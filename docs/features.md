@@ -1653,6 +1653,26 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   cleanly (a refresh of the sign-in under way is waited out, so its new token is kept). Nothing
   runs while the app is closed; a macro with Sync from Canva and Run When SoftPresenter Opens
   fetches a fresh video at each start.
+- **TimelyChurch** (Settings › Integrations, **hidden until TimelyChurch's Worship API ships**:
+  offered only when `SOFTPRESENTER_TIMELYCHURCH_URL` is set, and nothing is asked of the
+  network without it). Connect to TimelyChurch takes the church's TimelyChurch address and a
+  pairing code an administrator makes there (Setlists › Song Sync), or `sp timelychurch
+  connect` with the code on its standard input; the device token goes into the Mac's Keychain
+  (a test copy keeps its own in its own folder), only ever in the `Authorization` header, only
+  to that address, over HTTPS. Connected, the card says "Connected to <church> · last checked
+  …", with Check Now, Disconnect (which keeps the songs and playlists made) and the upcoming
+  services listed with how each stands. The services of the next four weeks are asked for soon
+  after the start and every five minutes, with the last list's ETag; each becomes a playlist
+  (headings, placeholders for readings and other items) and its songs library songs (in a
+  library named TimelyChurch), in groups in the order sung, with the published translation
+  under each slide. A song or playlist nobody touched is brought up to date; one the church
+  changed is kept and the newer version offered (`sp timelychurch newer`, `use-newer`,
+  `keep-mine`); a service removed in TimelyChurch leaves its playlist, noted as removed; changes
+  wait while anything is on screen. A TimelyChurch song put on screen from its service's
+  playlist on the service's day is told to TimelyChurch once per service, queued on disk with
+  its own idempotency key until sent. A disconnected computer says "This computer was
+  disconnected from TimelyChurch" and stops asking. [timelychurch.md](timelychurch.md) has the
+  design.
 - **A VoxLive screen's look**, changed from Settings › Integrations › VoxLive: clicking a screen
   opens its look, with a control for each setting VoxLive describes (a menu, a colour, a tick or
   a slider within VoxLive's range; only those that apply to the screen's mode) and a preview drawn

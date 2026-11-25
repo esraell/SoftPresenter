@@ -1744,6 +1744,9 @@ struct App {
     canva: canva::Client,
     /// The song catalog: downloaded songs, kept apart from the library (see `catalog_cli`).
     catalog: catalog_cli::CatalogState,
+    /// The connection to the church's TimelyChurch: its services as playlists, its songs in the
+    /// library, and the songs shown told to it (see `timelychurch`).
+    timelychurch: timelychurch::Connection,
     /// The preview of a VoxLive screen's look being changed, while its page is open.
     voxlive_preview: Option<LookPreview>,
     /// How the last save of a VoxLive look went, for `sp voxlive`.
@@ -6191,6 +6194,7 @@ impl App {
                     name: name.clone(),
                     items: playlist.items,
                     uids: Default::default(),
+                    origin: None,
                 });
                 services.changed = true;
                 playlist_name = Some(name);
@@ -8666,6 +8670,11 @@ impl App {
                         running.home_state.preferences_pane = 4;
                         running.home_state.songbooks.open = true;
                     }
+                    // TimelyChurch's page, where it is offered.
+                    "timelychurch" => {
+                        running.home_state.preferences_pane = 4;
+                        running.home_state.timelychurch.open = true;
+                    }
                     "remote" => {
                         running.home_state.preferences_pane =
                             home::PANES.iter().position(|pane| *pane == "Remote Control").unwrap_or(0);
@@ -10804,6 +10813,7 @@ impl ApplicationHandler<AppEvent> for App {
         let voxlive_at = self.tick_voxlive();
         let canva_at = self.tick_canva();
         let catalog_at = self.tick_catalog();
+        let timelychurch_at = self.tick_timelychurch();
         let audio_at = self.tick_audio();
         let announce_at = self.tick_announcements();
         self.show_announcement_in_window();
@@ -10864,6 +10874,7 @@ impl ApplicationHandler<AppEvent> for App {
             voxlive_at,
             canva_at,
             catalog_at,
+            timelychurch_at,
             audio_at,
             announce_at,
             cycle_at,
@@ -11373,6 +11384,7 @@ fn main() -> ExitCode {
         voxlive,
         canva,
         catalog: catalog_cli::CatalogState::default(),
+        timelychurch: timelychurch::Connection::new(timelychurch::gate(), timelychurch::Files::in_data_dir()),
         voxlive_preview: None,
         voxlive_said: None,
         media_playlists: Vec::new(),
@@ -11929,6 +11941,7 @@ mod tests {
             name: "Evening".to_owned(),
             items: Vec::new(),
             uids: Default::default(),
+            origin: None,
         });
         services.put_in(0, Some(0), landed.iter().map(|&at| item(at)).collect());
         services.put_in(1, Some(0), landed.iter().map(|&at| item(at)).collect());

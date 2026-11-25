@@ -91,8 +91,9 @@ pub const OPEN: &[&str] = &[
     "catalog",
 ];
 
-/// Commands never open to a page: Remote Control's own (switching it, its password).
-pub const CLOSED: &[&str] = &["remote"];
+/// Commands never open to a page: Remote Control's own (switching it, its password), and
+/// TimelyChurch's (its connection is made and kept at the computer).
+pub const CLOSED: &[&str] = &["remote", "timelychurch"];
 
 /// For the open commands made of sub-commands, the sub-commands open to Control (`""` for the
 /// command alone); any other is closed, so a sub-command added later, or one taking a key, a

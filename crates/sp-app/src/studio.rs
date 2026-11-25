@@ -7681,6 +7681,7 @@ pub mod tests {
             name: "Evening".to_owned(),
             items: Vec::new(),
             uids: Default::default(),
+            origin: None,
         });
         assert_eq!(songs_menu_adds(&show, &state, 3, Some(2)), [1, 3], "Two and Four");
         assert_eq!(songs_menu_adds(&show, &state, 0, Some(1)), [0], "One isn't picked: just it");
@@ -8220,6 +8221,7 @@ pub mod tests {
             name: "Evening".to_owned(),
             items: vec![Item::song("a", "A")],
             uids: Default::default(),
+            origin: None,
         });
         state.services.current = 1;
         state.services.chosen = Some(0);

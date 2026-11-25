@@ -260,6 +260,7 @@ impl crate::App {
             name: name.to_owned(),
             items: Vec::new(),
             uids: Default::default(),
+            origin: None,
         });
         state.services.changed = true;
         Ok(Reply::done(format!("Made the playlist {name}.")))

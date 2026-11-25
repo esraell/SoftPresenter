@@ -359,5 +359,11 @@
   "notices.songbooks.done": "El cancionero {name} ya está en este ordenador: {songs} de Worship Leader App.",
   "notices.songbooks.unchanged": "El cancionero {name} está al día.",
   "notices.songbooks.failed": "El cancionero {name} no se descargó: {problem}",
-  "notices.songbooks.remove_failed": "No se pudo quitar el cancionero {name}: {problem}"
+  "notices.songbooks.remove_failed": "No se pudo quitar el cancionero {name}: {problem}",
+  "notices.timelychurch.connected": "Conectado a TimelyChurch: {church}. Sus próximos cultos llegan como listas.",
+  "notices.timelychurch.new_playlists": ["Llegó {n} lista de TimelyChurch: {names}.", "Llegaron {n} listas de TimelyChurch: {names}."],
+  "notices.timelychurch.updated": ["{n} canción de TimelyChurch se ha puesto al día.", "{n} canciones de TimelyChurch se han puesto al día."],
+  "notices.timelychurch.offered": ["{n} canción que cambiaste tiene una versión más reciente en TimelyChurch; se conserva la tuya.", "{n} canciones que cambiaste tienen una versión más reciente en TimelyChurch; se conservan las tuyas."],
+  "notices.timelychurch.playlist_offered": "{name} cambió en TimelyChurch; se conserva tu lista, que cambiaste.",
+  "notices.timelychurch.removed": "{name} se quitó en TimelyChurch; su lista se queda."
 }

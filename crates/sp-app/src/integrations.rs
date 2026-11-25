@@ -1,6 +1,7 @@
 //! Settings › Integrations: the services SoftPresenter works with, each a row with its state,
-//! opening a page of its own to connect it: VoxLive, Canva Sync, and the free songbooks of
-//! Worship Leader App where the song catalog is offered (`songbooks`).
+//! opening a page of its own to connect it: VoxLive, Canva Sync, TimelyChurch where it is
+//! offered (`timelychurch`), and the free songbooks of Worship Leader App where the song
+//! catalog is offered (`songbooks`).
 
 use egui::{Align, Align2, Color32, FontId, Layout, Rect, Sense, Stroke, pos2, vec2};
 
@@ -36,27 +37,29 @@ pub enum Request {
 const SONGBOOKS: Color32 = Color32::from_rgb(58, 128, 98);
 
 /// The pane: the list of services, or the page of the one open, or a screen's look.
-/// `songbooks` is given only where the song catalog is offered.
+/// `songbooks` is given only where the song catalog is offered, and `timelychurch` only where
+/// TimelyChurch is.
 pub fn pane(
     ui: &mut egui::Ui,
     view: &mut View,
     canva: &mut crate::canva::View,
-    songbooks: Option<&mut crate::songbooks::View>,
+    mut songbooks: Option<&mut crate::songbooks::View>,
+    mut timelychurch: Option<&mut crate::timelychurch::View>,
 ) {
+    let songbooks_open = songbooks.as_ref().is_some_and(|songbooks| songbooks.open);
+    let timelychurch_open = timelychurch.as_ref().is_some_and(|timelychurch| timelychurch.open);
     if view.look.is_some() {
         look_page(ui, view);
     } else if view.open {
         voxlive_page(ui, view);
     } else if canva.open {
         canva_page(ui, canva);
-    } else if let Some(songbooks) = songbooks {
-        if songbooks.open {
-            songbooks_page(ui, songbooks);
-        } else {
-            list(ui, view, canva, Some(songbooks));
-        }
+    } else if let (true, Some(timelychurch)) = (timelychurch_open, timelychurch.as_deref_mut()) {
+        timelychurch_page(ui, timelychurch);
+    } else if let (true, Some(songbooks)) = (songbooks_open, songbooks.as_deref_mut()) {
+        songbooks_page(ui, songbooks);
     } else {
-        list(ui, view, canva, None);
+        list(ui, view, canva, songbooks, timelychurch);
     }
 }
 
@@ -91,6 +94,7 @@ fn list(
     view: &mut View,
     canva: &mut crate::canva::View,
     songbooks: Option<&mut crate::songbooks::View>,
+    timelychurch: Option<&mut crate::timelychurch::View>,
 ) {
     ui.label(
         egui::RichText::new(t(
@@ -128,6 +132,19 @@ fn list(
         t("integrations.canva.row.hint", "Connect Canva Sync, choose the presentation, or sync now"),
     ) {
         canva.open = true;
+    }
+    if let Some(timelychurch) = timelychurch {
+        ui.add_space(8.0);
+        let about = (
+            TIMELYCHURCH,
+            "T",
+            crate::timelychurch::SOURCE_NAME,
+            t("integrations.timelychurch.about.short", "Your upcoming services as playlists, with their songs"),
+        );
+        let hint = t("integrations.timelychurch.row.hint", "Connect TimelyChurch, or see its services");
+        if service_row(ui, about, timelychurch_state(timelychurch), hint) {
+            timelychurch.open = true;
+        }
     }
     if let Some(songbooks) = songbooks {
         ui.add_space(8.0);
@@ -458,6 +475,276 @@ fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
     if request.is_some() {
         view.request = request;
     }
+}
+
+/// TimelyChurch's colour, for its mark until its logo comes, and a lighter shade for words on
+/// a dark ground.
+pub const TIMELYCHURCH: Color32 = Color32::from_rgb(88, 86, 200);
+pub const TIMELYCHURCH_LIGHT: Color32 = Color32::from_rgb(164, 162, 240);
+
+/// A dot and a word or two for how TimelyChurch stands.
+fn timelychurch_state(view: &crate::timelychurch::View) -> (Color32, String) {
+    use crate::timelychurch::Status as S;
+    match &view.status {
+        S::Reading => (TEXT_FAINT, "…".to_owned()),
+        S::Off | S::NotConnected => (TEXT_FAINT, t("integrations.state.not_connected", "Not connected").to_owned()),
+        S::Pairing => (TEXT_FAINT, t("integrations.state.connecting", "Connecting…").to_owned()),
+        S::Disconnected => {
+            (crate::studio::TALLY, t("integrations.timelychurch.state.disconnected", "Disconnected").to_owned())
+        }
+        S::Connected if view.trouble.is_some() => {
+            (Color32::from_rgb(230, 170, 60), t("integrations.timelychurch.state.trouble", "Can't reach it").to_owned())
+        }
+        S::Connected => (GOOD, t("integrations.state.connected", "Connected").to_owned()),
+    }
+}
+
+/// When TimelyChurch was last checked, as the card says it: the time today, else the day too.
+fn checked_words(at: i64) -> String {
+    let Some(at) = chrono::DateTime::from_timestamp(at, 0).map(|at| at.with_timezone(&chrono::Local)) else {
+        return String::new();
+    };
+    let format = if at.date_naive() == chrono::Local::now().date_naive() {
+        t("integrations.timelychurch.checked.today_format", "%-I:%M %p")
+    } else {
+        t("integrations.timelychurch.checked.day_format", "%-d %b, %-I:%M %p")
+    };
+    written(at.format(format))
+}
+
+/// A service's date as the card lists it.
+fn service_date(date: &str) -> String {
+    match chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+        Ok(day) => written(day.format(t("integrations.timelychurch.date_format", "%a %-d %b"))),
+        Err(_) => date.to_owned(),
+    }
+}
+
+/// Settings › Integrations › TimelyChurch: Connect to TimelyChurch (the church's address and a
+/// pairing code); once connected, the church, when it was last checked, Check Now, Disconnect,
+/// and the playlists made from its services.
+fn timelychurch_page(ui: &mut egui::Ui, view: &mut crate::timelychurch::View) {
+    use crate::timelychurch::{Request as R, Status as S};
+    if ui
+        .add(
+            egui::Button::new(egui::RichText::new(t("integrations.back", "‹ Integrations")).color(TEXT_DIM))
+                .frame(false),
+        )
+        .clicked()
+    {
+        view.open = false;
+        view.typed_code.clear();
+        view.problem = None;
+    }
+    ui.add_space(6.0);
+    let (dot, words) = timelychurch_state(view);
+    ui.horizontal(|ui| {
+        mark(ui, 44.0, TIMELYCHURCH, "T");
+        ui.add_space(6.0);
+        ui.vertical(|ui| {
+            ui.label(
+                egui::RichText::new(crate::timelychurch::SOURCE_NAME).font(crate::studio::semibold(18.0)).color(TEXT),
+            );
+            ui.horizontal(|ui| {
+                let (place, _) = ui.allocate_exact_size(vec2(8.0, 14.0), Sense::hover());
+                ui.painter().circle_filled(place.center(), 3.5, dot);
+                ui.label(egui::RichText::new(words).size(12.0).color(TEXT_DIM));
+            });
+        });
+    });
+    ui.add_space(10.0);
+    let width = ui.available_width().min(560.0);
+    ui.set_max_width(width);
+    ui.label(
+        egui::RichText::new(
+            t("integrations.timelychurch.about", "Your church's upcoming setlists and service plans in TimelyChurch become playlists here, and their songs join the library with their translations, kept up to date during the week. A song or playlist you change here is never overwritten: TimelyChurch's newer version is only offered. SoftPresenter tells TimelyChurch which songs were shown in each service, for your church's song use report."),
+        )
+        .color(TEXT_DIM),
+    );
+    ui.add_space(12.0);
+    let mut request = None;
+    match &view.status {
+        S::Off => {}
+        S::Reading => {
+            ui.label(
+                egui::RichText::new(t(
+                    "integrations.timelychurch.reading",
+                    "Reading the connection kept on this computer…",
+                ))
+                .color(TEXT_FAINT),
+            );
+        }
+        S::NotConnected | S::Pairing | S::Disconnected => {
+            if let Some(trouble) = &view.trouble {
+                ui.label(egui::RichText::new(trouble.as_str()).color(crate::studio::TALLY));
+                ui.add_space(6.0);
+            }
+            timelychurch_connect(ui, view, &mut request);
+        }
+        S::Connected => timelychurch_connected(ui, view, &mut request),
+    }
+    let note = t(
+        "integrations.timelychurch.disconnect.note",
+        "This computer stops following TimelyChurch and forgets its connection. The songs and playlists it made stay as they are.",
+    );
+    let question = t("integrations.timelychurch.disconnect.question", "Disconnect TimelyChurch?");
+    if disconnect_answered(ui, "timelychurch", question, note) {
+        request = Some(R::Disconnect);
+    }
+    if request.is_some() {
+        view.request = request;
+    }
+}
+
+/// Connect to TimelyChurch: the church's address (unless TimelyChurch has one address for
+/// every church) and the pairing code an administrator made.
+fn timelychurch_connect(
+    ui: &mut egui::Ui,
+    view: &mut crate::timelychurch::View,
+    request: &mut Option<crate::timelychurch::Request>,
+) {
+    crate::studio::caption(ui, t("integrations.timelychurch.connect.caption", "CONNECT TO TIMELYCHURCH"));
+    ui.label(
+        egui::RichText::new(
+            t("integrations.timelychurch.connect.about", "In TimelyChurch, an administrator opens Setlists › Song Sync and makes a pairing code. Type your church's TimelyChurch address and the code here. The connection is kept in this computer's secure store and used only with your church's TimelyChurch."),
+        )
+        .size(12.0)
+        .color(TEXT_DIM),
+    );
+    ui.add_space(6.0);
+    let pairing = view.status == crate::timelychurch::Status::Pairing;
+    let mut connect = false;
+    egui::Grid::new("timelychurch connect").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+        if view.asks_address {
+            ui.label(egui::RichText::new(t("integrations.timelychurch.address", "Address")).color(TEXT_DIM));
+            ui.add(
+                egui::TextEdit::singleline(&mut view.typed_address)
+                    .hint_text("yourchurch.timelychurch.com")
+                    .desired_width(300.0),
+            );
+            ui.end_row();
+        }
+        ui.label(egui::RichText::new(t("integrations.timelychurch.code", "Pairing code")).color(TEXT_DIM));
+        let field = ui.add(egui::TextEdit::singleline(&mut view.typed_code).desired_width(300.0));
+        connect |= field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        ui.end_row();
+    });
+    ui.add_space(4.0);
+    let filled = !view.typed_code.trim().is_empty() && (!view.asks_address || !view.typed_address.trim().is_empty());
+    ui.horizontal(|ui| {
+        connect |= ui
+            .add_enabled(filled && !pairing, egui::Button::new(t("integrations.timelychurch.connect", "Connect")))
+            .clicked();
+        if pairing {
+            ui.label(egui::RichText::new(t("integrations.state.connecting", "Connecting…")).color(TIMELYCHURCH_LIGHT));
+        }
+    });
+    if connect && filled && !pairing {
+        *request = Some(crate::timelychurch::Request::Connect {
+            address: view.typed_address.trim().to_owned(),
+            code: std::mem::take(&mut view.typed_code),
+        });
+    }
+    if let Some(problem) = &view.problem {
+        ui.label(egui::RichText::new(problem.as_str()).size(12.0).color(crate::studio::TALLY));
+    }
+}
+
+/// Connected: the church and when it was last checked, Check Now and Disconnect, and the
+/// playlists made from its services.
+fn timelychurch_connected(
+    ui: &mut egui::Ui,
+    view: &crate::timelychurch::View,
+    request: &mut Option<crate::timelychurch::Request>,
+) {
+    use crate::timelychurch::RowState;
+    if let Some(trouble) = &view.trouble {
+        ui.label(egui::RichText::new(trouble.as_str()).color(Color32::from_rgb(230, 170, 60)));
+        ui.add_space(6.0);
+    }
+    let when = if view.checking {
+        t("integrations.timelychurch.checking", "checking now").to_owned()
+    } else {
+        match view.last_checked {
+            Some(at) => tf("integrations.timelychurch.checked", "last checked {when}", &[("when", &checked_words(at))]),
+            None => t("integrations.timelychurch.not_checked", "not checked yet").to_owned(),
+        }
+    };
+    let said = tf(
+        "integrations.timelychurch.connected_to",
+        "Connected to {church} · {when}",
+        &[("church", &view.church), ("when", &when)],
+    );
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(said).color(TEXT));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if ui
+                .button(t("integrations.disconnect", "Disconnect"))
+                .on_hover_text(t(
+                    "integrations.timelychurch.disconnect.hint",
+                    "Forget the connection on this computer; the songs and playlists it made stay",
+                ))
+                .clicked()
+            {
+                ask_to_disconnect(ui, "timelychurch");
+            }
+            if ui
+                .add_enabled(!view.checking, egui::Button::new(t("integrations.timelychurch.check_now", "Check Now")))
+                .on_hover_text(t(
+                    "integrations.timelychurch.check_now.hint",
+                    "Ask TimelyChurch for changes now (it is asked every few minutes anyway)",
+                ))
+                .clicked()
+            {
+                *request = Some(crate::timelychurch::Request::CheckNow);
+            }
+        });
+    });
+    ui.label(egui::RichText::new(view.address.as_str()).size(11.5).color(TEXT_FAINT));
+    if view.uses_waiting > 0 {
+        let waiting = tn(
+            "integrations.timelychurch.uses_waiting",
+            view.uses_waiting as u64,
+            "{n} song shown is waiting to be told to TimelyChurch.",
+            "{n} songs shown are waiting to be told to TimelyChurch.",
+            &[],
+        );
+        ui.label(egui::RichText::new(waiting).size(11.5).color(TEXT_FAINT));
+    }
+    ui.add_space(14.0);
+    crate::studio::caption(ui, t("integrations.timelychurch.services.caption", "UPCOMING SERVICES"));
+    if view.services.is_empty() {
+        let words = if view.checking || view.last_checked.is_none() {
+            t("integrations.timelychurch.services.coming", "The services come in at the first check.")
+        } else {
+            t("integrations.timelychurch.services.none", "No upcoming services in TimelyChurch.")
+        };
+        ui.label(egui::RichText::new(words).color(TEXT_FAINT));
+        return;
+    }
+    egui::Grid::new("timelychurch services").num_columns(4).spacing([14.0, 6.0]).show(ui, |ui| {
+        for row in &view.services {
+            let date = row.date.as_deref().map(service_date).unwrap_or_default();
+            ui.label(egui::RichText::new(date).size(12.0).color(TEXT_DIM));
+            ui.label(egui::RichText::new(row.name.as_str()).color(TEXT));
+            let songs = tn("integrations.timelychurch.songs", row.songs as u64, "{n} song", "{n} songs", &[]);
+            ui.label(egui::RichText::new(songs).size(12.0).color(TEXT_DIM));
+            let (colour, state) = match row.state {
+                RowState::InStep => (TEXT_FAINT, t("integrations.timelychurch.row.in_step", "Up to date")),
+                RowState::ChangedHere => (TEXT_DIM, t("integrations.timelychurch.row.changed", "Changed here")),
+                RowState::NewerWaiting => (
+                    TIMELYCHURCH_LIGHT,
+                    t("integrations.timelychurch.row.newer", "Changed here; newer in TimelyChurch"),
+                ),
+                RowState::Removed => (
+                    Color32::from_rgb(230, 170, 60),
+                    t("integrations.timelychurch.row.removed", "Removed in TimelyChurch"),
+                ),
+            };
+            ui.label(egui::RichText::new(state).size(12.0).color(colour));
+            ui.end_row();
+        }
+    });
 }
 
 /// Where a page keeps that its Disconnect asked, while the question is open.
@@ -1135,8 +1422,11 @@ mod tests {
         assert_eq!(hex_of(colour_of("#FFE14D"), false), "#FFE14D");
         assert_eq!(hex_of(colour_of("#fff"), false), "#FFFFFF");
         assert_eq!(hex_of(colour_of("#00000080"), true), "#00000080");
-        assert_eq!(setting_name("letterSpacing"), "Letter spacing");
-        assert_eq!(setting_name("maxLines"), "Lines");
+        // In English whatever the one test that sets the global language is doing meanwhile.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            assert_eq!(setting_name("letterSpacing"), "Letter spacing");
+            assert_eq!(setting_name("maxLines"), "Lines");
+        });
     }
 
     #[test]
@@ -1170,7 +1460,14 @@ mod tests {
     }
 
     /// Every word the pane draws in one frame.
-    fn words_drawn(mut songbooks: Option<&mut crate::songbooks::View>) -> Vec<String> {
+    fn words_drawn(songbooks: Option<&mut crate::songbooks::View>) -> Vec<String> {
+        words_drawn_with(songbooks, None)
+    }
+
+    fn words_drawn_with(
+        mut songbooks: Option<&mut crate::songbooks::View>,
+        mut timelychurch: Option<&mut crate::timelychurch::View>,
+    ) -> Vec<String> {
         fn walk(shape: &egui::Shape, words: &mut Vec<String>) {
             match shape {
                 egui::Shape::Text(text) => words.push(text.galley.text().to_owned()),
@@ -1181,7 +1478,7 @@ mod tests {
         let ctx = egui::Context::default();
         let (mut voxlive, mut canva) = (View::default(), crate::canva::View::default());
         let mut drawn = ctx.run_ui(egui::RawInput::default(), |ui| {
-            pane(ui, &mut voxlive, &mut canva, songbooks.as_deref_mut());
+            pane(ui, &mut voxlive, &mut canva, songbooks.as_deref_mut(), timelychurch.as_deref_mut());
         });
         drawn.textures_delta.clear();
         let mut words = Vec::new();
@@ -1199,6 +1496,37 @@ mod tests {
             let with = words_drawn(Some(&mut songbooks));
             assert!(with.iter().any(|w| w == "Worship Leader App"), "{with:?}");
             assert!(with.iter().any(|w| w == "Not downloaded"), "{with:?}");
+        });
+    }
+
+    #[test]
+    fn timelychurch_is_listed_only_where_it_is_offered_and_its_card_follows_the_connection() {
+        use crate::timelychurch::{RowState, ServiceRow, Status, View as Card};
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            assert!(!words_drawn(None).iter().any(|w| w.contains("TimelyChurch")), "hidden unless offered");
+            let mut card = Card { offered: true, status: Status::NotConnected, asks_address: true, ..Card::default() };
+            let listed = words_drawn_with(None, Some(&mut card));
+            assert!(listed.iter().any(|w| w == "TimelyChurch"), "{listed:?}");
+            card.open = true;
+            let page = words_drawn_with(None, Some(&mut card));
+            for words in ["CONNECT TO TIMELYCHURCH", "Address", "Pairing code", "Connect"] {
+                assert!(page.iter().any(|w| w == words), "{words}: {page:?}");
+            }
+            card.status = Status::Connected;
+            card.church = "Demo Church".to_owned();
+            card.services =
+                vec![ServiceRow { name: "Sunday".to_owned(), date: None, songs: 2, state: RowState::Removed }];
+            let connected = words_drawn_with(None, Some(&mut card));
+            for words in [
+                "Connected to Demo Church · not checked yet",
+                "Check Now",
+                "Disconnect",
+                "2 songs",
+                "Removed in TimelyChurch",
+            ] {
+                assert!(connected.iter().any(|w| w == words), "{words}: {connected:?}");
+            }
+            assert!(!connected.iter().any(|w| w == "Pairing code"), "{connected:?}");
         });
     }
 }

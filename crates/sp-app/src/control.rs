@@ -376,6 +376,13 @@ pub fn run_client(args: Vec<String>) -> std::process::ExitCode {
         );
         return std::process::ExitCode::FAILURE;
     }
+    // `timelychurch connect [ADDRESS]` the same way: the pairing code on the standard input.
+    let pairing =
+        args.len() >= 2 && args[0].eq_ignore_ascii_case("timelychurch") && args[1].eq_ignore_ascii_case("connect");
+    if pairing && args.len() > 3 {
+        say_err!("Give the pairing code on the standard input: echo \"$CODE\" | sp timelychurch connect [ADDRESS]");
+        return std::process::ExitCode::FAILURE;
+    }
     // `remote password` the same way: the new password on one line of the standard input,
     // unshown when typed at a terminal.
     let password =
@@ -402,7 +409,7 @@ pub fn run_client(args: Vec<String>) -> std::process::ExitCode {
     } else {
         args
     };
-    let args = if connect || canva {
+    let args = if connect || canva || pairing {
         use std::io::{BufRead, IsTerminal};
         let terminal = std::io::stdin().is_terminal();
         let mut line = String::new();
@@ -422,7 +429,9 @@ pub fn run_client(args: Vec<String>) -> std::process::ExitCode {
             };
             line = format!("{} {}", id.trim(), secret.trim());
         } else {
-            if terminal {
+            if terminal && pairing {
+                eprint!("Type the pairing code from TimelyChurch, then press Return: ");
+            } else if terminal {
                 eprint!("Paste the VoxLive API key, then press Return: ");
             }
             let _ = std::io::stdin().lock().read_line(&mut line);
@@ -655,6 +664,7 @@ pub fn only_reads(args: &[String]) -> bool {
         "audio" => alone || (args.len() == 2 && word(1) == "playlists"),
         "voxlive" => alone || (args.len() == 2 && word(1) == "screens"),
         "canva" => alone || (args.len() == 2 && word(1) == "status"),
+        "timelychurch" => alone || (args.len() == 2 && matches!(word(1).as_str(), "services" | "newer")),
         "catalog" => {
             alone || matches!(word(1).as_str(), "status" | "languages" | "search" | "list" | "newer" | "sizes")
         }
@@ -676,7 +686,9 @@ pub fn only_reads(args: &[String]) -> bool {
 /// out.
 pub fn shown_args(args: &[String]) -> Vec<String> {
     let secret = args.len() > 2
-        && (((args[0].eq_ignore_ascii_case("voxlive") || args[0].eq_ignore_ascii_case("canva"))
+        && (((args[0].eq_ignore_ascii_case("voxlive")
+            || args[0].eq_ignore_ascii_case("canva")
+            || args[0].eq_ignore_ascii_case("timelychurch"))
             && args[1].eq_ignore_ascii_case("connect"))
             || (args[0].eq_ignore_ascii_case("remote") && args[1].eq_ignore_ascii_case("password")));
     if secret { vec![args[0].clone(), args[1].clone(), "…".to_owned()] } else { args.to_vec() }
@@ -784,6 +796,7 @@ const COMMANDS: &[&str] = &[
     "media-playlist",
     "voxlive",
     "canva",
+    "timelychurch",
     "themes",
     "screens",
     "timers",
@@ -1252,6 +1265,7 @@ impl crate::App {
             "media-playlist" => self.ctl_media_playlist(args),
             "voxlive" => self.ctl_voxlive(args),
             "canva" => self.ctl_canva(args),
+            "timelychurch" => self.ctl_timelychurch(args),
             "catalog" => self.ctl_catalog(args),
             "themes" => Ok(self.ctl_named_list("themes", |s| s.theme_names.clone())),
             "screens" => Ok(self.ctl_screens()),
@@ -3556,8 +3570,12 @@ mod tests {
         assert!(aim_words(&names(&["--aim"])).is_err());
         assert!(aim_words(&names(&["--rev", "00ff"])).is_err());
         // A playlist's rev changes when its items do, and only then.
-        let mut list =
-            crate::service::Service { name: "Sunday".to_owned(), items: Vec::new(), uids: Default::default() };
+        let mut list = crate::service::Service {
+            name: "Sunday".to_owned(),
+            items: Vec::new(),
+            uids: Default::default(),
+            origin: None,
+        };
         let empty = list.rev();
         list.items.push(crate::service::Item::Header { name: "Worship".to_owned() });
         assert_ne!(list.rev(), empty);

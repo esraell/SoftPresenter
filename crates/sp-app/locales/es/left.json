@@ -119,5 +119,13 @@
   "left.more": "Más",
   "left.alert.cancel": "Cancelar",
   "left.add.header.name": "Encabezado",
-  "left.add.placeholder.name": "Hueco"
+  "left.add.placeholder.name": "Hueco",
+  "left.timelychurch.song": "Canción",
+  "left.timelychurch.reading": "Lectura",
+  "left.timelychurch.prayer": "Oración",
+  "left.timelychurch.sermon": "Sermón",
+  "left.timelychurch.offering": "Ofrenda",
+  "left.timelychurch.announcements": "Anuncios",
+  "left.timelychurch.item": "Elemento",
+  "left.timelychurch.reading_of": "{title}: {passage}"
 }

@@ -424,6 +424,8 @@ pub struct HomeState {
     pub voxlive: crate::voxlive::View,
     /// Canva Sync's page in Settings › Integrations, and what the top bar says of a sync.
     pub canva: crate::canva::View,
+    /// TimelyChurch's card in Settings › Integrations, where it is offered.
+    pub timelychurch: crate::timelychurch::View,
     /// Settings › Remote Control, as the window shows it.
     pub remote: crate::remote::View,
     /// Where the VoxLive item is among the presentations.
@@ -1761,6 +1763,7 @@ impl Default for HomeState {
             preferences_pane: 0,
             voxlive: Default::default(),
             canva: Default::default(),
+            timelychurch: Default::default(),
             remote: Default::default(),
             voxlive_slot: None,
             voxlive_go: None,
@@ -5971,7 +5974,8 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match pane {
             "Integrations" => {
                 let songbooks = crate::catalog::offered().then_some(&mut state.songbooks);
-                crate::integrations::pane(ui, &mut state.voxlive, &mut state.canva, songbooks);
+                let timelychurch = state.timelychurch.offered.then_some(&mut state.timelychurch);
+                crate::integrations::pane(ui, &mut state.voxlive, &mut state.canva, songbooks, timelychurch);
                 command_line_card(ui, state);
             }
             "About" => {
@@ -13914,7 +13918,12 @@ mod tests {
         state.services.add(Item::song("alpha".to_owned(), "Alpha".to_owned()));
         state.services.add(Item::song("beta".to_owned(), "Beta".to_owned()));
         state.services.chosen = None;
-        state.services.list.push(Service { name: "Evening".to_owned(), items: Vec::new(), uids: Default::default() });
+        state.services.list.push(Service {
+            name: "Evening".to_owned(),
+            items: Vec::new(),
+            uids: Default::default(),
+            origin: None,
+        });
         state.libraries.push(crate::libraries::Library::new("Hymns".to_owned()));
         (show, state)
     }

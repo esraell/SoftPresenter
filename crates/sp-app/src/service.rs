@@ -172,6 +172,33 @@ pub struct Service {
     /// The stable ids of the items ([`Service::uids`]).
     #[serde(default)]
     pub uids: UidBook,
+    /// Where the playlist came from, when an outside planner made it (TimelyChurch).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<ServiceOrigin>,
+}
+
+/// The mark of a playlist made from a service planned elsewhere (TimelyChurch): which service
+/// it is, so the next check finds it again, and whether the church has changed it since. An
+/// older SoftPresenter drops the mark when it saves the playlists; the playlist stays.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceOrigin {
+    /// The planner (`timelychurch`).
+    pub source: String,
+    /// The planner's key for the service (`church.example.org/plan/57`).
+    pub key: String,
+    /// The fingerprint of the playlist (its name and items) as it was made: it is untouched
+    /// while it still has it.
+    pub made: String,
+    /// The service's date, `YYYY-MM-DD`, when the planner gave one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+    /// The planner changed a service whose playlist the church changed here: the fingerprint
+    /// of the items it would make now, offered and never forced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub newer: Option<String>,
+    /// The planner no longer has the service. The playlist stays until someone deletes it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub removed: bool,
 }
 
 /// Remembers a stable id (`uid`) for each item of a playlist, so a page that names an item by it
@@ -331,7 +358,12 @@ pub fn first_playlist_name() -> &'static str {
 impl Default for Services {
     fn default() -> Services {
         Services {
-            list: vec![Service { name: first_playlist_name().to_owned(), items: Vec::new(), uids: Default::default() }],
+            list: vec![Service {
+                name: first_playlist_name().to_owned(),
+                items: Vec::new(),
+                uids: Default::default(),
+                origin: None,
+            }],
             current: 0,
             chosen: None,
             changed: false,
@@ -681,7 +713,12 @@ impl Services {
         let name = (1..)
             .map(|n| tf("notices.new_playlist.name", "Playlist {n}", &[("n", &n.to_string())]))
             .find(|name| self.list.iter().all(|s| &s.name != name));
-        self.list.push(Service { name: name.unwrap_or_default(), items: Vec::new(), uids: Default::default() });
+        self.list.push(Service {
+            name: name.unwrap_or_default(),
+            items: Vec::new(),
+            uids: Default::default(),
+            origin: None,
+        });
         self.current = self.list.len() - 1;
         self.chosen = None;
         self.changed = true;
@@ -1443,7 +1480,12 @@ mod tests {
         assert_eq!(titles(&services, 0), ["A", "X", "Y", "B", "C"]);
         assert_eq!(services.chosen, Some(2), "the last put in is the open one");
         // Another playlist: at its end, the open item of the one in front left alone.
-        services.list.push(Service { name: "Evening".to_owned(), items: vec![song("a")], uids: Default::default() });
+        services.list.push(Service {
+            name: "Evening".to_owned(),
+            items: vec![song("a")],
+            uids: Default::default(),
+            origin: None,
+        });
         assert_eq!(services.put_in(1, Some(0), vec![song("b")]), [true]);
         assert_eq!((titles(&services, 1), services.chosen), (vec!["A".to_owned(), "B".to_owned()], Some(2)));
     }
@@ -1474,6 +1516,7 @@ mod tests {
                     name: (*name).to_owned(),
                     items: vec![song("a"), song("b")],
                     uids: Default::default(),
+                    origin: None,
                 })
                 .collect(),
             current: 2,
@@ -1525,6 +1568,7 @@ mod tests {
             name: "Evening".to_owned(),
             items: vec![song("x"), Item::Placeholder { name: "Sermon".to_owned() }],
             uids: Default::default(),
+            origin: None,
         });
         services.chosen = Some(2);
         assert_eq!(services.fill_in(1, 1, song("y")), Some(1));

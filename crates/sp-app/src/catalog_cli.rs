@@ -433,10 +433,10 @@ impl crate::App {
         Some(done)
     }
 
-    /// Puts a song changed by the catalog's update in its place: saved, and not a step to undo
-    /// (nobody changed it; the steps kept for it are let go, as they would put back what the
-    /// update just replaced).
-    fn replace_song_quietly(&mut self, at: usize, song: Presentation) {
+    /// Puts a song changed by an outside source's update (the catalog, TimelyChurch) in its
+    /// place: saved, and not a step to undo (nobody changed it; the steps kept for it are let
+    /// go, as they would put back what the update just replaced).
+    pub(crate) fn replace_song_quietly(&mut self, at: usize, song: Presentation) {
         let ids: Vec<sp_model::Uuid> = song.slides().map(|(_, slide)| slide.id).collect();
         self.history.forget(at);
         self.show.replace_presentation(at, Arc::new(song));

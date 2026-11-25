@@ -2,261 +2,263 @@
 
 [TimelyChurch](https://timelychurch.com) is a church-management app. Its worship side holds a
 church's songs, its setlists (the songs a team sings at a service, in order) and its service
-plans (the whole running order). It also pairs devices with a PIN, under the name Song Sync.
+plans (the whole running order). It pairs devices with a code, under the name Song Sync.
 
-SoftPresenter will connect to a church's TimelyChurch as a Song Sync device. The church's
-upcoming services will become playlists, and their songs will become library songs, in named
-groups, in the order sung, with the translation under each slide. SoftPresenter will keep them
-in step as the plans change during the week, and will never overwrite a change the church made
-in SoftPresenter.
+SoftPresenter connects to a church's TimelyChurch as a device. The church's upcoming services
+become playlists, and their songs become library songs, in named groups, in the order sung,
+with the translation under each slide. SoftPresenter keeps them in step as the plans change
+during the week, never overwrites a change the church made in SoftPresenter, and tells
+TimelyChurch which songs were shown in each service, for the church's song use report (which
+feeds its CCLI report).
 
-**Where it stands (24 November 2026):** this page is the design. The mapping, from TimelyChurch's
-data to SoftPresenter's songs and playlists, is built and tested in `crates/sp-app/src/timelychurch/`.
-It is not wired into the app yet. The connection itself waits for TimelyChurch's description of
-its device interface. [What waits on TimelyChurch](#what-waits-on-timelychurch) lists each
-question by the ID it has in the questions sent to TimelyChurch's developer (P1, R3…).
+**Where it stands (24 November 2026):** TimelyChurch agreed to build a read-only **Worship API,
+version 1**, for presentation apps, planned for one of its December releases, and will send an
+OpenAPI file and example JSON for every request first. SoftPresenter's side is built against
+the API as TimelyChurch described it in its answer, and tested against a stand-in of our own
+(`crates/sp-app/src/timelychurch/mock.rs`). It is **hidden until the API ships**: the card and
+`sp timelychurch` are offered only when `SOFTPRESENTER_TIMELYCHURCH_URL` is set, and without it
+nothing is ever asked of the network or the secure store. When the OpenAPI file comes, the
+field names marked `assumed:` in `wire.rs` are checked against it ([the list](#names-assumed)).
 
-## What TimelyChurch holds
+## The Worship API, as described
 
-We read this read-only through TimelyChurch's assistant connector, on one church's account. Only
-the shapes are recorded here. The device interface may name or shape things differently.
-`crates/sp-app/src/timelychurch/wire.rs` models the fields the mapping uses.
+| Request | What it does |
+| --- | --- |
+| `POST /api/v1/worship/devices/pair` | The pairing code an administrator made in TimelyChurch (Setlists › Song Sync), the computer's name, and the app's name and version. Gives back the device token and the church's name. |
+| `GET /api/v1/worship/services?from=…&to=…` | The setlists and service plans between two dates, each with its items in order (a song, a reading, the sermon or another placeholder; song and arrangement ids; key; notes) and when it last changed. ETag and `If-None-Match`: a short 304 when nothing changed. A removed service is gone from the list. |
+| `GET /api/v1/worship/songs/{id}?arrangement=…` | A song: title, authors, CCLI number, copyright, key, its sections (a name and lines, each section once), the order they are sung in as a list of section names (a repeat is the name again), each **published** translation by language code, lined up with the sections line for line (`null` for a line nobody translated), and when it last changed. A deleted song is a 404. |
+| `POST /api/v1/worship/song-uses` | One song shown in a service (song, arrangement, date and time, service, key), with an `Idempotency-Key` header so a retry never counts twice. |
 
-| Resource | Fields seen | What we learnt |
-|---|---|---|
-| Song Sync devices | name, status (`paired`), last seen; for the church: stand link issued, PIN required, PIN mode `self`, enrolment open and until when, 180 days of lookahead | No address, code or token is shown. |
-| Setlist | id, name, date, team, song count, linked calendar event, next rehearsal, active | A church can have several setlists per week, one for each team. |
-| Setlist song | order, song id, title, arrangement, target key, capo, Nashville flag, notes, worship spot | It has **no id of its own**: its place and its song identify it. `arrangement` was `null` every time (meaning the song's default). |
-| Service plan | id, title, series, type, date, time, status, event, item count, total duration | Titles may carry HTML entities (`&amp;`): decode them before showing. |
-| Plan item | order, type, title, description, song id and title, key, capo, duration, leader, scripture reference, notes, worship spot | Types seen: `song`, `worship`, `section`, `scripture`, `prayer`, `sermon`, `offering`, `announcement`. A plan can be a template whose song slots name no song; then **the songs are in the setlists**. A `worship` item carries a worship-spot label. |
-| Song | id, title, artist, composer, CCLI number, copyright, default key, tempo, BPM, time signature, status, tags, themes, notes, plain lyrics, arrangements, attachments, recent use | The plain `lyrics` have no section names. They can be missing, can carry ChordPro directives (`{title: …}`). |
-| Arrangement | id, name, key, available keys, BPM, default flag, chart format (`chordpro` or `chords_above`) | An arrangement is **a chart in a key, not an order of sections**. A song usually has one default arrangement. |
-| Chart | the arrangement's sections in order: a name and lines with chords in square brackets; as stored, `[Verse 1]` lines start sections | Section names are free text (Verse 1, Chorus, Bridge 1, Final Chorus, Half Chorus, Припев, куплет 1). See [how a chart writes a song](#how-a-chart-writes-a-song). |
-| Translation | language, status, translated title, sections of `{source, translated}` rows, languages | Its sections are **pieces of at most six rows** (the slide style's lines per slide): a section's name can repeat, and a piece can cross a verse's blank line. The rows have no chords. A line nobody translated has `translated: ""`. |
-| Congregation slide style | background, original and translation colours, sizes, gap, offsets, layout (`original_first`), lines per slide (6), and whether the church ever saved one | A church may never have saved one (`has_default` false): then SoftPresenter's own look applies. |
-| Song use | when, the key used, the plan (`null` every time) | Several uses can fall on one day. |
+The token goes only in the `Authorization: Bearer` header, never in an address. A computer
+disconnected in TimelyChurch, or a church that turned the feature off, gets a 401 or 403, which
+SoftPresenter shows as "This computer was disconnected from TimelyChurch".
 
-**Identity and change:** every id is an integer, unique in one church. No resource carries an
-`updated_at`, a version or an ETag. Setlist songs and plan items have no ids.
-
-**Setlists and plans:** a setlist and a plan can be for the same calendar event; one pair was.
-Another setlist and plan were on the same date, for different events.
-
-### How a chart writes a song
-
-A chart writes every section where it is sung. Repeats come in several forms:
-
-- the section written out in full again, word for word;
-- the section named again with no lines ("Chorus" with nothing under it);
-- a count in the name ("Chorus - 2x", "Chorus x2", "Припев 2х", "Ending (2x)");
-- a count on a line of its own inside another section ("Chorus: 3x"), followed by the chorus;
-- repeat signs inside a section (`||: two lines :||`), sometimes not closed;
-- the same name with slightly different words (a last chorus with a line added).
-
-Charts also hold things that are not words to sing. These are lines of chords alone (`[Intro:]
-[G] [D]`, `INTRO: Am – F – C`, `F------`) and notes to the band ("End", "Play Verse 1"). A
-`chords_above` chart arrives as one section with no name. Its section names come as lines of
-their own ("Verse 1", "Chorus 2x").
+TimelyChurch asked that songs be kept for that church's use only (never shared between
+churches or sent anywhere else), the token be kept in the system's secure store (never in a
+plain file or a log), and the church's own edits be kept with its newer version offered.
+Stands following the screens come after version 1 is in use.
 
 ## How it maps
 
 ### A song
 
-`timelychurch::make_song` turns a song, one arrangement's chart and, if there is one, a
-translation into a SoftPresenter song.
+`timelychurch::make_song` (`song.rs`) turns a song, in one arrangement, into a SoftPresenter
+song.
 
 | TimelyChurch | SoftPresenter |
 |---|---|
-| The song's title (HTML escapes undone) | The song's title. A song sung in an arrangement that isn't its default is a library song of its own, "Title (Arrangement)". |
-| The chart's sections | Groups, named as the church named them, without a count. Lines before any named section form a group with no name. |
-| A blank line in a section | A new slide. A stretch longer than the most lines a slide takes is shared out evenly, as for songs imported from text. That most is the church's saved lines per slide, or SoftPresenter's usual four when the church never saved one. TimelyChurch's own default of six is not the church's choice. |
-| Chords, lines of chords alone, repeat signs, and a few notes to the band ("End", "Fine", "Play …", "Repeat …" followed by a section name) | Left out: they are for the musicians. A line that only might be a note is kept as words. |
-| The same section again (same name and words), a section named with no lines, a count | The same group again, as many times as the count says. A name with no lines means the first group of that name, or failing that its first numbered one ("Chorus 1" for "Chorus"). A name with no lines that names nothing sung before it (an instrumental intro, or a chorus named before the chorus is written) is no group; such names are listed, so the window can say so. |
-| The same name with other words | Another group of the same name: SoftPresenter allows repeated names. |
-| The order sung | An arrangement, chosen to play, named after TimelyChurch's arrangement (or "TimelyChurch" for one called "Default Arrangement"). There is none when the order sung is simply the groups as written. |
-| A translation | Lined up **line by line, by the line's words** rather than by section, because the translation's sections are only pieces. Each slide gets a translation box holding the translated lines of its own lines, in order. A line translated once is translated wherever it comes again. A line nobody translated is left out of the box and counted, so the window can say so. A slide with no translated line has no box, and a translation with none at all puts nothing under the words. |
-| The translation's status | Used when it is approved or not given. A draft is used only if the church chooses (once R4 says what the statuses are). |
-| The translated title | Not used yet: a song has one title. |
-| Artist, composer, CCLI number, copyright line | Artist, Author, CCLI Song #, and the year and publisher read from the copyright line. These go on the copyright line on the screens. |
-| The song's notes | The first slide's notes. |
-| Key, capo, BPM, Nashville flag, tags, themes, scripture reference | Not shown on slides, and not kept for now. A key for the stage screen could come later. |
-| Plain lyrics | Not used. |
-| Attachments | Not used (R7). |
+| The title (HTML escapes undone) | The title. A song sung in an arrangement that isn't its default is a library song of its own, "Title (Arrangement)". |
+| Each section, once | A group, named as the church named it. |
+| A blank line in a section | A new slide. A stretch longer than four lines (the app's usual for songs from text) is shared out evenly. |
+| Chords in square brackets, repeat signs (`\|\|:` `:\|\|`), should a line carry any | Left out: they are for the musicians. A line left with no words is no line. |
+| The order sung | An arrangement of the groups, chosen to play, named after TimelyChurch's arrangement (or "TimelyChurch" for one called "Default" or "Default Arrangement"). None when the order is simply the sections as sent, or there is no order. Names are matched whatever their case and spacing; two sections sent with one name are taken in turn. A name that names no section with words (an instrumental part) is no group, and is said in the log. |
+| A published translation | Lined up by place: the translation's section at the song's section's place (or, if that one names another section, the one of this section's name), and its line *n* under the section's line *n*, counted as sent, before anything is left out. Each slide gets a translation box with the translated lines of its own lines, in order. A `null` line is left out and counted; a slide with none translated has no box; a translation with nothing translated puts nothing under the words. |
+| Several translations | The first, in the order sent, with a line translated (`song::translation_for`, the one place to change if the church is to choose). |
+| The translated title | Not used: a song has one title. |
+| Authors, CCLI number, copyright line | Author (the names joined with commas), CCLI Song #, and the year and publisher read from the copyright line. |
+| Key | Not on slides, not kept. The song use sends the key the service gave. |
 
 ### A playlist
 
-`timelychurch::from_setlist` and `from_plan` say what a service asks for. `to_service` then makes
-the playlist once its songs are in the library.
+`plan.rs` turns each service into what it asks for, and `to_service` into the playlist once its
+songs are in the library.
 
-- **A setlist** becomes a playlist with the setlist's name, holding its songs in order. A heading
-  is added wherever the songs' worship-spot label changes ("Opening", "Communion").
-- **A plan** becomes a playlist with the plan's title, holding its items in order:
-  - a `section` becomes a heading;
-  - a `worship` item becomes a heading with its label, followed by the setlist's songs that
-    carry the same label (or all of them, at the first such item, when no song carries one);
-  - a `song` item with a song becomes that song. Without one, it takes the setlist's next song
-    when the plan has no `worship` item; otherwise it stays a placeholder ("Song");
-  - a `scripture` item becomes a placeholder named with its passage ("Reading: Psalm 100"). Once
-    R6 gives the format, it will become a Bible passage in the Bible view's translations;
-  - every other type becomes a placeholder with the item's title (Sermon, Offering, Prayer…).
-    Durations, leaders' names, descriptions and notes are not used.
-- **A setlist and a plan for the same calendar event** make one playlist: the plan's order, with
-  the setlist's songs. Any songs no place took follow the last song. A setlist and a plan on the
-  same day for different events are not joined, and nothing is matched by date.
-- **Which services appear:** every upcoming setlist inside the lookahead window. A plan replaces
-  its setlist when it is linked to one, and stands alone when it holds songs of its own. A plan
-  with neither is a template and is left out.
-- A song not in the library yet (it couldn't be fetched) keeps its place as a placeholder with
-  its title, and a song comes once, as in any playlist.
-- A setlist song's notes, target key and capo are not used: a playlist's song item has no place
-  for them, and the key and capo are for the musicians. If they are wanted on the stage screen
-  later, the playlist item needs a field for them.
-- Upcoming services with the same name ("Sunday Service" each week) get their date added:
-  "Sunday Service (2026-12-06)".
+- **A setlist** becomes a playlist with its name and its songs in order, with a heading wherever
+  the songs' worship-spot label changes ("Opening", "Communion"), if the list carries labels.
+- **A plan** becomes a playlist with its items in order: a `heading` (or `section`) item is a
+  heading; a `song` item is that song; a `reading` is a placeholder named with its passage
+  ("Reading: Psalm 23"); any other item a placeholder with its title (Sermon, Offering…).
+- **A setlist and a plan for the same calendar event**, if the list says which event each is for,
+  make one playlist: the plan's order, the setlist's songs in its `worship` places (by label) or
+  its empty song places; the setlist is then no playlist of its own.
+- A song not in the library (not fetched yet, or deleted in TimelyChurch) keeps its place as a
+  placeholder with its title. A song comes once, as in any playlist.
+- Services with the same name get their date added: "Sunday Service (2026-12-06)".
+- Names the app gives (a placeholder with no title: Song, Reading, Sermon…) are in the language
+  set.
 
 ## Identity, and the church's own changes
 
-**Songs** carry the same mark as songs from the song catalog (`CatalogOrigin` in `sp-model`),
-with the source `timelychurch`. The catalog's update pass picks its songs by source, so it
-never touches TimelyChurch's songs, and the sync will pick its own the same way. The mark holds:
+**Songs** carry the song catalog's mark (`CatalogOrigin` in `sp-model`) with the source
+`timelychurch`, so the catalog's update pass never touches them:
 
-- **key:** `church.example.org/song/1201/arrangement/1305`. This is the address the church was
-  connected with, then TimelyChurch's song and arrangement ids, so two churches on one computer
-  never collide;
+- **key:** `church.example.org/song/1201/arrangement/1305` (the address the church was
+  connected with, then TimelyChurch's ids), so two churches on one computer never collide;
 - **second:** the language of the translation under the words;
-- **made_hash:** the fingerprint of the song as SoftPresenter made it. That is the whole song,
-  with its ids numbered afresh and the mark left out. **Any change the church makes in
-  SoftPresenter** gives the song another fingerprint: words, title, details, theme,
-  arrangements, or a slide's look;
-- **text_hash:** what TimelyChurch had. TimelyChurch's songs carry no version, so this is the
-  fingerprint of the song as SoftPresenter would make it from TimelyChurch's data. A change at
-  TimelyChurch that changes nothing shown (a new BPM) is then no change. The other side of
-  this: anything that changes how songs are made changes every song's fingerprint at once.
-  That covers the church's lines per slide, its second language, or a later release's
-  mapping. Untouched songs are then made again, and songs the church changed are each offered
-  the newer version;
+- **made_hash:** the fingerprint of the song as made; any change the church makes (words,
+  title, details, theme, arrangements, a slide's look) gives another;
+- **text_hash:** the fingerprint of the song as SoftPresenter makes it from what TimelyChurch
+  sent, so a change there that changes nothing shown is no change;
 - **newer** and **gone**, as for the catalog.
 
-At each check, the song is made again from what TimelyChurch sends, and the catalog's rules
-decide (`catalog::judge`):
+At each fetch the song is made again and the catalog's rules (`catalog::judge`) decide:
+unchanged, nothing; changed and untouched, replaced (keeping its id, theme, transition and
+looping, so playlists and macros still find it); changed and changed by the church, kept, with
+the newer version offered (a notice, and `sp timelychurch newer`, `use-newer SONG`, which can
+be undone, and `keep-mine SONG`); deleted (404), noted as gone and kept. New songs go into a
+library named TimelyChurch.
 
-| TimelyChurch | The song in SoftPresenter | What happens |
+**Playlists** carry a mark in the services file (`ServiceOrigin`: the key
+`church.example.org/setlist/42` or `…/plan/57`, the fingerprint of the playlist's name and
+items as made, the service's date, a newer version's fingerprint, and whether TimelyChurch
+removed it). Older builds drop the mark when they save. At each check:
+
+| TimelyChurch's service | The playlist | What happens |
 |---|---|---|
-| Unchanged | Any | Nothing. |
-| Changed | Untouched | Replaced by the new version. It keeps its id, theme, transition and looping, so playlists, macros and links still find it. |
-| Changed | Changed by the church | Kept. The newer version is offered ("Use the newer version" or "Keep mine", as for the catalog), never forced. |
-| The song is gone | Any | Noted as gone; the song stays. |
-
-Songs that join the library go into a library named TimelyChurch. A library song of the same
-title that didn't come from TimelyChurch is never merged on its own. On the first sync, such
-songs are listed, and the church can choose to use the song it already has for that
-TimelyChurch song. That choice is remembered by TimelyChurch's song id, and the church's song is
-then never updated.
-
-**Playlists** have no id or origin today. A synced playlist will carry a mark of the same kind,
-a small addition to the services file that older builds drop on saving. The mark holds the key
-(`church.example.org/setlist/42` or `…/plan/57`), the fingerprint of what TimelyChurch asked
-for (`PlannedService::fingerprint`), and the fingerprint of the items as made. A playlist the
-church hasn't touched is rebuilt when TimelyChurch's setlist or plan changes. One the church has
-changed (a video added, a song moved) is left alone, and the change is offered.
+| Makes the playlist as it was made | Any | Nothing (an offer taken back is withdrawn). |
+| Changed | Untouched | Made again. |
+| Changed | Changed by the church | Kept; TimelyChurch's version offered, said once (`sp timelychurch use-newer PLAYLIST` takes it). |
+| New | — | A new playlist, at the end of the list. |
+| Gone from a list answered now, its date still inside the dates asked for | Any | Noted as removed in TimelyChurch (the card says so); never deleted. |
+| Its date has passed | Any | It has only dropped out of the dates asked for: left as it is. |
+| Any | Deleted by the church | Not made again. |
 
 ## Keeping in step
 
-**What is asked for, with what exists today.** Nothing tells SoftPresenter what changed, so it
-compares fingerprints. It fetches in tiers, so that checking often stays cheap:
+**When:** while connected, ten seconds after the start and then every five minutes (and on
+Check Now), for the next 28 days. Requests run on threads of their own, never on the window's
+or the screens'.
 
-1. **Every check:** the upcoming setlists and plans inside the lookahead window, as two lists.
-   Then each one in full, which is a request for each service.
-2. **When a song is first seen, or when a setlist or plan it is in has changed:** the song, its
-   arrangement's chart, and its translation into the church's chosen second language. That is
-   three requests for each song, made once per check even when the song is in two services.
-3. **Otherwise, about once a day, and never while anything is on screen:** every song again, to
-   catch a change to a song's words that left its setlists as they were.
+**What is asked:**
 
-With three upcoming services, a check that finds nothing costs about five requests. A full
-fetch of fifteen songs costs about fifty.
+1. The services list, with the ETag of the list last applied. A 304 means the list kept on disk
+   (`TimelyChurch/services.json`, with its ETag) stands. The ETag is kept only together with
+   the list it belongs to, and only once what the list made has been applied; it is dropped on
+   Disconnect, on pairing again and when the token is refused.
+2. Each song that may have changed, once per check however many services it is in: one never
+   fetched or not in the library any more; one whose last-changed time in the list differs
+   from when it was fetched (if the list says when songs last changed); every song of a
+   service whose last-changed time changed; and otherwise each song about once a day (a song
+   TimelyChurch deleted too, in case it comes back). Each song's reply is kept as sent
+   (`TimelyChurch/songs/`), so a newer version offered can be taken later with no network.
 
-**What we asked TimelyChurch for:** a "changed since" query, or `updated_at` and ETags (S1).
-With those, a check that finds nothing costs one small request, and a changed setlist or song
-fetches only itself. The daily pass over every song is then no longer needed.
+With nothing changed, a check is one short request.
 
-**How often:** every five minutes while the app is open, and every minute in the hour before a
-service (the plan's time, or the setlist's date). This is what S3 proposes; TimelyChurch may
-ask for less. Requests run on a thread of their own and never on the thread that draws the
-screens. A "please wait" (429 with Retry-After, S4) is waited out.
+**Applying** happens on the window's thread. New songs and new playlists come at once. Changes
+to songs and playlists wait while anything is on screen (as the catalog's updates do), a song
+open in the editor waits until it is closed, and no new check starts while a check's findings
+wait (Check Now still does). Notices say what came, what was brought up to date, what is offered
+and what was removed.
 
-**Applying what changed:** fetching happens at any time, but nothing changes on screen.
+**Problems:** a 401 or 403 means the computer was disconnected in TimelyChurch: the token is
+forgotten, the card and the notices say "This computer was disconnected from TimelyChurch", and
+nothing more is asked until it is connected again. A 429 (or 503 with Retry-After) is waited
+out. No network: the playlists and songs already made work as they are (they are ordinary
+songs and playlists, saved as every other is), the card says TimelyChurch can't be reached, and
+it asks again five minutes later.
 
-- A new service appears at once as a new playlist.
-- A change to a song that is on screen or open in the editor waits until nothing is live and
-  the editor is closed, as the catalog's updates do.
-- A change to the playlist in front waits until nothing is live. A notice says what changed.
+## Song use
 
-**Deletions, today:** a setlist or plan missing from the list while still inside the window is
-noted on its playlist as removed in TimelyChurch. The playlist is never deleted on its own. A
-service whose date has passed drops out of the window and simply stops being followed. A song
-TimelyChurch no longer has is noted as gone. With tombstones or a list of removed ids (S2),
-removal would no longer have to be guessed from absence.
+A TimelyChurch song **counts as shown** when it goes on screen (the slide on screen, whatever
+the screens show) from the playlist in front, when that playlist was made from a TimelyChurch
+service, on the service's date (the computer's date), and the song is of the church connected
+now. It counts **once per song per service**: the sound check and the service on the day are
+one use, and showing the song on another day (a rehearsal in the week) is none. The count is
+remembered on disk (`TimelyChurch/song-uses.json`), so starting the app again doesn't count it
+again.
 
-## Offline
+Each use is queued on disk with its own idempotency key, made once when it is queued from what
+it is (the service and the song: the same use always has the same key), and sent while
+connected; it leaves the queue only when TimelyChurch has it (a 2xx, or a 409), or when
+TimelyChurch will never take it as it is (400, 404, 410, 422, said in the log). A network
+problem leaves it queued and it is tried again a minute later; a retry never counts twice. The
+use says the song and arrangement, when it was shown (RFC 3339 with the computer's offset), the
+service and its kind, and the key the service gave.
 
-A service never depends on the network. Synced songs are ordinary library songs and synced
-playlists ordinary playlists, saved as every other is. Every song in every service inside the
-window is fetched ahead, so the church can run any of them with no network. A check that fails
-changes nothing, and the Integrations page says when TimelyChurch was last reached. Song use
-(W1) will be kept in a queue on disk, each with its own key so a retry never counts twice, and
-sent when the network is back.
+## Connecting: Settings › Integrations › TimelyChurch
 
-## Connecting: Settings › Integrations
+TimelyChurch has a row beside VoxLive and Canva Sync ("Your upcoming services as playlists,
+with their songs"), shown only while it is offered. Its page:
 
-TimelyChurch gets a row beside VoxLive and Canva Sync, with how it stands. Its page follows
-VoxLive's:
+- **Not connected:** CONNECT TO TIMELYCHURCH, with "In TimelyChurch, an administrator opens
+  Setlists › Song Sync and makes a pairing code. Type your church's TimelyChurch address and the
+  code here. The connection is kept in this computer's secure store and used only with your
+  church's TimelyChurch.", the fields Address and Pairing code, and **Connect**. If the OpenAPI
+  file shows one address for every church, `client::ONE_ADDRESS` is set and the Address field
+  goes. The address is taken as typed in a browser (`https://` added); plain http only for this
+  computer, for the stand-in. SoftPresenter pairs as a device named after the computer (its
+  name in Sharing on a Mac), as "SoftPresenter" with its version.
+- **Connected:** "Connected to <church> · last checked <time>" (or "checking now", "not
+  checked yet"), the address, **Check Now** and **Disconnect**, how many songs shown are waiting
+  to be told to TimelyChurch, and UPCOMING SERVICES: each playlist made, with its date, its
+  songs, and Up to date, Changed here, Changed here; newer in TimelyChurch, or Removed in
+  TimelyChurch.
+- **Disconnect** asks first ("Disconnect TimelyChurch? This computer stops following
+  TimelyChurch and forgets its connection. The songs and playlists it made stay as they are.")
+  and forgets the token on this computer.
+- **Disconnected in TimelyChurch:** "This computer was disconnected from TimelyChurch." over the
+  connect form.
+- The logo comes later (TimelyChurch will send its files); until then a "T" mark.
 
-- **Not connected:** the church's TimelyChurch address and the Song Sync PIN, and **Connect**.
-  SoftPresenter pairs as a device named after the computer, and sends its version (P2). The
-  token goes into the computer's store for secrets (`secrets.rs`: the Mac's Keychain, Windows'
-  Credential Manager, or the keyring on Linux, where connecting is refused if there is none
-  rather than keeping the token in a plain file). A test copy keeps its own in its own folder. The token is never written to a settings file, the log, a command's reply
-  or a song pack. It is sent only to the church's TimelyChurch address, over HTTPS, with
-  redirects off.
-- **Connected:** the church, when it was last checked, and the upcoming services (date, name,
-  songs, and whether each is followed, changed here, or has a newer version waiting). The page
-  also has **Check Now**, the second language for translations (from the languages the
-  church's songs have), and **Disconnect**, which asks first.
-- **Disconnected in TimelyChurch** (P5): the page says "This computer was disconnected in
-  TimelyChurch" and stops asking until it is connected again.
-- `sp timelychurch status | connect | check | disconnect` do the same from the command line. The
-  PIN is piped in, as `sp voxlive connect` takes its key.
+The token goes into the Mac's Keychain (a test copy started with `SOFTPRESENTER_DATA` keeps its
+own in its own folder). `token.rs` holds a stand-in for `crate::secrets` (the store over the
+Keychain, Windows Credential Manager and Linux Secret Service being written now), with the same
+`get`, `set` and `delete`, to be replaced by it; until then only a Mac keeps a token. The token
+is never written to a settings file, the log, a notice, a command's reply or a song pack.
+
+`sp timelychurch` does the same from the command line: `sp timelychurch` (how it stands),
+`echo "$CODE" | sp timelychurch connect [ADDRESS]`, `check`, `services`, `newer`, `use-newer
+SONG|PLAYLIST`, `keep-mine SONG`, `disconnect --yes`. A remote page can't use it.
+
+## The stand-in
+
+`timelychurch/mock.rs` is a small HTTP server (std::net only) serving a demo church in the
+described shapes: a setlist today and a plan in a week, a two-language song whose chorus is
+sung three times, a one-language song, and a deleted song (404); it answers 304 to its ETag,
+records each song use once by its idempotency key, and can be changed while it runs
+(`POST /_mock/next`: a song's words changed, the plan removed, a new setlist; `/_mock/disconnect`;
+`/_mock/wait`; `GET /_mock/uses`). The tests run against it; to try the app by hand,
+`cargo test -p sp-app timelychurch::mock::serve -- --ignored --nocapture` serves it at
+`http://127.0.0.1:4320` (pairing code `DEMO-2026`), and a test copy is started with
+`SOFTPRESENTER_TIMELYCHURCH_URL=http://127.0.0.1:4320`.
+
+## Names assumed
+
+TimelyChurch's answer gave the paths and what each request carries, not the field names. Each
+name below is marked `assumed:` in `wire.rs`; the likeliest other spellings are read too.
+
+| Where | Assumed | Also read |
+|---|---|---|
+| Services query | `from`, `to` as `YYYY-MM-DD`, both days included | — |
+| Song query | `arrangement` (left out for the default) | — |
+| Pair request | `pairing_code`, `device_name`, `app_name`, `app_version` | — |
+| Pair reply | `token`; `church` object with `id` and `name` | `device_token`, `access_token`; `church_name` |
+| Services reply | an object with `services` | `data`, `items`, or the list itself |
+| Service | `id`, `type` (`setlist` or `plan`), `name`, `date`, `time`, `event_id`, `updated_at`, `items` | `kind`; `title`; `linked_event_id`; `last_changed`, `changed_at`, `last_changed_at` |
+| Item | `position`, `type` (`song`, `reading`, `sermon`, `heading`, `worship`, other), `title`, `song_id`, `arrangement_id`, `key`, `notes`, `worship_spot`, `reference`, `song_updated_at` | `order`; `kind`; `name`; `spot`; `scripture_reference`, `passage`; `song_last_changed`, `song_changed_at` |
+| Song | `id`, `title`, `authors` (a list), `ccli_number`, `copyright`, `key`, `arrangement` (`id`, `name`, `key`, `is_default`), `sections` (`name`, `lines`), `order` (strings), `translations`, `updated_at` | `name`; `author`, or one line with commas; `ccli`, `ccli_song_number`; `copyright_info`, `copyright_line`; `default`; `label`; `sequence`, `section_order`, `order_sung`, objects with a `name`; `last_changed`… |
+| Translation | `language`, `title`, `sections` (`name`, `lines` with `null`) | `language_code`, `lang` |
+| Song use | `song_id`, `arrangement_id`, `used_at`, `service_id`, `service_type`, `key`; header `Idempotency-Key` | — |
+| Errors | `error` (a string or an object with `message`), `message` | — |
+| Ids | integers | strings (letters, figures, `-`, `_`, `.` only go into an address) |
 
 ## What waits on TimelyChurch
 
-| ID | Question | What the connector already showed | Still needed |
-|---|---|---|---|
-| P1–P6 | Pairing, base address, scopes, revoking, several devices | Devices have a name, status and last seen; PIN mode `self`; an enrolment window; 180 days of lookahead; a church can have more than one device paired | The whole pairing exchange, the token's form and life, the address rule, the error when revoked |
-| R1 | Setlists, plans or both | Songs live in setlists; plans can be templates with song places and worship places; the two meet by calendar event | Whether a plan's `worship` item is meant to take a setlist's songs, and how churches use the two |
-| R2 | The read endpoints | The fields above | The device's own routes, fields and paging |
-| R3 | Sections and order | The chart holds named sections in the order sung, with repeats written as above; names are free text; the plain lyrics have no sections | Whether the device gets the chart, and whether an arrangement order (V1 C V2 C) could be given instead of repeats written into the words |
-| R4 | Translations | Rows of source and translated lines, in six-row pieces; `""` for a missing line; status and translated title `null`; no song had a translation | A filled example, the list of a song's languages, what the statuses are |
-| R5 | Chords | ChordPro with chords in square brackets; `chords_above` charts too; the plain lyrics can carry directives | Whether a chord-free form exists for the device |
-| R6 | Items that aren't songs | The eight types above; no scripture reference seen | The reference's format |
-| R7 | Attachments | Type, file name, size, and whether it is a link elsewhere | Whether a device can fetch a background picture or video |
-| R8 | Identity and versions | Integer ids; no `updated_at` anywhere; no ids for setlist songs or plan items | Whether ids last, and a version on each resource |
-| S1–S4 | Changes, deletions, push or poll, limits | Nothing for any of them | All four |
-| W1 | Song use | Uses are recorded with a date and key | The endpoint, and an idempotency key |
-| W2, W3 | What's live; heartbeat | Devices show a last-seen time | Both |
-| X1–X6 | Test church, versions, errors, plans, naming, licensing | — | All six; a test church with translated songs matters most |
+- **The OpenAPI file and examples:** the names above; the per-device rate limit (five minutes
+  between checks is assumed to be well inside it); whether there is one address for every
+  church.
+- **How the services list says a song changed:** a last-changed time per item, a service's
+  last-changed time moving when its songs change, or neither. All three are handled; with
+  neither, a changed song's words arrive within a day, or at once when its service changes.
+- **Worship spots and events:** whether items carry a worship-spot label and services an event,
+  and so whether a setlist and a plan still need joining.
+- **Lines:** whether section lines can carry chords (they are taken out if they do).
+- **A choice of translation**, if churches publish more than one.
+- **The logo files**, and a development build for TimelyChurch's own demo church before any
+  church sees it.
+- **Later:** stands following the screens (which song and section is on screen).
 
 ## Build plan
 
-| Step | What | Size | Waits on |
-|---|---|---|---|
-| 1 | The mapping: songs (groups, slides, order sung, translation line by line, details, mark) and playlists (setlists, plans, linking, placeholders). `crates/sp-app/src/timelychurch/`, with tests on made-up data | Done | — |
-| 2 | The device client: pairing, the token in the system's store, the reads, errors, a stand-in for tests (`SOFTPRESENTER_TIMELYCHURCH_API`, local addresses only, as VoxLive's) | M, 2–3 days | P, R2, X2, X3 |
-| 3 | Keeping in step: the background check, fetching each song once, fingerprints, the update rules, the TimelyChurch library, the playlists' mark in the services file, notices | M, about 3 days | S1, S2 (works without them, at a higher cost) |
-| 4 | Settings › Integrations page and `sp timelychurch` | S–M, 1–2 days | P2, X5 |
-| 5 | Song use, queued offline | S, 1 day | W1 |
-| 6 | Readings as Bible passages | S, half a day | R6 |
-| 7 | Stands following the screens | M | W2, after the rest |
+| Step | What | Where it stands |
+|---|---|---|
+| 1 | The mapping: songs (sections, order sung, translation lined up, details, mark) and playlists | Done, for the described API |
+| 2 | The client: pairing, the token in the system's store, the reads, errors, the stand-in | Done (the store is a stand-in until `secrets.rs`) |
+| 3 | Keeping in step: the background check, fetching only what changed, the update rules, the TimelyChurch library, the playlists' mark, notices | Done |
+| 4 | Settings › Integrations › TimelyChurch and `sp timelychurch` | Done, hidden behind `SOFTPRESENTER_TIMELYCHURCH_URL`; the logo when it comes |
+| 5 | Song use, queued offline | Done |
+| 6 | Readings as Bible passages | Waits on how a passage is written |
+| 7 | Stands following the screens | After version 1 is in use |
 
-Steps 2 to 5 are about a week once the answers arrive. After that, a development build goes to
-TimelyChurch's team to try.
+Once the OpenAPI file is in: check the names, try it against TimelyChurch's demo church with a
+development build, then take away the switch.

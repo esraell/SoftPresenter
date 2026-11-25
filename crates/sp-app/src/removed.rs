@@ -567,7 +567,7 @@ mod tests {
         let mut state = HomeState::default();
         state.services.list = names
             .iter()
-            .map(|name| Service { name: (*name).to_owned(), items: Vec::new(), uids: Default::default() })
+            .map(|name| Service { name: (*name).to_owned(), items: Vec::new(), uids: Default::default(), origin: None })
             .collect();
         state.libraries = names.iter().map(|name| crate::libraries::Library::new((*name).to_owned())).collect();
         state.audio.playlists = names.iter().map(|name| crate::audio::Playlist::new((*name).to_owned())).collect();
