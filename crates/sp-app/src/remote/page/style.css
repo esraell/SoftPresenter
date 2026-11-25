@@ -1855,3 +1855,9 @@ body.login { display: grid; grid-template: 1fr / 1fr; place-items: center; heigh
 .right.editing #tabs { margin-top: 10px; }
 /* a key's own words keep the key's colour and size inside a settings row (the rows' small faint words are for notes) */
 .sline .btn span:not(.pill) { color: inherit; font-size: inherit; }
+/* the Bibles sheet: the person's languages first, under a heading with a faint line to the edge */
+.bi-yours { display: flex; align-items: center; gap: 10px; margin: 16px 0 0; font-size: 13.5px; color: var(--ink); } .bi-yours b { font-weight: 600; } .bi-yours::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+/* the setup's Reports step: one switch, what's sent folded under it */
+.su-rep { max-width: 640px; } .su-rep .sline { border-top: 0; } .su-rep .st-fold pre, .settings .st-fold .st-coderow pre { max-height: 220px; overflow: auto; } .st-fold summary::-webkit-details-marker { color: var(--faint); }
+/* the setup's pre-release note: a quiet card, no warning colour */
+.su-pre { display: grid; gap: 4px; margin-top: 12px; padding: 12px 14px; border-radius: var(--r-key); background: var(--well); max-width: 560px; } .su-pre b { font-size: 13px; font-weight: 600; } .su-pre span { font-size: 12.5px; line-height: 1.45; color: var(--dim); }

@@ -1,6 +1,6 @@
 {
   "_note": "Ukrainian; see topbar.json and docs/translating.md. The keys sheet and key names. What is printed on a key stays as printed (Shift, Enter, Delete, Home, End, Esc), as on Ukrainian keyboards; what describes keys is translated (Пробіл, Стрілки, Літера).",
-  "keys.also_in": "Також у Налаштування › Клавіші.",
+  "keys.also_in": "Також у розділі Налаштування › Клавіші.",
   "keys.cap.arrows": "Стрілки",
   "keys.cap.button_only": "Лише кнопка",
   "keys.cap.delete": "Delete",

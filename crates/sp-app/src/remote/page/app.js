@@ -975,7 +975,11 @@ function followLive(sel = '.live') {
 function aimed() {
   if (state.mode !== 'show' || !state.live) return null;
   const all = decks(), open = all.find(x => x.key === (state.src.type === 'lib' ? 'lib-' + state.openSong : state.openItem));
-  if (!open || open.key === state.live.deck || !all.some(x => x.key === state.live.deck)) return null;
+  if (!open || open.key === state.live.deck) return null;
+  // What was last shown came from outside the playlist (a verse from the Bible page, say). While it is still on screen, Next
+  // keeps stepping through it; once it is cleared, Next starts the open item (the app, c1b3afe; the owner: "if you open a
+  // song in playlist, next should be the song not bible verse since they clicked on song")
+  if (!all.some(x => x.key === state.live.deck) && state.on) return null;
   return (open.slides && open.seq.length) || (open.kind === 'media' && open.media) || (open.kind === 'mediaPlaylist' && open.mp) ? open : null;
 }
 // The cue: a slide or verse picked by the keyboard (a search, or Up and Down), ready to go on screen. It is never orange:
@@ -2164,11 +2168,20 @@ A.biblesSheet = () => {
   openSheet({ title: 'Bibles', wide: true, body: html`<input class="field" placeholder="Search" data-i="biblesFilter" style="margin-bottom:12px"><div id="biblesList">${biblesList('')}</div>`, note: 'Each is public domain or free to share; its terms are shown before it is installed. A Bible of your own installs from a file: Zefania, OSIS, Beblia, USFM or USX, zipped too.', buttons: [{ t: 'Install from File…', f: () => { A.bibleFromFile(); return false; } }, { t: 'Done', primary: true }] });
   state.sheet.inst = inst;
 };
+const BIBLE_LANG_CODE = { English: 'en', Deutsch: 'de', Français: 'fr', Español: 'es', Português: 'pt', Українська: 'uk', Ἑλληνική: 'el', עברית: 'he' };
+// Whose languages, in order: the church's, if set; the app's own (or this computer's first); the computer's other languages
+const yourLanguages = () => { const st = DOC.settings, sys = (navigator.languages || [navigator.language || 'en']).map(l => l.slice(0, 2));
+  return [...new Set([...(st.langs || []), st.uiLang && st.uiLang !== 'auto' ? st.uiLang : sys[0], ...sys])]; };
 function biblesList(f) {
   const hit = n => !f || n.toLowerCase().includes(f.toLowerCase()), inst = B().installed;
   return html`<span class="cap">Installed</span>${Object.values(BIBLE_DATA.bibles).filter(b => hit(b.name)).map(b => html`<div class="ui-row"><span class="t">${b.name}</span><span class="pill">Built in</span></div>`)}
     ${inst.filter(hit).map(n => html`<div class="ui-row"><span class="t">${n}</span><button class="btn sm" data-a="bibleRemove:${encodeURIComponent(n)}">Remove</button></div>`)}
-    ${BIBLES_TO_DOWNLOAD.map(([lang, list]) => { const rows = list.filter(n => hit(n) && !inst.includes(n)); return rows.length ? [html`<span class="cap" style="margin-top:12px;display:block">${lang}</span>`, rows.map(n => html`<div class="ui-row"><span class="t">${n}</span><span class="sub">Public domain</span><button class="btn sm" data-a="bibleInstall:${encodeURIComponent(n)}">Install</button></div>`)] : ''; })}`;
+    ${(() => { const group = ([lang, list]) => { const rows = list.filter(n => hit(n) && !inst.includes(n)); return rows.length ? [html`<span class="cap" style="margin-top:12px;display:block">${lang}</span>`, rows.map(n => html`<div class="ui-row"><span class="t">${n}</span><span class="sub">Public domain</span><button class="btn sm" data-a="bibleInstall:${encodeURIComponent(n)}">Install</button></div>`)] : ''; };
+      // The person's languages first (the app, 304d8cf; the owner: "based on the languages that the user has selected to use, have
+      // those bibles for download show up first"), in their order; the headings show only while one of theirs is listed
+      const mine = yourLanguages(), code = ([lang]) => BIBLE_LANG_CODE[lang], listed = g => g[1].some(n => hit(n) && !inst.includes(n));
+      const yours = mine.map(c => BIBLES_TO_DOWNLOAD.find(g => code(g) === c)).filter(g => g && listed(g)), rest = BIBLES_TO_DOWNLOAD.filter(g => !yours.includes(g));
+      return yours.length ? [html`<div class="bi-yours"><b>Your languages</b></div>`, yours.map(group), rest.some(listed) ? html`<div class="bi-yours"><b>Other languages</b></div>` : '', rest.map(group)] : BIBLES_TO_DOWNLOAD.map(group); })()}`;
 }
 A.bibleInstall = ([n], el) => { n = decodeURIComponent(n); el.textContent = 'Downloading…'; el.disabled = true; setTimeout(() => { B().installed.push(n); if ($('biblesList')) put('biblesList', biblesList('')); toast(`${n} is installed`); }, 600); };
 A.bibleRemove = ([n]) => { n = decodeURIComponent(n); B().installed = B().installed.filter(x => x !== n); B().rows.forEach(r => { if (r.bible === 'dl-' + n) r.bible = 'none'; }); put('biblesList', biblesList('')); render(); };
@@ -2815,10 +2828,12 @@ const ST_ICON = { Screens: svg('M1.500 2.500h10v6.500h-10zM4.500 11.500h4'), 'Ph
   'Phone remote': svg('M3.500 1.500h4v10h-4zM9.500 4.500a3 3 0 0 1 0 4'), Keys: svg('M1.500 3.500h10v6h-10zM3.500 5.500h.010M6.500 5.500h.010M9.500 5.500h.010M4.500 7.500h4', 1.2), 'Command line': svg('M2 3.500l3 3-3 3M6.500 9.500h4.500'),
   'Song files': svg('M3 1.500h4.500l2.500 2.500v7.500H3zM7.500 1.500V4H10'), About: svg('M6.500 1.500a5 5 0 1 0 0 10a5 5 0 0 0 0-10M6.500 6v3M6.500 4h.010', 1.2), Coverage: svg('M2.500 6.500l3 3 5-6') };
 // A flag stands for a language here, not a country: the one most people know that language by.
-const FLAGS = { en: html`<svg class="st-flag" viewBox="0 0 24 16" aria-hidden="true"><rect y="0.0" width="24" height="2.29" fill="#b22234"/><rect y="2.29" width="24" height="2.29" fill="#fff"/><rect y="4.57" width="24" height="2.29" fill="#b22234"/><rect y="6.86" width="24" height="2.29" fill="#fff"/><rect y="9.14" width="24" height="2.29" fill="#b22234"/><rect y="11.43" width="24" height="2.29" fill="#fff"/><rect y="13.71" width="24" height="2.29" fill="#b22234"/><rect width="10.5" height="9.14" fill="#3c3b6e"/></svg>`, es: html`<svg class="st-flag" viewBox="0 0 24 16" aria-hidden="true"><rect width="24" height="16" fill="#aa151b"/><rect y="4" width="24" height="8" fill="#f1bf00"/></svg>`, ru: html`<svg class="st-flag" viewBox="0 0 24 16" aria-hidden="true"><rect width="24" height="16" fill="#fff"/><rect y="5.33" width="24" height="5.34" fill="#0039a6"/><rect y="10.67" width="24" height="5.33" fill="#d52b1e"/></svg>`, uk: html`<svg class="st-flag" viewBox="0 0 24 16" aria-hidden="true"><rect width="24" height="8" fill="#0057b7"/><rect y="8" width="24" height="8" fill="#ffd700"/></svg>`,
+const FLAGS = { en: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect y="0.0" width="24" height="2.29" fill="#b22234"/><rect y="2.29" width="24" height="2.29" fill="#fff"/><rect y="4.57" width="24" height="2.29" fill="#b22234"/><rect y="6.86" width="24" height="2.29" fill="#fff"/><rect y="9.14" width="24" height="2.29" fill="#b22234"/><rect y="11.43" width="24" height="2.29" fill="#fff"/><rect y="13.71" width="24" height="2.29" fill="#b22234"/><rect width="10.5" height="9.14" fill="#3c3b6e"/></svg>`, es: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="24" height="16" fill="#aa151b"/><rect y="4" width="24" height="8" fill="#f1bf00"/></svg>`, ru: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="24" height="16" fill="#fff"/><rect y="5.33" width="24" height="5.34" fill="#0039a6"/><rect y="10.67" width="24" height="5.33" fill="#d52b1e"/></svg>`, uk: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="24" height="8" fill="#0057b7"/><rect y="8" width="24" height="8" fill="#ffd700"/></svg>`,
   auto: html`<svg class="st-flag plain" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="1.500" width="16" height="10" rx="1.500"/><path d="M9 14.500h6"/></svg>` };
 const LOGOS = { vox: html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none"><g transform="translate(15 24)" stroke="#F3F0E8" stroke-linecap="round" fill="none"><path d="M0 -8 Q6 0 0 8" stroke-width="2.2"/><path d="M6 -11 Q14 0 6 11" stroke-width="2"/><path d="M13 -14 Q23 0 13 14" stroke-width="1.8" opacity="0.55"/></g><circle cx="13" cy="24" r="2.4" fill="#D4A24A"/></svg>`, timely: html`<img alt="" src="logos/timelychurch.png">`,
-  grok: html`<img alt="" src="logos/grok.svg">`, canva: html`<img alt="" src="logos/canva.svg">` };      // each as its company provides it, unaltered (handoff/logos.md)
+  grok: html`<img alt="" src="logos/grok.svg">`, canva: html`<img alt="" src="logos/canva.svg">`,
+  // used without these companies' approval, on the owner's decision of 2026-11-25; removed on his request or theirs (handoff/logos.md)
+  claude: html`<img alt="" src="logos/claude.svg">`, chatgpt: html`<img alt="" src="logos/chatgpt.svg">`, wla: html`<img alt="" src="logos/worship-leader-app.png">` };      // each as its company provides it, unaltered (handoff/logos.md)
 
 /* ═════════ settings.js ═════════ */
 // Settings: a page of its own behind the gear. The on-screen column stays.
@@ -2857,6 +2872,23 @@ A.section = ([s]) => { state.section = SEC_WAS[s] || s; state.integ = null; rend
 const stLine = (label, ctl, note = '', why = '') => html`<div class="${why ? 'sline dis' : 'sline'}"><div><b>${label}</b>${why || note ? html`<span>${why || note}</span>` : ''}</div><div class="ctl">${ctl}</div></div>`;
 // A choice among a few, shown: a flat key with its light (lit when chosen), a small picture, a name and a line
 const pick = (on, a, pic, name, sub = '') => html`<button class="st-pick ${on ? 'on' : ''}" role="radio" aria-checked="${on ? 'true' : 'false'}" data-a="${a}"><i class="led"></i>${pic}<span class="n">${name}</span>${sub ? html`<span class="s">${sub}</span>` : ''}</button>`;
+const APP_VERSION = '0.9.0-dev.16';
+const isPrerelease = () => /-/.test(APP_VERSION);      // a version with a pre-release part (-dev.16); a release shows no note      // a development build shows its whole number
+// Anonymous reports (the app, 25 November; PRIVACY.md): on unless turned off, but off to start with where the computer's region
+// is the EU, the EEA or the UK (?demo=reportseu). The choice, once made, is kept. "See what's sent" shows the next report whole.
+const reportsSet = () => DOC.settings.reports || (DOC.settings.reports = { on: !state.reportsEU, startsOff: !!state.reportsEU, id: 'a3f91c07-5d2e-4b6a-9c18-7e40d2b6f1aa' });
+const reportsSample = () => JSON.stringify({ id: reportsSet().id, app: APP_VERSION, system: WINDOWS ? 'Windows 11 (26100)' : 'macOS 15.1', computer: { processor: WINDOWS ? 'Intel Core i5-12400' : 'Apple M2', cores: 8, memory_gb: 16, graphics: WINDOWS ? 'Intel UHD Graphics 730' : 'Apple M2', displays: [{ size: '2560x1440', scale: 2, hz: 60 }, { size: '1920x1080', scale: 1, hz: 60 }] },
+  screens: { set_up: DOC.screens.length, on: DOC.screens.filter(goingOut).length, to: ['display', 'ndi'] }, language: DOC.settings.uiLang && DOC.settings.uiLang !== 'auto' ? DOC.settings.uiLang : 'en',
+  minutes: [{ cpu_pct: 3.1, memory_mb: 412, window_ms: 4.2, screens_ms: 2.8, keys: 14, clicks: 9, on_screen: ['song', 'video_1080p30'] }], events: [{ code: 'slow_frame', ms: 41 }, { code: 'display_plugged_in' }], used: { view_bible: 7, view_edit: 2 }, log: [], crash: null }, null, 2);
+const reportsSee = () => html`<details class="st-fold" data-keep="reportsSee" ${{ open: !!state.reportsSee }}><summary data-a="reportsSee">See what’s sent</summary><p class="sc-note">The next report, as it stands now. This is all of it: nothing else is sent with it.</p>
+  <div class="st-coderow"><pre class="mono">${reportsSample()}</pre><button class="btn sm" data-a="reportsCopy">${state.reportsCopied ? 'Copied' : 'Copy'}</button></div></details>`;
+A.reportsOn = () => { const sheet = state.sheet; mutate(() => { const r = reportsSet(); r.on = !r.on; }); if (sheet && state.su) suOpen(); };
+A.reportsSee = () => { state.reportsSee = !state.reportsSee; };
+A.reportsCopy = () => { if (navigator.clipboard) navigator.clipboard.writeText(reportsSample()).catch(() => {}); state.reportsCopied = true; if (state.su && state.sheet) suOpen(); else render(); };
+A.reportsReset = () => { mutate(() => { reportsSet().id = 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => Math.floor(Math.random() * 16).toString(16)); }); };
+// Check for updates: asks GitHub's releases (here, a moment's wait; ?demo=updnewer answers with a newer one)
+const updAnswer = () => { const d = new Date(); state.updates = { at: `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}`, newer: state.updNewer ? '0.9.1-dev.2' : null }; if (state.mode === 'settings') render(); };
+A.updCheck = () => { state.updates = { ...(state.updates || {}), checking: true }; render(); clearTimeout(A.updCheck.t); A.updCheck.t = setTimeout(updAnswer, 500); };
 A.setPick = ([k, v]) => mutate(() => { DOC.settings[k] = v; });
 A.transPick = ([k]) => mutate(() => { const t = DOC.settings.transition; DOC.settings.transition = { ...t, kind: k, time: t.time || .5 }; });
 const onoff = (on, a) => html`<button class="btn ${on ? 'onkey' : ''}" data-a="${a}">${sw(on, 'On', 'Off')}</button>`;
@@ -3001,11 +3033,22 @@ function renderSettings() {
   }
   // About (24 November: the Mac menu bar keeps only what a Mac user expects, so what it gave up has a home here, the one way in
   // on Windows and Linux): the version, what's new, help, reporting a problem and the licences.
-  if (sec === 'About') body = [card('SoftPresenter', 'Version 0.1.0 · free and open source, GPL-3.0-or-later', html`
+  if (sec === 'About') { const u = state.updates || {};
+    // Updates first (the app, 25 November; the owner: "would be nice to have a check for updates", and a development build
+    // shows its whole number, "-dev.15"). The answer and when; if GitHub has a newer release, a second row to its page.
+    body = [card('SoftPresenter', `Version ${APP_VERSION} · free and open source, GPL-3.0-or-later`, html`
+      ${stLine('Updates', html`<button class="btn" data-a="updCheck" ${{ disabled: !!u.checking }}>${u.checking ? 'Checking…' : 'Check for updates'}</button>`, u.at ? `${u.newer ? 'A newer version is out' : `You have the newest version (${APP_VERSION.replace(/-dev.*/, '')})`} · checked at ${u.at}` : 'Not checked yet')}
+      ${isPrerelease() ? stLine(`This is a pre-release (${APP_VERSION})`, '', 'Things may still change: the core of how SoftPresenter works and looks will stay, and bugs will be fixed in the versions that come next. Check for updates, above, tells you when one is out.') : ''}
+      ${u.newer ? stLine(`SoftPresenter ${u.newer}`, html`<button class="btn" data-a="say:The download page opens in the browser">Open the download page</button>`, 'On GitHub') : ''}
       ${stLine('What’s new', html`<button class="btn" data-a="say:What’s new opens: the changes in this version">What’s new</button>`, 'The changes in this version')}
       ${stLine('Help', html`<button class="btn" data-a="say:The guide opens in the browser">Open the guide</button>`, 'How to set up the screens, run a service and more, on the web')}
       ${stLine('Something wrong?', html`<button class="btn" data-a="say:A new issue opens on GitHub, with the version filled in">Report an issue…</button>`, 'Opens a new issue on GitHub, with the version filled in')}
-      ${stLine('Licences', html`<button class="btn" data-a="say:The licences open">Licences…</button>`, 'SoftPresenter’s and those of the parts it carries')}`)];
+      ${stLine('Licences', html`<button class="btn" data-a="say:The licences open">Licences…</button>`, 'SoftPresenter’s and those of the parts it carries')}`),
+    (r => card('Anonymous reports', 'How the app runs, never what you show', html`
+      ${stLine('Send anonymous reports', onoff(r.on, 'reportsOn'), `SoftPresenter ${r.on ? 'sends' : 'can send'} anonymous reports of how it runs and what goes wrong: the kind of computer, speeds, crashes. Never your songs, Bible text, file names or anything about you.`)}
+      ${stLine('Anonymous id', html`<span class="st-key mono" style="text-transform:none">${r.id.slice(0, 8)}…</span><button class="btn" data-a="reportsReset">Reset my anonymous id</button>`, 'A random number that says which reports came from the same install, never whose it is')}
+      ${stLine('Privacy', html`<button class="btn" data-a="say:The privacy page opens in the browser">Privacy…</button>`, 'What is sent, what never is, where it goes and how long it is kept')}
+      ${reportsSee()}`))(reportsSet())]; }
   if (sec === 'Phone remote') body = [card('This page', 'Served by the computer that runs the screens, to this network only', html`
       ${stLine('Control from the network', onoff(st.remote, 'setFlag:remote'), 'Off means nobody can open this page, you included')}
       ${stLine('Address', html`<span class="st-key mono" style="text-transform:none">http://192.168.1.20:4310</span><button class="btn" data-a="say:Address copied">Copy</button>`, 'Open it on any phone, tablet or computer here')}
@@ -3526,7 +3569,7 @@ function catFind(want, room = 4) {
 A.findCat = ([id]) => { $('find').value = ''; $('found').hidden = true; $('find').blur(); state.mode = 'show'; state.src = { type: 'cat', id: 'wla' }; state.openCat = id; state.srcMenu = false; deckCache = null; render(); };
 
 /* ───────── the setup ───────── */
-const SU_STEPS = ['Languages', 'Songs', 'Bibles', 'Screens', 'Ready'];
+const SU_STEPS = ['Languages', 'Songs', 'Bibles', 'Screens', 'Reports', 'Ready'];
 // The Bibles the app has, by language (the app's list, 23 November): built in, or downloaded with Continue.
 const SU_BIBLES = {
   ru: [['syn', 'Синодальный перевод', true]],
@@ -3572,6 +3615,7 @@ function suBody(n) {
     // The app's own words come first, so the rest of the setup is read in them (as built, 24 November)
     return html`${suHead(u.again ? 'Set up SoftPresenter' : 'Welcome to SoftPresenter', u.again ? 'Your answers are filled in. Change what you like; nothing else changes.' : 'A few questions and it’s ready for Sunday. Every answer can be changed later.')}
       <div class="su-ui"><span class="cap">Language of SoftPresenter</span>${uiLangMenu()}</div>
+      ${isPrerelease() ? html`<div class="su-pre"><b>This is a pre-release (${APP_VERSION})</b><span>Things may still change: the core of how SoftPresenter works and looks will stay, and bugs will be fixed in the versions that come next. Check for updates (Settings › About) tells you when one is out.</span></div>` : ''}
       <h3 class="su-q">Which languages does your church show?</h3>
       <div class="su-langs">${CAT_LANGS.map(card)}</div>
       ${u.langs.length > 1 ? html`<div class="su-order"><span class="cap">On screen</span>${sel(0, u.langs[0])}<span class="su-w">on top,</span>${sel(1, u.langs[1])}<span class="su-w">below</span></div>
@@ -3620,6 +3664,12 @@ function suBody(n) {
       <div class="su-scrs">${SU_DISPLAYS.filter(([d]) => d !== u.aud).map(([d, sz]) => card('stage', d, sz, u.stage))}${card('stage', 'No stage screen', '', u.stage)}</div>
       <div class="su-id"><button class="btn" data-a="identify">Identify Screens</button><span class="su-small">Shows each screen’s name on it. ${isMac() ? 'Your main display, with the menu bar, keeps' : 'The main display keeps'} SoftPresenter’s own window.</span></div>`;
   }
+  // Reports, the last step before Ready (the app, 25 November): anonymous reports of how the app runs. On unless turned off;
+  // where the computer's region is the EU, the EEA or the UK they start off and the step invites turning them on.
+  if (n === 4) { const r = reportsSet();
+    return html`${suHead('Anonymous reports', r.startsOff ? 'SoftPresenter can send anonymous reports of how it runs and what goes wrong: the kind of computer, speeds, crashes. Never your songs, Bible text, file names or anything about you.' : 'SoftPresenter sends anonymous reports of how it runs and what goes wrong: the kind of computer, speeds, crashes. Never your songs, Bible text, file names or anything about you.')}
+      <div class="su-rep">${stLine('Send anonymous reports', onoff(r.on, 'reportsOn'), r.startsOff ? 'Off unless you turn it on. Turning it on helps us find and fix problems. You can change it later in Settings › About.' : 'On unless you turn it off. You can change it later in Settings › About.')}
+        ${reportsSee()}<p class="su-small"><button class="btn sm" data-a="say:The privacy page opens in the browser">Read the privacy page</button></p></div>`; }
   // Ready: what is set, with a way back to each; what was skipped or still needs doing says so.
   const st = catState(), dl = Object.keys(st.dl), fail = Object.keys(st.fail), kept = CAT_LANGS.filter(l => catHave()[l]);
   const item = (i, label, text, warn = false, act = null, none = false) => html`<div class="su-done ${warn ? 'warn' : ''}"><i class="su-di">${warn ? html`<i class="nk warn"></i>` : none ? '–' : I.check}</i><span class="cap">${label}</span><span class="su-dt">${text}</span>${act || html`<button class="btn sm" data-a="suStep:${i}">Change</button>`}</div>`;
@@ -4328,7 +4378,7 @@ const REMOTE_WORDS = {
    "A playlist is the running order of a service: songs, Bible passages, pictures and videos, in the order they come.": "Список — это порядок служения: песни, отрывки из Библии, картинки и видео, в том порядке, в каком они идут.",
    "A question is waiting: click to answer it": "Есть вопрос: нажмите, чтобы ответить",
    "a service, in order": "служение, по порядку",
-   "A small tag beside each button with its key. Also in Settings › Keys.": "Маленькая метка с клавишей возле каждой кнопки. Также в «Настройки › Клавиши».",
+   "A small tag beside each button with its key. Also in Settings › Keys.": "Маленькая метка с клавишей возле каждой кнопки. Также в разделе Настройки › Клавиши.",
    "A Song Bundle…": "Пакет песен…",
    "A song…": "Песня…",
    "A–Z": "А–Я",
@@ -4342,8 +4392,8 @@ const REMOTE_WORDS = {
    "Add Slide": "Добавить слайд",
    "Add the Sample Backgrounds": "Добавить образцы фонов",
    "Add to playlist": "Добавить в список",
-   "Adding music is done at the computer for now.": "Музыка пока добавляется на компьютере.",
-   "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Добавлять картинки и видео отсюда можно будет со следующим шагом. Пока добавляйте их на компьютере.",
+   "Adding music is done at the computer for now.": "Музыка пока добавляется за компьютером.",
+   "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Добавлять картинки и видео отсюда можно будет на следующем этапе. Пока добавляйте их за компьютером.",
    "Advanced": {
     "in": [
      [
@@ -4366,12 +4416,12 @@ const REMOTE_WORDS = {
    "Bible": "Библия",
    "Bible, too (Bold while editing a slide)": "Тоже Библия (при правке слайда — жирный)",
    "Cancel": "Отмена",
-   "Changing songs, playlists and settings is done at the computer for now. Running the show works from here.": "Песни, списки и настройки пока меняются на компьютере. Вести служение можно отсюда.",
+   "Changing songs, playlists and settings is done at the computer for now. Running the show works from here.": "Песни, списки и настройки пока меняются за компьютером. Вести служение можно отсюда.",
    "Changing things": "Изменения",
    "Choose": "Выбрать",
    "Choose a library or playlist (⌘P)": "Выберите список или библиотеку (⌘P)",
    "Choose a song…": "Выбрать песню…",
-   "Choosing from the menu bar is done at the computer, not from the remote page.": "Выбирать в строке меню можно на компьютере, а не со страницы пульта.",
+   "Choosing from the menu bar is done at the computer, not from the remote page.": "Выбирать в строке меню можно за компьютером, а не со страницы пульта.",
    "Choosing the stage layouts": "Выбор макетов сцены",
    "CLEAR": "ПУСТО",
    "Clear All": "Очистить всё",
@@ -4381,7 +4431,7 @@ const REMOTE_WORDS = {
    "Clearing": "Очистка",
    "Click to show it": "Нажмите, чтобы показать",
    "Close": "Закрыть",
-   "comes to the remote page with the next step. Use the computer for now.": "появится на странице пульта со следующим шагом. Пока пользуйтесь компьютером.",
+   "comes to the remote page with the next step. Use the computer for now.": "появится на странице пульта на следующем этапе. Пока пользуйтесь компьютером.",
    "Connect": "Подключить",
    "Connected": "Подключено",
    "Connecting…": "Подключение…",
@@ -4454,14 +4504,14 @@ const REMOTE_WORDS = {
    "Import…": "Импорт…",
    "In Edit: a new text box, duplicate, pick everything": "В Редакторе: новый текстовый блок, дублировать, выбрать всё",
    "In Edit: nudge the picked object (Shift for one pixel)": "В Редакторе: сдвинуть выбранный объект (с Shift — на один пиксель)",
-   "is empty": "пуст",
+   "is empty": "— пустой список",
    "Jump to a group (C for the chorus), or a slide’s own hot key": "Перейти к части (C — припев) или по собственной горячей клавише слайда",
    "Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)": "Играть, пока не остановят: после последнего трека начать снова с первого (если «Подряд» выключено — повторять этот трек)",
    "Keys": "Клавиши",
    "Label": "Метка",
    "Library": "Библиотека",
    "Longest": "Самые длинные",
-   "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Поиск по Библии появится на странице пульта со следующим шагом. Пока пользуйтесь страницей Библии на компьютере.",
+   "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Поиск по Библии появится на странице пульта на следующем этапе. Пока пользуйтесь страницей Библии на компьютере.",
    "Loop": {
     "in": [
      [
@@ -4486,7 +4536,7 @@ const REMOTE_WORDS = {
    "New Media Playlist…": "Новый медиасписок…",
    "New playlist": "Новый список",
    "New song": "Новая песня",
-   "Next": "Дальше",
+   "Next": "Далее",
    "Next at the end of a song goes on to the next song": "«Далее» в конце песни переходит к следующей песне",
    "Next slide": "Следующий слайд",
    "Next track": "Следующий трек",
@@ -4552,9 +4602,9 @@ const REMOTE_WORDS = {
    "Scaling": "Масштаб",
    "Service": "Служение",
    "Service (⌥S)": "Служение (⌥S)",
-   "Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)": "Служение, Библия (готова к вводу ссылки), Правка (в приложении ⌘1 ⌘2 ⌘3; браузер оставляет их себе)",
+   "Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)": "Служение, Библия (готова к вводу ссылки), Редактор (в приложении ⌘1 ⌘2 ⌘3; в браузере они заняты)",
    "Settings": "Настройки",
-   "Settings are changed at the computer.": "Настройки меняются на компьютере.",
+   "Settings are changed at the computer.": "Настройки меняются за компьютером.",
    "Show": "Показать",
    "Show a message": "Показать сообщение",
    "Show keys on buttons": "Клавиши на кнопках",
@@ -4576,9 +4626,9 @@ const REMOTE_WORDS = {
    "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track": "Запустить этот таймер, показать это сообщение или накладку, выполнить этот макрос, переключить сцену на этот макет, включить этот трек",
    "Table": "Таблица",
    "Template": "Шаблон",
-   "The car with the lights on, please": "Машина с включёнными фарами, пожалуйста",
+   "The car with the lights on, please": "Чья машина с включёнными фарами?",
    "The computer didn't answer.": "Компьютер не ответил.",
-   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "Отмеченный слайд или стих выходит на экран (после поиска или ↑ ↓)",
+   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "Выбранный слайд или стих выходит на экран (после поиска или ↑ ↓)",
    "The first nine can be changed in Settings › Keys.": "Первые девять можно изменить: Настройки › Клавиши.",
    "The item above or below, cued at its first slide; in Bible, the verse before or after": "Пункт выше или ниже; в Библии — стих до или после",
    "The live tools": "Инструменты показа",
@@ -4587,11 +4637,11 @@ const REMOTE_WORDS = {
    "This device is remembered once it signs in, until it is forgotten in Settings › Phone remote on the computer.": "Это устройство запоминается после входа, пока его не забудут на компьютере: Настройки › Пульт на телефоне.",
    "This library has no songs yet.": "В этой библиотеке пока нет песен.",
    "This list": "Этот список (внизу — «Клавиши на кнопках»)",
-   "This sample only has": "В этом образце есть только",
+   "This sample only has": "В этом примере есть только",
    "Timers": "Таймеры",
    "track": "Трек",
    "Transition": "Переход",
-   "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "При вводе в блоке: жирный, курсив, подчёркнутый — для выделенных слов (или всего блока)",
+   "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "При вводе в блоке: жирный, курсив, подчёркнутый — для выбранных слов (или всего блока)",
    "Undo": "Отменить",
    "Undo, redo": "Отменить, повторить",
    "Volume": "Громкость",
@@ -4599,7 +4649,7 @@ const REMOTE_WORDS = {
    "Waiting for SoftPresenter": "Ждём SoftPresenter",
    "Waiting for SoftPresenter to answer. Try again in a moment.": "Ждём ответа SoftPresenter. Попробуйте ещё раз через минуту.",
    "When a track ends, go on to the next": "Когда трек кончится, перейти к следующему",
-   "With nothing on screen, move the cue; Space or Enter puts it on": "Когда на экране пусто, передвинуть метку; пробел или Enter выводит на экран",
+   "With nothing on screen, move the cue; Space or Enter puts it on": "Когда на экране пусто, выбрать слайд; пробел или Enter выводит его на экран",
    "Words": {
     "in": [
      [
@@ -4613,22 +4663,22 @@ const REMOTE_WORDS = {
    "Words once…": "Слова один раз…",
    "Words only": "Только слова",
    "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Разрешить телефону, iPad или Mac показывать свой экран можно только за компьютером, а не с удалённой страницы.",
-   "There is no track to play. Add music at the computer.": "Нет трека для воспроизведения. Добавьте музыку на компьютере."
+   "There is no track to play. Add music at the computer.": "Нет трека для воспроизведения. Добавьте музыку за компьютером."
   },
   "patterns": [
    {
     "re": "^(.+) \\(⌥(\\d), then 1 to 9 for what is in it\\)$",
-    "to": "{1t} (⌥{2}, затем от 1 до 9 для того, что внутри)",
+    "to": "{1t} (⌥{2}, затем 1 … 9 внутри вкладки)",
     "key": "page.tool_tab.hint"
    },
    {
     "re": "^Running SoftPresenter as (.+)$",
-    "to": "SoftPresenter работает как {1}",
+    "to": "Вы управляете SoftPresenter с устройства {1}",
     "key": "page.conn.as"
    },
    {
     "re": "^Notices: (\\d+) need you$",
-    "to": "Уведомления: {1} ждут вас",
+    "to": "Уведомлений, ждущих вас: {1}",
     "key": "page.notices.many"
    },
    {
@@ -4719,7 +4769,7 @@ const REMOTE_WORDS = {
    "A playlist is the running order of a service: songs, Bible passages, pictures and videos, in the order they come.": "Список — це порядок служіння: пісні, уривки з Біблії, зображення й відео в тому порядку, в якому вони йдуть.",
    "A question is waiting: click to answer it": "Чекає запитання: клацніть, щоб відповісти",
    "a service, in order": "служіння, за порядком",
-   "A small tag beside each button with its key. Also in Settings › Keys.": "Маленька мітка з клавішею біля кожної кнопки. Також у «Налаштування › Клавіші».",
+   "A small tag beside each button with its key. Also in Settings › Keys.": "Маленька мітка з клавішею біля кожної кнопки. Також у розділі Налаштування › Клавіші.",
    "A Song Bundle…": "Пакет пісень…",
    "A song…": "Пісня…",
    "A–Z": "А–Я",
@@ -4733,8 +4783,8 @@ const REMOTE_WORDS = {
    "Add Slide": "Додати слайд",
    "Add the Sample Backgrounds": "Додати зразки фонів",
    "Add to playlist": "Додати до списку",
-   "Adding music is done at the computer for now.": "Музика поки що додається на компʼютері.",
-   "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Додавати зображення й відео звідси можна буде з наступним кроком. Поки що додавайте їх на компʼютері.",
+   "Adding music is done at the computer for now.": "Додавати музику поки що можна за компʼютером.",
+   "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Додавати зображення й відео звідси можна буде на наступному етапі. Поки що додавайте їх за компʼютером.",
    "Advanced": {
     "in": [
      [
@@ -4757,12 +4807,12 @@ const REMOTE_WORDS = {
    "Bible": "Біблія",
    "Bible, too (Bold while editing a slide)": "Також Біблія (жирний шрифт під час редагування слайда)",
    "Cancel": "Скасувати",
-   "Changing songs, playlists and settings is done at the computer for now. Running the show works from here.": "Пісні, списки й налаштування поки що змінюються на компʼютері. Вести служіння можна звідси.",
+   "Changing songs, playlists and settings is done at the computer for now. Running the show works from here.": "Пісні, списки й налаштування поки що змінюють за компʼютером. Керувати служінням можна звідси.",
    "Changing things": "Зміни",
    "Choose": "Вибрати",
    "Choose a library or playlist (⌘P)": "Вибрати список або бібліотеку (⌘P)",
    "Choose a song…": "Вибрати пісню…",
-   "Choosing from the menu bar is done at the computer, not from the remote page.": "Вибирати в рядку меню можна на компʼютері, а не зі сторінки пульта.",
+   "Choosing from the menu bar is done at the computer, not from the remote page.": "Вибирати в смузі меню можна за компʼютером, не зі сторінки пульта.",
    "Choosing the stage layouts": "Вибір макетів сцени",
    "CLEAR": "ЧИСТО",
    "Clear All": "Очистити все",
@@ -4772,7 +4822,7 @@ const REMOTE_WORDS = {
    "Clearing": "Очищення",
    "Click to show it": "Клацніть, щоб показати",
    "Close": "Закрити",
-   "comes to the remote page with the next step. Use the computer for now.": "зʼявиться на сторінці пульта з наступним кроком. Поки що користуйтеся компʼютером.",
+   "comes to the remote page with the next step. Use the computer for now.": "зʼявиться на сторінці пульта на наступному етапі. Поки що користуйтеся компʼютером.",
    "Connect": "Підключити",
    "Connected": "Підключено",
    "Connecting…": "Підключення…",
@@ -4805,7 +4855,7 @@ const REMOTE_WORDS = {
    "Delete…": "Видалити…",
    "Details": "Відомості: автор, видавець і номер CCLI пісні",
    "Disable": "Вимкнути слайд",
-   "Disconnected at the computer: click to connect again": "Відключено на компʼютері: натисніть, щоб підключитися знову",
+   "Disconnected at the computer: click to connect again": "Відключено на компʼютері: клацніть, щоб підключитися знову",
    "Dissolve": "Плавно",
    "Done": "Готово",
    "Drag it into a playlist": "Перетягніть у список",
@@ -4845,14 +4895,14 @@ const REMOTE_WORDS = {
    "Import…": "Імпортувати…",
    "In Edit: a new text box, duplicate, pick everything": "У Редакторі: нове текстове поле, дублювати, вибрати все",
    "In Edit: nudge the picked object (Shift for one pixel)": "У Редакторі: зсунути вибраний обʼєкт (із Shift — на один піксель)",
-   "is empty": "порожній",
+   "is empty": "— порожній список",
    "Jump to a group (C for the chorus), or a slide’s own hot key": "Перейти до частини (C — приспів) або за власною гарячою клавішею слайда",
    "Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)": "Грати, доки не зупините: після останнього треку почати знову з першого (коли «Підряд» вимкнено, повторювати цей трек)",
    "Keys": "Клавіші",
    "Label": "Мітка",
    "Library": "Бібліотека",
    "Longest": "Найдовші",
-   "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Пошук у Біблії зʼявиться на сторінці пульта з наступним кроком. Поки що користуйтеся сторінкою Біблії на компʼютері.",
+   "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Пошук у Біблії зʼявиться на сторінці пульта на наступному етапі. Поки що користуйтеся сторінкою Біблії на компʼютері.",
    "Loop": {
     "in": [
      [
@@ -4943,9 +4993,9 @@ const REMOTE_WORDS = {
    "Scaling": "Масштаб",
    "Service": "Служіння",
    "Service (⌥S)": "Служіння (⌥S)",
-   "Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)": "Служіння, Біблія (готова до введення посилання), Редагування (у застосунку ⌘1 ⌘2 ⌘3; браузер залишає їх собі)",
+   "Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)": "Служіння, Біблія (готова до введення посилання), Редактор (у програмі ⌘1 ⌘2 ⌘3; у браузері вони зайняті)",
    "Settings": "Налаштування",
-   "Settings are changed at the computer.": "Налаштування змінюються на компʼютері.",
+   "Settings are changed at the computer.": "Налаштування змінюють за компʼютером.",
    "Show": "Показати",
    "Show a message": "Показати повідомлення",
    "Show keys on buttons": "Клавіші на кнопках",
@@ -4967,9 +5017,9 @@ const REMOTE_WORDS = {
    "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track": "Запустити цей таймер, показати це повідомлення чи накладку, виконати цей макрос, перемкнути сцену на цей макет, відтворити цей трек",
    "Table": "Таблиця",
    "Template": "Шаблон",
-   "The car with the lights on, please": "Автомобіль з увімкненими фарами, будь ласка",
+   "The car with the lights on, please": "Чиє авто з увімкненими фарами?",
    "The computer didn't answer.": "Компʼютер не відповів.",
-   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "Позначений слайд або вірш виходить на екран (після пошуку або ↑ ↓)",
+   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "Вибраний слайд або вірш виходить на екран (після пошуку або ↑ ↓)",
    "The first nine can be changed in Settings › Keys.": "Перші девʼять можна змінити: Налаштування › Клавіші.",
    "The item above or below, cued at its first slide; in Bible, the verse before or after": "Пункт вище чи нижче; у Біблії — вибрати попередній чи наступний вірш",
    "The live tools": "Під час служіння",
@@ -4982,15 +5032,15 @@ const REMOTE_WORDS = {
    "Timers": "Таймери",
    "track": "Трек",
    "Transition": "Перехід",
-   "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "Під час введення в блоці: жирний, курсив, підкреслений — для виділених слів (або всього блока)",
+   "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "Під час введення в полі: жирний, курсив, підкреслений — для вибраних слів (або всього поля)",
    "Undo": "Відмінити",
    "Undo, redo": "Відмінити, повторити",
    "Volume": "Гучність",
    "VoxLive": "VoxLive",
    "Waiting for SoftPresenter": "Чекаємо на SoftPresenter",
-   "Waiting for SoftPresenter to answer. Try again in a moment.": "Чекаємо на відповідь SoftPresenter. Спробуйте ще раз за хвилину.",
+   "Waiting for SoftPresenter to answer. Try again in a moment.": "Чекаємо на відповідь SoftPresenter. Спробуйте ще раз за мить.",
    "When a track ends, go on to the next": "Коли трек закінчується, переходити до наступного",
-   "With nothing on screen, move the cue; Space or Enter puts it on": "Коли на екрані порожньо, пересунути мітку; пробіл або Enter виводить на екран",
+   "With nothing on screen, move the cue; Space or Enter puts it on": "Коли на екрані порожньо, вибрати слайд; пробіл або Enter виводить його на екран",
    "Words": {
     "in": [
      [
@@ -5004,22 +5054,22 @@ const REMOTE_WORDS = {
    "Words once…": "Швидкий текст…",
    "Words only": "Лише слова",
    "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Дозволити телефону, iPad чи Mac показувати свій екран можна лише за компʼютером, не зі сторінки пульта.",
-   "There is no track to play. Add music at the computer.": "Немає треку для відтворення. Додайте музику на компʼютері."
+   "There is no track to play. Add music at the computer.": "Немає треку для відтворення. Додайте музику за компʼютером."
   },
   "patterns": [
    {
     "re": "^(.+) \\(⌥(\\d), then 1 to 9 for what is in it\\)$",
-    "to": "{1t} (⌥{2}, потім від 1 до 9 для того, що всередині)",
+    "to": "{1t} (⌥{2}, потім 1 … 9 усередині вкладки)",
     "key": "page.tool_tab.hint"
    },
    {
     "re": "^Running SoftPresenter as (.+)$",
-    "to": "SoftPresenter працює як {1}",
+    "to": "Ви керуєте SoftPresenter із пристрою {1}",
     "key": "page.conn.as"
    },
    {
     "re": "^Notices: (\\d+) need you$",
-    "to": "Сповіщення: {1} чекають на вас",
+    "to": "Сповіщень, що чекають на вас: {1}",
     "key": "page.notices.many"
    },
    {
@@ -6024,6 +6074,8 @@ Object.assign(DEMOS, {      // Testing aids: notices, the status button and its 
   notes: () => { toast('“Harbour Lights” added to Wednesday Evening'); toast('Reading Ukrainian_Ogienko.xml…'); toast('Installed Ukrainian Ogienko'); trouble('SoftPresenter didn’t answer. Open it, then connect again, and it will carry on from where it stopped.'); NOTES.forEach((n, k) => { n.time = new Date(Date.now() - (k + 1) * 4 * 60000); }); NOTES[3].seen = true; render(); setTimeout(() => { state.notesOpen = true; renderNote(); }, 60); },
   notesnew: () => { toast('“Harbour Lights” added to Wednesday Evening'); trouble('SoftPresenter didn’t answer. Open it, then connect again.'); render(); },
   // A newer build installed over the running copy (as built, 24 November): said once, as information; nothing restarts by itself
+  reports: () => { A.setup([4]); }, reportseu: () => { state.reportsEU = true; DOC.settings.reports = null; A.setup([4]); },
+  updnewer: () => { state.updNewer = true; state.mode = 'settings'; state.section = 'About'; render(); A.updCheck(); },
   notenewer: () => { toast('A newer SoftPresenter has been installed. Quit and reopen SoftPresenter to use it.'); render(); },
   // The sp command installed by itself at the first start from an installed place (as built, 24 November, 7557fd8): one notice
   // Phone Screens (as built, 24 November): the pane switched on and waiting; a device asking; a box with a device showing

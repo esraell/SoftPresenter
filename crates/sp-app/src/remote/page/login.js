@@ -407,7 +407,7 @@ const REMOTE_WORDS = {
    "A playlist is the running order of a service: songs, Bible passages, pictures and videos, in the order they come.": "Список — это порядок служения: песни, отрывки из Библии, картинки и видео, в том порядке, в каком они идут.",
    "A question is waiting: click to answer it": "Есть вопрос: нажмите, чтобы ответить",
    "a service, in order": "служение, по порядку",
-   "A small tag beside each button with its key. Also in Settings › Keys.": "Маленькая метка с клавишей возле каждой кнопки. Также в «Настройки › Клавиши».",
+   "A small tag beside each button with its key. Also in Settings › Keys.": "Маленькая метка с клавишей возле каждой кнопки. Также в разделе Настройки › Клавиши.",
    "A Song Bundle…": "Пакет песен…",
    "A song…": "Песня…",
    "A–Z": "А–Я",
@@ -421,8 +421,8 @@ const REMOTE_WORDS = {
    "Add Slide": "Добавить слайд",
    "Add the Sample Backgrounds": "Добавить образцы фонов",
    "Add to playlist": "Добавить в список",
-   "Adding music is done at the computer for now.": "Музыка пока добавляется на компьютере.",
-   "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Добавлять картинки и видео отсюда можно будет со следующим шагом. Пока добавляйте их на компьютере.",
+   "Adding music is done at the computer for now.": "Музыка пока добавляется за компьютером.",
+   "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Добавлять картинки и видео отсюда можно будет на следующем этапе. Пока добавляйте их за компьютером.",
    "Advanced": {
     "in": [
      [
@@ -445,12 +445,12 @@ const REMOTE_WORDS = {
    "Bible": "Библия",
    "Bible, too (Bold while editing a slide)": "Тоже Библия (при правке слайда — жирный)",
    "Cancel": "Отмена",
-   "Changing songs, playlists and settings is done at the computer for now. Running the show works from here.": "Песни, списки и настройки пока меняются на компьютере. Вести служение можно отсюда.",
+   "Changing songs, playlists and settings is done at the computer for now. Running the show works from here.": "Песни, списки и настройки пока меняются за компьютером. Вести служение можно отсюда.",
    "Changing things": "Изменения",
    "Choose": "Выбрать",
    "Choose a library or playlist (⌘P)": "Выберите список или библиотеку (⌘P)",
    "Choose a song…": "Выбрать песню…",
-   "Choosing from the menu bar is done at the computer, not from the remote page.": "Выбирать в строке меню можно на компьютере, а не со страницы пульта.",
+   "Choosing from the menu bar is done at the computer, not from the remote page.": "Выбирать в строке меню можно за компьютером, а не со страницы пульта.",
    "Choosing the stage layouts": "Выбор макетов сцены",
    "CLEAR": "ПУСТО",
    "Clear All": "Очистить всё",
@@ -460,7 +460,7 @@ const REMOTE_WORDS = {
    "Clearing": "Очистка",
    "Click to show it": "Нажмите, чтобы показать",
    "Close": "Закрыть",
-   "comes to the remote page with the next step. Use the computer for now.": "появится на странице пульта со следующим шагом. Пока пользуйтесь компьютером.",
+   "comes to the remote page with the next step. Use the computer for now.": "появится на странице пульта на следующем этапе. Пока пользуйтесь компьютером.",
    "Connect": "Подключить",
    "Connected": "Подключено",
    "Connecting…": "Подключение…",
@@ -533,14 +533,14 @@ const REMOTE_WORDS = {
    "Import…": "Импорт…",
    "In Edit: a new text box, duplicate, pick everything": "В Редакторе: новый текстовый блок, дублировать, выбрать всё",
    "In Edit: nudge the picked object (Shift for one pixel)": "В Редакторе: сдвинуть выбранный объект (с Shift — на один пиксель)",
-   "is empty": "пуст",
+   "is empty": "— пустой список",
    "Jump to a group (C for the chorus), or a slide’s own hot key": "Перейти к части (C — припев) или по собственной горячей клавише слайда",
    "Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)": "Играть, пока не остановят: после последнего трека начать снова с первого (если «Подряд» выключено — повторять этот трек)",
    "Keys": "Клавиши",
    "Label": "Метка",
    "Library": "Библиотека",
    "Longest": "Самые длинные",
-   "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Поиск по Библии появится на странице пульта со следующим шагом. Пока пользуйтесь страницей Библии на компьютере.",
+   "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Поиск по Библии появится на странице пульта на следующем этапе. Пока пользуйтесь страницей Библии на компьютере.",
    "Loop": {
     "in": [
      [
@@ -565,7 +565,7 @@ const REMOTE_WORDS = {
    "New Media Playlist…": "Новый медиасписок…",
    "New playlist": "Новый список",
    "New song": "Новая песня",
-   "Next": "Дальше",
+   "Next": "Далее",
    "Next at the end of a song goes on to the next song": "«Далее» в конце песни переходит к следующей песне",
    "Next slide": "Следующий слайд",
    "Next track": "Следующий трек",
@@ -631,9 +631,9 @@ const REMOTE_WORDS = {
    "Scaling": "Масштаб",
    "Service": "Служение",
    "Service (⌥S)": "Служение (⌥S)",
-   "Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)": "Служение, Библия (готова к вводу ссылки), Правка (в приложении ⌘1 ⌘2 ⌘3; браузер оставляет их себе)",
+   "Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)": "Служение, Библия (готова к вводу ссылки), Редактор (в приложении ⌘1 ⌘2 ⌘3; в браузере они заняты)",
    "Settings": "Настройки",
-   "Settings are changed at the computer.": "Настройки меняются на компьютере.",
+   "Settings are changed at the computer.": "Настройки меняются за компьютером.",
    "Show": "Показать",
    "Show a message": "Показать сообщение",
    "Show keys on buttons": "Клавиши на кнопках",
@@ -655,9 +655,9 @@ const REMOTE_WORDS = {
    "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track": "Запустить этот таймер, показать это сообщение или накладку, выполнить этот макрос, переключить сцену на этот макет, включить этот трек",
    "Table": "Таблица",
    "Template": "Шаблон",
-   "The car with the lights on, please": "Машина с включёнными фарами, пожалуйста",
+   "The car with the lights on, please": "Чья машина с включёнными фарами?",
    "The computer didn't answer.": "Компьютер не ответил.",
-   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "Отмеченный слайд или стих выходит на экран (после поиска или ↑ ↓)",
+   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "Выбранный слайд или стих выходит на экран (после поиска или ↑ ↓)",
    "The first nine can be changed in Settings › Keys.": "Первые девять можно изменить: Настройки › Клавиши.",
    "The item above or below, cued at its first slide; in Bible, the verse before or after": "Пункт выше или ниже; в Библии — стих до или после",
    "The live tools": "Инструменты показа",
@@ -666,11 +666,11 @@ const REMOTE_WORDS = {
    "This device is remembered once it signs in, until it is forgotten in Settings › Phone remote on the computer.": "Это устройство запоминается после входа, пока его не забудут на компьютере: Настройки › Пульт на телефоне.",
    "This library has no songs yet.": "В этой библиотеке пока нет песен.",
    "This list": "Этот список (внизу — «Клавиши на кнопках»)",
-   "This sample only has": "В этом образце есть только",
+   "This sample only has": "В этом примере есть только",
    "Timers": "Таймеры",
    "track": "Трек",
    "Transition": "Переход",
-   "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "При вводе в блоке: жирный, курсив, подчёркнутый — для выделенных слов (или всего блока)",
+   "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "При вводе в блоке: жирный, курсив, подчёркнутый — для выбранных слов (или всего блока)",
    "Undo": "Отменить",
    "Undo, redo": "Отменить, повторить",
    "Volume": "Громкость",
@@ -678,7 +678,7 @@ const REMOTE_WORDS = {
    "Waiting for SoftPresenter": "Ждём SoftPresenter",
    "Waiting for SoftPresenter to answer. Try again in a moment.": "Ждём ответа SoftPresenter. Попробуйте ещё раз через минуту.",
    "When a track ends, go on to the next": "Когда трек кончится, перейти к следующему",
-   "With nothing on screen, move the cue; Space or Enter puts it on": "Когда на экране пусто, передвинуть метку; пробел или Enter выводит на экран",
+   "With nothing on screen, move the cue; Space or Enter puts it on": "Когда на экране пусто, выбрать слайд; пробел или Enter выводит его на экран",
    "Words": {
     "in": [
      [
@@ -692,22 +692,22 @@ const REMOTE_WORDS = {
    "Words once…": "Слова один раз…",
    "Words only": "Только слова",
    "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Разрешить телефону, iPad или Mac показывать свой экран можно только за компьютером, а не с удалённой страницы.",
-   "There is no track to play. Add music at the computer.": "Нет трека для воспроизведения. Добавьте музыку на компьютере."
+   "There is no track to play. Add music at the computer.": "Нет трека для воспроизведения. Добавьте музыку за компьютером."
   },
   "patterns": [
    {
     "re": "^(.+) \\(⌥(\\d), then 1 to 9 for what is in it\\)$",
-    "to": "{1t} (⌥{2}, затем от 1 до 9 для того, что внутри)",
+    "to": "{1t} (⌥{2}, затем 1 … 9 внутри вкладки)",
     "key": "page.tool_tab.hint"
    },
    {
     "re": "^Running SoftPresenter as (.+)$",
-    "to": "SoftPresenter работает как {1}",
+    "to": "Вы управляете SoftPresenter с устройства {1}",
     "key": "page.conn.as"
    },
    {
     "re": "^Notices: (\\d+) need you$",
-    "to": "Уведомления: {1} ждут вас",
+    "to": "Уведомлений, ждущих вас: {1}",
     "key": "page.notices.many"
    },
    {
@@ -798,7 +798,7 @@ const REMOTE_WORDS = {
    "A playlist is the running order of a service: songs, Bible passages, pictures and videos, in the order they come.": "Список — це порядок служіння: пісні, уривки з Біблії, зображення й відео в тому порядку, в якому вони йдуть.",
    "A question is waiting: click to answer it": "Чекає запитання: клацніть, щоб відповісти",
    "a service, in order": "служіння, за порядком",
-   "A small tag beside each button with its key. Also in Settings › Keys.": "Маленька мітка з клавішею біля кожної кнопки. Також у «Налаштування › Клавіші».",
+   "A small tag beside each button with its key. Also in Settings › Keys.": "Маленька мітка з клавішею біля кожної кнопки. Також у розділі Налаштування › Клавіші.",
    "A Song Bundle…": "Пакет пісень…",
    "A song…": "Пісня…",
    "A–Z": "А–Я",
@@ -812,8 +812,8 @@ const REMOTE_WORDS = {
    "Add Slide": "Додати слайд",
    "Add the Sample Backgrounds": "Додати зразки фонів",
    "Add to playlist": "Додати до списку",
-   "Adding music is done at the computer for now.": "Музика поки що додається на компʼютері.",
-   "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Додавати зображення й відео звідси можна буде з наступним кроком. Поки що додавайте їх на компʼютері.",
+   "Adding music is done at the computer for now.": "Додавати музику поки що можна за компʼютером.",
+   "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Додавати зображення й відео звідси можна буде на наступному етапі. Поки що додавайте їх за компʼютером.",
    "Advanced": {
     "in": [
      [
@@ -836,12 +836,12 @@ const REMOTE_WORDS = {
    "Bible": "Біблія",
    "Bible, too (Bold while editing a slide)": "Також Біблія (жирний шрифт під час редагування слайда)",
    "Cancel": "Скасувати",
-   "Changing songs, playlists and settings is done at the computer for now. Running the show works from here.": "Пісні, списки й налаштування поки що змінюються на компʼютері. Вести служіння можна звідси.",
+   "Changing songs, playlists and settings is done at the computer for now. Running the show works from here.": "Пісні, списки й налаштування поки що змінюють за компʼютером. Керувати служінням можна звідси.",
    "Changing things": "Зміни",
    "Choose": "Вибрати",
    "Choose a library or playlist (⌘P)": "Вибрати список або бібліотеку (⌘P)",
    "Choose a song…": "Вибрати пісню…",
-   "Choosing from the menu bar is done at the computer, not from the remote page.": "Вибирати в рядку меню можна на компʼютері, а не зі сторінки пульта.",
+   "Choosing from the menu bar is done at the computer, not from the remote page.": "Вибирати в смузі меню можна за компʼютером, не зі сторінки пульта.",
    "Choosing the stage layouts": "Вибір макетів сцени",
    "CLEAR": "ЧИСТО",
    "Clear All": "Очистити все",
@@ -851,7 +851,7 @@ const REMOTE_WORDS = {
    "Clearing": "Очищення",
    "Click to show it": "Клацніть, щоб показати",
    "Close": "Закрити",
-   "comes to the remote page with the next step. Use the computer for now.": "зʼявиться на сторінці пульта з наступним кроком. Поки що користуйтеся компʼютером.",
+   "comes to the remote page with the next step. Use the computer for now.": "зʼявиться на сторінці пульта на наступному етапі. Поки що користуйтеся компʼютером.",
    "Connect": "Підключити",
    "Connected": "Підключено",
    "Connecting…": "Підключення…",
@@ -884,7 +884,7 @@ const REMOTE_WORDS = {
    "Delete…": "Видалити…",
    "Details": "Відомості: автор, видавець і номер CCLI пісні",
    "Disable": "Вимкнути слайд",
-   "Disconnected at the computer: click to connect again": "Відключено на компʼютері: натисніть, щоб підключитися знову",
+   "Disconnected at the computer: click to connect again": "Відключено на компʼютері: клацніть, щоб підключитися знову",
    "Dissolve": "Плавно",
    "Done": "Готово",
    "Drag it into a playlist": "Перетягніть у список",
@@ -924,14 +924,14 @@ const REMOTE_WORDS = {
    "Import…": "Імпортувати…",
    "In Edit: a new text box, duplicate, pick everything": "У Редакторі: нове текстове поле, дублювати, вибрати все",
    "In Edit: nudge the picked object (Shift for one pixel)": "У Редакторі: зсунути вибраний обʼєкт (із Shift — на один піксель)",
-   "is empty": "порожній",
+   "is empty": "— порожній список",
    "Jump to a group (C for the chorus), or a slide’s own hot key": "Перейти до частини (C — приспів) або за власною гарячою клавішею слайда",
    "Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)": "Грати, доки не зупините: після останнього треку почати знову з першого (коли «Підряд» вимкнено, повторювати цей трек)",
    "Keys": "Клавіші",
    "Label": "Мітка",
    "Library": "Бібліотека",
    "Longest": "Найдовші",
-   "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Пошук у Біблії зʼявиться на сторінці пульта з наступним кроком. Поки що користуйтеся сторінкою Біблії на компʼютері.",
+   "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Пошук у Біблії зʼявиться на сторінці пульта на наступному етапі. Поки що користуйтеся сторінкою Біблії на компʼютері.",
    "Loop": {
     "in": [
      [
@@ -1022,9 +1022,9 @@ const REMOTE_WORDS = {
    "Scaling": "Масштаб",
    "Service": "Служіння",
    "Service (⌥S)": "Служіння (⌥S)",
-   "Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)": "Служіння, Біблія (готова до введення посилання), Редагування (у застосунку ⌘1 ⌘2 ⌘3; браузер залишає їх собі)",
+   "Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)": "Служіння, Біблія (готова до введення посилання), Редактор (у програмі ⌘1 ⌘2 ⌘3; у браузері вони зайняті)",
    "Settings": "Налаштування",
-   "Settings are changed at the computer.": "Налаштування змінюються на компʼютері.",
+   "Settings are changed at the computer.": "Налаштування змінюють за компʼютером.",
    "Show": "Показати",
    "Show a message": "Показати повідомлення",
    "Show keys on buttons": "Клавіші на кнопках",
@@ -1046,9 +1046,9 @@ const REMOTE_WORDS = {
    "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track": "Запустити цей таймер, показати це повідомлення чи накладку, виконати цей макрос, перемкнути сцену на цей макет, відтворити цей трек",
    "Table": "Таблиця",
    "Template": "Шаблон",
-   "The car with the lights on, please": "Автомобіль з увімкненими фарами, будь ласка",
+   "The car with the lights on, please": "Чиє авто з увімкненими фарами?",
    "The computer didn't answer.": "Компʼютер не відповів.",
-   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "Позначений слайд або вірш виходить на екран (після пошуку або ↑ ↓)",
+   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "Вибраний слайд або вірш виходить на екран (після пошуку або ↑ ↓)",
    "The first nine can be changed in Settings › Keys.": "Перші девʼять можна змінити: Налаштування › Клавіші.",
    "The item above or below, cued at its first slide; in Bible, the verse before or after": "Пункт вище чи нижче; у Біблії — вибрати попередній чи наступний вірш",
    "The live tools": "Під час служіння",
@@ -1061,15 +1061,15 @@ const REMOTE_WORDS = {
    "Timers": "Таймери",
    "track": "Трек",
    "Transition": "Перехід",
-   "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "Під час введення в блоці: жирний, курсив, підкреслений — для виділених слів (або всього блока)",
+   "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "Під час введення в полі: жирний, курсив, підкреслений — для вибраних слів (або всього поля)",
    "Undo": "Відмінити",
    "Undo, redo": "Відмінити, повторити",
    "Volume": "Гучність",
    "VoxLive": "VoxLive",
    "Waiting for SoftPresenter": "Чекаємо на SoftPresenter",
-   "Waiting for SoftPresenter to answer. Try again in a moment.": "Чекаємо на відповідь SoftPresenter. Спробуйте ще раз за хвилину.",
+   "Waiting for SoftPresenter to answer. Try again in a moment.": "Чекаємо на відповідь SoftPresenter. Спробуйте ще раз за мить.",
    "When a track ends, go on to the next": "Коли трек закінчується, переходити до наступного",
-   "With nothing on screen, move the cue; Space or Enter puts it on": "Коли на екрані порожньо, пересунути мітку; пробіл або Enter виводить на екран",
+   "With nothing on screen, move the cue; Space or Enter puts it on": "Коли на екрані порожньо, вибрати слайд; пробіл або Enter виводить його на екран",
    "Words": {
     "in": [
      [
@@ -1083,22 +1083,22 @@ const REMOTE_WORDS = {
    "Words once…": "Швидкий текст…",
    "Words only": "Лише слова",
    "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Дозволити телефону, iPad чи Mac показувати свій екран можна лише за компʼютером, не зі сторінки пульта.",
-   "There is no track to play. Add music at the computer.": "Немає треку для відтворення. Додайте музику на компʼютері."
+   "There is no track to play. Add music at the computer.": "Немає треку для відтворення. Додайте музику за компʼютером."
   },
   "patterns": [
    {
     "re": "^(.+) \\(⌥(\\d), then 1 to 9 for what is in it\\)$",
-    "to": "{1t} (⌥{2}, потім від 1 до 9 для того, що всередині)",
+    "to": "{1t} (⌥{2}, потім 1 … 9 усередині вкладки)",
     "key": "page.tool_tab.hint"
    },
    {
     "re": "^Running SoftPresenter as (.+)$",
-    "to": "SoftPresenter працює як {1}",
+    "to": "Ви керуєте SoftPresenter із пристрою {1}",
     "key": "page.conn.as"
    },
    {
     "re": "^Notices: (\\d+) need you$",
-    "to": "Сповіщення: {1} чекають на вас",
+    "to": "Сповіщень, що чекають на вас: {1}",
     "key": "page.notices.many"
    },
    {
