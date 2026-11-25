@@ -5,6 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- The screens no longer wait for the computer's disk to write the log, which once held them still for half a second.
 - A video behind the words no longer freezes on NDI and DeckLink for each slide change: those outputs now show the dissolve the TVs show, and the video keeps moving through it.
 - Each NDI screen has a frame rate in the Screens window: 29.97 unless you choose 30, 59.94, 60, 25 or 50. Sending exactly 30 to 29.97 equipment, as before, made a small pause every half-minute or so.
 - The stage screen's clock no longer makes the other NDI screens redraw once a second.

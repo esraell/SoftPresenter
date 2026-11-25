@@ -15,6 +15,8 @@ const LIMIT_BYTES: u64 = 5 * 1024 * 1024;
 
 static FILE: OnceLock<Mutex<Option<(File, PathBuf)>>> = OnceLock::new();
 static STARTED: OnceLock<Instant> = OnceLock::new();
+/// The log's own thread, which writes the lines of threads that must never wait for the disk.
+static WRITER: OnceLock<std::sync::mpsc::Sender<String>> = OnceLock::new();
 
 /// Where the log is kept.
 fn folder() -> Option<PathBuf> {
@@ -61,7 +63,8 @@ pub fn start() {
     );
     let before = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        event("crash", &info.to_string());
+        // Written at once, whatever thread it is: the app may be about to stop.
+        write_line(&line("crash", &info.to_string()));
         before(info);
     }));
 }
@@ -70,6 +73,16 @@ thread_local! {
     /// How long this thread has spent writing to the log, in all, the wait for the file
     /// included.
     static WRITING: std::cell::Cell<std::time::Duration> = const { std::cell::Cell::new(std::time::Duration::ZERO) };
+    /// This thread hands its lines to the log's own thread instead of writing them.
+    static NEVER_WAITS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// From now on the calling thread never waits for the log: its lines go to the log's own thread,
+/// which writes them in order, so a slow disk (or another thread writing) can't hold it. The
+/// screens' thread calls it as it starts: a line written there once held the screens 486 ms.
+/// Other threads write at once, so nothing they say is lost if the app stops just after.
+pub fn never_wait_on_this_thread() {
+    NEVER_WAITS.with(|never| never.set(true));
 }
 
 /// How long the calling thread has spent writing to the log, in all: the screens' thread reads
@@ -98,22 +111,51 @@ pub fn plain_paths(text: &str) -> std::borrow::Cow<'_, str> {
 }
 
 /// Writes one line: the clock time, the seconds since the start, what part of the app it is
-/// about, and what happened.
+/// about, and what happened (handed to the log's own thread on a thread that never waits).
 pub fn event(area: &str, message: &str) {
     let began = Instant::now();
-    write_event(area, message);
+    // The time is the moment it is said, wherever the line is written.
+    let line = line(area, message);
+    if NEVER_WAITS.with(std::cell::Cell::get) {
+        if let Err(std::sync::mpsc::SendError(line)) = writer().send(line) {
+            // No thread of its own could be started: written here after all.
+            write_line(&line);
+        }
+    } else {
+        write_line(&line);
+    }
     WRITING.with(|writing| writing.set(writing.get() + began.elapsed()));
 }
 
-fn write_event(area: &str, message: &str) {
+/// The log's own thread, started the first time a thread that never waits says something.
+fn writer() -> &'static std::sync::mpsc::Sender<String> {
+    WRITER.get_or_init(|| {
+        let (lines, coming) = std::sync::mpsc::channel::<String>();
+        // If the thread can't start, `coming` is dropped with it and each send fails.
+        let _ = std::thread::Builder::new().name("log".to_owned()).spawn(move || {
+            for line in coming {
+                write_line(&line);
+            }
+        });
+        lines
+    })
+}
+
+/// One line of the log: the clock time, the seconds since the start, the part of the app, and
+/// what happened.
+fn line(area: &str, message: &str) -> String {
     // The log is read by developers: in English whatever language the window speaks.
     let english = crate::i18n::english_of(message);
     let message = plain_paths(&english);
-    let Some(Ok(mut guard)) = FILE.get().map(Mutex::lock) else { return };
-    let Some((file, path)) = guard.as_mut() else { return };
     let since = STARTED.get().map_or(0.0, |started| started.elapsed().as_secs_f64());
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-    let _ = writeln!(file, "{now} +{since:.1}s [{area}] {message}");
+    format!("{now} +{since:.1}s [{area}] {message}")
+}
+
+fn write_line(line: &str) {
+    let Some(Ok(mut guard)) = FILE.get().map(Mutex::lock) else { return };
+    let Some((file, path)) = guard.as_mut() else { return };
+    let _ = writeln!(file, "{line}");
     // Too big: move it aside and begin again.
     if file.metadata().is_ok_and(|meta| meta.len() > LIMIT_BYTES) {
         let older = path.with_file_name("SoftPresenter.1.log");
@@ -232,6 +274,23 @@ mod tests {
             plain_paths(r#"["media", "add", "\\\\?\\UNC\\server\\a.mp4"]"#),
             r#"["media", "add", "\\\\server\\a.mp4"]"#
         );
+    }
+
+    #[test]
+    fn a_thread_that_never_waits_is_not_held_by_the_log() {
+        let _ = FILE.set(Mutex::new(None));
+        // Another thread is writing, slowly: it holds the file.
+        let held = FILE.get().unwrap().lock().unwrap();
+        let took = std::thread::spawn(|| {
+            never_wait_on_this_thread();
+            let began = Instant::now();
+            event("test", "a line said while the log is held");
+            began.elapsed()
+        })
+        .join()
+        .unwrap();
+        drop(held);
+        assert!(took < std::time::Duration::from_millis(200), "the line waited {took:?}");
     }
 
     #[test]

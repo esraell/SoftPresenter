@@ -866,6 +866,8 @@ impl OutputHandle {
         let thread = std::thread::Builder::new()
             .name("output".to_owned())
             .spawn(move || {
+                // The screens never wait for the disk to take a log line.
+                crate::applog::never_wait_on_this_thread();
                 sp_render::draw_kept_only(move || {
                     let _ = wake.send(OutputMsg::Redraw);
                 });
