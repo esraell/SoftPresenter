@@ -343,6 +343,31 @@ Glossary, shared with the Russian tables so the two read alike:
 | Install · Download | Встановити · Завантажити |
 | Connect · Sign in | Підключити · Увійти |
 | click · press · drag | клацніть · натисніть · перетягніть |
+| On · Off (a state) | Увімк. · Вимк. (the top bar's keys, in capitals: УВІМК · ВИМК) |
+| Next (the action) · the stage screens' NEXT · Go to Next | «Далі» · ДАЛІ · Перейти далі |
+| placeholder (a playlist item) | порожнє місце |
+| media strip · media bin · media playlist · audio playlist | смуга медіа · медіатека · медіасписок · аудіосписок |
+| Cut · Dissolve · Continuous | Миттєво · Розчинення · Підряд |
+| Page · Slides · Options (the Bible bar) | Сторінка · Слайди · Параметри (short: Стор., Опції) |
+| Identify · test pattern | Розпізнати · тестове зображення |
+| key · fill (a DeckLink keyer) | ключ · заповнення |
+| Screen Mirroring · Control Centre (Apple's own) | Відеодублювання · Центр керування |
+| Phone or iPad Screen (the box) | Екран телефону або iPad |
+| a text box · any other box (inspector) | поле · рамка |
+| Build (the inspector's tab) | Поява |
+| Slide Notes · stage message | Нотатки слайда · повідомлення для сцени |
+| countdown · count up | зворотний відлік · прямий відлік |
+| Reload · Keep mine (a song changed outside) | Перечитати · Залишити мою |
+| Trash | Смітник |
+| sign-in (what is kept) | вхід, дані входу |
+| app | програма |
+| a copy's name | {name} (копія) |
+| free songbooks | безкоштовні збірники |
+
+Names the church gives (a playlist, a library, a song) can't be declined, so a sentence that
+carries one puts it in «…» or after a noun: «{item}» додано до «{list}»; у бібліотеці {library}.
+A count given without plural forms (`tf`) goes after a colon or in brackets, so nothing has to
+agree with it: «Імпортовано пісень: {n}», «Вилучити зі списку ({n})».
 
 ## Checking
 
