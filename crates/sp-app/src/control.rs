@@ -324,7 +324,10 @@ fn ask(deliver: &Deliver, request: Request, within: Duration) -> Reply {
     rx.recv_timeout(within).unwrap_or_else(|_| Reply::failed("SoftPresenter did not answer in time."))
 }
 
-fn write_reply(stream: &UnixStream, reply: Reply) {
+fn write_reply(stream: &UnixStream, mut reply: Reply) {
+    // Scripts read the replies: in English whatever language the window speaks, even where a
+    // reply repeats what the window said.
+    reply.text = crate::i18n::english_of(&reply.text);
     let mut text = serde_json::to_string(&reply).unwrap_or_default();
     text.push('\n');
     let mut stream = stream;

@@ -302,12 +302,14 @@ fn words(language: Language, key: &str) -> Option<&'static Words> {
 
 /// The words for `key` in the current language, or `english` where the table has none yet.
 pub fn t(key: &'static str, english: &'static str) -> &'static str {
-    match words(current(), key) {
+    let said = match words(current(), key) {
         Some(Words::One(text)) => text,
         // A plural asked for as plain words: its first form.
         Some(Words::Forms(forms)) => forms.first().copied().unwrap_or(english),
-        None => english,
-    }
+        None => return english,
+    };
+    remember_fixed(said, english);
+    said
 }
 
 /// A key and its English together, for a place that keeps them in a table before it draws
@@ -323,7 +325,10 @@ pub const fn tk(key: &'static str, english: &'static str) -> (&'static str, &'st
 pub fn ts(key: &'static str, english: &'static str) -> &'static str {
     short_key(key)
         .and_then(|short| match words(current(), &short) {
-            Some(Words::One(text)) => Some(*text),
+            Some(Words::One(text)) => {
+                remember_fixed(text, english);
+                Some(*text)
+            }
             _ => None,
         })
         .unwrap_or_else(|| t(key, english))
@@ -360,7 +365,12 @@ pub fn fill(template: &str, args: &[(&str, &str)]) -> String {
 /// A whole sentence with `{placeholders}`, so word order can change between languages:
 /// `tf("left.already_in", "{item} is already in {list}.", &[("item", a), ("list", b)])`.
 pub fn tf(key: &'static str, english: &'static str, args: &[(&str, &str)]) -> String {
-    fill(t(key, english), args)
+    let template = t(key, english);
+    let said = fill(template, args);
+    if !std::ptr::eq(template, english) {
+        remember_made(&said, || fill(english, args));
+    }
+    said
 }
 
 /// A counted thing in the right form: English `one` and `other` stand for the table's forms
@@ -378,7 +388,117 @@ pub fn tn(key: &'static str, n: u64, one: &'static str, other: &'static str, arg
     let number = count(n);
     let mut all: Vec<(&str, &str)> = vec![("n", number.as_str())];
     all.extend_from_slice(args);
-    fill(template, &all)
+    let said = fill(template, &all);
+    if language != Language::English {
+        remember_made(&said, || {
+            let number = group_digits(&n.to_string(), &Format::ENGLISH);
+            let mut all: Vec<(&str, &str)> = vec![("n", number.as_str())];
+            all.extend_from_slice(args);
+            fill(if n == 1 { one } else { other }, &all)
+        });
+    }
+    said
+}
+
+/// The English of words said in another language, kept for the places that must stay in
+/// English whatever the window speaks: the log (developers read it) and the command line's
+/// replies (scripts read them). Every call of [`t`], [`ts`], [`tf`] and [`tn`] in another
+/// language remembers its English here; [`english_of`] gives a text back with each piece
+/// it recognises put back into English. Remembering never waits: a call that finds the table
+/// busy (the screens' thread, say) leaves it alone.
+#[derive(Default)]
+struct Shadow {
+    /// Fixed words, by what they say in the language: their English.
+    fixed: HashMap<&'static str, &'static str>,
+    /// Sentences made with placeholders: their English, made the same way. Emptied when it
+    /// grows past [`MADE_KEPT`] (a readout that changes every moment would fill it).
+    made: HashMap<String, String>,
+    /// Both, longest first, for [`english_of`]; made again after a change.
+    sorted: Option<Vec<(String, String)>>,
+}
+
+const MADE_KEPT: usize = 4096;
+
+fn shadow() -> &'static std::sync::Mutex<Shadow> {
+    static SHADOW: OnceLock<std::sync::Mutex<Shadow>> = OnceLock::new();
+    SHADOW.get_or_init(Default::default)
+}
+
+fn remember_fixed(said: &'static str, english: &'static str) {
+    if said == english {
+        return;
+    }
+    if let Ok(mut shadow) = shadow().try_lock()
+        && !shadow.fixed.contains_key(said)
+    {
+        shadow.fixed.insert(said, english);
+        shadow.sorted = None;
+    }
+}
+
+fn remember_made(said: &str, english: impl FnOnce() -> String) {
+    if let Ok(mut shadow) = shadow().try_lock()
+        && !shadow.made.contains_key(said)
+    {
+        let english = english();
+        if english == said {
+            return;
+        }
+        if shadow.made.len() >= MADE_KEPT {
+            shadow.made.clear();
+        }
+        shadow.made.insert(said.to_owned(), english);
+        shadow.sorted = None;
+    }
+}
+
+/// `text` with the app's own words in it put back into English: a whole sentence said in
+/// another language, or each piece of one joined from several (a whole word or phrase, never
+/// part of a word, and never fewer than three letters). Names, song words and anything the app
+/// didn't say stay as they are. For the log and the command line's replies, which stay English.
+pub fn english_of(text: &str) -> String {
+    let Ok(mut shadow) = shadow().try_lock() else { return text.to_owned() };
+    if shadow.fixed.is_empty() && shadow.made.is_empty() {
+        return text.to_owned();
+    }
+    // The whole sentence when it was said as one; then any piece still in the language (a
+    // placeholder filled with the app's own words, or sentences joined).
+    let whole = shadow.made.get(text).cloned().or_else(|| shadow.fixed.get(text).map(|english| (*english).to_owned()));
+    if shadow.sorted.is_none() {
+        let mut all: Vec<(String, String)> = shadow
+            .fixed
+            .iter()
+            .map(|(said, english)| ((*said).to_owned(), (*english).to_owned()))
+            .chain(shadow.made.iter().map(|(said, english)| (said.clone(), english.clone())))
+            .filter(|(said, _)| said.chars().count() >= 3)
+            .collect();
+        all.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(&b.0)));
+        shadow.sorted = Some(all);
+    }
+    let mut out = whole.unwrap_or_else(|| text.to_owned());
+    for (said, english) in shadow.sorted.iter().flatten() {
+        if out.contains(said.as_str()) {
+            out = replace_whole(&out, said, english);
+        }
+    }
+    out
+}
+
+/// Every place `said` stands in `text` as a whole word or phrase (not inside a longer word),
+/// replaced by `with`.
+fn replace_whole(text: &str, said: &str, with: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(said) {
+        let before = rest[..at].chars().next_back();
+        let after = rest[at + said.len()..].chars().next();
+        let bounded = !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric);
+        out.push_str(&rest[..at]);
+        out.push_str(if bounded { with } else { said });
+        rest = &rest[at + said.len()..];
+    }
+    out.push_str(rest);
+    out
 }
 
 fn format_of(language: Language) -> &'static Format {
@@ -599,6 +719,23 @@ mod tests {
                 "Se añadieron 3 canciones a Domingo."
             );
         });
+    }
+
+    #[test]
+    fn the_log_and_the_command_line_get_the_english_back() {
+        with_language(Language::Spanish, || {
+            let said = tf("left.added", "Added {item} to {list}.", &[("item", "Gracia"), ("list", "Domingo")]);
+            assert_eq!(said, "Se añadió Gracia a Domingo.");
+            assert_eq!(english_of(&said), "Added Gracia to Domingo.", "a whole sentence");
+            let songs = tn("left.songs", 1234, "{n} song", "{n} songs", &[]);
+            let joined = format!("{}: {songs}", t("right.clear_all", "Clear All"));
+            assert_eq!(english_of(&joined), "Clear All: 1,234 songs", "pieces, numbers written the English way");
+            let untitled = t("left.untitled", "Untitled");
+            let inside = tf("left.added", "Added {item} to {list}.", &[("item", untitled), ("list", "Domingo")]);
+            assert_eq!(english_of(&inside), "Added Untitled to Domingo.", "a placeholder filled with the app's words");
+        });
+        assert_eq!(english_of("Borrar todos los días"), "Borrar todos los días", "never part of a word");
+        assert_eq!(replace_whole("todo, todos y todo", "todo", "all"), "all, todos y all");
     }
 
     #[test]

@@ -56,6 +56,18 @@ array: **two** forms for English and Spanish (one, other), **three** for Russian
 "left.songs": ["{n} песня", "{n} песни", "{n} песен"]
 ```
 
+## What stays English
+
+The log (developers read it) and the `sp` command line's replies (scripts read them) stay in
+English whatever the window speaks, while the window, the notices list and the remote page speak
+the language set. Nothing at a call site has to do anything for that: every `t`, `ts`, `tf` and
+`tn` in another language remembers its English, and `i18n::english_of` puts each piece of a text
+it recognises back into English. The log's writer (`applog`) and the command line's reply writer
+(`control::write_reply`) pass everything through it. It replaces whole words and phrases only,
+never part of a word, and nothing under three letters; names and song words stay as they are.
+For a reply built from words of its own, `i18n::with_language(Language::English, …)` makes it
+in English to begin with (the macros' `describe` does).
+
 ## Numbers, times and quotation marks
 
 `i18n::count(n)`, `i18n::number(x, places)`, `i18n::seconds(x)` ("0.4 s", "0,4 s") and

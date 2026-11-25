@@ -106,7 +106,9 @@ pub fn event(area: &str, message: &str) {
 }
 
 fn write_event(area: &str, message: &str) {
-    let message = plain_paths(message);
+    // The log is read by developers: in English whatever language the window speaks.
+    let english = crate::i18n::english_of(message);
+    let message = plain_paths(&english);
     let Some(Ok(mut guard)) = FILE.get().map(Mutex::lock) else { return };
     let Some((file, path)) = guard.as_mut() else { return };
     let since = STARTED.get().map_or(0.0, |started| started.elapsed().as_secs_f64());
@@ -124,7 +126,7 @@ fn write_event(area: &str, message: &str) {
 
 /// Writes a problem to the log, and to the terminal for someone running the app from one.
 pub fn problem(area: &str, message: &str) {
-    eprintln!("{message}");
+    eprintln!("{}", crate::i18n::english_of(message));
     event(area, message);
 }
 

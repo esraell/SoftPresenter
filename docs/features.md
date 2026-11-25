@@ -1495,8 +1495,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   English. Russian and Ukrainian have the number and quotation rules and the plural forms, and
   their words come next. Controls take the width of their words in the language set, and a place
   with a fixed room (a layer key, the find box, All Songs) uses a short form when the usual word
-  is too long. Songs and Bible text stay as they are; the `sp` command line keeps English where
-  only it speaks, and repeats a notice or message the window says in the window's language.
+  is too long. Songs and Bible text stay as they are. The log and the `sp` command line's replies
+  stay in English whatever the window speaks (a notice is logged in English, and a reply that
+  repeats what the window said gets its English back, `i18n::english_of`); the window, the
+  notices list and the remote page speak the language set.
 - Each song's Artist, Author, Publisher, Year and CCLI Song # (the Info icon at the right of its header, beside Edit Words, Arrangement and Notes), and a
   copyright line on the screens on a song's first slide, last slide or every slide, with the
   church's CCLI licence number, chosen in Settings.
