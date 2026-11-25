@@ -161,7 +161,6 @@ const REMOTE_WORDS = {
    "Move Down": "Bajar",
    "Move Up": "Subir",
    "Mute": "Silenciar",
-   "Mute is at the computer for now. Turn the volume down here.": "Por ahora, silenciar se hace en el ordenador. Aquí puedes bajar el volumen.",
    "New": "Temporizador nuevo",
    "New library": "Biblioteca nueva",
    "New Media Playlist…": "Lista multimedia nueva…",

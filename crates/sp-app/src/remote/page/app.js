@@ -4082,7 +4082,6 @@ const REMOTE_WORDS = {
    "Move Down": "Bajar",
    "Move Up": "Subir",
    "Mute": "Silenciar",
-   "Mute is at the computer for now. Turn the volume down here.": "Por ahora, silenciar se hace en el ordenador. Aquí puedes bajar el volumen.",
    "New": "Temporizador nuevo",
    "New library": "Biblioteca nueva",
    "New Media Playlist…": "Lista multimedia nueva…",
@@ -4652,7 +4651,7 @@ remoteWrapA('audio', (orig, [what, n]) => { const a = state.audio, pl = audioPl(
   if (what === 'next' || what === 'prev') return remoteSend(['audio', what === 'prev' ? 'previous' : 'next']);
   if (what === 'fwd' || what === 'back') return remoteSend(['audio', 'seek', what === 'fwd' ? '+15' : '-15']);
   if (what === 'through' || what === 'shuffle' || what === 'loop') return remoteSend(onoff(what));
-  if (what === 'mute') return refuse('Mute is at the computer for now. Turn the volume down here.');
+  if (what === 'mute') return remoteSend(['audio', 'mute', a.muted ? 'off' : 'on']);      // the app keeps the level to come back to
   return refuse('Adding music is done at the computer for now.'); });
 // a slider is sent once it has settled, not at every step of a drag
 // (wrapped when the page starts as a remote: the sliders' own handlers are defined after this file)
