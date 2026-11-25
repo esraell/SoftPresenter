@@ -7,7 +7,7 @@
   "remote.day.format": "%-d/%-m/%Y",
   "remote.about": "Lleva la presentación desde otro ordenador, una tableta o un teléfono conectado a la red de la iglesia: abre la dirección de abajo en su navegador e inicia sesión con la contraseña. Cada dispositivo se recuerda hasta que lo olvides aquí.",
   "remote.caption": "CONTROL REMOTO",
-  "remote.on": "Activado",
+  "remote.turn_on": "Activar el control remoto",
   "remote.on.disabled": "Primero pon una contraseña",
   "remote.port": "Puerto",
   "remote.port.use": "Usar",

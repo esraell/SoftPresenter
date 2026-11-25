@@ -52,7 +52,7 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
     let can_switch = view.has_password || view.on;
     ui.add_enabled_ui(can_switch, |ui| {
         if ui
-            .checkbox(&mut on, t("remote.on", "On"))
+            .checkbox(&mut on, t("remote.turn_on", "Turn on Remote Control"))
             .on_disabled_hover_text(t("remote.on.disabled", "Set a password first"))
             .changed()
         {
