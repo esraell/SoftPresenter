@@ -190,7 +190,7 @@ pub fn list_head(ui: &mut egui::Ui, state: &mut HomeState, delete: bool) -> Opti
         ];
         let none_open = t("editor.layouts.none_open", "No stage layout is open");
         let why = match open {
-            Some(_) => ["", none_open, crate::home::ONE_LAYOUT, crate::studio::AT_TOP, crate::studio::AT_BOTTOM],
+            Some(_) => ["", none_open, crate::home::one_layout(), crate::studio::at_top(), crate::studio::at_bottom()],
             None => ["", none_open, none_open, none_open, none_open],
         };
         let pressed = crate::studio::list_keys(ui, "stage layout keys", can, hints, why)
@@ -335,7 +335,7 @@ fn layout_menu(ui: &mut egui::Ui, only_one: bool) -> Option<Choice> {
             "editor.layouts.delete.hint",
             "Delete this layout; stage screens that use it show the first one",
         ))
-        .on_disabled_hover_text(crate::home::ONE_LAYOUT);
+        .on_disabled_hover_text(crate::home::one_layout());
     if delete.clicked() {
         chose = Some(Choice::Delete);
     }
@@ -419,8 +419,8 @@ pub fn add_menu(ui: &mut egui::Ui, draft: &mut EditDraft, screens: &[(sp_model::
             .font(crate::studio::fixed_semibold(11.0))
             .color(TEXT_FAINT),
     );
-    for (role, name, _) in ITEMS {
-        if ui.button(name).clicked() {
+    for (role, _, _) in ITEMS {
+        if ui.button(crate::stage::item_name(&sp_model::Role((*role).to_owned()))).clicked() {
             draft.add(item_object(role));
             ui.close();
         }

@@ -2028,11 +2028,11 @@ fn track_menu(ui: &mut egui::Ui, first: bool, last: bool) -> Option<TrackAsk> {
     }
     ui.separator();
     let up = ui.add_enabled(!first, egui::Button::new(t("tools.audio.move_up", "Move Up")));
-    if up.on_disabled_hover_text(crate::studio::AT_TOP).clicked() {
+    if up.on_disabled_hover_text(crate::studio::at_top()).clicked() {
         asked = Some(TrackAsk::Up);
     }
     let down = ui.add_enabled(!last, egui::Button::new(t("tools.audio.move_down", "Move Down")));
-    if down.on_disabled_hover_text(crate::studio::AT_BOTTOM).clicked() {
+    if down.on_disabled_hover_text(crate::studio::at_bottom()).clicked() {
         asked = Some(TrackAsk::Down);
     }
     if ui.button(t("tools.menu.rename", "Rename")).clicked() {

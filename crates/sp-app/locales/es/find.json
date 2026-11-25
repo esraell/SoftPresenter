@@ -1,0 +1,9 @@
+{
+  "_note": "Español de España; see topbar.json. The find box's list of results: the SONG tag, nothing found, looking in the Bibles, and the keys line at its foot (Spanish keyboards print Intro for Enter, as keys.json says).",
+  "find.tag.song": "CANCIÓN",
+  "find.tag.song_group": "CANCIÓN · {group}",
+  "find.nothing": "No se encontró nada",
+  "find.looking": "Buscando en las Biblias…",
+  "find.keys.mac": "↵ Abrir    ⌘↵ Añadir a la lista    esc Cerrar",
+  "find.keys": "Intro: Abrir    Ctrl+Intro: Añadir a la lista    Esc: Cerrar"
+}

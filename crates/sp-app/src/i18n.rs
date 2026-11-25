@@ -760,6 +760,12 @@ mod tests {
         "editor",
         "import",
         "tools",
+        "settings",
+        "edit",
+        "themes",
+        "bible",
+        "dialogs",
+        "find",
     ];
 
     #[test]

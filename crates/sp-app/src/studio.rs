@@ -1379,13 +1379,33 @@ pub fn edit_kinds(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     let no_song = open != Some(0) && song_to_edit(show, state).is_none();
     let why = no_song_to_edit();
     let hints: [&str; 4] = [
-        if no_song { why.as_str() } else { "Edit a song's slides" },
-        "Edit the themes and their templates",
-        "Make and edit the props",
-        "Edit the stage screens' layouts",
+        if no_song { why.as_str() } else { t("edit.kind.slides.hint", "Edit a song's slides") },
+        t("edit.kind.themes.hint", "Edit the themes and their templates"),
+        t("edit.kind.props.hint", "Make and edit the props"),
+        t("edit.kind.stage.hint", "Edit the stage screens' layouts"),
     ];
+    let width = ui.available_width() - 20.0;
+    // The four names with room round each, or their short forms where they don't fit the row.
+    let usual = [
+        t("edit.kind.slides", "Slides"),
+        t("edit.kind.themes", "Themes"),
+        t("edit.kind.props", "Props"),
+        t("edit.kind.stage", "Stage"),
+    ];
+    let font = FontId::proportional(11.5);
+    let needs: f32 = usual.iter().map(|label| widest(ui, &[*label], &font) + 2.0 * TAB_PAD).sum();
+    let labels = if needs <= width - 6.0 - 3.0 * 2.0 {
+        usual
+    } else {
+        [
+            ts("edit.kind.slides", "Slides"),
+            ts("edit.kind.themes", "Themes"),
+            ts("edit.kind.props", "Props"),
+            ts("edit.kind.stage", "Stage"),
+        ]
+    };
     let tabs = Tabs {
-        labels: &["Slides", "Themes", "Props", "Stage"],
+        labels: &labels,
         hints: &hints,
         dots: &[],
         tags: &[],
@@ -1393,7 +1413,6 @@ pub fn edit_kinds(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
         tall: 23.5,
         size: 11.5,
     };
-    let width = ui.available_width() - 20.0;
     let (place, _) =
         ui.allocate_exact_size(vec2(ui.available_width(), 12.0 + tab_switch_height(&tabs)), Sense::hover());
     let (_, clicked) = tab_switch(ui, "edit kinds", place.min + vec2(10.0, 12.0), width, &tabs, open);
@@ -1493,8 +1512,12 @@ pub fn plain_row_sensing(ui: &mut egui::Ui, look: &PlainRow, sense: Sense) -> (e
 
 /// What a greyed ↑ or ↓ (Move Up, Move Down) says when hovered: what it would move is at that
 /// end of the list already.
-pub const AT_TOP: &str = "Already at the top";
-pub const AT_BOTTOM: &str = "Already at the bottom";
+pub fn at_top() -> &'static str {
+    t("left.at_top", "Already at the top")
+}
+pub fn at_bottom() -> &'static str {
+    t("left.at_bottom", "Already at the bottom")
+}
 
 /// One of the keys over a list of pictures in the Edit view's left column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1512,9 +1535,9 @@ impl ListKey {
 
     fn words(self) -> &'static str {
         match self {
-            ListKey::Add => "Add",
-            ListKey::Copy => "Duplicate",
-            ListKey::Delete => "Delete",
+            ListKey::Add => t("edit.list.add", "Add"),
+            ListKey::Copy => t("edit.list.duplicate", "Duplicate"),
+            ListKey::Delete => t("edit.list.delete", "Delete"),
             ListKey::Up => "\u{2191}",
             ListKey::Down => "\u{2193}",
         }

@@ -1240,7 +1240,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
             })
             .inner
             .on_hover_text(t("inspector.text.paste_style.hint", "Give this text the look that was copied"))
-            .on_disabled_hover_text(crate::home::COPY_A_STYLE);
+            .on_disabled_hover_text(crate::home::copy_a_style());
         if paste.clicked()
             && let Some(copied) = &inspector.copied_style
         {

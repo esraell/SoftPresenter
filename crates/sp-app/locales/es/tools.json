@@ -256,5 +256,8 @@
   "tools.voxlive.reference": "Pasaje bíblico",
   "tools.voxlive.on_screen.hint": "Está en las pantallas. Haz clic en un versículo o una diapositiva para volver a ella",
   "tools.voxlive.show.hint": "Poner estos subtítulos en las pantallas, en lugar de lo que hay",
-  "tools.voxlive.note": "LOS SUBTÍTULOS EN DIRECTO OCUPAN EL LUGAR DE LA DIAPOSITIVA. HAZ CLIC EN UN VERSÍCULO O EN UNA DIAPOSITIVA PARA VOLVER A ELLA."
+  "tools.voxlive.note": "LOS SUBTÍTULOS EN DIRECTO OCUPAN EL LUGAR DE LA DIAPOSITIVA. HAZ CLIC EN UN VERSÍCULO O EN UNA DIAPOSITIVA PARA VOLVER A ELLA.",
+  "tools.timer.no_such": "No existe ese temporizador.",
+  "tools.timer.needs_name": "Un temporizador necesita un nombre.",
+  "tools.timer.taken": "Ya hay un temporizador llamado {name}."
 }

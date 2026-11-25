@@ -1484,7 +1484,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   and the song and playlist item menus), the slides area (with the slide, arrangement and times
   menus) and the bar under it, the media strip under it (its menus, and what adding
   pictures and videos says), the Bible view's page and lists and the Bibles window, the
-  first-start setup, the Edit view's inspector and stage layouts, the Import Slides sheets,
+  first-start setup, the Edit view (its lists, tools, inspector and stage layouts, Edit Words),
+  the Themes view, the Bible view's bar and Options, the find box's results, Settings (all but
+  Screens), the confirmation sheets, the Import Slides sheets,
   Settings › Integrations (VoxLive, Canva Sync) and Remote Control, and the right
   column's preview, layer keys, Clear All and tool tabs with what is in them (timers, messages,
   props, macros, the stage layouts, the audio player);

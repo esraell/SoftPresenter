@@ -102,6 +102,12 @@ start with `_` (`"_note"`) are comments.
 | `editor` | the Edit view's slide editing (`editor.rs`) and its stage layouts' parts (`stage_editor.rs`) |
 | `import` | the Import Slides sheets |
 | `tools` | the right column's tool tabs: Timers, Messages, Props, Macros, Stage, Audio and VoxLive; macros' steps and the stage layouts' items |
+| `settings` | the Settings window's sidebar, General, Groups, Key Mappings, About (not Screens yet) |
+| `edit` | the Edit view: its kinds, the slides and props lists, the object tools, Edit Words, why a key is greyed |
+| `themes` | the Themes view and the version sheet |
+| `bible` | the Bible view's bar, its Options and translations, and its history's dates |
+| `dialogs` | confirmation sheets and small windows: delete a song, media or theme, New Song, missing fonts |
+| `find` | the find box's list of results |
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 
