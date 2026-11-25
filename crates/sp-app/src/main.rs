@@ -369,6 +369,33 @@ fn describe_opening(show: &Show, state: &home::HomeState, step: &sp_model::ShowA
     }
 }
 
+/// Does what the operator asked of a playing video (on the media layer or the Announcements
+/// layer), and keeps the window's view of it (`live`) in step.
+fn ask_of_video(player: &mut sp_video::Player, live: &mut home::VideoLive, request: home::VideoRequest) {
+    use home::VideoRequest;
+    match request {
+        VideoRequest::TogglePause if player.playing() => player.pause(),
+        VideoRequest::TogglePause => player.play(),
+        VideoRequest::Restart => {
+            player.seek(0.0);
+            player.play();
+        }
+        VideoRequest::Looping(on) => {
+            player.set_looping(on);
+            live.looping = on;
+        }
+        VideoRequest::Muted(on) => {
+            player.set_volume(if on { 0.0 } else { 1.0 });
+            live.muted = on;
+        }
+        VideoRequest::Seek(to) => player.seek(to),
+        VideoRequest::Scrub(to) if !player.uses_ffmpeg() => player.seek(to),
+        VideoRequest::Scrub(_) => {}
+    }
+    live.playing = player.playing();
+    live.position = player.position();
+}
+
 /// Does an action that changes the window's own state: shows or hides a message or a prop,
 /// starts, stops or resets a timer.
 fn do_state_action(state: &mut home::HomeState, action: &sp_model::ShowAction, now: Instant) {
@@ -3228,33 +3255,12 @@ impl App {
 
     /// Carries out what the operator asked of the video on screen.
     fn handle_video(&mut self) {
-        use home::VideoRequest;
         let Some(running) = self.running.as_mut() else { return };
         let Some(request) = running.home_state.video_request.take() else { return };
         let (Some((_, player)), Some(live)) = (self.video.as_mut(), running.home_state.video_live.as_mut()) else {
             return;
         };
-        match request {
-            VideoRequest::TogglePause if player.playing() => player.pause(),
-            VideoRequest::TogglePause => player.play(),
-            VideoRequest::Restart => {
-                player.seek(0.0);
-                player.play();
-            }
-            VideoRequest::Looping(on) => {
-                player.set_looping(on);
-                live.looping = on;
-            }
-            VideoRequest::Muted(on) => {
-                player.set_volume(if on { 0.0 } else { 1.0 });
-                live.muted = on;
-            }
-            VideoRequest::Seek(to) => player.seek(to),
-            VideoRequest::Scrub(to) if !player.uses_ffmpeg() => player.seek(to),
-            VideoRequest::Scrub(_) => {}
-        }
-        live.playing = player.playing();
-        live.position = player.position();
+        ask_of_video(player, live, request);
         running.home_window.request_redraw();
     }
 
@@ -10181,6 +10187,7 @@ impl ApplicationHandler<AppEvent> for App {
                 self.tick_advance();
                 self.handle_audio();
                 self.handle_video();
+                self.handle_announcement_video();
                 self.handle_slide_request();
                 self.handle_song_theme();
                 self.handle_song_loop();
@@ -10327,6 +10334,7 @@ impl ApplicationHandler<AppEvent> for App {
         let catalog_at = self.tick_catalog();
         let audio_at = self.tick_audio();
         let announce_at = self.tick_announcements();
+        self.show_announcement_in_window();
         let cycle_at = self.tick_media_cycle();
         self.check_folders(false);
         let folders_at = self

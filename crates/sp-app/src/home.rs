@@ -274,6 +274,11 @@ pub struct HomeState {
     /// plays there, with its name.
     pub announcement_request: Option<Option<crate::announcements::Announce>>,
     pub announcement_live: Option<(crate::announcements::Announce, String)>,
+    /// The picture or video the Announcements layer shows, as the window shows it (its ring in
+    /// the media strip, its video's keys under the preview), and what the operator asked of that
+    /// video.
+    pub announcement_media: Option<crate::announcements::Shown>,
+    pub announcement_video_request: Option<VideoRequest>,
     /// A song given a transition of its own (or none, to follow the one for all).
     pub song_transition_request: Option<(usize, Option<sp_model::Transition>)>,
     /// A theme chosen for a song from its menu: the song, and the theme by its place (`None`
@@ -1753,6 +1758,8 @@ impl Default for HomeState {
             song_transition_request: None,
             announcement_request: None,
             announcement_live: None,
+            announcement_media: None,
+            announcement_video_request: None,
             libraries: Vec::new(),
             library_shown: None,
             libraries_changed: false,

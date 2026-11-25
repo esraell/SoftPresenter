@@ -57,6 +57,18 @@ pub struct Announcing {
     pub on_slide_screens: bool,
 }
 
+/// The picture or video the layer shows, as the window shows it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shown {
+    /// Its media bin item.
+    pub item: Uuid,
+    /// Its video, how far in and how it plays, when it is one.
+    pub video: Option<crate::home::VideoLive>,
+    /// False once a slide has taken the layer off the screens that show slides, so that only a
+    /// lobby screen shows it.
+    pub over_slides: bool,
+}
+
 impl Announcing {
     /// The song on the layer, if a song is.
     pub fn song(&self) -> Option<usize> {
@@ -511,6 +523,63 @@ impl crate::App {
                 None
             }
         }
+    }
+
+    /// Tells the window which picture or video the layer shows and how its video plays. Run on
+    /// every pass of the event loop, so the window follows the layer however it changed (cleared,
+    /// taken off by a slide, on to a media playlist's next item, FFmpeg taking over a video); it
+    /// is drawn again only when what it shows changes (the time left, by whole seconds).
+    pub(crate) fn show_announcement_in_window(&mut self) {
+        let Some(running) = self.running.as_mut() else { return };
+        let was = running.home_state.announcement_media.take();
+        let now = self.announcing.as_ref().and_then(|on| {
+            let item = on.item?;
+            let video = on.video.as_ref().map(|player| {
+                // The player doesn't say whether it is muted: the window remembers, for the same
+                // video.
+                let muted = was.as_ref().filter(|was| was.item == item).and_then(|was| was.video.as_ref());
+                crate::home::VideoLive {
+                    name: self
+                        .show
+                        .media()
+                        .iter()
+                        .find(|have| have.id == item)
+                        .map(|have| have.name.clone())
+                        .unwrap_or_default(),
+                    position: player.position(),
+                    duration: player.duration(),
+                    playing: player.playing(),
+                    looping: player.looping(),
+                    muted: muted.is_some_and(|video| video.muted),
+                }
+            });
+            Some(Shown { item, video, over_slides: on.on_slide_screens })
+        });
+        // The window shows whole seconds.
+        let drawn = |shown: &Option<Shown>| {
+            shown.clone().map(|mut shown| {
+                if let Some(video) = shown.video.as_mut() {
+                    video.position = video.position.floor();
+                }
+                shown
+            })
+        };
+        if drawn(&was) != drawn(&now) {
+            running.home_window.request_redraw();
+        }
+        running.home_state.announcement_media = now;
+    }
+
+    /// Carries out what the operator asked of the video on the layer, from the keys under the
+    /// preview.
+    pub(crate) fn handle_announcement_video(&mut self) {
+        let Some(running) = self.running.as_mut() else { return };
+        let Some(request) = running.home_state.announcement_video_request.take() else { return };
+        let player = self.announcing.as_mut().and_then(|on| on.video.as_mut());
+        let shown = running.home_state.announcement_media.as_mut().and_then(|shown| shown.video.as_mut());
+        let (Some(player), Some(shown)) = (player, shown) else { return };
+        crate::ask_of_video(player, shown, request);
+        running.home_window.request_redraw();
     }
 
     /// The video of a media bin item playing on the layer has a new file: it is opened now and

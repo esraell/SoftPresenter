@@ -4965,7 +4965,7 @@ pub fn right_column(
         let audio = state.audio_playing.track.is_some();
         let announcing = state.announcement_live.is_some();
         let on_screen = slide || media || props || message || announcing;
-        preview_block(ui, show, state, preview, commands, block, on_screen);
+        preview_block(ui, show, state, preview, block, on_screen);
 
         // The six layer keys: each is lit while its layer shows, and clears that layer alone.
         let keys_top = block.max.y + 12.0;
@@ -5056,14 +5056,13 @@ pub fn right_column(
 /// The preview block, in `block` (`anything_shows` says whether any layer the screens show has
 /// something on it): black, with a head (the on-screen light, the switch between
 /// the audience's picture and the stage's, and ON SCREEN or CLEAR), the picture, the readout
-/// (the slide's number large, then its group and song), and one row, always there, for whatever
-/// is playing.
+/// (the slide's number large, then its group and song, or the announcements playing), and one
+/// row, always there, for whatever is playing.
 fn preview_block(
     ui: &mut egui::Ui,
     show: &Show,
     state: &mut HomeState,
     preview: crate::home::Preview,
-    commands: &mut Vec<Command>,
     block: Rect,
     anything_shows: bool,
 ) {
@@ -5229,15 +5228,27 @@ fn preview_block(
     let first_y = if second.is_some() { words.center().y - 8.0 } else { words.center().y };
     let painter = ui.painter().with_clip_rect(words);
     let label = fixed(12.0);
-    match (at, song) {
-        (Some(at), Some(song)) => {
-            let group = song.slides().nth(at.slide).map(|(group, _)| group.name.to_uppercase()).unwrap_or_default();
-            let group = spaced(ui, &group, fixed_semibold(12.0), TEXT, 0.7);
-            let after = pos2(words.min.x + group.size().x, first_y);
-            painter.galley(pos2(words.min.x, first_y - group.size().y / 2.0), group, TEXT);
-            let title = format!(" \u{b7} {}", song.title.to_uppercase());
-            let title = spaced(ui, &title, label.clone(), SCREEN_DIM, 0.7);
-            painter.galley(pos2(after.x, first_y - title.size().y / 2.0), title, SCREEN_DIM);
+    // What shows, bright, then whose it is, dim: the slide's group and its song, or the
+    // announcements and what plays there.
+    let what_and_whose = |what: &str, whose: &str| {
+        let what = spaced(ui, &what.to_uppercase(), fixed_semibold(12.0), TEXT, 0.7);
+        let after = pos2(words.min.x + what.size().x, first_y);
+        painter.galley(pos2(words.min.x, first_y - what.size().y / 2.0), what, TEXT);
+        let whose = spaced(ui, &format!(" \u{b7} {}", whose.to_uppercase()), label.clone(), SCREEN_DIM, 0.7);
+        painter.galley(pos2(after.x, first_y - whose.size().y / 2.0), whose, SCREEN_DIM);
+    };
+    match (at, song, &state.announcement_live) {
+        (Some(at), Some(song), _) => {
+            let group = song.slides().nth(at.slide).map(|(group, _)| group.name.as_str()).unwrap_or_default();
+            what_and_whose(group, &song.title);
+        }
+        // With no slide on screen, the announcements are what the audience sees: the song, or the
+        // picture or video on now (by its name in the media strip, a media playlist's too).
+        (_, _, Some((_, playing))) => {
+            let item =
+                state.announcement_media.as_ref().and_then(|shown| show.media().iter().find(|m| m.id == shown.item));
+            let playing = item.map_or_else(|| playing.clone(), |item| crate::media::label(&item.name, show.media()));
+            what_and_whose(t("right.preview.announcements", "Announcements"), &playing);
         }
         _ => {
             let words_now = if anything_shows {
@@ -5270,18 +5281,14 @@ fn preview_block(
         ) {
             state.identify = false;
         }
-    } else if let Some(video) = state.video_live.clone() {
-        video_row(ui, state, &video, row);
-    } else if let Some((_, name)) = state.announcement_live.clone() {
-        if playing_line(
-            ui,
-            row,
-            t("right.playing.announcements", "Announcements:"),
-            &name,
-            t("right.playing.clear", "Clear"),
-            t("right.playing.announcements_clear", "Take the announcements off the screens"),
-        ) {
-            commands.push(Command::Clear(Layer::Announcements));
+    } else if let Some((of, video)) = row_video(state) {
+        // The same keys for a video on either layer, each acting on its own player. The
+        // Announce key and Clear All take the announcements off.
+        if let Some(asked) = video_row(ui, &video, row) {
+            match of {
+                RowVideo::Media => state.video_request = Some(asked),
+                RowVideo::Announcement => state.announcement_video_request = Some(asked),
+            }
         }
     } else if let Some(pattern) = state.test_pattern {
         let name = match pattern {
@@ -5381,10 +5388,32 @@ fn playing_line(ui: &egui::Ui, row: Rect, what: &str, name: &str, key: &str, hin
 /// How far Forward goes in the video on screen, in seconds.
 const VIDEO_STEP: f64 = 10.0;
 
-/// The keys of the video on screen, in the preview block's one row: Play or Pause, Start Over,
+/// Which layer's video the preview block's row has the keys of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RowVideo {
+    Media,
+    Announcement,
+}
+
+/// The video whose keys the preview block's row has: the announcement's while the layer shows
+/// it over the slides (it covers the media), then the one on the media layer, then the
+/// announcement's that a lobby screen alone shows.
+fn row_video(state: &HomeState) -> Option<(RowVideo, crate::home::VideoLive)> {
+    let announced = state.announcement_media.as_ref().and_then(|shown| Some((shown.video.clone()?, shown.over_slides)));
+    match (announced, state.video_live.clone()) {
+        (Some((video, true)), _) => Some((RowVideo::Announcement, video)),
+        (_, Some(video)) => Some((RowVideo::Media, video)),
+        (Some((video, false)), None) => Some((RowVideo::Announcement, video)),
+        (None, None) => None,
+    }
+}
+
+/// The keys of a video on screen, in the preview block's one row: Play or Pause, Start Over,
 /// Forward ten seconds, a slim bar to click or drag through, the time left, Loop and Sound.
-fn video_row(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::VideoLive, row: Rect) {
+/// Returns what was asked of the video.
+fn video_row(ui: &mut egui::Ui, video: &crate::home::VideoLive, row: Rect) -> Option<crate::home::VideoRequest> {
     use crate::home::VideoRequest;
+    let mut asked = None;
     let clock = |seconds: f64| crate::audio::clock(std::time::Duration::from_secs_f64(seconds.max(0.0)));
     let length = video.duration;
     let y = row.center().y;
@@ -5406,14 +5435,14 @@ fn video_row(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
     let glyph = Rect::from_center_size(play_at + vec2(nudge, 0.0), egui::Vec2::splat(12.0));
     icons::paint(ui.painter(), play, glyph, Color32::from_gray(17));
     if big.on_hover_text(words).clicked() {
-        state.video_request = Some(VideoRequest::TogglePause);
+        asked = Some(VideoRequest::TogglePause);
     }
     // Start Over, and Forward ten seconds.
     let start_at = pos2(row.min.x + 45.0, y);
     let start = round_key(ui, start_at, 26.0, "video start", dark, false);
     icons::paint(ui.painter(), Icon::ToStart, Rect::from_center_size(start_at, egui::Vec2::splat(12.0)), TEXT);
     if start.on_hover_text(t("right.video.restart", "Start over, from the beginning")).clicked() {
-        state.video_request = Some(VideoRequest::Restart);
+        asked = Some(VideoRequest::Restart);
     }
     let forward_at = pos2(row.min.x + 75.0, y);
     let forward = round_key(ui, forward_at, 26.0, "video forward", dark, false);
@@ -5421,7 +5450,7 @@ fn video_row(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
     if forward.on_hover_text(t("right.video.forward", "Forward 10 seconds")).clicked()
         && let Some(length) = length
     {
-        state.video_request = Some(VideoRequest::Seek((video.position + VIDEO_STEP).min(length)));
+        asked = Some(VideoRequest::Seek((video.position + VIDEO_STEP).min(length)));
     }
     // Sound and Loop, from the right: each the lighter grey while it is on.
     let sound_at = pos2(row.max.x - 13.0, y);
@@ -5434,7 +5463,7 @@ fn video_row(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
     let ink = if video.muted { TEXT_FAINT } else { TEXT };
     icons::paint(ui.painter(), sound, Rect::from_center_size(sound_at, egui::Vec2::splat(14.0)), ink);
     if response.on_hover_text(sound_hint).clicked() {
-        state.video_request = Some(VideoRequest::Muted(!video.muted));
+        asked = Some(VideoRequest::Muted(!video.muted));
     }
     let loop_at = pos2(row.max.x - 43.0, y);
     let loop_hint = if video.looping {
@@ -5446,13 +5475,14 @@ fn video_row(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
     let ink = if video.looping { TEXT } else { TEXT_FAINT };
     icons::paint(ui.painter(), Icon::Loop, Rect::from_center_size(loop_at, egui::Vec2::splat(14.0)), ink);
     if response.on_hover_text(loop_hint).clicked() {
-        state.video_request = Some(VideoRequest::Looping(!video.looping));
+        asked = Some(VideoRequest::Looping(!video.looping));
     }
     // The bar between them, and the time left at its right.
     let bar = Rect::from_x_y_ranges(row.min.x + 98.0..=row.max.x - 112.0, y - 8.0..=y + 8.0);
-    let shown = video_bar(ui, state, video, bar);
+    let (shown, on_bar) = video_bar(ui, video, bar);
     let left = length.map_or_else(|| "\u{2013}".to_owned(), |length| format!("\u{2212}{}", clock(length - shown)));
     ui.painter().text(pos2(row.max.x - 64.0, y), Align2::RIGHT_CENTER, left, fixed(12.0), SCREEN_DIM);
+    on_bar.or(asked)
 }
 
 /// How tall the open media strip is: its top margin, its head, the room under that, a picture
@@ -6277,8 +6307,9 @@ fn transition_settings(ui: &mut egui::Ui, look: &mut sp_model::Transition, id: &
 
 /// The bar of the video on screen, in `bar`: a slim rounded track, the part played in white, the
 /// playhead under the pointer (and while dragged), and the time a click would go to over it.
-/// Clicking or dragging asks for the video to go there. Returns the time it shows.
-fn video_bar(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::VideoLive, bar: Rect) -> f64 {
+/// Clicking or dragging asks for the video to go there. Returns the time it shows, and what was
+/// asked.
+fn video_bar(ui: &mut egui::Ui, video: &crate::home::VideoLive, bar: Rect) -> (f64, Option<crate::home::VideoRequest>) {
     use crate::home::VideoRequest;
     let clock = |seconds: f64| crate::audio::clock(std::time::Duration::from_secs_f64(seconds.max(0.0)));
     let length = video.duration;
@@ -6309,16 +6340,14 @@ fn video_bar(ui: &mut egui::Ui, state: &mut HomeState, video: &crate::home::Vide
             ui.painter().galley(pill.min + vec2(5.0, 2.0), galley, TEXT);
         }
     }
-    match dragged {
-        Some(to) if response.drag_stopped() => state.video_request = Some(VideoRequest::Seek(to)),
-        Some(to) => state.video_request = Some(VideoRequest::Scrub(to)),
-        None => {
-            if let (Some(length), Some(at)) = (length, response.interact_pointer_pos().filter(|_| response.clicked())) {
-                state.video_request = Some(VideoRequest::Seek(seconds_at(at.x, length)));
-            }
-        }
-    }
-    shown
+    let asked = match dragged {
+        Some(to) if response.drag_stopped() => Some(VideoRequest::Seek(to)),
+        Some(to) => Some(VideoRequest::Scrub(to)),
+        None => length
+            .zip(response.interact_pointer_pos().filter(|_| response.clicked()))
+            .map(|(length, at)| VideoRequest::Seek(seconds_at(at.x, length))),
+    };
+    (shown, asked)
 }
 
 /// A media tile's label: the file's name without its ending (see `media::label`), in capitals, on
@@ -7354,7 +7383,6 @@ pub mod tests {
     /// of the video. The row is 316 wide from 20 in, so its bar runs from 118 to 224.
     fn video_frames(video: &crate::home::VideoLive, frames: &[Vec<Event>]) -> Vec<Option<crate::home::VideoRequest>> {
         let ctx = egui::Context::default();
-        let mut state = HomeState::default();
         let mut asked = Vec::new();
         let row = Rect::from_min_size(pos2(20.0, 20.0), vec2(316.0, 30.0));
         for (n, events) in frames.iter().enumerate() {
@@ -7364,9 +7392,10 @@ pub mod tests {
                 events: events.clone(),
                 ..RawInput::default()
             };
-            let output = ctx.run_ui(input, |ui| video_row(ui, &mut state, video, row));
+            let mut this = None;
+            let output = ctx.run_ui(input, |ui| this = video_row(ui, video, row));
             output.drop_without_applying_deltas();
-            asked.push(state.video_request.take());
+            asked.push(this);
         }
         asked
     }
@@ -7423,6 +7452,111 @@ pub mod tests {
         assert_eq!(click(95.0), Some(VideoRequest::Seek(15.0)));
         assert_eq!(click(293.0), Some(VideoRequest::Looping(true)));
         assert_eq!(click(323.0), Some(VideoRequest::Muted(true)));
+    }
+
+    /// Draws the preview block, 320 by 316 at (10, 10), with what `state` says plays, through
+    /// frames of input, and returns the words drawn in the last one.
+    fn preview_frames(show: &Show, state: &mut HomeState, frames: &[Vec<Event>]) -> Vec<String> {
+        fn words(shape: &egui::Shape, into: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| words(shape, into)),
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        let block = Rect::from_min_size(pos2(10.0, 10.0), vec2(320.0, 316.0));
+        let mut drawn = Vec::new();
+        for (n, events) in frames.iter().enumerate() {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 400.0))),
+                time: Some(n as f64 * 0.1),
+                events: events.clone(),
+                ..RawInput::default()
+            };
+            let preview = crate::home::Preview { amount: 1.0, ..Default::default() };
+            let output = ctx.run_ui(input, |ui| preview_block(ui, show, state, preview, block, true));
+            drawn.clear();
+            output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut drawn));
+            output.drop_without_applying_deltas();
+        }
+        drawn
+    }
+
+    fn announced_video(name: &str) -> crate::home::VideoLive {
+        crate::home::VideoLive {
+            name: name.to_owned(),
+            position: 5.0,
+            duration: Some(36.0),
+            playing: true,
+            looping: true,
+            muted: false,
+        }
+    }
+
+    #[test]
+    fn an_announcement_video_has_the_video_keys_under_the_preview_and_its_name_in_the_readout() {
+        use crate::announcements::{Announce, Shown};
+        use crate::home::VideoRequest;
+        let mut show = Show::new(vec![Arc::new(sp_model::parse_song_text("Song", "Words\n"))]);
+        show.add_media(sp_model::MediaItem::new("Notices.mp4".into(), "/media/Notices.mp4".into()));
+        let item = show.media()[0].id;
+        let mut state = HomeState {
+            announcement_live: Some((Announce::Media(item), "Notices.mp4".to_owned())),
+            announcement_media: Some(Shown { item, video: Some(announced_video("Notices.mp4")), over_slides: true }),
+            ..HomeState::default()
+        };
+        // Play or Pause, at the left of the row under the readout.
+        let play = pos2(36.0, 301.0);
+        let frames = vec![vec![Event::PointerMoved(play)], vec![press(play, true)], vec![press(play, false)], vec![]];
+        let words = preview_frames(&show, &mut state, &frames);
+        assert!(words.iter().any(|w| w == "ANNOUNCEMENTS"), "named in the readout: {words:?}");
+        assert!(words.iter().any(|w| w.ends_with("\u{b7} NOTICES")), "by its name in the media strip: {words:?}");
+        assert!(!words.iter().any(|w| w.contains("NO SLIDE")), "{words:?}");
+        assert!(words.iter().any(|w| w == "\u{2212}0:31"), "its own time left: {words:?}");
+        assert!(!words.iter().any(|w| w == "Clear"), "the Announce key clears it, not a key of its own: {words:?}");
+        assert_eq!(state.announcement_video_request, Some(VideoRequest::TogglePause), "asked of its own player");
+        assert_eq!(state.video_request, None, "not of the media layer's");
+    }
+
+    #[test]
+    fn a_song_on_the_announcements_layer_is_named_in_the_readout_with_no_keys_under_it() {
+        use crate::announcements::Announce;
+        let show = Show::new(vec![Arc::new(sp_model::parse_song_text("Welcome", "Words\n"))]);
+        let mut state =
+            HomeState { announcement_live: Some((Announce::Song(0), "Welcome".to_owned())), ..HomeState::default() };
+        let words = preview_frames(&show, &mut state, &[vec![]]);
+        assert!(words.iter().any(|w| w == "ANNOUNCEMENTS"), "{words:?}");
+        assert!(words.iter().any(|w| w.ends_with("WELCOME")), "{words:?}");
+        assert!(!words.iter().any(|w| w == "Clear" || w.contains('\u{2212}')), "nothing to play or clear: {words:?}");
+    }
+
+    #[test]
+    fn the_row_has_the_keys_of_the_video_the_audience_sees_in_front() {
+        use crate::announcements::Shown;
+        let item = sp_model::Uuid::new_v4();
+        let shown = |video: bool, over_slides: bool| {
+            Some(Shown { item, video: video.then(|| announced_video("Notices")), over_slides })
+        };
+        let of = |state: &HomeState| row_video(state).map(|(of, video)| (of, video.name));
+        let mut state = HomeState {
+            video_live: Some(announced_video("Walk-in")),
+            announcement_media: shown(true, true),
+            ..HomeState::default()
+        };
+        // Over the slides, the announcement covers the media.
+        assert_eq!(of(&state), Some((RowVideo::Announcement, "Notices".to_owned())));
+        // Taken off the slide screens by a slide (a lobby screen alone shows it): the media's.
+        state.announcement_media = shown(true, false);
+        assert_eq!(of(&state), Some((RowVideo::Media, "Walk-in".to_owned())));
+        // With no video behind the words, the one the lobby screen shows.
+        state.video_live = None;
+        assert_eq!(of(&state), Some((RowVideo::Announcement, "Notices".to_owned())));
+        // A picture on the layer has no keys.
+        state.announcement_media = shown(false, true);
+        assert_eq!(of(&state), None);
+        state.video_live = Some(announced_video("Walk-in"));
+        assert_eq!(of(&state), Some((RowVideo::Media, "Walk-in".to_owned())));
     }
 
     /// The media strip, with three pictures in the bin, and a media playlist of them in its own

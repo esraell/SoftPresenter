@@ -472,7 +472,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   under the slide's number and name: a round Play or Pause, Start Over, Forward 10 seconds, a
   slim bar to click or drag through (the time a click goes to shows over it), the time left,
   Loop and Sound (each a lighter grey while it is on); its name is the second line of the
-  readout. The row is always there, empty when nothing plays, so nothing under it moves. A tool
+  readout. A video on the Announcements layer has the same keys there, acting on its own player
+  (while the layer is over the slides it covers the media, so its keys come first; once a slide
+  has taken it off and only a lobby screen shows it, the media's video has them). The row is
+  always there, empty when nothing plays, so nothing under it moves. A tool
   tab that goes on below what shows fades out at
   its foot. An item's
   right-click menu sets its Scaling (Scale to Fill, Scale to Fit, Stretch to Fill), whether a
@@ -532,8 +535,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   media bin item is set to (Scale to Fill, Fit or Stretch), on black. Each screen's Look can
   show or hide the layer (a lobby screen can show only announcements); the Announce key (lit
   while it plays), Presentation › Clear Announcements and Clear All take it off; while it
-  plays, the preview block's row names it with a Clear key beside it, and the same menu item
-  reads Stop Announcements. **A slide going on screen** (a song's, a Bible verse, a playlist
+  plays with no slide on screen, the readout under the preview names it (ANNOUNCEMENTS · its
+  name), a video on it has the video keys under the preview (see the media bin), and the same
+  menu item reads Stop Announcements. **A slide going on screen** (a song's, a Bible verse, a playlist
   item's: by a click, a key, Enter, `sp`, a macro or a slide's action) takes the announcements
   off every screen that shows slides, and they stay off until someone starts them again
   (Announce, a macro step, `sp announce`): clearing the slide doesn't bring them back. A lobby
