@@ -3844,49 +3844,14 @@ impl App {
         };
         // The audience's picture shows the slide in the version that is on, as the screens do;
         // the stage's shows it as it is.
-        let version = state.version_switch.version().filter(|_| !state.preview_stage);
-        let slide = self.show.live_slide().map(|(_, slide)| {
-            let in_version = version.and_then(|version| theme.slide_in_version(slide, version));
-            let built = in_version.as_ref().unwrap_or(slide).built(&theme, sp_model::BuildClock::settled(step)).0;
-            Arc::new(links::fill(&built, &values).into_owned())
-        });
-        running.stage_preview_at = Instant::now();
-        running.preview_shows_stage = state.preview_stage;
-        if state.preview_stage {
-            // The stage screens' picture: the time, this slide, the next, a timer, the stage message.
-            let next = self.show.live().and(self.show.upcoming()).and_then(|at| {
-                let song = self.show.presentations().get(at.presentation)?;
-                song.slide(at.slide).map(|(_, slide)| slide.clone())
-            });
-            let overlay = running.overlay_sent.clone().unwrap_or_default();
-            // The layout of the stage screen looked at, or of the first, as the people on stage
-            // see it.
-            let stage_screens = || state.screens.iter().filter(|screen| screen.kind == screens::Kind::Stage);
-            let wanted = stage_screens()
-                .find(|screen| Some(screen.id) == state.preview_screen)
-                .or_else(|| stage_screens().next())
-                .and_then(|s| s.stage_layout);
-            let template = stage::layout_for(&state.stage_layouts, wanted);
-            let picture = stage::slide(slide.as_deref(), next.as_ref(), &overlay, &about, &template);
-            let layers = Layers {
-                media_fit: sp_model::ImageFit::Fill,
-                media: None,
-                slide: Some(&picture),
-                overlay: None,
-                time: 0.0,
-                backdrop: None,
-                mask: [0.0; 4],
-                announcement: None,
-            };
-            let layout = stage::theme_for(&template);
-            let (now, before) = running.thumbs.preview(&running.gpu, &mut running.egui_renderer, &layers, &layout);
-            running.preview = now;
-            running.preview_before = before;
-            let now = Instant::now();
-            running.preview_changed = if fade { now } else { now.checked_sub(Duration::from_secs(60)).unwrap_or(now) };
-            running.stage_preview_at = now;
-            return;
-        }
+        let slide_in = |version: Option<Uuid>| {
+            self.show.live_slide().map(|(_, slide)| {
+                let in_version = version.and_then(|version| theme.slide_in_version(slide, version));
+                let built = in_version.as_ref().unwrap_or(slide).built(&theme, sp_model::BuildClock::settled(step)).0;
+                Arc::new(links::fill(&built, &values).into_owned())
+            })
+        };
+        let audience_slide = slide_in(state.version_switch.version());
         // The operator's preview shows the props and a message over the slide, as the audience
         // sees them.
         let message = state.message_live.and_then(|(id, _)| {
@@ -3904,17 +3869,67 @@ impl App {
             running.overlay_sent.as_ref().and_then(|sent| sent.copyright.as_deref()).map(props::copyright_slide),
         );
         let over = props::overlay(&live_props, message.as_ref());
-        let layers = Layers {
+        let audience = Layers {
             media_fit,
             media: media.as_ref(),
-            slide: slide.as_deref(),
+            slide: audience_slide.as_deref(),
             overlay: over.as_ref().filter(|_| self.show.output_enabled()),
             time: 0.0,
             backdrop: None,
             mask: [0.0; 4],
             announcement: announcement.as_ref().map(|shown| (&*shown.slide, &*shown.theme)),
         };
-        let (now, before) = running.thumbs.preview(&running.gpu, &mut running.egui_renderer, &layers, &theme);
+        running.stage_preview_at = Instant::now();
+        running.preview_shows_stage = state.preview_stage;
+        if state.preview_stage {
+            // The stage screens' picture: the time, this slide, the next, a timer, the stage message.
+            let slide = slide_in(None);
+            let next = self.show.live().and(self.show.upcoming()).and_then(|at| {
+                let song = self.show.presentations().get(at.presentation)?;
+                song.slide(at.slide).map(|(_, slide)| slide.clone())
+            });
+            let overlay = running.overlay_sent.clone().unwrap_or_default();
+            // The layout of the stage screen looked at, or of the first, as the people on stage
+            // see it, each picture of an audience screen in it naming the screen it shows.
+            let stage_screens = || state.screens.iter().filter(|screen| screen.kind == screens::Kind::Stage);
+            let wanted = stage_screens()
+                .find(|screen| Some(screen.id) == state.preview_screen)
+                .or_else(|| stage_screens().next())
+                .and_then(|s| s.stage_layout);
+            let template = stage::with_sources(&stage::layout_for(&state.stage_layouts, wanted), &state.screens);
+            let picture = stage::slide(slide.as_deref(), next.as_ref(), &overlay, &about, &template);
+            let layers = Layers {
+                media_fit: sp_model::ImageFit::Fill,
+                media: None,
+                slide: Some(&picture),
+                overlay: None,
+                time: 0.0,
+                backdrop: None,
+                mask: [0.0; 4],
+                announcement: None,
+            };
+            // A picture of an audience screen in the layout shows what the audience preview
+            // shows, as the stage screens show that screen's own picture.
+            let shown_screen = template.objects.iter().find_map(|object| match object.kind {
+                sp_model::ObjectKind::Screen { screen: Some(screen), .. } if !screen.is_nil() => Some(screen),
+                _ => None,
+            });
+            let layout = stage::theme_for(&template);
+            let (now, before) = running.thumbs.preview_showing(
+                &running.gpu,
+                &mut running.egui_renderer,
+                &layers,
+                &layout,
+                shown_screen.map(|screen| (screen, &audience, &*theme)),
+            );
+            running.preview = now;
+            running.preview_before = before;
+            let now = Instant::now();
+            running.preview_changed = if fade { now } else { now.checked_sub(Duration::from_secs(60)).unwrap_or(now) };
+            running.stage_preview_at = now;
+            return;
+        }
+        let (now, before) = running.thumbs.preview(&running.gpu, &mut running.egui_renderer, &audience, &theme);
         running.preview = now;
         running.preview_before = before;
         let now = Instant::now();

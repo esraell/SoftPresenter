@@ -404,6 +404,29 @@ impl Thumbs {
 
     /// Draws the audience screen's picture for the preview. Returns it, and the picture that
     /// was there before, which is kept so the new one can fade in over it.
+    /// The preview, as [`Thumbs::preview`] makes it, with one audience screen's picture at hand
+    /// for a picture of that screen in it (a stage layout showing the audience): that screen's
+    /// layers are drawn first and shown in its place.
+    pub fn preview_showing(
+        &mut self,
+        gpu: &Gpu,
+        egui_renderer: &mut egui_wgpu::Renderer,
+        layers: &Layers,
+        theme: &Theme,
+        screen: Option<(sp_model::Uuid, &Layers, &Theme)>,
+    ) -> (Option<egui::TextureId>, Option<egui::TextureId>) {
+        let pictures: Vec<sp_render::ScreenPicture> = screen
+            .map(|(id, shown, shown_theme)| {
+                sp_render::show_placeholders(false);
+                let scene = build_layers(&mut self.fonts, shown, shown_theme, PREVIEW_W, PREVIEW_H).scene;
+                sp_render::show_placeholders(true);
+                sp_render::ScreenPicture { screen: id, scene, width: PREVIEW_W, height: PREVIEW_H }
+            })
+            .into_iter()
+            .collect();
+        sp_render::with_screen_pictures(pictures, || self.preview(gpu, egui_renderer, layers, theme))
+    }
+
     pub fn preview(
         &mut self,
         gpu: &Gpu,
