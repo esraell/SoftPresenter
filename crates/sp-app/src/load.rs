@@ -543,7 +543,12 @@ fn load_one(path: &Path, songs: &mut Vec<Loaded>, problems: &mut Vec<String>) {
     // A text file that has been edited has a SoftPresenter file beside it; read that.
     let edited = song_file_for(path);
     let path = if !is_song_file(path) && edited.is_file() { edited.as_path() } else { path };
-    let read = if is_song_file(path) { read_song_file(path) } else { import_file(path) };
+    // Another program's file is tidied as an import tidies it.
+    let read = if is_song_file(path) {
+        read_song_file(path)
+    } else {
+        import_file(path).map(|song| sp_model::tidy_song(&song, sp_model::TidyOptions::default()).song)
+    };
     let song = match read {
         Ok(song) => song,
         Err(reason) => return problems.push(format!("{}: {reason}", path.display())),

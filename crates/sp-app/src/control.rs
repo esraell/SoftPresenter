@@ -1055,6 +1055,8 @@ Songs, libraries and playlists
   playlist fill PLACEHOLDER with SONG | with media ITEM [in PLAYLIST]
   library new NAME | library rename OLD to NEW | library delete NAME (songs stay)
   library add SONG… to LIBRARY | library remove SONG… from LIBRARY
+  library tidy [--apply] [--keep-numbers]   put songs' titles and words right, as an import does
+                               (lists every change; --apply makes them, keeping a copy of each file)
   song rename SONG to TITLE | song duplicate SONG [as TITLE]
   song theme SONG THEME|main | song transition SONG KIND [SECONDS] | none
   song info SONG [artist=… author=… publisher=… year=… ccli=…]
@@ -2406,6 +2408,9 @@ impl crate::App {
     }
 
     fn ctl_library(&mut self, args: &[String]) -> Result<Reply, String> {
+        if args.get(1).is_some_and(|word| word.eq_ignore_ascii_case("tidy")) {
+            return self.ctl_library_tidy(&args[2..]);
+        }
         if let Some(result) = self.ctl_library_change(args) {
             return result;
         }

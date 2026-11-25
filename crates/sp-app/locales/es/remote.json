@@ -105,6 +105,7 @@
   "remote.at_computer.mirror": "Dejar que un teléfono, iPad o Mac muestre su pantalla se decide en el ordenador, no desde la página remota.",
   "remote.at_computer.language": "El idioma de la aplicación se elige en el ordenador, no desde la página remota.",
   "remote.at_computer.words_file": "Leer la letra de una canción desde un archivo se hace en el ordenador, no desde la página remota.",
+  "remote.at_computer.tidy": "Poner en orden la biblioteca se hace en el ordenador, no desde la página remota.",
   "remote.item.missing": "{title} (falta)",
   "remote.item.video": "{title} (vídeo)",
   "remote.item.picture": "{title} (imagen)",

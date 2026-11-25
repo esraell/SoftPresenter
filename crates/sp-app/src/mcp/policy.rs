@@ -181,6 +181,7 @@ fn refusal(args: &[String]) -> String {
             at_computer("Files on the computer are opened")
         }
         ("slide", "web") => at_computer("Web pages are put on slides"),
+        ("library", "tidy") => at_computer("The library's songs are tidied"),
         // A Bible named alone that isn't offered (a file's path among them): which are.
         ("bible", "install") if args.len() == 3 => {
             let typed: String = args[2].chars().filter(|c| !c.is_control()).take(60).collect();
@@ -377,6 +378,9 @@ mod tests {
         assert!(said(&["song", "import", "/etc/hosts"]).contains("Files"));
         assert!(said(&["song", "export", "Amazing", "--to", "/tmp/x"]).contains("Files"));
         assert!(said(&["slide", "web", "Amazing", "1", "https://example.org"]).contains("Web pages"));
+        assert!(said(&["library", "tidy"]).contains("tidied"));
+        assert!(said(&["library", "tidy", "--apply"]).contains("tidied"));
+        assert!(said(&["library", "Tidy", "--titles-from", "/Users"]).contains("tidied"));
         assert!(said(&["undo"]).contains("only the shapes"));
         // Adding SoftPresenter to assistant apps (another program's settings) is the person's,
         // at the computer: `sp` answers it itself, and an assistant's request for it is refused.

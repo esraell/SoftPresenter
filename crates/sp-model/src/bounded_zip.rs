@@ -71,7 +71,7 @@ pub fn for_each_entry_at(
     for at in 0..zip.len() {
         let (entry_name, is_wanted, size) = {
             let entry = zip.by_index_raw(at).map_err(|_| ZipRefusal::Damaged)?;
-            let entry_name = String::from_utf8_lossy(entry.name_raw()).into_owned();
+            let entry_name = crate::zip_entry_name(entry.name_raw());
             let plain = !entry.is_dir() && !entry.is_symlink() && !entry.encrypted();
             (entry_name.clone(), plain && wanted(&entry_name), entry.compressed_size())
         };

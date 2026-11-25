@@ -435,7 +435,9 @@ fn entries(zip: &mut Zip, name: &str, limits: &Limits) -> Result<Entries, String
     let mut more_songs = 0;
     for at in 0..zip.len() {
         let entry = zip.by_index_raw(at).map_err(|_| not_a_bundle(name))?;
-        let raw = String::from_utf8_lossy(entry.name_raw()).into_owned();
+        // UTF-8 when it is, else the zip format's own code page: many tools write UTF-8 names
+        // without saying so, and older ones the code page.
+        let raw = sp_model::zip_entry_name(entry.name_raw());
         if entry.is_dir() || is_junk(&raw) {
             continue;
         }

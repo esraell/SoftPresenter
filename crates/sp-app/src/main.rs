@@ -83,6 +83,7 @@ mod system_language;
 mod theme_cli;
 mod theme_store;
 mod thumbs;
+mod tidy_cli;
 mod timelychurch;
 mod timers;
 mod versions;
@@ -6798,6 +6799,12 @@ impl App {
         ids: &mut std::collections::HashSet<Uuid>,
         done: &mut Imported,
     ) {
+        // A song from another program's file comes in tidied (its title and words put right, as
+        // `sp library tidy` puts the library's), before it is looked for in the library, so
+        // the same file imported again is found there. SoftPresenter's own songs come as saved.
+        if !load::is_song_file(path) {
+            song = sp_model::tidy_song(&song, sp_model::TidyOptions::default()).song;
+        }
         let look = import_key(&song);
         if let Some(at) = already_here(&song, have, ids, self.show.presentations()) {
             done.problems.push(format!("{}{}", song.title, already()));

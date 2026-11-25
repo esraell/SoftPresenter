@@ -196,6 +196,7 @@ pub enum AtComputer {
     AddMedia,
     Samples,
     SongWordsFile,
+    TidyLibrary,
 }
 
 impl AtComputer {
@@ -264,6 +265,9 @@ impl AtComputer {
                 "remote.at_computer.words_file",
                 "Reading a song's words from a file is done at the computer, not from the remote page.",
             ),
+            AtComputer::TidyLibrary => {
+                t("remote.at_computer.tidy", "Tidying the library is done at the computer, not from the remote page.")
+            }
         }
     }
 }
@@ -318,6 +322,9 @@ fn control_refusal(args: &[String]) -> Option<String> {
         ("audio", "add") => at_computer(AtComputer::AudioTracks),
         ("media-playlist", "follow") if !(args.len() == 4 && word(3) == "off") => at_computer(AtComputer::FollowFolder),
         ("bible", "install") if !(args.len() == 3 && offered_bible(&args[2])) => at_computer(AtComputer::BibleFile),
+        // Tidying rewrites every song's file (after keeping a copy), and can read the folder the
+        // songs were imported from: at the computer only, even to look at what it would do.
+        ("library", "tidy") => at_computer(AtComputer::TidyLibrary),
         // A title, name or song given as one word (spaces and all) is never read as a file; more
         // words than that could end in one (`song new TITLE FILE.txt`, `prop new NAME PICTURE`,
         // `song text SONG FILE`).
@@ -534,6 +541,10 @@ mod tests {
             "remote off",
             "remote password",
             "install-cli",
+            "library tidy",
+            "library tidy --apply",
+            "LIBRARY Tidy --apply --keep-numbers",
+            "library tidy --titles-from /Users",
             "mcp connect desktop",
             "mcp disconnect code",
             "mcp connect chatgpt --replace",

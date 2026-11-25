@@ -11,6 +11,8 @@ serde.workspace = true
 serde_json.workspace = true
 # Zips read with limits (bounded_zip): Bibles and presentation files.
 zip.workspace = true
+# Letters written as a letter and a mark joined into one (NFC), when songs are tidied.
+icu_normalizer.workspace = true
 
 [lints]
 workspace = true

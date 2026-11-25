@@ -833,6 +833,7 @@ Romans`.
 | `library open NAME\|all` | Shows a library's songs, or every song, in the song list |
 | `library new NAME`, `library rename OLD to NEW`, `library delete NAME` | Makes, renames or deletes a library (its songs stay; deleted at once, `sp undo` puts it back) |
 | `library add SONG… to LIBRARY`, `library remove SONG… from LIBRARY` | Puts songs in a library or takes them out (quote each name with spaces) |
+| `library tidy [--apply] [--keep-numbers]` | Puts the library's songs right as an import does ([below](#tidying-the-library)): lists every change, and makes them with `--apply`. At the computer only |
 
     $ sp playlist new Sunday Evening
     Made the playlist Sunday Evening.
@@ -898,6 +899,58 @@ kept with:
    "text": "Sermon slides (placeholder)"}
 ]
 ```
+
+### Tidying the library
+
+`library tidy` puts the songs already in the library right, the way an import puts each song
+it brings in right ([features.md](features.md) says what that does). Without `--apply` it
+changes nothing. It lists every change it would make, by kind: each title before and after,
+with titles that are only a number listed apart; each slide it would part, and why; and the
+letters and spaces it would put right, song by song. It also lists the slides it would leave
+whole (when a translation doesn't part the same way), and songs with the same words, which it
+only lists. `--apply` makes the changes. Each song keeps its id, theme, arrangements and
+places, and a copy of each song's file as it was goes first into "Backup before tidying" and
+the date, in the data folder. `--keep-numbers` leaves the number-only titles as they are.
+Songs kept in step with the song catalog or TimelyChurch are left alone, and so is a song
+whose file changed outside the app (the reply names it). Run again, it says there is nothing
+to tidy. `--json` gives each song with a change (`id`, `title_before`, `title`,
+`title_fixes`, `splits`, `left_whole`, `chars`, `libraries`, and with `--apply` `not_done`),
+`duplicates`, the `backup` folder and the `counts`. It isn't open to a remote page or an AI
+assistant.
+
+    $ sp library tidy
+    Tidying would change 6 of the library's 7 songs. Nothing has changed yet: sp library tidy --apply does it.
+
+    Garbled titles put back (1):
+        ╨í╨▓╨╡╤é ╨╜╨░╨┤ ╤Ç╨╡╨║╨╛╨╣  →  Свет над рекой
+
+    “Untitled” titles given the song's first line (1):
+        Untitled  →  Lanterns along the road
+
+    File endings taken off titles (1):
+        Morning Star (modified).docx  →  Morning Star (modified)
+
+    Number-only titles given the song's first line (--keep-numbers leaves them) (1):
+        619  →  619 - Round the harbour lights
+
+    Slides parted (3 slides in 3 songs):
+        619 - Round the harbour lights: slide 1 into 2 (at a “* * *” line)
+        Harbour Lights: slide 1 into 2 (at a “* * *” line)
+        River Song: slide 1 into 2 (12 lines)
+
+    Words put right in 2 songs: 2 “* * *” lines.
+        619 - Round the harbour lights: 1 “* * *” line
+        Harbour Lights: 1 “* * *” line
+
+    Songs with the same words, listed only (1 set):
+        619 - Round the harbour lights  =  Harbour Lights
+    $ sp library tidy --apply
+    Tidied 6 of the library's 7 songs.
+    Their files as they were are kept in /path/to/test-library/Backup before tidying 2026-11-25.
+    …
+    $ sp library tidy
+    Nothing to tidy: the library's 7 songs are as an import leaves them.
+    …
 
 ## Themes
 

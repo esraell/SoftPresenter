@@ -140,6 +140,37 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   number, writers and copyright go into the song's details; a church's own licence number is
   never kept), ChordPro (sections from its directives, chords taken out), SoftPresenter's own
   song text and song files, rich text, and on macOS Word and OpenDocument files.
+- **Imported songs are tidied** (every kind above but SoftPresenter's own songs and song packs).
+  - **Titles:** a garbled title (UTF-8 read as an older code page and saved that way, such as
+    "╨Ñ╨▓╨░╨╗╨░" or "lifeΓÇÖs") is put back, but only when reading it back as bytes gives
+    UTF-8 with letters. Right Russian, Ukrainian, Spanish or English titles are never changed.
+    A file's ending (".docx", ".txt", ".pro"…) and a comma, semicolon or colon at the end come
+    off. "Untitled", or no title, becomes the first line. A title that is only a number (a
+    hymnbook's, perhaps with a counter: "100 4") becomes "100 - its first line", so the number
+    still finds it.
+  - **Words** (the main and translation boxes, and the reference's letters): letters typed as
+    a letter and a mark (и and a breve) are joined into one (й), as Unicode's NFC does. Line
+    and paragraph separators become line breaks; non-breaking spaces and tabs become plain
+    spaces; zero-width characters between letters go. Runs of spaces become one, and lines
+    lose the spaces at their start and end. A blank line, or a line of only "* * *", "***" or
+    "---", between words parts the slide there, and the line goes; one at a box's start or end
+    just goes. A slide of more than eight lines is shared out into slides of at most eight, as
+    even as they can be (12 lines make 6 and 6).
+  - A slide is parted only when its translation parts the same way, stanza for stanza or line
+    for line; otherwise it stays whole. The first part keeps the slide's label, notes, actions
+    and hot key; every part has the slide's reference, pictures and shapes. Repeat marks
+    ("2x"), group names and presentation slides (boxes with no role) are left as they are.
+  - **Songs already in the library:** `sp library tidy` does the same to them (see
+    [cli.md](cli.md#playlists-and-libraries)). It lists every change first: each title before
+    and after (number-only titles on a list of their own), each slide it would part, and the
+    letters and spaces it would put right, song by song. It also lists the slides it leaves
+    whole, and songs with the same words (listed only). `--apply` makes the changes through
+    the app's own saving: songs keep their ids, themes, arrangements and places in playlists
+    and libraries. First, each song's file is copied as it was into "Backup before tidying"
+    and the date, in the data folder. `--keep-numbers` leaves number-only titles alone. Songs
+    kept in step with the song catalog or TimelyChurch are left alone, and so is a song whose
+    file changed outside the app. Run again, it finds nothing left to change. Done at the
+    computer only: not from a remote page or an AI assistant.
 - **Slides from a presentation file, a PDF or pictures.** File › Import Slides… (or Import ›
   Slides… beside the songs) opens a sheet with two cards: **Pictures as slides** and **A
   presentation** (a `.pptx`, `.ppsx`, `.key`, `.odp`, `.ppt` or `.pps` file, or a PDF). Dropping

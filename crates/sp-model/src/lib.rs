@@ -7,6 +7,7 @@ mod build;
 mod format;
 mod import;
 mod link;
+mod names;
 mod pro_file;
 mod rtf;
 mod softprojector;
@@ -15,6 +16,7 @@ mod spans;
 pub mod sqlite_read;
 mod text_map;
 mod theme;
+mod tidy;
 mod transition;
 mod types;
 
@@ -25,6 +27,7 @@ pub use import::{
     MOST_LINES, decode_text, import_song_text, section_name, share_out, without_chords, year_and_publisher,
 };
 pub use link::TextLink;
+pub use names::{repair_garbled, zip_entry_name};
 #[cfg(any(test, feature = "test-documents"))]
 #[doc(hidden)]
 pub use pro_file::example as pro_example;
@@ -51,6 +54,10 @@ pub use theme::{
     Align, BIBLE_TEMPLATE, BIBLE_THEME_ID, BUILTIN_TEMPLATES, BUILTIN_THEME, BoxStyle, Caps, DEFAULT_FONT_FAMILY,
     Gradient, GradientKind, LINE_HEIGHT, LineFill, LineTransform, ListStyle, Scaling, Scroll, Shadow, SlideRect,
     TextStyle, Theme, ThemeTemplate, ThemeVersion, VAlign, Version, all_versions, fonts_used, missing_fonts,
+};
+pub use tidy::{
+    CharFixes, LeftWhole, MOST_TIDY_LINES, Split, SplitWhy, Tidied, TidyOptions, TitleFix, WholeWhy, first_line,
+    tidy_song, tidy_text, tidy_title, words_key,
 };
 pub use transition::{Direction, Transition, TransitionKind};
 pub use types::{

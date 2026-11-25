@@ -50,6 +50,9 @@ roxmltree = { version = "0.21", default-features = false, features = ["std"] }
 fs4 = { version = "0.13", default-features = false, features = ["sync"] }
 # The macOS menu bar.
 muda = { version = "=0.21.2", default-features = false }
+# Unicode's NFC, for tidying songs' words and titles. Already built for the web address code
+# the downloads use; only its compiled-in data.
+icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
