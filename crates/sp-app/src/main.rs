@@ -3625,6 +3625,16 @@ impl App {
     /// open item only when `open_it` (not when a remote page, which keeps its own, started it).
     fn start_item_as(&mut self, item: usize, last: bool, open_it: bool) {
         let (stops, _) = self.playlist_stops();
+        // A picture, video or media playlist that belongs to the announcements plays there.
+        if let Some((what, from)) = self.announced_item(item, &stops) {
+            if let Some(running) = self.running.as_mut()
+                && open_it
+            {
+                running.home_state.services.chosen = Some(item);
+            }
+            self.announce_clicked(what, from);
+            return;
+        }
         if let Some(running::Stop::MediaPlaylist(true)) = stops.get(item) {
             let id = self.running.as_ref().and_then(|r| match r.home_state.services.front().items.get(item) {
                 Some(service::Item::MediaPlaylist { id, .. }) => Some(*id),
@@ -3642,6 +3652,22 @@ impl App {
         }
         if let Some(commands) = self.start_commands(item, last, &stops, open_it) {
             self.apply(commands);
+        }
+    }
+
+    /// What an item of the playlist in front plays on the Announcements layer when it is
+    /// started, if it is a picture, video or media playlist that belongs to the announcements
+    /// (see `announcements::for_media`).
+    fn announced_item(&self, item: usize, stops: &[running::Stop]) -> Option<(announcements::Announce, Option<Uuid>)> {
+        let state = &self.running.as_ref()?.home_state;
+        match (state.services.front().items.get(item)?, stops.get(item)?) {
+            (service::Item::Media { .. }, running::Stop::Media(Some(at))) => {
+                announcements::for_media(state, self.show.media().get(*at)?)
+            }
+            (service::Item::MediaPlaylist { id, .. }, running::Stop::MediaPlaylist(true)) => {
+                announcements::for_media_playlist(state, *id)
+            }
+            _ => None,
         }
     }
 

@@ -47,6 +47,16 @@ pub const SCOPE: &str = "design:content:read";
 pub const FOLDER: &str = "Canva Sync";
 pub const PLAYLIST: &str = "Announcements";
 
+/// The folder Canva Sync puts the video in, in a data folder.
+fn folder_in(data: &Path) -> PathBuf {
+    data.join("Media").join(FOLDER)
+}
+
+/// The folder Canva Sync puts the video in, which its media playlist follows.
+pub fn folder() -> PathBuf {
+    folder_in(&crate::bible_store::data_dir().unwrap_or_else(std::env::temp_dir))
+}
+
 /// A downloaded video smaller than this is not one.
 const SMALLEST_VIDEO: u64 = 1_000_000;
 /// Nor larger than this.
@@ -149,7 +159,7 @@ impl Places {
             refreshing: Arc::default(),
             staging: local,
             settings: data.join("canva-sync.json"),
-            folder: data.join("Media").join(FOLDER),
+            folder: folder_in(&data),
             poll_every: Duration::from_secs(5),
             export_for: Duration::from_secs(25 * 60),
         }

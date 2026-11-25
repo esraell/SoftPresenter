@@ -1013,7 +1013,10 @@ pub fn slide_scroll(
                     let tile = sheet.tile(place, 0);
                     let video =
                         at.is_some_and(|at| show.media().get(at).is_some_and(|m| crate::media::is_video(&m.path)));
-                    let live = at.is_some() && *at == show.live_media();
+                    let announced = at
+                        .and_then(|at| show.media().get(at))
+                        .is_some_and(|m| crate::announcements::shows_item(state, m.id));
+                    let live = at.is_some() && *at == show.live_media() || announced;
                     let words = match at {
                         None => t("slides.media.gone", "Gone from the media strip"),
                         Some(_) if live => t("slides.media.live", "On screen"),
@@ -1026,12 +1029,12 @@ pub fn slide_scroll(
                         && response.on_hover_text(t("slides.media.show_hint", "Show it on the screens")).clicked()
                     {
                         state.services.chosen = Some(*item);
-                        commands.push(Command::ShowMedia(*at));
+                        crate::studio::show_media_item(show, state, *at, commands);
                     }
                 }
                 Deck::MediaPlaylist { item, id, shown, count, gone, .. } => {
                     let tile = sheet.tile(place, 0);
-                    let live = state.media_playing == Some(*id);
+                    let live = state.media_playing == Some(*id) || crate::announcements::plays_playlist(state, *id);
                     let words = if *gone {
                         t("slides.playlist.gone", "Gone").to_owned()
                     } else if *count == 0 {
@@ -1061,7 +1064,7 @@ pub fn slide_scroll(
                             .clicked()
                     {
                         state.services.chosen = Some(*item);
-                        state.media_request = Some(MediaRequest::PlayPlaylist(Some(*id)));
+                        crate::studio::play_media_playlist(state, *id);
                     }
                 }
                 Deck::Placeholder { item, .. } => {

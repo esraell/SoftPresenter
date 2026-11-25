@@ -274,6 +274,13 @@ pub struct HomeState {
     /// plays there, with its name.
     pub announcement_request: Option<Option<crate::announcements::Announce>>,
     pub announcement_live: Option<(crate::announcements::Announce, String)>,
+    /// What last played on the Announcements layer this run, kept after it stops, so that a
+    /// click on it plays it there again (see `announcements::for_media`).
+    pub announced_last: Option<crate::announcements::Announce>,
+    /// A picture, video or media playlist clicked (or started by the keys) that belongs to the
+    /// announcements: it plays there, a media playlist from the item clicked when one was, unless
+    /// the layer shows it already.
+    pub announcement_click: Option<(crate::announcements::Announce, Option<sp_model::Uuid>)>,
     /// The picture or video the Announcements layer shows, as the window shows it (its ring in
     /// the media strip, its video's keys under the preview), and what the operator asked of that
     /// video.
@@ -1758,6 +1765,8 @@ impl Default for HomeState {
             song_transition_request: None,
             announcement_request: None,
             announcement_live: None,
+            announced_last: None,
+            announcement_click: None,
             announcement_media: None,
             announcement_video_request: None,
             libraries: Vec::new(),
@@ -11131,6 +11140,22 @@ mod tests {
         frame_commands(&ctx, &show, &mut state, pressed(Key::M, shift), 2.0);
         let asked = frame_commands(&ctx, &show, &mut state, pressed(Key::Num1, Modifiers::NONE), 2.1);
         assert!(asked.contains(&Command::ShowMedia(0)), "{asked:?}");
+    }
+
+    #[test]
+    fn a_picture_that_played_on_the_announcements_layer_goes_back_there_not_behind_the_words() {
+        use crate::announcements::Announce;
+        let ctx = egui::Context::default();
+        let mut show = Show::new(vec![Arc::new(parse_song_text("Alpha", "Words\n"))]);
+        show.add_media(sp_model::MediaItem::new("Notices.png".into(), "Notices.png".into()));
+        let id = show.media()[0].id;
+        // It played there, and a slide going up took it off.
+        let mut state = HomeState { announced_last: Some(Announce::Media(id)), ..HomeState::default() };
+        frame_commands(&ctx, &show, &mut state, vec![], 1.0);
+        frame_commands(&ctx, &show, &mut state, pressed(Key::M, Modifiers::COMMAND | Modifiers::SHIFT), 2.0);
+        let asked = frame_commands(&ctx, &show, &mut state, pressed(Key::Num1, Modifiers::NONE), 2.1);
+        assert!(!asked.iter().any(|command| matches!(command, Command::ShowMedia(_))), "{asked:?}");
+        assert_eq!(state.announcement_click, Some((Announce::Media(id), Some(id))));
     }
 
     #[test]

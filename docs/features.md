@@ -544,7 +544,18 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   screen showing announcements and no slides keeps them going; with none, the layer stops. A
   picture or video on the media layer, a prop, a message or a timer leaves them on. The first
   time in a run, a notice says so. So a start-up macro's loop plays before the service and goes
-  the moment the first song slide goes up.
+  the moment the first song slide goes up. **The announcements play as announcements every
+  time**: a picture, video or media playlist that belongs to them, clicked in the media strip or
+  in a playlist (or started there by the keys), plays on the Announcements layer, not behind the
+  words. It belongs when it is what plays there or last played there this run (on its own, or
+  in the media playlist that did; still after a clear or a slide taking it off), when a macro's
+  step plays it there (on its own, or a media playlist it is in, such as a start-up macro's
+  loop), or when it is in the media playlist that follows the Canva Sync folder. One in a media
+  playlist plays that playlist round, from it. A click on what the layer shows already changes
+  nothing (a video isn't started again); one that a slide took off goes back over the slides.
+  While a picture or video plays there, it is ringed in orange in the media strip and its
+  playlist item is lit, as on the media layer. Play This Playlist, `sp media show` and a macro's
+  Show a Picture or Video step still put it behind the words.
 - **Media slides**: drag a media item onto a slide to have that slide show it when it goes on
   screen (an ink outline shows it will), or onto a song's bar in the slides, or the space under
   a song shown by itself, to add a slide of its own; also

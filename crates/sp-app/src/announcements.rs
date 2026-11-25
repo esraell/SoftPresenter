@@ -19,6 +19,7 @@
 //! announcements and no slides keeps them; with none, the layer stops. A picture or video on
 //! the media layer, a prop, a message or a timer leaves them on.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -79,6 +80,93 @@ impl Announcing {
     }
 }
 
+/// What has been chosen to play on the Announcements layer, so that a picture, video or media
+/// playlist among it plays there when it is clicked: what plays there now, or last played there
+/// (it stays chosen after a clear, or a slide taking it off); what the macros' steps play there
+/// (a start-up macro's loop among them); and the media playlist that follows Canva Sync's folder
+/// (the church's announcements video). `canva` is that folder.
+fn chosen<'a>(
+    last: Option<Announce>,
+    macros: &'a [crate::macros::Macro],
+    playlists: &'a [crate::media::Playlist],
+    canva: &'a Path,
+) -> impl Iterator<Item = Announce> + 'a {
+    use sp_model::{Announced, ShowAction};
+    let steps = macros.iter().flat_map(|made| &made.actions).filter_map(|action| match action {
+        ShowAction::Announce { what: Announced::Media { id } } => Some(Announce::Media(*id)),
+        ShowAction::Announce { what: Announced::MediaPlaylist { id } } => Some(Announce::MediaPlaylist(*id)),
+        _ => None,
+    });
+    let canva = playlists
+        .iter()
+        .filter(move |playlist| playlist.folder.as_deref() == Some(canva))
+        .map(|playlist| Announce::MediaPlaylist(playlist.id));
+    last.into_iter().chain(steps).chain(canva)
+}
+
+/// What a click on a picture or video of the media bin plays on the Announcements layer, when it
+/// belongs to the announcements (see [`chosen`]): the item itself, or a media playlist it is in,
+/// from it. `None` puts it on the media layer, as usual.
+fn of_media(
+    item: &sp_model::MediaItem,
+    last: Option<Announce>,
+    macros: &[crate::macros::Macro],
+    playlists: &[crate::media::Playlist],
+    canva: &Path,
+) -> Option<(Announce, Option<Uuid>)> {
+    let holds = |id: Uuid| playlists.iter().any(|playlist| playlist.id == id && playlist.has(&item.path));
+    chosen(last, macros, playlists, canva)
+        .find(|what| match what {
+            Announce::Media(id) => *id == item.id,
+            Announce::MediaPlaylist(id) => holds(*id),
+            Announce::Song(_) => false,
+        })
+        .map(|what| (what, Some(item.id)))
+}
+
+/// What a click on a picture or video of the media bin (in the media strip or a playlist) plays
+/// on the Announcements layer, when it belongs to the announcements; `None` for the media layer.
+pub fn for_media(state: &crate::home::HomeState, item: &sp_model::MediaItem) -> Option<(Announce, Option<Uuid>)> {
+    of_media(item, state.announced_last, &state.macros, &state.media_playlists, &crate::canva::folder())
+}
+
+/// The same for a media playlist clicked in a playlist, or started by the keys: it plays round on
+/// the Announcements layer when it belongs to the announcements; `None` for the media layer.
+pub fn for_media_playlist(state: &crate::home::HomeState, id: Uuid) -> Option<(Announce, Option<Uuid>)> {
+    of_playlist(id, state.announced_last, &state.macros, &state.media_playlists, &crate::canva::folder())
+}
+
+/// What a click on a media playlist plays on the Announcements layer, when it belongs to the
+/// announcements (see [`chosen`]).
+fn of_playlist(
+    id: Uuid,
+    last: Option<Announce>,
+    macros: &[crate::macros::Macro],
+    playlists: &[crate::media::Playlist],
+    canva: &Path,
+) -> Option<(Announce, Option<Uuid>)> {
+    let what = Announce::MediaPlaylist(id);
+    chosen(last, macros, playlists, canva).any(|chosen| chosen == what).then_some((what, None))
+}
+
+/// Whether the Announcements layer shows this media bin item now (the media strip rings it, a
+/// playlist lights it, as for the media layer).
+pub fn shows_item(state: &crate::home::HomeState, id: Uuid) -> bool {
+    state.announcement_media.as_ref().is_some_and(|shown| shown.item == id)
+}
+
+/// Whether the Announcements layer plays this media playlist now.
+pub fn plays_playlist(state: &crate::home::HomeState, id: Uuid) -> bool {
+    state.announcement_live.as_ref().is_some_and(|(what, _)| *what == Announce::MediaPlaylist(id))
+}
+
+/// Whether the layer shows what a click asks for already, over the slides (the item clicked, or
+/// any of a media playlist's when no item was): then the click changes nothing, as a click on the
+/// picture behind the words changes nothing, and a video isn't started again.
+fn shows_already(on: Option<(Announce, Option<Uuid>, bool)>, what: Announce, from: Option<Uuid>) -> bool {
+    on.is_some_and(|(playing, item, over_slides)| over_slides && playing == what && (from.is_none() || from == item))
+}
+
 /// True when a screen that is in use shows announcements and no slides (a lobby screen), so
 /// the layer goes on for it after a slide goes on screen.
 pub fn lobby_screen(screens: &[crate::screens::Screen]) -> bool {
@@ -117,12 +205,41 @@ fn shown_name(path: &std::path::Path) -> String {
 impl crate::App {
     /// Starts something on the Announcements layer, or stops it, as the window or a macro asked.
     pub(crate) fn handle_announcement(&mut self) {
-        let Some(asked) = self.running.as_mut().and_then(|r| r.home_state.announcement_request.take()) else {
-            return;
-        };
+        let Some(state) = self.running.as_mut().map(|r| &mut r.home_state) else { return };
+        let (asked, clicked) = (state.announcement_request.take(), state.announcement_click.take());
         match asked {
-            Some(what) => self.start_announcement(what),
-            None => self.apply(vec![sp_engine::Command::Clear(sp_engine::Layer::Announcements)]),
+            Some(Some(what)) => self.start_announcement(what),
+            Some(None) => self.apply(vec![sp_engine::Command::Clear(sp_engine::Layer::Announcements)]),
+            None => {}
+        }
+        if let Some((what, from)) = clicked {
+            self.announce_clicked(what, from);
+        }
+    }
+
+    /// Plays on the layer what a click on a picture, video or media playlist that belongs to the
+    /// announcements asked for (a media playlist from the item clicked, when one was), unless the
+    /// layer shows it already.
+    pub(crate) fn announce_clicked(&mut self, what: Announce, from: Option<Uuid>) {
+        let on = self.announcing.as_ref().map(|on| (on.what, on.item, on.on_slide_screens));
+        if shows_already(on, what, from) {
+            return;
+        }
+        let start_at = match (what, from) {
+            (Announce::MediaPlaylist(id), Some(item)) => {
+                let items = self.playlist_media(id);
+                let index = self.show.media().iter().position(|have| have.id == item);
+                index.and_then(|index| items.iter().position(|at| *at == index).map(|at| (at, index)))
+            }
+            _ => None,
+        };
+        match start_at {
+            Some((at, index)) => {
+                // A fresh start, so it is over the slides again.
+                self.announcing = None;
+                self.show_media_announcement(what, at, index);
+            }
+            None => self.start_announcement(what),
         }
     }
 
@@ -346,6 +463,7 @@ impl crate::App {
                 output.send(OutputMsg::Announcement(Some(shown.clone())));
             }
             running.home_state.announcement_live = Some((what, title));
+            running.home_state.announced_last = Some(what);
             running.home_window.request_redraw();
         }
     }
@@ -656,6 +774,93 @@ mod tests {
         ));
         assert!(object.fill.is_none() && object.stroke.is_none(), "nothing drawn around it");
         assert_eq!(media_theme().background, Some(sp_model::Rgba::BLACK), "black covers what is under the layer");
+    }
+
+    #[test]
+    fn a_picture_or_video_chosen_for_the_announcements_plays_there_when_clicked_every_time() {
+        use sp_model::{Announced, MediaItem, ShowAction};
+        let canva = Path::new("/library/Media/Canva Sync");
+        let video = MediaItem::new("Notices.mp4".to_owned(), "/library/Media/Canva Sync/Notices.mp4".into());
+        let picture = MediaItem::new("Welcome.png".to_owned(), "/pictures/Welcome.png".into());
+        let mut loop_list = crate::media::Playlist::new("Loop".to_owned());
+        loop_list.files = vec![video.path.clone(), picture.path.clone()];
+        let mut synced = crate::media::Playlist::new("Announcements".to_owned());
+        synced.folder = Some(canva.to_owned());
+        synced.files = vec![video.path.clone()];
+        let other = crate::media::Playlist::new("Backgrounds".to_owned());
+        let playlists = vec![loop_list.clone(), synced.clone(), other.clone()];
+        let step = |what| crate::macros::Macro {
+            actions: vec![ShowAction::Announce { what }],
+            ..crate::macros::Macro::new("Before the service".to_owned())
+        };
+        let nowhere = Path::new("/elsewhere");
+        let plain = vec![loop_list.clone(), other.clone()];
+
+        // Nothing chosen for the layer: a click shows it behind the words, as before.
+        assert_eq!(of_media(&video, None, &[], &plain, nowhere), None);
+        assert_eq!(of_playlist(loop_list.id, None, &[], &plain, nowhere), None);
+        // Played there (now, or before and cleared since, or taken off by a slide): there again.
+        assert_eq!(
+            of_media(&video, Some(Announce::Media(video.id)), &[], &plain, nowhere),
+            Some((Announce::Media(video.id), Some(video.id)))
+        );
+        assert_eq!(of_media(&picture, Some(Announce::Media(video.id)), &[], &plain, nowhere), None, "only that one");
+        // A media playlist played there: any of its items plays it, from that item.
+        let last = Some(Announce::MediaPlaylist(loop_list.id));
+        assert_eq!(
+            of_media(&picture, last, &[], &plain, nowhere),
+            Some((Announce::MediaPlaylist(loop_list.id), Some(picture.id)))
+        );
+        assert_eq!(
+            of_playlist(loop_list.id, last, &[], &plain, nowhere),
+            Some((Announce::MediaPlaylist(loop_list.id), None))
+        );
+        assert_eq!(of_playlist(other.id, last, &[], &plain, nowhere), None);
+        // A macro's step plays it there (a start-up macro's loop): the first click too.
+        let macros = [step(Announced::MediaPlaylist { id: loop_list.id })];
+        assert_eq!(
+            of_media(&picture, None, &macros, &plain, nowhere),
+            Some((Announce::MediaPlaylist(loop_list.id), Some(picture.id)))
+        );
+        let macros = [step(Announced::Media { id: picture.id })];
+        assert_eq!(
+            of_media(&picture, None, &macros, &plain, nowhere),
+            Some((Announce::Media(picture.id), Some(picture.id)))
+        );
+        assert_eq!(of_media(&video, None, &macros, &plain, nowhere), None);
+        // The media playlist following Canva Sync's folder is the church's announcements.
+        assert_eq!(
+            of_media(&video, None, &[], &playlists, canva),
+            Some((Announce::MediaPlaylist(synced.id), Some(video.id)))
+        );
+        assert_eq!(
+            of_playlist(synced.id, None, &[], &playlists, canva),
+            Some((Announce::MediaPlaylist(synced.id), None))
+        );
+        assert_eq!(of_media(&picture, None, &[], &playlists, canva), None, "not in it");
+        // What last played there comes first: the video plays on in the loop it was playing in.
+        let last = Some(Announce::MediaPlaylist(loop_list.id));
+        assert_eq!(
+            of_media(&video, last, &[], &playlists, canva),
+            Some((Announce::MediaPlaylist(loop_list.id), Some(video.id)))
+        );
+    }
+
+    #[test]
+    fn a_click_on_what_the_layer_shows_already_changes_nothing() {
+        let (a, b, list) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let video = Announce::Media(a);
+        assert!(shows_already(Some((video, Some(a), true)), video, Some(a)), "the video isn't started again");
+        assert!(
+            !shows_already(Some((video, Some(a), false)), video, Some(a)),
+            "back over the slides after a slide took it off"
+        );
+        assert!(!shows_already(None, video, Some(a)));
+        let round = Announce::MediaPlaylist(list);
+        assert!(shows_already(Some((round, Some(a), true)), round, Some(a)));
+        assert!(!shows_already(Some((round, Some(a), true)), round, Some(b)), "another of its items: on to it");
+        assert!(shows_already(Some((round, Some(a), true)), round, None), "the playlist itself, playing");
+        assert!(!shows_already(Some((video, Some(a), true)), round, Some(a)), "the same video, from a playlist");
     }
 
     #[test]

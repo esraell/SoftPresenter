@@ -4546,8 +4546,13 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     let on_screen = items.iter().enumerate().position(|(index, item)| match item {
         Item::Song { .. } => live_in.is_some() && looked_up.get(index).and_then(|(found, _)| *found) == live_in,
         Item::Passage(saved) => shows_passage(&saved.lookup),
-        Item::Media { id, .. } => show.live_media().and_then(|at| show.media().get(at)).is_some_and(|m| m.id == *id),
-        Item::MediaPlaylist { id, .. } => state.media_playing == Some(*id),
+        Item::Media { id, .. } => {
+            show.live_media().and_then(|at| show.media().get(at)).is_some_and(|m| m.id == *id)
+                || crate::announcements::shows_item(state, *id)
+        }
+        Item::MediaPlaylist { id, .. } => {
+            state.media_playing == Some(*id) || crate::announcements::plays_playlist(state, *id)
+        }
         Item::Header { .. } | Item::Placeholder { .. } => false,
     });
     let follow = if on_screen != state.live_row_seen {
@@ -4643,12 +4648,13 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                     let found = show.media().iter().position(|media| media.id == *id);
                     let video = found.is_some_and(|at| crate::media::is_video(&show.media()[at].path));
                     let icon = if video { Icon::Film } else { Icon::Picture };
-                    let live = found.is_some() && found == show.live_media();
+                    let live =
+                        found.is_some() && found == show.live_media() || crate::announcements::shows_item(state, *id);
                     (Some(icon), found.is_none(), live, "This picture or video is no longer in the media bin")
                 }
                 Item::MediaPlaylist { id, .. } => {
                     let found = state.media_playlists.iter().any(|playlist| playlist.id == *id);
-                    let live = state.media_playing == Some(*id);
+                    let live = state.media_playing == Some(*id) || crate::announcements::plays_playlist(state, *id);
                     (Some(Icon::Loop), !found, live, "This media playlist has been deleted")
                 }
                 // Not missing, but faint: a place kept for something to come.
@@ -5822,6 +5828,26 @@ fn menu_pill(ui: &egui::Ui, id: &str, left: f32, middle: f32, words: &str, right
     response
 }
 
+/// Puts a picture or video of the media bin on screen, as a click on it does (in the media strip
+/// or a playlist): on the Announcements layer when it belongs to the announcements (see
+/// `announcements::for_media`), otherwise behind the words.
+pub fn show_media_item(show: &Show, state: &mut HomeState, index: usize, commands: &mut Vec<Command>) {
+    let Some(item) = show.media().get(index) else { return };
+    match crate::announcements::for_media(state, item) {
+        Some(click) => state.announcement_click = Some(click),
+        None => commands.push(Command::ShowMedia(index)),
+    }
+}
+
+/// Plays a media playlist, as a click on it in a playlist does: round on the Announcements layer
+/// when it belongs to the announcements, otherwise on the media layer.
+pub fn play_media_playlist(state: &mut HomeState, id: sp_model::Uuid) {
+    match crate::announcements::for_media_playlist(state, id) {
+        Some(click) => state.announcement_click = Some(click),
+        None => state.media_request = Some(crate::home::MediaRequest::PlayPlaylist(Some(id))),
+    }
+}
+
 /// The media strip, the foot of the dock: "Media", the menu that shows all media or one media
 /// playlist, how one picture or video gives way to the next, the button that adds some, then
 /// the pictures and videos with their names. The one showing is ringed in orange.
@@ -5968,7 +5994,7 @@ pub fn media_strip(
                             // Its number, after Shift-modifier-M: the number shows it.
                             let numbers = &state.numbers;
                             if crate::keys::Numbers::picked(numbers, crate::keys::NumbersOf::Media, placed.len() - 1) {
-                                commands.push(Command::ShowMedia(index));
+                                show_media_item(show, state, index, commands);
                             }
                             // A drag starting on an item picks out the items it passes over while it
                             // stays in the bin (in a media playlist's own view, moves it there);
@@ -5991,7 +6017,8 @@ pub fn media_strip(
                                     carried: false,
                                 });
                             }
-                            // A click shows it behind the words; with Command or Shift it is only
+                            // A click shows it behind the words (or on the Announcements layer,
+                            // when it is one of the announcements); with Command or Shift it is only
                             // picked out (to delete several at once).
                             if response.clicked() {
                                 state.picking = crate::home::Picking::Media;
@@ -6003,7 +6030,7 @@ pub fn media_strip(
                                     mods,
                                 );
                                 if !mods.command && !mods.shift {
-                                    commands.push(Command::ShowMedia(index));
+                                    show_media_item(show, state, index, commands);
                                 }
                             }
                             if !ui.is_rect_visible(rect) {
@@ -6029,7 +6056,8 @@ pub fn media_strip(
                                 ui.painter().rect_filled(tag, 3.0, Color32::from_black_alpha(178));
                                 ui.painter().galley(tag.min + vec2(5.0, 2.0), galley, Color32::WHITE);
                             }
-                            let live = show.live_media() == Some(index);
+                            let live =
+                                show.live_media() == Some(index) || crate::announcements::shows_item(state, item.id);
                             let picked = state.picked_media.contains(&index);
                             if live {
                                 ui.painter().rect_stroke(image, RADIUS, Stroke::new(3.0, TALLY), StrokeKind::Outside);
