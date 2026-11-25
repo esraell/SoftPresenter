@@ -187,13 +187,23 @@ pub fn save(timers: &[Timer]) -> Result<(), String> {
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
-            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+            tf(
+                "media.no_folder",
+                "Could not make the app's folder: {error}",
+                &[("error", &crate::notices::write_problem(&e))],
+            )
         })?;
     }
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, serde_json::to_string_pretty(timers).unwrap_or_default())
         .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| tf("tools.timers.not_saved", "Could not save the timers: {error}", &[("error", &e.to_string())]))
+        .map_err(|e| {
+            tf(
+                "tools.timers.not_saved",
+                "Could not save the timers: {error}",
+                &[("error", &crate::notices::write_problem(&e))],
+            )
+        })
 }
 
 #[cfg(test)]

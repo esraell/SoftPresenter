@@ -5189,11 +5189,9 @@ impl App {
             notices.info("Reading Ukrainian_Ogienko.xml\u{2026}");
             notices.info("Installed Ukrainian Ogienko");
         }
+        // The notice a church sees when the playlists can't be written to a full disk.
         if matches!(look.as_str(), "trouble" | "list") {
-            notices.trouble(
-                "SoftPresenter couldn't save the playlists: the disk is full. Make room, and they are saved \
-                 again with the next change.",
-            );
+            notices.trouble(service::not_saved(&std::io::Error::from(std::io::ErrorKind::StorageFull)));
         }
         if matches!(look.as_str(), "list") {
             egui::Popup::open_id(&running.egui_ctx, notices::list_id());

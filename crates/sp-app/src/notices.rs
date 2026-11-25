@@ -359,6 +359,21 @@ pub fn time_of_day(time: i64, form: &crate::clock::TimeForm) -> String {
     form.hours_minutes(local.hour(), local.minute())
 }
 
+/// Why a file couldn't be written, for the end of a notice: the usual reasons in plain words in
+/// the language set (a full disk, a place SoftPresenter may not write in, a disk that can only be
+/// read), and any other as the system gives it.
+pub fn write_problem(error: &std::io::Error) -> String {
+    use std::io::ErrorKind;
+    match error.kind() {
+        ErrorKind::StorageFull => t("notices.reason.disk_full", "the disk is full").to_owned(),
+        ErrorKind::PermissionDenied => {
+            t("notices.reason.not_allowed", "SoftPresenter isn't allowed to write there").to_owned()
+        }
+        ErrorKind::ReadOnlyFilesystem => t("notices.reason.read_only", "the disk can only be read").to_owned(),
+        _ => error.to_string(),
+    }
+}
+
 /// The status button's size, in points: it never changes size or place.
 pub const BUTTON: egui::Vec2 = egui::vec2(52.0, 30.0);
 
@@ -754,6 +769,27 @@ fn paint_mark(painter: &egui::Painter, at: egui::Pos2, kind: Kind) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_not_written_says_why_in_the_language_set() {
+        use crate::i18n::{Language, with_language};
+        use std::io::{Error, ErrorKind};
+        let full = Error::from(ErrorKind::StorageFull);
+        with_language(Language::English, || {
+            assert_eq!(crate::service::not_saved(&full), "Could not save the playlists: the disk is full");
+        });
+        with_language(Language::Spanish, || {
+            assert_eq!(crate::service::not_saved(&full), "No se pudieron guardar las listas: el disco está lleno");
+            assert_eq!(
+                write_problem(&Error::from(ErrorKind::PermissionDenied)),
+                "SoftPresenter no tiene permiso para escribir ahí"
+            );
+            assert_eq!(write_problem(&Error::from(ErrorKind::ReadOnlyFilesystem)), "el disco es de solo lectura");
+        });
+        // Any other reason is the system's own.
+        let other = Error::other("the cable came out");
+        assert_eq!(write_problem(&other), "the cable came out");
+    }
 
     #[test]
     fn the_button_is_quiet_then_dotted_then_amber_then_asks() {

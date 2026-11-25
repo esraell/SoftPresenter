@@ -909,13 +909,23 @@ pub fn save_prefs(prefs: &Prefs) -> Result<(), String> {
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
-            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+            tf(
+                "media.no_folder",
+                "Could not make the app's folder: {error}",
+                &[("error", &crate::notices::write_problem(&e))],
+            )
         })?;
     }
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, serde_json::to_string_pretty(prefs).unwrap_or_default())
         .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| tf("notices.save.settings", "Could not save the settings: {error}", &[("error", &e.to_string())]))
+        .map_err(|e| {
+            tf(
+                "notices.save.settings",
+                "Could not save the settings: {error}",
+                &[("error", &crate::notices::write_problem(&e))],
+            )
+        })
 }
 
 fn bible_page_file() -> Option<std::path::PathBuf> {
@@ -957,13 +967,21 @@ pub fn save_bible_history(history: &[HistoryEntry]) -> Result<(), String> {
 fn save_history_in(path: &std::path::Path, history: &[HistoryEntry]) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
-            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+            tf(
+                "media.no_folder",
+                "Could not make the app's folder: {error}",
+                &[("error", &crate::notices::write_problem(&e))],
+            )
         })?;
     }
     let text = serde_json::to_string_pretty(history).unwrap_or_default();
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, text).and_then(|()| std::fs::rename(&partial, path)).map_err(|e| {
-        tf("notices.save.bible_history", "Could not save the Bible history: {error}", &[("error", &e.to_string())])
+        tf(
+            "notices.save.bible_history",
+            "Could not save the Bible history: {error}",
+            &[("error", &crate::notices::write_problem(&e))],
+        )
     })
 }
 
@@ -979,13 +997,21 @@ pub fn save_bible_page(page: &SavedPassage) -> Result<(), String> {
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
-            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+            tf(
+                "media.no_folder",
+                "Could not make the app's folder: {error}",
+                &[("error", &crate::notices::write_problem(&e))],
+            )
         })?;
     }
     let text = serde_json::to_string_pretty(page).unwrap_or_default();
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, text).and_then(|()| std::fs::rename(&partial, &path)).map_err(|e| {
-        tf("notices.save.bible_page", "Could not save the Bible page's settings: {error}", &[("error", &e.to_string())])
+        tf(
+            "notices.save.bible_page",
+            "Could not save the Bible page's settings: {error}",
+            &[("error", &crate::notices::write_problem(&e))],
+        )
     })
 }
 
@@ -1021,20 +1047,34 @@ pub fn set_aside(path: &std::path::Path, problem: &str) {
     }
 }
 
+/// What the window says when the playlists couldn't be written: a plain sentence with the
+/// system's reason.
+pub fn not_saved(error: &std::io::Error) -> String {
+    tf(
+        "notices.save.services",
+        "Could not save the playlists: {error}",
+        &[("error", &crate::notices::write_problem(error))],
+    )
+}
+
 /// Writes the services to their file. The error is a plain sentence.
 pub fn save(services: &Services) -> Result<(), String> {
     let path = file().ok_or_else(|| {
-        t("notices.save.no_place_services", "Could not find where to keep services on this computer.").to_owned()
+        t("notices.save.no_place_services", "Could not find where to keep playlists on this computer.").to_owned()
     })?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
-            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+            tf(
+                "media.no_folder",
+                "Could not make the app's folder: {error}",
+                &[("error", &crate::notices::write_problem(&e))],
+            )
         })?;
     }
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, services.to_json())
         .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| tf("notices.save.services", "Could not save the services: {error}", &[("error", &e.to_string())]))
+        .map_err(|e| not_saved(&e))
 }
 
 #[cfg(test)]

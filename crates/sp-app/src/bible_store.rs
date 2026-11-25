@@ -86,13 +86,22 @@ fn install_bytes_in(folder: &Path, bytes: &[u8], trash_old: bool) -> Result<(Pat
     let name = file_name(&bible.info.id)
         .ok_or_else(|| t("bibles.store.no_id", "This Bible file does not say which Bible it is.").to_owned())?;
     std::fs::create_dir_all(folder).map_err(|e| {
-        tf("bibles.store.no_folder", "Could not make the Bibles folder: {error}", &[("error", &e.to_string())])
+        tf(
+            "bibles.store.no_folder",
+            "Could not make the Bibles folder: {error}",
+            &[("error", &crate::notices::write_problem(&e))],
+        )
     })?;
     let path = folder.join(name);
     // Write beside it and rename, so a half-written file is never left under the real name.
     let partial = path.with_extension("spbible.part");
-    std::fs::write(&partial, bytes)
-        .map_err(|e| tf("bibles.store.not_saved", "Could not save the Bible: {error}", &[("error", &e.to_string())]))?;
+    std::fs::write(&partial, bytes).map_err(|e| {
+        tf(
+            "bibles.store.not_saved",
+            "Could not save the Bible: {error}",
+            &[("error", &crate::notices::write_problem(&e))],
+        )
+    })?;
     if trash_old && path.is_file() {
         crate::sweep::to_trash(&path).map_err(|e| {
             let _ = std::fs::remove_file(&partial);
@@ -103,8 +112,13 @@ fn install_bytes_in(folder: &Path, bytes: &[u8], trash_old: bool) -> Result<(Pat
             )
         })?;
     }
-    std::fs::rename(&partial, &path)
-        .map_err(|e| tf("bibles.store.not_saved", "Could not save the Bible: {error}", &[("error", &e.to_string())]))?;
+    std::fs::rename(&partial, &path).map_err(|e| {
+        tf(
+            "bibles.store.not_saved",
+            "Could not save the Bible: {error}",
+            &[("error", &crate::notices::write_problem(&e))],
+        )
+    })?;
     // The same Bible kept before the rename is replaced, not left beside it.
     let _ = std::fs::remove_file(path.with_extension("pcbible"));
     Ok((path, bible.info))

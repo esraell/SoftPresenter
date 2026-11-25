@@ -376,7 +376,7 @@ pub fn save_song(path: &Path, song: &Presentation) -> Result<PathBuf, String> {
         tf(
             "notices.song.not_saved",
             "{file}: could not be saved ({error}).",
-            &[("file", &target.display().to_string()), ("error", &e.to_string())],
+            &[("file", &target.display().to_string()), ("error", &crate::notices::write_problem(&e))],
         )
     })?;
     Ok(target)

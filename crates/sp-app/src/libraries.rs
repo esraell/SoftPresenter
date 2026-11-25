@@ -100,12 +100,20 @@ pub fn save(libraries: &[Library]) -> Result<(), String> {
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
-            tf("media.no_folder", "Could not make the app's folder: {error}", &[("error", &e.to_string())])
+            tf(
+                "media.no_folder",
+                "Could not make the app's folder: {error}",
+                &[("error", &crate::notices::write_problem(&e))],
+            )
         })?;
     }
     let partial = path.with_extension("json.part");
     std::fs::write(&partial, to_json(libraries)).and_then(|()| std::fs::rename(&partial, &path)).map_err(|e| {
-        tf("notices.save.libraries", "Could not save the libraries: {error}", &[("error", &e.to_string())])
+        tf(
+            "notices.save.libraries",
+            "Could not save the libraries: {error}",
+            &[("error", &crate::notices::write_problem(&e))],
+        )
     })
 }
 

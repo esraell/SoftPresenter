@@ -115,14 +115,18 @@ pub fn save(theme: &Theme) -> Result<(), String> {
 
 fn save_in(folder: &Path, theme: &Theme) -> Result<(), String> {
     std::fs::create_dir_all(folder).map_err(|e| {
-        tf("notices.save.no_themes_folder", "Could not make the Themes folder: {error}", &[("error", &e.to_string())])
+        tf(
+            "notices.save.no_themes_folder",
+            "Could not make the Themes folder: {error}",
+            &[("error", &crate::notices::write_problem(&e))],
+        )
     })?;
     let path = folder.join(format!("{}.sptheme", theme.id));
     // Write beside it and rename, so a half-written file is never left under the real name.
     let partial = path.with_extension("sptheme.part");
-    std::fs::write(&partial, theme.to_json())
-        .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| tf("notices.save.theme", "Could not save the theme: {error}", &[("error", &e.to_string())]))?;
+    std::fs::write(&partial, theme.to_json()).and_then(|()| std::fs::rename(&partial, &path)).map_err(|e| {
+        tf("notices.save.theme", "Could not save the theme: {error}", &[("error", &crate::notices::write_problem(&e))])
+    })?;
     // The same theme saved before the rename is replaced by the new file, not left beside it.
     let _ = std::fs::remove_file(folder.join(format!("{}.pctheme", theme.id)));
     Ok(())
