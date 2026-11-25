@@ -97,8 +97,12 @@ impl crate::App {
         let connection = &self.timelychurch;
         let settings = &connection.settings;
         let mut text = format!("TimelyChurch: {}", status_words(&connection.status));
-        if !settings.church.is_empty() && connection.status != Status::NotConnected {
-            text.push_str(&format!(" to {} ({})", settings.church, settings.address));
+        if !settings.church.is_empty() {
+            match connection.status {
+                Status::Connected => text.push_str(&format!(" to {} ({})", settings.church, settings.address)),
+                Status::Disconnected => text.push_str(&format!(" ({}, {})", settings.church, settings.address)),
+                _ => {}
+            }
         }
         let checked = settings.last_checked.and_then(|at| chrono::DateTime::from_timestamp(at, 0));
         if let Some(at) = checked {

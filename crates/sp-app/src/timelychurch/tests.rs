@@ -800,6 +800,19 @@ mod with_the_demo_church {
     }
 
     #[test]
+    fn a_computer_disconnected_in_timelychurch_still_says_so_after_a_restart() {
+        let root = folder("restart");
+        let files = Files::at(root.clone());
+        let left =
+            Settings { address: "https://x.example.org".to_owned(), disconnected_there: true, ..Settings::default() };
+        files.save_settings(&left).expect("saved");
+        let mut connection = Connection::new(Some("https://x.example.org".to_owned()), Some(files));
+        assert_eq!(connection.status, Status::Disconnected);
+        assert!(connection.check_now().is_err(), "nothing is asked until it is connected again");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn nothing_is_offered_or_asked_without_the_switch() {
         let mut connection = Connection::new(None, None);
         assert_eq!(connection.status, Status::Off);

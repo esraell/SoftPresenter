@@ -187,7 +187,7 @@ with their songs"), shown only while it is offered. Its page:
   TimelyChurch and forgets its connection. The songs and playlists it made stay as they are.")
   and forgets the token on this computer.
 - **Disconnected in TimelyChurch:** "This computer was disconnected from TimelyChurch." over the
-  connect form.
+  connect form, after a restart too, until it is connected again.
 - The logo comes later (TimelyChurch will send its files); until then a "T" mark.
 
 The token goes into the Mac's Keychain (a test copy started with `SOFTPRESENTER_DATA` keeps its
@@ -206,7 +206,8 @@ SONG|PLAYLIST`, `keep-mine SONG`, `disconnect --yes`. A remote page can't use it
 described shapes: a setlist today and a plan in a week, a two-language song whose chorus is
 sung three times, a one-language song, and a deleted song (404); it answers 304 to its ETag,
 records each song use once by its idempotency key, and can be changed while it runs
-(`POST /_mock/next`: a song's words changed, the plan removed, a new setlist; `/_mock/disconnect`;
+(`POST /_mock/next`: a song's words changed, the plan removed, a new setlist; and again: the
+two-language song's bridge changed; `/_mock/disconnect`;
 `/_mock/wait`; `GET /_mock/uses`). The tests run against it; to try the app by hand,
 `cargo test -p sp-app timelychurch::mock::serve -- --ignored --nocapture` serves it at
 `http://127.0.0.1:4320` (pairing code `DEMO-2026`), and a test copy is started with

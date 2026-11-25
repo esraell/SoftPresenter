@@ -614,7 +614,8 @@ fn joined_words(made: &super::song::MadeSong) -> String {
     if let Some(second) = &made.second {
         said.push_str(&format!(", with the {second} translation under the words"));
         if made.untranslated > 0 {
-            said.push_str(&format!(" ({} lines untranslated)", made.untranslated));
+            let lines = if made.untranslated == 1 { "line" } else { "lines" };
+            said.push_str(&format!(" ({} {lines} untranslated)", made.untranslated));
         }
     }
     if !made.unmatched.is_empty() {

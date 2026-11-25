@@ -36,7 +36,7 @@ mod wire;
 pub use plan::{PlannedService, distinct_names, from_service, to_follow, to_service};
 pub use song::{fresh_source, make_song};
 pub use store::Files;
-pub use sync::{Connection, Status};
+pub use sync::{Connection, Status, disconnected_words};
 #[cfg(test)]
 pub use view::ServiceRow;
 pub use view::{Request, RowState, View};

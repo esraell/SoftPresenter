@@ -7,8 +7,8 @@
 //! (404). It answers "nothing changed" (304) to the ETag it gave, records each song use once
 //! by its idempotency key, and can be changed while it runs:
 //!
-//! - `POST /_mock/next`: the next version of the church (a song's words changed, the plan
-//!   removed, a new setlist);
+//! - `POST /_mock/next`: the next version of the church (first: a song's words changed, the
+//!   plan removed, a new setlist; then: the two-language song's bridge changed);
 //! - `POST /_mock/disconnect`: every token refused from now on (401);
 //! - `POST /_mock/wait`: the next request is asked to wait (429);
 //! - `GET /_mock/uses`: the song uses recorded, and how many were sent in all.
@@ -250,7 +250,11 @@ fn services(version: u32, today: chrono::NaiveDate) -> serde_json::Value {
     let changed = version >= 1;
     let mut list = vec![serde_json::json!({
         "id": 501, "type": "setlist", "name": "Sunday Morning (Demo)", "date": day(today, 0), "time": "10:00",
-        "updated_at": if changed { "2026-11-24T08:00:00Z" } else { "2026-11-20T10:00:00Z" },
+        "updated_at": match version {
+            0 => "2026-11-20T10:00:00Z",
+            1 => "2026-11-24T08:00:00Z",
+            _ => "2026-11-24T09:00:00Z",
+        },
         "items": [
             song_item(1, 101, "Morning Light", "G", "Opening"),
             song_item(2, 102, "Quiet Evening", if changed { "E" } else { "D" }, "Opening"),
@@ -296,7 +300,7 @@ fn song(id: &str, version: u32) -> Option<serde_json::Value> {
                                               "Open doors and open hands", "Walk together through the lands"]},
                 {"name": "Chorus", "lines": ["Sing, sing the morning song", "Sing it all the day long"]},
                 {"name": "Verse 2", "lines": ["Noon is high and work is near", "Every voice is ringing clear"]},
-                {"name": "Bridge", "lines": ["Hold on, hold on"]}
+                {"name": "Bridge", "lines": [if version >= 2 { "Hold on, hold fast" } else { "Hold on, hold on" }]}
             ],
             "order": ["Verse 1", "Chorus", "Verse 2", "Chorus", "Bridge", "Chorus"],
             "translations": [{
@@ -310,7 +314,7 @@ fn song(id: &str, version: u32) -> Option<serde_json::Value> {
                     {"name": "Bridge", "lines": ["Espera, espera"]}
                 ]
             }],
-            "updated_at": "2026-11-20T10:00:00Z"
+            "updated_at": if version >= 2 { "2026-11-24T09:00:00Z" } else { "2026-11-20T10:00:00Z" }
         })),
         "102" => Some(serde_json::json!({
             "id": 102,

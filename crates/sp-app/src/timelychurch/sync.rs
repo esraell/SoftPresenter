@@ -160,7 +160,9 @@ impl Connection {
         if connection.gate.is_none() {
             return connection;
         }
-        connection.status = Status::NotConnected;
+        // Disconnected in TimelyChurch before the app was last closed: still said.
+        connection.status =
+            if connection.settings.disconnected_there { Status::Disconnected } else { Status::NotConnected };
         connection.list = connection
             .files
             .as_ref()

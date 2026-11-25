@@ -575,8 +575,13 @@ fn timelychurch_page(ui: &mut egui::Ui, view: &mut crate::timelychurch::View) {
             );
         }
         S::NotConnected | S::Pairing | S::Disconnected => {
-            if let Some(trouble) = &view.trouble {
-                ui.label(egui::RichText::new(trouble.as_str()).color(crate::studio::TALLY));
+            // Disconnected in TimelyChurch: said as TimelyChurch asked, in the language set now.
+            let said = match &view.status {
+                S::Disconnected => Some(crate::timelychurch::disconnected_words()),
+                _ => view.trouble.clone(),
+            };
+            if let Some(said) = said {
+                ui.label(egui::RichText::new(said).color(crate::studio::TALLY));
                 ui.add_space(6.0);
             }
             timelychurch_connect(ui, view, &mut request);
@@ -675,32 +680,32 @@ fn timelychurch_connected(
         "Connected to {church} · {when}",
         &[("church", &view.church), ("when", &when)],
     );
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(said).color(TEXT));
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui
-                .button(t("integrations.disconnect", "Disconnect"))
-                .on_hover_text(t(
-                    "integrations.timelychurch.disconnect.hint",
-                    "Forget the connection on this computer; the songs and playlists it made stay",
-                ))
-                .clicked()
-            {
-                ask_to_disconnect(ui, "timelychurch");
-            }
-            if ui
-                .add_enabled(!view.checking, egui::Button::new(t("integrations.timelychurch.check_now", "Check Now")))
-                .on_hover_text(t(
-                    "integrations.timelychurch.check_now.hint",
-                    "Ask TimelyChurch for changes now (it is asked every few minutes anyway)",
-                ))
-                .clicked()
-            {
-                *request = Some(crate::timelychurch::Request::CheckNow);
-            }
-        });
-    });
+    // The church's name and the time can be long in any language: the buttons go under them.
+    ui.label(egui::RichText::new(said).color(TEXT));
     ui.label(egui::RichText::new(view.address.as_str()).size(11.5).color(TEXT_FAINT));
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(!view.checking, egui::Button::new(t("integrations.timelychurch.check_now", "Check Now")))
+            .on_hover_text(t(
+                "integrations.timelychurch.check_now.hint",
+                "Ask TimelyChurch for changes now (it is asked every few minutes anyway)",
+            ))
+            .clicked()
+        {
+            *request = Some(crate::timelychurch::Request::CheckNow);
+        }
+        if ui
+            .button(t("integrations.disconnect", "Disconnect"))
+            .on_hover_text(t(
+                "integrations.timelychurch.disconnect.hint",
+                "Forget the connection on this computer; the songs and playlists it made stay",
+            ))
+            .clicked()
+        {
+            ask_to_disconnect(ui, "timelychurch");
+        }
+    });
     if view.uses_waiting > 0 {
         let waiting = tn(
             "integrations.timelychurch.uses_waiting",
