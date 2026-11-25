@@ -607,11 +607,16 @@ fn unreachable_bridge() -> Bridge {
 }
 
 impl crate::App {
-    /// Refuses, while a remote page's command runs, what would open a file or folder on the
-    /// computer: called where each such command opens it, behind the policy's own refusal.
+    /// Refuses, while a remote page's command runs (or an AI assistant's, `mcp`), what would open
+    /// a file or folder on the computer: called where each such command opens it, behind the
+    /// policy's own refusal.
     pub(crate) fn only_at_the_computer(&self, what: policy::AtComputer) -> Result<(), String> {
         if self.remote_call {
             return Err(what.words().to_owned());
+        }
+        // The page's words name the page; an assistant is told plainly.
+        if self.mcp_call {
+            return Err("That is done at the computer, never by an AI assistant.".to_owned());
         }
         Ok(())
     }

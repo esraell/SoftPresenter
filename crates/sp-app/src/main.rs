@@ -44,6 +44,7 @@ mod live_tabs;
 mod load;
 mod macros;
 mod make_cli;
+mod mcp;
 mod media;
 mod menubar;
 mod messages;
@@ -1688,6 +1689,8 @@ struct App {
     /// True while a command from a remote page is carried out: the handlers that would open a
     /// file or folder on the computer refuse then (`only_at_the_computer`), whatever the policy let by.
     remote_call: bool,
+    /// The same while an AI assistant's command (`sp mcp`) is carried out (`mcp::policy`).
+    mcp_call: bool,
     show: Show,
     /// The file each song came from, in the show's order; `None` for the bundled sample.
     sources: Vec<Option<PathBuf>>,
@@ -8724,6 +8727,11 @@ impl App {
                         running.home_state.preferences_pane = 4;
                         running.home_state.canva.open = true;
                     }
+                    // Integrations scrolled to the AI assistants (MCP) card.
+                    "mcp" => {
+                        running.home_state.preferences_pane = 4;
+                        running.home_state.mcp.reveal = true;
+                    }
                     // The songbooks' page, where the song catalog is offered.
                     "songbooks" => {
                         running.home_state.preferences_pane = 4;
@@ -10312,6 +10320,12 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Menu(id) => id,
             // A command from `softpresenter ctl`: done now, and its outcome sent back.
             AppEvent::Control(incoming) => {
+                // An AI assistant's, through `sp mcp`: checked against Settings › Integrations ›
+                // AI assistants and `mcp::policy` first (which never lets a wait through).
+                if incoming.request.mcp.is_some() {
+                    self.mcp_control(el, incoming);
+                    return;
+                }
                 // A wait for a change, with nothing changed yet, is held and answered later
                 // (`answer_waiting`, from `about_to_wait`).
                 let Some(incoming) = self.hold_wait(incoming) else { return };
@@ -11095,6 +11109,9 @@ fn main() -> ExitCode {
     }
     match args.first().map(String::as_str) {
         Some("ctl") => return control::run_client(args[1..].to_vec()),
+        // `softpresenter mcp` (`sp mcp`): the MCP server an AI assistant starts, talking to it
+        // over the standard input and output and to the running app over the control socket.
+        Some("mcp") => return mcp::serve(),
         // `softpresenter decklink-check …`: lists the DeckLink devices, and with `play` sends a
         // test picture to one, from a terminal, without the app.
         Some("decklink-check") => return sp_decklink::check::run(&args[1..], "softpresenter decklink-check"),
@@ -11443,6 +11460,7 @@ fn main() -> ExitCode {
         remote_started: false,
         remote_pages_seen: 0,
         remote_call: false,
+        mcp_call: false,
         _control: control,
         show,
         sources,

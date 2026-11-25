@@ -19,7 +19,8 @@ change, as everything else may (see the README).
   [changing a slide](#changing-a-slide) ·
   [playlists and libraries](#playlists-and-libraries) · [themes](#themes) ·
   [screens and settings](#screens-and-settings) ·
-  [undo, jobs and the menu bar](#undo-jobs-and-the-menu-bar) · [notices](#notices) · [Remote Control](#remote-control)
+  [undo, jobs and the menu bar](#undo-jobs-and-the-menu-bar) · [notices](#notices) · [Remote Control](#remote-control) ·
+  [AI assistants (MCP)](#ai-assistants-mcp)
 - [Song text](#song-text) · [song files edited outside the app](#song-files-edited-outside-the-app) ·
   [song packs](#song-packs)
 - [Recipes](#recipes) · [replies as JSON](#replies-as-json) ·
@@ -146,7 +147,7 @@ output sent to a file), or pipe it: `softpresenter.exe COMMAND | more`.
   doesn't fill it: `status`, `songs`, `slides`, `slide SONG N` and `slide item …`, `playlists`,
   `playlist [NAME]`,
   `libraries`, `themes`, `screens`, `timers`, `messages`, `props`, `macros`, `groups`,
-  `displays`, `bibles`, `search`, `job`, `help`, and `media`, `media-playlist`, `audio`,
+  `displays`, `bibles`, `bible text`, `bible search`, `search`, `job`, `help`, and `media`, `media-playlist`, `audio`,
   `audio playlists`, `settings`, `menu`, `voxlive` and `voxlive screens` with nothing after them.
 
 ## Trying it safely
@@ -488,7 +489,8 @@ deleted)".
 | `bible REFERENCE` | Looks a passage up on the Bible page, with the translations and options chosen there |
 | `bible REFERENCE --show` | The same, and puts its first verse on screen; `next` and `previous` then go verse by verse (with a slide a verse, on through the passage's chapter) |
 | `bible REFERENCE --add [to PLAYLIST]` | Looks it up and keeps it in a playlist, as the page's + Add does; the same passage in the same translations goes in once ("John 3:16 is already in Sunday.") |
-| `bible search WORDS` | Verses with those words, in the Bibles in use written in their alphabet (in the first translation when none is), each named in its Bible's language with its numbers; each line names its Bible when more than one has them |
+| `bible text REFERENCE` | The passage's verses, slide by slide, made with the Bible page's translations and options as looking it up would make them, but leaving the page as it is (what it shows, what is typed in it, and the view the window is in): for a script or an assistant reading a passage while the operator uses the page |
+| `bible search WORDS` | Verses with those words, in the Bibles in use written in their alphabet (in the first translation when none is), each named in its Bible's language with its numbers; each line names its Bible when more than one has them. The page's own Search and what it found stay as they are |
 | `bible rows [BIBLE…]` | The translations shown, first to last; with names (short or whole), sets them |
 | `bible options [verses=on\|off break=on\|off translation=on\|off reference=verse\|passage\|last\|none]` | Verse numbers, a new slide for each verse, the translation's name, where the reference goes |
 | `bible history` | The passages looked up |
@@ -567,6 +569,7 @@ names the passage as it was typed, while the screens and the playlist follow the
 | Command | Does |
 |---|---|
 | `song new TITLE [FILE.txt] [--library NAME\|none]` | A new song, with its words from a [song text](#song-text) file, or one empty slide |
+| `song new TITLE --words TEXT` | A new song with its words given as song text in one word (quoted, line breaks and all): for a script or an assistant that has the words but no file. Every other word is the title, and the disk is never looked at |
 | `song import FILE… \| FOLDER… [--library NAME\|none]` | Imports songs, as File › Import Songs does (any of its kinds of file; formats below). A folder becomes a library of its name (and each folder in it another), unless `--library` says where its songs go. A song already in the library is skipped |
 | `song text SONG` | Prints the song as song text |
 | `song text SONG FILE` | Replaces the song's words from a song text file, keeping the song (its id, theme, playlist places) and its slides' looks, labels and notes where they still match |
@@ -779,15 +782,16 @@ it and `slide frame` moves it, while `slide text` and `slide style` say "The sli
 | `playlist open NAME` | Puts a playlist in front |
 | `playlist add SONG [to PLAYLIST]` | Adds a song at the end (of the playlist in front if none is named); `VoxLive` adds the VoxLive item, once VoxLive is connected |
 | `playlist new NAME`, `playlist rename OLD to NEW`, `playlist delete NAME` | Makes, renames or deletes a playlist (the last one stays; deleted at once, `sp undo` puts it back). The playlist in front stays in front with its open item; deleting the one in front brings the one before it (or the next) to the front |
-| `playlist remove ITEM [from PLAYLIST]`, `playlist move ITEM to N [in PLAYLIST]` | Takes out or moves an item, by number or title; the open item of the playlist in front stays open (unless it is the one taken out) |
+| `playlist remove ITEM [from PLAYLIST]`, `playlist move ITEM to N [in PLAYLIST]` | Takes out or moves an item, by number, title or `uid` (from `playlist --json`, which names it exactly wherever it has moved to); the open item of the playlist in front stays open (unless it is the one taken out) |
 | `playlist header TEXT [at N] [in PLAYLIST]` | A header that groups the items after it |
 | `playlist media ITEM [at N] [in PLAYLIST]` | A picture or video from the media bin (the countdown video) |
 | `playlist media-playlist NAME [at N] [in PLAYLIST]` | A media playlist (the announcement loop), to play from the playlist |
 | `playlist placeholder NAME [at N] [in PLAYLIST]` | A place kept for something to come (the sermon slides) |
+| `playlist passage REFERENCE [at N] [in PLAYLIST]` | A Bible passage, kept as `bible REFERENCE --add` keeps one (the Bible page's translations and options, named in the language typed; the same passage in the same translations goes in once), but leaving the Bible page as it is |
 | `playlist fill PLACEHOLDER with SONG`, `… with media ITEM` `[in PLAYLIST]` | Puts a song, or a picture or video, in a placeholder's place (a song the playlist has elsewhere already is refused, and stays where it is: "River Song is already in Sunday Evening (item 4); a playlist has a song once."); in the playlist in front it becomes the open item, in another the open item stays |
 | `playlist item N show-with NAME\|usual [--keep] [in PLAYLIST]` | The theme version a song or passage goes on screen in (see [theme versions](#theme-versions)) |
 
-In `playlist header|media|media-playlist|placeholder`, a last `in` names a playlist only when
+`playlist go` takes the item's `uid` too. In `playlist header|media|media-playlist|placeholder|passage`, a last `in` names a playlist only when
 there is one called that, and a last `at` a place only when a number follows, so either word
 can be part of the name: `playlist media Live at Church.mp4`, `playlist placeholder Sermon in
 Romans`.
@@ -1298,6 +1302,20 @@ a remote page (a remote page can answer the question in the notices).
     $ sp mirror allow
     Anna's iPhone may show its screen.
 
+## AI assistants (MCP)
+
+`sp mcp` (or `softpresenter mcp`) is a Model Context Protocol server, for Claude Code, Claude
+Desktop and other AI assistants: the assistant starts it, and it passes the assistant's tool
+calls to the running app as `sp` commands. It never starts SoftPresenter. Nothing works until
+**Settings › Integrations › AI assistants (MCP)** lets assistants in; changing the screens needs
+a second switch there and the person's yes each time. [mcp.md](mcp.md) says how to connect each
+assistant, what each tool does and what is refused.
+
+    claude mcp add softpresenter -- ~/.local/bin/sp mcp
+
+With `SOFTPRESENTER_DATA` and `SOFTPRESENTER_CONTROL_SOCKET` set, as for `sp`, it reaches that
+test copy only.
+
 ## Song text
 
 The format `song new`, `song text` and the app's Edit Words use:
@@ -1477,7 +1495,8 @@ the command's facts where it has any:
 | `slide SONG N`, `slide item N SLIDE` | `song`, `slide`, `group`, `enabled`, `label`, `notes`, `hot_key`, `transition`, `template`, `actions`, `advance`, and `objects`: each with `object` (its number), `name`, `role`, `kind`, `text`, `frame` (`x`, `y`, `w`, `h`, and `own`), `style` (the settings the slide sets itself) and `look` (every setting, the theme's filled in) |
 | `song text SONG` | `{"song": "River Song", "text": "[Verse 1]\n…"}` |
 | `song info SONG` | `id`, `title`, `artist`, `author`, `publisher`, `year`, `ccli`, `slides`, `theme`, `transition`, `loops` |
-| `search WORDS` | `[{"song": "Blessed Assurance", "number": 1, "title": false, "slides": [1]}]` |
+| `search WORDS` | `[{"song": "Blessed Assurance", "number": 1, "id": "e698…", "title": false, "slides": [1]}]` |
+| `bible text REFERENCE` | `passage` (as a playlist keeps it), `bibles` (the translations' ids), and `slides`: `[{"slide": 1, "group": "John 3:16", "words": "…"}]` |
 | `bible search WORDS` | `[{"verse": "John 3:16", "chapter": …, "words": "…", "bible": "KJV"}]` |
 | `song import` | `imported`, `making` (presentations still being turned into slides), `opening` (song bundles still being read), `notes` (pictures or videos a bundle's song came without, and what a bundle left out), `pictures` and `videos` (how many a bundle brought into the media bin), `problems` (songs not imported, those already in the library among them) |
 | `settings` | Every setting, as the app keeps it |
@@ -1537,9 +1556,13 @@ These need the window for now; some can be reached with `sp menu`.
   switched on, is the one way in from the network: HTTPS only, behind a password, and the
   commands that reach the computer's files, the services' keys, the menu bar and Remote Control
   itself are refused there.
-- A request is one line of JSON, `{"v": 1, "args": ["go", "River Song", "2"]}`, at most 64 KB
+- A request is one line of JSON, `{"v": 2, "args": ["go", "River Song", "2"]}`, at most 64 KB
   (`sp` refuses a longer one before sending it); the reply is one line of JSON. `v` is the
-  protocol's version: a command line from a different build is told so.
+  protocol's version: a command line from a different build is told so. A request from
+  [`sp mcp`](#ai-assistants-mcp) also carries `"mcp": {"tool": …, "asked": …, "check": …}`, and the
+  app checks it against Settings › Integrations › AI assistants and its list of what an assistant
+  may do before anything is done (version 2 brought that field, so an app from before refuses
+  such a request rather than carrying it out unchecked).
 - The app answers one command at a time, each within 15 seconds. A
   [`status --wait`](#waiting-for-a-change) is the exception: its connection is held on a thread
   of its own (at most 8 at once, for at most 30 seconds each) while the app carries on.
@@ -1553,6 +1576,6 @@ These need the window for now; some can be reached with `sp menu`.
 
 ## Still to come
 
-The whole app in a browser (the design work's page, on [Remote Control's API](remote-api.md)), a
-view-only password, and an MCP server so AI agents can use these commands as tools. All of them
-will run the same commands as `sp`.
+The whole app in a browser (the design work's page, on [Remote Control's API](remote-api.md)) and a
+view-only password. Both will run the same commands as `sp`, as the remote page and
+[the MCP server](mcp.md) do.

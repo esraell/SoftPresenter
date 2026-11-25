@@ -8,6 +8,18 @@ use crate::control::{Reply, find, numbered};
 use crate::i18n::tf;
 use crate::service::Item;
 
+/// The place of an item of a playlist, named by its number, its title, or its `uid` (from
+/// `playlist --json`), which names it exactly wherever it has been moved to.
+pub(crate) fn item_in(playlist: &crate::service::Service, typed: &str) -> Result<usize, String> {
+    if let Ok(uid) = sp_model::Uuid::parse_str(typed.trim()) {
+        return playlist
+            .place_of_uid(uid)
+            .ok_or_else(|| format!("That item is no longer in {}; look again and try once more.", playlist.name));
+    }
+    let items: Vec<String> = playlist.items.iter().map(|item| item.title().to_owned()).collect();
+    find("item", &items, typed).map_err(|problem| format!("{problem} {} has {} items.", playlist.name, items.len()))
+}
+
 /// Splits `words … KEYWORD more words` at the last KEYWORD: the words before it and after.
 fn split_at_word<'a>(words: &'a [String], keyword: &str) -> (&'a [String], Option<String>) {
     match words.iter().rposition(|w| w.eq_ignore_ascii_case(keyword)) {
@@ -217,9 +229,7 @@ impl crate::App {
     /// An item of a playlist, by its number or its title.
     fn playlist_item(&self, list: usize, typed: &str) -> Result<usize, String> {
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
-        let items: Vec<String> = state.services.list[list].items.iter().map(|item| item.title().to_owned()).collect();
-        find("item", &items, typed)
-            .map_err(|problem| format!("{problem} {} has {} items.", state.services.list[list].name, items.len()))
+        item_in(&state.services.list[list], typed)
     }
 
     /// `playlist new|rename|delete|remove|move|header …`; `None` for a word that isn't one of them.
@@ -249,10 +259,10 @@ impl crate::App {
                     None => Err("playlist move ITEM to N [in PLAYLIST]".to_owned()),
                 }
             }
-            // `playlist header|media|media-playlist|placeholder NAME [at N] [in PLAYLIST]`
+            // `playlist header|media|media-playlist|placeholder|passage NAME [at N] [in PLAYLIST]`
             // "in" names a playlist only when one is called that, and "at" a place only when a
             // number follows, so either can be part of the name ("Live at Church.mp4").
-            "header" | "media" | "media-playlist" | "placeholder" => {
+            "header" | "media" | "media-playlist" | "placeholder" | "passage" => {
                 let (mut head, mut list) = split_at_word(words, "in");
                 if list.as_deref().is_some_and(|typed| self.playlist_at(Some(typed)).is_err()) {
                     (head, list) = (words, None);
@@ -261,7 +271,11 @@ impl crate::App {
                     (text, Some(at)) if at.parse::<usize>().is_ok() => (text, at.parse::<usize>().ok()),
                     _ => (head, None),
                 };
-                self.playlist_put(&word, &text.join(" "), at, list.as_deref())
+                if word == "passage" {
+                    self.playlist_passage(&text.join(" "), at, list.as_deref())
+                } else {
+                    self.playlist_put(&word, &text.join(" "), at, list.as_deref())
+                }
             }
             // `playlist fill PLACEHOLDER with SONG | with media ITEM [in PLAYLIST]`
             "fill" => {
@@ -399,6 +413,40 @@ impl crate::App {
         let name = playlist.name.clone();
         state.services.changed = true;
         Ok(Reply::done(format!("Put the {what} {title} at place {place} in {name}.")))
+    }
+
+    /// Puts a Bible passage into a playlist, at a place (or at the end), as `bible REF --add`
+    /// keeps one (the Bible page's translations and options, named in the language typed), but
+    /// leaving the Bible page as it is. The same passage in the same translations goes in once.
+    fn playlist_passage(&mut self, typed: &str, at: Option<usize>, list: Option<&str>) -> Result<Reply, String> {
+        let typed = typed.trim();
+        if typed.is_empty() {
+            return Err("playlist passage REFERENCE [at N] [in PLAYLIST]".to_owned());
+        }
+        if let Some(problem) = self.bible_reference_problem(typed) {
+            return Err(problem);
+        }
+        let list = self.playlist_at(list)?;
+        let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
+        let (_, saved) = state.bible.passage_typed(typed)?;
+        let item = Item::Passage(saved);
+        let title = item.title().to_owned();
+        let name = state.services.list[list].name.clone();
+        if let Some(was) = state.services.place_of(list, &item) {
+            return Ok(Reply::done(format!("{title} is already in {name} (item {}).", was + 1)));
+        }
+        let playlist = &mut state.services.list[list];
+        let place = at.unwrap_or(playlist.items.len() + 1);
+        if !(1..=playlist.items.len() + 1).contains(&place) {
+            return Err(format!(
+                "{name} has {} items; a passage can go at 1 to {}.",
+                playlist.items.len(),
+                playlist.items.len() + 1
+            ));
+        }
+        playlist.items.insert(place - 1, item);
+        state.services.changed = true;
+        Ok(Reply::done(format!("Put {title} at place {place} in {name}.")))
     }
 
     /// Fills a placeholder with a song, or with a picture or video from the media bin (`media
@@ -1085,7 +1133,9 @@ impl crate::App {
                 many => format!("slides {}", many.iter().map(usize::to_string).collect::<Vec<_>>().join(", ")),
             };
             lines.push(format!("{} ({where_})", title));
-            data.push(serde_json::json!({"song": title, "number": number + 1, "title": in_title, "slides": slides}));
+            data.push(serde_json::json!({
+                "song": title, "number": number + 1, "id": song.id, "title": in_title, "slides": slides,
+            }));
         }
         if lines.is_empty() {
             return Err(format!("No song has \u{201c}{}\u{201d} in its title or words.", typed.trim()));

@@ -245,7 +245,7 @@ complete enough for a large Sunday service, simple enough for a volunteer, light
 old laptop, and open to scripts and AI. First on the list: bringing playlists and media across
 from a church's existing software, and fixing a slide's words from the Service view. After that
 come the whole app in a browser (Remote Control's API is in place; its fuller page is still
-being designed) with a phone remote, and an MCP server for AI assistants. Planned with
+being designed) with a phone remote. Planned with
 [TimelyChurch](https://timelychurch.com): setlists planned there for a service arriving in
 SoftPresenter by themselves. Windows and Linux are in testing; releasing them is the other big
 step.
@@ -260,11 +260,15 @@ script or an AI agent can do too. `sp` (full name `softpresenter`) controls the 
 the command line (`sp status`, `sp next`, `sp clear all`, and slides, media, messages, timers,
 macros, the Bible and every command); the app puts it where a terminal finds it as it starts,
 and Settings › Integrations › Command line installs or removes it.
-Remote Control sends the same commands from a page.
+Remote Control sends the same commands from a page, and `sp mcp` is an MCP server through which
+Claude and other AI assistants prepare services and, when the operator allows it and says yes
+each time, run the screens.
 
 - [docs/app-map.md](docs/app-map.md) maps every view, panel and window, what each part does, the
   command-line command that does the same, where the files are, and how to try the app safely.
 - [docs/cli.md](docs/cli.md) is the command line's reference.
+- [docs/mcp.md](docs/mcp.md) is how to connect an AI assistant, what it can do, and what is
+  refused.
 - [AGENTS.md](AGENTS.md) is for AI coding agents: running the app without disturbing anyone,
   the testing switches, and the rules.
 - [CONTRIBUTING.md](CONTRIBUTING.md) covers sending a change and the commit standard.

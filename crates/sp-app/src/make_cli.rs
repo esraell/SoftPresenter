@@ -421,7 +421,7 @@ impl crate::App {
     fn prop_new(&mut self, words: &[String]) -> Result<Reply, String> {
         let usage = "prop new NAME [PICTURE]   (words of its name, or a picture filling it)";
         // From a remote page every word is the name: the disk is never looked at.
-        let files = !self.remote_call;
+        let files = !self.outside_call();
         let (name_words, picture) = match words.last() {
             Some(last) if files && words.len() > 1 && std::path::Path::new(last).is_file() => {
                 (&words[..words.len() - 1], Some(PathBuf::from(last)))

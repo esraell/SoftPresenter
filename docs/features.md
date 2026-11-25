@@ -1834,9 +1834,37 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   slide can never go on to plain http on this computer (only a test's stand-in opened there
   can). `sp remote` does the same from the command line.
 
+## AI assistants (MCP)
+
+- **Claude, and other AI assistants, can work with SoftPresenter** through `sp mcp`, a Model
+  Context Protocol server in the app's own program, which Claude Code or Claude Desktop starts
+  and which passes each request to the running app as `sp` commands (it never starts the app:
+  with it closed, every tool says "SoftPresenter isn't open"). Off until **Settings ›
+  Integrations › AI assistants (MCP)** lets assistants in; the card also has the line to add it
+  to Claude Code and the snippet for Claude Desktop's configuration, each with Copy, with this
+  computer's path to `sp` filled in. With the first switch on, an assistant can see what is on
+  the screens and each screen, search songs and read their words, look up and search the Bible
+  (leaving the Bible page as the operator has it), list the playlists, media, messages and
+  Bibles, make a song from lyrics (sections, slides, and a translation under each slide's
+  lines), make a playlist and add songs, passages, pictures and videos, headers and placeholders
+  to it in order, and download an offered Bible. With the second, **Let them change what's on
+  the screens**, it can put a song, a playlist item, a passage or a message on the screens, go to
+  the next or previous slide and clear a layer; each time it asks the person first through the
+  assistant ("Put “Amazing Grace” on the screens now?"), in words the server writes from what the
+  app found, and only Yes goes ahead. Taking an item out of a playlist asks too. The app decides,
+  not the assistant: each request is marked as an assistant's and checked against the switches
+  and a list of what an assistant may do; quitting, the menu bar, Settings, the screens' setup,
+  Remote Control, connections and keys, deleting, and anything that names a file are never
+  open to it. The log has a line for each change it makes and each request refused, and why,
+  never their words. Two skills (preparing a service; running the screens safely) come with it,
+  for assistants that load skills from a server, and a Bible download is a task for those that
+  take tasks. See [mcp.md](mcp.md).
+
 ## From the command line
 - Preparing a service from the command line, as the window does it: `playlist new|rename|delete|
-  remove|move|header|media|media-playlist|placeholder|fill`, `bible REF --add [to PLAYLIST]`, `library new|rename|delete|add|remove`,
+  remove|move|header|media|media-playlist|placeholder|fill`, `bible REF --add [to PLAYLIST]`, `playlist
+  passage REF [at N] [in PLAYLIST]` (the same, leaving the Bible page as it is), `song new TITLE
+  --words TEXT` (a song from words given, with no file), `library new|rename|delete|add|remove`,
   `song rename|duplicate|theme|transition|info`, `slide add|delete|duplicate|move|group|label|
   notes|enable|disable|hotkey|transition|template|media`, `slide frame SONG all …`, and `search
   WORDS`. Song and slide changes can be undone (`sp undo`) and are saved; each reply says what
@@ -1856,7 +1884,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   them, leaving the Bible page as it is), `slide item N SLIDE` shows one of them, and `--full`
   gives every slide with its objects and looks in one reply; `playlist go N SLIDE` puts a
   passage's slide on screen. `playlist NAME --json` gives each item's kind, title, and the
-  song's id and number; `status --json` names the song on screen by id and number, and the
+  song's id and number (and its `uid`, which `playlist go` and `playlist remove` take); `status --json` names the song on screen by id and number, and the
   playlist item it came from. A song can be named by its id wherever a song is named.
 - Making things from the command line: timers (`timer new NAME countdown 5:00 | to 10:30 | up
   [to M:SS]`, `timer set`, `timer rename OLD to NEW`, `timer delete`), messages (`message new`, `message set NAME text=…
@@ -1868,7 +1896,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   on|off`, `audio crossfade SECONDS`) and media playlists (`media-playlist new`, `add ITEM… to`,
   `remove ITEM… from`, `follow NAME FOLDER|off`, `delete`). `stage layouts` lists the stage
   layouts and the screens showing each.
-- The Bible page, themes and arrangements from the command line: `bible search WORDS`, `bible
+- The Bible page, themes and arrangements from the command line: `bible text REF` (a passage's
+  verses, leaving the page as it is), `bible search WORDS` (also leaving the page's own search), `bible
   rows [BIBLE…]`, `bible options key=value…`, `bible history`, `bibles` (installed and to
   download), `bible install NAME|FILE [--name --short --language]` (a Bible file in any of the formats above), `bible remove NAME --yes`; `theme templates THEME`, `theme
   main THEME`, `theme duplicate|rename|delete`, `theme box THEME TEMPLATE BOX key=value…` (the

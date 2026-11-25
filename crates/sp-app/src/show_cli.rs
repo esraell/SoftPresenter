@@ -26,7 +26,7 @@ impl crate::App {
     /// `playlist go ITEM [SLIDE] [in PLAYLIST]`: opens an item as a click on it does (so the
     /// continuous playlist follows on from it), and with a slide number puts that slide on screen.
     pub(crate) fn playlist_go(&mut self, words: &[String]) -> Result<Reply, String> {
-        let usage = "playlist go ITEM [SLIDE] [in PLAYLIST]   (ITEM by number or title)";
+        let usage = "playlist go ITEM [SLIDE] [in PLAYLIST]   (ITEM by number, title or uid)";
         let (head, list) = match words.iter().rposition(|w| w.eq_ignore_ascii_case("in")) {
             Some(at) if at + 1 < words.len() => (&words[..at], Some(words[at + 1..].join(" "))),
             _ => (words, None),
@@ -41,9 +41,7 @@ impl crate::App {
         };
         let list = self.playlist_at_for_cli(list.as_deref())?;
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
-        let items: Vec<String> = state.services.list[list].items.iter().map(|i| i.title().to_owned()).collect();
-        let at = find("item", &items, &item)
-            .map_err(|problem| format!("{problem} {} has {} items.", state.services.list[list].name, items.len()))?;
+        let at = crate::service_cli::item_in(&state.services.list[list], &item)?;
         let chosen = state.services.list[list].items[at].clone();
         let song = match &chosen {
             crate::service::Item::Song { key, .. } => Some(

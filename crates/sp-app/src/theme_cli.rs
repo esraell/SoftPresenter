@@ -16,12 +16,13 @@ fn on_off(value: &str) -> Result<bool, String> {
 }
 
 impl crate::App {
-    /// `bible search|rows|options|history|install|remove …` and `bibles`; `None` for a
+    /// `bible text|search|rows|options|history|install|remove …` and `bibles`; `None` for a
     /// passage to look up.
     pub(crate) fn ctl_bible_more(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
         let words = &args[2..];
         let result = match word.as_str() {
+            "text" => self.bible_text(&words.join(" ")),
             "search" => self.bible_search(&words.join(" ")),
             "rows" => self.bible_rows(words),
             "options" => self.bible_options(words),
@@ -91,18 +92,44 @@ impl crate::App {
         Ok(Reply::done(said))
     }
 
+    /// `bible text REFERENCE`: a passage's verses, made with the Bible page's translations and
+    /// options as looking it up would make them, but leaving the page as it is (what it shows,
+    /// what is typed, the view the window is in). Each slide's words, the translations' parted
+    /// by " / " as `slides` parts them.
+    fn bible_text(&mut self, typed: &str) -> Result<Reply, String> {
+        let typed = typed.trim();
+        if typed.is_empty() {
+            return Err("bible text REFERENCE   (as typed on the Bible page: John 3:16-18, Psalm 23)".to_owned());
+        }
+        if let Some(problem) = self.bible_reference_problem(typed) {
+            return Err(problem);
+        }
+        let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
+        let (passage, saved) = state.bible.passage_typed(typed)?;
+        let mut lines = vec![saved.lookup.clone()];
+        let mut slides = Vec::new();
+        for (index, (group, slide)) in passage.slides().enumerate() {
+            let words =
+                slide.texts().into_iter().map(|(_, text)| text.replace('\n', " / ")).collect::<Vec<_>>().join(" / ");
+            let label = if group.name.is_empty() { String::new() } else { format!("[{}] ", group.name) };
+            lines.push(format!("{:>3}. {label}{words}", index + 1));
+            slides.push(serde_json::json!({"slide": index + 1, "group": group.name, "words": words}));
+        }
+        let bibles: Vec<String> = saved.rows.iter().map(|row| row.bible.clone()).collect();
+        let data = serde_json::json!({"passage": saved.lookup, "bibles": bibles, "slides": slides});
+        Ok(Reply::with(lines.join("\n"), data))
+    }
+
+    /// `bible search WORDS`: verses holding the words, found as the page's Search finds them,
+    /// leaving the page's own search as it is.
     fn bible_search(&mut self, words: &str) -> Result<Reply, String> {
         if words.trim().is_empty() {
             return Err("bible search WORDS".to_owned());
         }
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;
-        state.bible.search = words.trim().to_owned();
-        state.bible.find();
-        if state.bible.found.is_empty() {
-            return Err(state.bible.message.clone().unwrap_or_else(|| "Nothing found.".to_owned()));
-        }
+        let found = state.bible.verses_with(words.trim())?;
         // Found in more than one Bible: each line says which.
-        let found = &state.bible.found;
+        let found = &found;
         let mixed = found.iter().any(|verse| verse.bible != found[0].bible);
         let lines: Vec<String> = found
             .iter()
@@ -287,7 +314,7 @@ impl crate::App {
             .iter()
             .any(|b| b.short.eq_ignore_ascii_case(typed) || b.id.eq_ignore_ascii_case(typed));
         // From a remote page only a Bible offered is installed: the disk is never looked at.
-        if !self.remote_call && path.exists() && !offered_name {
+        if !self.outside_call() && path.exists() && !offered_name {
             self.running.as_ref().ok_or("The app isn't ready.")?;
             // Read on a thread of its own, as a dropped file is. The command line waits for the
             // job (the reply asks it to), so it still answers with what came in.

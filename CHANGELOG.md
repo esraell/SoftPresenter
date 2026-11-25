@@ -6,6 +6,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 ## Unreleased
 
 - Unofficial: an iPhone, iPad or Mac can show its screen in a box on a slide, through its own Screen Mirroring. Switch it on in Settings › Phone Screens; it is off until then, a device shows only where you put a Phone or iPad Screen box, and you're asked before it does. It isn't made or supported by Apple, and an Apple update may stop it working. On a Mac only for now, and without sound yet.
+- Claude and other AI assistants can work with SoftPresenter: find songs and Bible passages, make a song from lyrics in one or two languages, and prepare a service's playlist. They can change what is on the screens only if you allow it in Settings › Integrations › AI assistants, and they ask you each time first. Both are off until you switch them on.
 
 ## 0.9.0-dev.14 — 24 November 2026 (development build)
 

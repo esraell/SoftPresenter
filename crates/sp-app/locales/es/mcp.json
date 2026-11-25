@@ -1,0 +1,15 @@
+{
+  "_note": "Español de España; see topbar.json. Settings › Integrations › AI assistants (MCP): the two switches and how to connect Claude Code and Claude Desktop. Claude Code, Claude Desktop, MCP and claude_desktop_config.json are names and stay as they are.",
+  "mcp.caption": "Asistentes de IA (MCP)",
+  "mcp.about": "Deja que Claude y otros asistentes de IA trabajen con SoftPresenter: buscar canciones y pasajes de la Biblia, preparar listas y, si lo permites, llevar las pantallas.",
+  "mcp.allow": "Dejar que los asistentes de IA usen SoftPresenter",
+  "mcp.allow.detail": "Pueden leer tus canciones, Biblias y listas, y crear canciones y listas. Nada cambia en las pantallas.",
+  "mcp.screens": "Dejar que cambien lo que se ve en las pantallas",
+  "mcp.screens.disabled": "Primero deja que los asistentes de IA usen SoftPresenter",
+  "mcp.screens.detail": "El asistente te pregunta antes, cada vez. Déjalo desactivado si nadie lo está mirando.",
+  "mcp.claude_code": "Claude Code: escribe esto en un terminal",
+  "mcp.claude_desktop": "Claude Desktop: añade esto a su claude_desktop_config.json y vuelve a abrir Claude Desktop",
+  "mcp.copy": "Copiar",
+  "mcp.copied": "Copiado.",
+  "mcp.save_failed": "No se ha podido guardar el ajuste: {error}"
+}

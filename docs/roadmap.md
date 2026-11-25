@@ -215,7 +215,6 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Several computers following one show.** · L · Low
 - **Older remote and stage socket protocols**, for remote and stage apps that still use them. · M · Low
 - **Planning Center Live.** Control of the plan, and its countdown on stage. · M · Low
-- **MCP server for AI assistants.** Needs the network API. · M · Low
 - **Siri and Shortcuts.** Ask Siri for slides, songs and macros. · M · Low
 
 ## The app
@@ -242,7 +241,8 @@ Ideas of our own, beyond the lists above:
   Worship API TimelyChurch described, hidden until it ships; waits for its OpenAPI file to
   check the field names, then a test with TimelyChurch's demo church).
 - VoxLive live translation shown on a screen.
-- An API over the network with a stream of changes, and MCP for AI agents. The command line
-  `sp` already controls the running app; see [cli.md](cli.md).
+- An API over the network with a stream of changes. The command line `sp` already controls
+  the running app ([cli.md](cli.md)), and `sp mcp` lets AI assistants use it
+  ([mcp.md](mcp.md)).
 - Fully customisable NDI.
 - Audio routing in one place.

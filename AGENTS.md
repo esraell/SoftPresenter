@@ -33,6 +33,9 @@ careless test run puts a slide in front of whoever is using the computer.
   live app, which may be on the real screens in front of a congregation.
   [docs/cli.md](docs/cli.md#trying-it-safely) has a wrapper that refuses to run without the
   test copy's socket.
+- **`sp mcp` is `sp` too** (the MCP server, [docs/mcp.md](docs/mcp.md)): try it with the test
+  copy's variables set, and never add it to the owner's Claude Code or Claude Desktop setup. A
+  new `sp` command stays closed to assistants until `crates/sp-app/src/mcp/policy.rs` lists it.
 - **Quit a test copy through its own socket** (`sp menu Quit` with its variables set), never by
   name or path (`osascript -e 'quit app "SoftPresenter"'`): macOS may send that to the owner's
   copy, or to another session's test copy.

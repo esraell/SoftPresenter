@@ -975,6 +975,7 @@ mod tests {
         "menubar",
         "screens",
         "mirror",
+        "mcp",
     ];
 
     #[test]

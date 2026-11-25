@@ -577,6 +577,8 @@ pub struct HomeState {
     pub catalog: crate::catalog_songs::CatalogSongs,
     /// Settings › Integrations › Command line: where the sp command stands, and what it said.
     pub command_line: crate::cli_install::Card,
+    /// Settings › Integrations › AI assistants (MCP): its switches, and what the card said.
+    pub mcp: crate::mcp::pane::View,
     /// An NDI name being typed in the Screens window, and the screen it is for. It is used
     /// when the field is left, so NDI is not restarted at every letter.
     pub ndi_draft: Option<(sp_model::Uuid, String)>,
@@ -751,7 +753,6 @@ pub enum SlidesOf {
 #[derive(Debug)]
 pub struct BiblePage {
     pub lookup: String,
-    pub search: String,
     pub rows: Vec<BibleRow>,
     pub options: crate::bible::BibleOptions,
     /// The Bibles installed.
@@ -850,7 +851,6 @@ impl Default for BiblePage {
         let place = |id: &str| shelf.position(id).unwrap_or(0);
         BiblePage {
             lookup: String::new(),
-            search: String::new(),
             options: crate::bible::BibleOptions::default(),
             // Two translations, one for each language, as the built-in Bible theme lays them out:
             // the Russian Synodal on top, the King James Version below, each with its reference.
@@ -1121,6 +1121,43 @@ impl BiblePage {
             saved.numbering.as_deref().and_then(sp_bible::Numbering::from_name).unwrap_or(in_use[0].info.numbering);
         let lookup = crate::bible::renumbered(&saved.lookup, numbering, &in_use);
         crate::bible::build_passage(&lookup, &choices, &options, self.template)
+    }
+
+    /// A passage typed as on the page (in English, Russian or Ukrainian, read in that language's
+    /// numbering), made with the page's translations and options as looking it up would make
+    /// it, but leaving the page as it is: its slides, and the passage as a playlist keeps it
+    /// (named and numbered in the language typed, as Add to keeps a passage looked up).
+    pub fn passage_typed(
+        &mut self,
+        typed: &str,
+    ) -> Result<(sp_model::Presentation, crate::service::SavedPassage), String> {
+        let rows = self.row_choices()?;
+        let in_use: Vec<&sp_bible::Bible> = rows.iter().map(|row| row.bible.as_ref()).collect();
+        let first_numbering = in_use[0].info.numbering;
+        let languages: Vec<String> =
+            rows.iter().map(|row| crate::bible_language::language_of(&row.bible.info.language)).collect();
+        let said = sp_bible::read_reference(typed, &in_use[0].info.language)
+            .map(|reference| reference.languages)
+            .unwrap_or_default();
+        let typed_in = crate::bible_language::typed_bible(&said, &self.reading().session, &languages).1;
+        let lookup = match &typed_in {
+            Some(language) => crate::bible::renumbered(typed, crate::bible::numbering_of(language, &in_use), &in_use),
+            None => typed.to_owned(),
+        };
+        let passage = crate::bible::build_passage(&lookup, &rows, &self.options, self.template)?;
+        let (kept, numbering) = match &typed_in {
+            Some(language) => (
+                crate::bible::named_in(&passage.title, first_numbering, language, &in_use, false),
+                crate::bible::numbering_of(language, &in_use),
+            ),
+            None => (passage.title.clone(), first_numbering),
+        };
+        let saved = crate::service::SavedPassage {
+            lookup: kept,
+            numbering: Some(numbering.name().to_owned()),
+            ..self.settings()
+        };
+        Ok((passage, saved))
     }
 
     /// The choices a passage is made with, as text, so a change to any of them can be noticed.
@@ -1569,28 +1606,29 @@ impl BiblePage {
         }
     }
 
-    /// Finds verses holding the words typed in Search: in the Bibles in use written in the
-    /// words' alphabet (the session's language first), or, with none, in the first translation
-    /// as before. Each verse is named in the language of the Bible it was found in, with that
-    /// Bible's numbers, and opened as the first translation numbers it.
-    pub fn find(&mut self) {
-        self.found.clear();
-        self.message = None;
+    /// The verses holding these words: in the Bibles in use written in the words' alphabet (the
+    /// session's language first), or, with none, in the first translation as before. Each verse
+    /// is named in the language of the Bible it was found in, with that Bible's numbers, and
+    /// opened as the first translation numbers it. The page is left as it is (what it found and
+    /// what it says), so the command line can search while the operator uses the page. The
+    /// verses, or why there are none.
+    pub fn verses_with(&mut self, words: &str) -> Result<Vec<crate::bible::FoundVerse>, String> {
         let (places, _) = self.in_use();
         let mut bibles = Vec::new();
+        let mut trouble = None;
         for (at, place) in places.into_iter().enumerate() {
             match self.shelf.get(place) {
                 Ok(bible) => bibles.push((bible.info.short.clone(), bible)),
                 // The first numbers the verses: without it there is nothing to name them by.
-                Err(problem) if at == 0 => {
-                    self.message = Some(problem);
-                    return;
-                }
-                Err(problem) => self.message = Some(problem),
+                Err(problem) if at == 0 => return Err(problem),
+                Err(problem) => trouble = Some(problem),
             }
         }
-        let words = self.search.clone();
-        self.show_found(crate::find::search_page(&words, &bibles, &self.reading()));
+        let found = crate::find::search_page(words, &bibles, &self.reading());
+        if found.verses.is_empty() {
+            return Err(trouble.or(found.message).unwrap_or_else(|| "Nothing found.".to_owned()));
+        }
+        Ok(found.verses)
     }
 
     /// Lists verses Search found (in place of the slides), or says why there are none.
@@ -1921,6 +1959,7 @@ impl Default for HomeState {
             songbooks: crate::songbooks::View::default(),
             catalog: crate::catalog_songs::CatalogSongs::default(),
             command_line: crate::cli_install::Card::default(),
+            mcp: crate::mcp::pane::View::load(),
             ndi_draft: None,
             // Assumed until it has been looked for.
             ndi_available: true,
@@ -6001,6 +6040,7 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState) {
                 let timelychurch = state.timelychurch.offered.then_some(&mut state.timelychurch);
                 crate::integrations::pane(ui, &mut state.voxlive, &mut state.canva, songbooks, timelychurch);
                 command_line_card(ui, state);
+                crate::mcp::pane::card(ui, &mut state.mcp);
             }
             "About" => {
                 ui.label(
@@ -10188,8 +10228,7 @@ mod tests {
     #[test]
     fn search_looks_in_the_bibles_of_the_words_alphabet_and_opens_as_the_first_bible_numbers() {
         let mut page = bible_page();
-        page.search = "valley of the shadow".to_owned();
-        page.find();
+        page.found = page.verses_with("valley of the shadow").expect("found");
         assert!(!page.found.is_empty() && page.found.iter().all(|found| found.bible == "KJV"), "{:?}", page.found);
         let psalm =
             page.found.iter().find(|found| found.words.contains("shadow of death")).cloned().expect("Psalm 23:4");
@@ -10205,18 +10244,14 @@ mod tests {
         assert!(english.is_some_and(|words| words.contains("shadow of death")));
         assert_eq!((page.lookup.as_str(), page.session_language().as_str()), ("Psalm 23:4", "en"));
         // Russian words, in the Russian Bible.
-        page.search = "долиною смертной тени".to_owned();
-        page.find();
+        page.found = page.verses_with("долиною смертной тени").expect("found");
         assert!(!page.found.is_empty() && page.found.iter().all(|found| found.bible == "SYN"));
         // Named as its own Bible reads it ("Псалом 22:4" for what is kept as "Псалтирь 22:4"): the
         // same verse.
         let read = |name: &str| sp_bible::parse_reference_in(name, "ru").ok();
         assert_eq!(read(&page.found[0].reference), read(&page.found[0].kept));
         // No Bible in use in that alphabet: the first Bible, as before.
-        page.search = "λόγος".to_owned();
-        page.find();
-        assert!(page.found.is_empty());
-        assert_eq!(page.message.as_deref(), Some("Nothing in the Синодальный перевод has those words."));
+        assert_eq!(page.verses_with("λόγος").unwrap_err(), "Nothing in the Синодальный перевод has those words.");
     }
 
     #[test]
@@ -10355,11 +10390,11 @@ mod tests {
         state.bible.lookup.clear();
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.4);
         assert!(state.bible.found.is_empty());
-        // `sp bible search` still lists verses for words without the field.
-        state.bible.search = "valley of the shadow".to_owned();
-        state.bible.find();
-        assert!(state.bible.found.iter().all(|found| found.bible == "KJV") && !state.bible.found.is_empty());
-        state.bible.found.clear();
+        // `sp bible search` still lists verses for words without the field, leaving the page's
+        // own list as it is.
+        let found = state.bible.verses_with("valley of the shadow").expect("found");
+        assert!(found.iter().all(|found| found.bible == "KJV") && !found.is_empty());
+        assert!(state.bible.found.is_empty());
         // In Scripture Lookup: Russian words that are no reference and no book's name.
         state.bible.focus_lookup = true;
         frame_then_app(&ctx, &mut show, &mut state, vec![], 0.5);

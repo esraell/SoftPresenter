@@ -26,8 +26,10 @@ use winit::event_loop::ActiveEventLoop;
 
 use crate::private_folder;
 
-/// Changes when requests or replies change shape, so an older command line is told so.
-pub const PROTOCOL: u32 = 1;
+/// Changes when requests or replies change shape, so an older command line is told so. 2: a
+/// request may carry `mcp` (it comes from an AI assistant); an app from before refuses it, rather
+/// than carrying it out unchecked, as it would if it only ignored the field.
+pub const PROTOCOL: u32 = 2;
 
 /// Why a slide named by its number isn't there: "River Song has 6 slides; there is no slide 9.",
 /// in the window's language for a remote page (`sp`'s replies are given back in English).
@@ -49,6 +51,26 @@ const MAX_REQUEST: u64 = 64 * 1024;
 pub struct Request {
     pub v: u32,
     pub args: Vec<String>,
+    /// Set by `sp mcp` on each request it sends for an AI assistant: the app then checks the
+    /// request against Settings › Integrations › AI assistants and `mcp::policy`, not as the
+    /// computer's own user's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<McpCall>,
+}
+
+/// What `sp mcp` says about a request it sends: which of its tools sent it, whether the person
+/// said yes to its question, and whether the app is only to say if it would allow it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpCall {
+    /// The tool (or `resource …`, `tasks/get`), for the log.
+    pub tool: String,
+    /// True when the person said yes to the question the server asked first; a change to the
+    /// screens, or a removal, is refused without it.
+    #[serde(default)]
+    pub asked: bool,
+    /// True to be told whether it would be allowed, without carrying it out.
+    #[serde(default)]
+    pub check: bool,
 }
 
 /// One reply: whether it worked, what to tell the person, and the same as data for programs.
@@ -136,7 +158,10 @@ pub fn listen(deliver: impl Fn(Incoming) + Send + Sync + 'static) -> Result<List
 
 /// Starts listening at a socket file of that path, in a folder kept to this user. If the folder
 /// can't be kept private, nothing listens.
-fn listen_at(path: PathBuf, deliver: impl Fn(Incoming) + Send + Sync + 'static) -> Result<Listening, String> {
+pub(crate) fn listen_at(
+    path: PathBuf,
+    deliver: impl Fn(Incoming) + Send + Sync + 'static,
+) -> Result<Listening, String> {
     // A socket path must be short (about 104 bytes on macOS).
     if path.as_os_str().len() > 100 {
         return Err(format!("The control socket's path is too long: {}", path.display()));
@@ -623,7 +648,7 @@ fn help_for(word: &str) -> Option<String> {
 }
 
 /// The words after `playlist` that change something; any other word names a playlist to list.
-const PLAYLIST_CHANGES: &[&str] = &[
+pub(crate) const PLAYLIST_CHANGES: &[&str] = &[
     "open",
     "add",
     "new",
@@ -636,6 +661,7 @@ const PLAYLIST_CHANGES: &[&str] = &[
     "media",
     "media-playlist",
     "placeholder",
+    "passage",
     "fill",
     "item",
 ];
@@ -682,6 +708,8 @@ pub fn only_reads(args: &[String]) -> bool {
         }
         "remote" | "mirror" => alone || (args.len() == 2 && word(1) == "status"),
         "notices" => alone,
+        // `bible text REFERENCE` and `bible search WORDS` leave the Bible page as it is.
+        "bible" => matches!(word(1).as_str(), "text" | "search"),
         // `playlist [NAME]`, not `playlist add …`.
         "playlist" => alone || !PLAYLIST_CHANGES.contains(&word(1).as_str()),
         // `slide SONG N` and `slide item N SLIDE …`, not `slide text …`.
@@ -768,8 +796,18 @@ fn send(args: &[String]) -> Result<Reply, String> {
 }
 
 /// Sends one request to the app listening at the socket file `at` finds, and reads its reply.
-fn send_to(at: impl FnOnce() -> Option<PathBuf>, args: &[String]) -> Result<Reply, String> {
-    let probe = serde_json::to_string(&Request { v: PROTOCOL, args: args.to_vec() }).map_err(|e| e.to_string())?;
+pub(crate) fn send_to(at: impl FnOnce() -> Option<PathBuf>, args: &[String]) -> Result<Reply, String> {
+    send_as(at, args, None)
+}
+
+/// The same, marked as coming from an AI assistant through `sp mcp` when `mcp` is given.
+pub(crate) fn send_as(
+    at: impl FnOnce() -> Option<PathBuf>,
+    args: &[String],
+    mcp: Option<&McpCall>,
+) -> Result<Reply, String> {
+    let request = Request { v: PROTOCOL, args: args.to_vec(), mcp: mcp.cloned() };
+    let probe = serde_json::to_string(&request).map_err(|e| e.to_string())?;
     if probe.len() as u64 >= MAX_REQUEST {
         return Err(format!(
             "That command is {} KB; one may be at most {} KB. Give long words in a file (song text SONG FILE).",
@@ -784,8 +822,7 @@ fn send_to(at: impl FnOnce() -> Option<PathBuf>, args: &[String]) -> Result<Repl
     // A wait for a change is answered when it is up at the latest.
     let waiting = wait_for(args).and_then(Result::ok).map_or(Duration::ZERO, |(wait, _)| wait);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(20) + waiting));
-    let mut request =
-        serde_json::to_string(&Request { v: PROTOCOL, args: args.to_vec() }).map_err(|e| e.to_string())?;
+    let mut request = probe;
     request.push('\n');
     stream.write_all(request.as_bytes()).map_err(|e| e.to_string())?;
     let mut line = String::new();
@@ -979,6 +1016,8 @@ Layers and controls
   bible REFERENCE --add [to PLAYLIST]
                                look it up and put it in a playlist, with the page's rows
                                and options, as Add to does
+  bible text REFERENCE         a passage's verses in the page's translations, leaving the page
+                               as it is
   bible search WORDS           verses with those words, in the first translation
   bible rows [BIBLE…]          the translations shown (KJV RST …), first to last
   bible options [verses=on|off break=on|off translation=on|off reference=verse|passage|last|none]
@@ -990,6 +1029,7 @@ Layers and controls
 
 Songs, libraries and playlists
   song new TITLE [FILE.txt]    a new song, its words from a song text file
+  song new TITLE --words TEXT  a new song, its words given as song text (one word, quoted)
   song import FILE… | FOLDER…  import songs (text, lyric, ChordPro, rich text, Word, .pro,
                                .proBundle); a folder becomes a library of its name
   libraries                    the libraries, with how many songs each has
@@ -999,12 +1039,14 @@ Songs, libraries and playlists
   playlist open NAME
   playlist add SONG [to PLAYLIST]               (VoxLive names the VoxLive item)
   playlist new NAME | playlist rename OLD to NEW | playlist delete NAME
-  playlist remove ITEM [from PLAYLIST]          (ITEM by number or title)
+  playlist remove ITEM [from PLAYLIST]          (ITEM by number, title or uid)
   playlist move ITEM to N [in PLAYLIST]
   playlist header TEXT [at N] [in PLAYLIST]
   playlist media ITEM [at N] [in PLAYLIST]      a picture or video from the media bin
   playlist media-playlist NAME [at N] [in PLAYLIST]   a media playlist, to play round
   playlist placeholder NAME [at N] [in PLAYLIST]      a place kept for something to come
+  playlist passage REFERENCE [at N] [in PLAYLIST]     a Bible passage, as bible --add keeps it,
+                               leaving the Bible page as it is
   playlist fill PLACEHOLDER with SONG | with media ITEM [in PLAYLIST]
   library new NAME | library rename OLD to NEW | library delete NAME (songs stay)
   library add SONG… to LIBRARY | library remove SONG… from LIBRARY
@@ -2137,14 +2179,14 @@ impl crate::App {
             }
             Some("seen") => {
                 // A remote page leaves the notices about security unseen: the operator sees them.
-                let page = self.remote_call;
+                let page = self.outside_call();
                 self.with_state(
                     |state| if page { state.notices.mark_seen_for_page() } else { state.notices.mark_seen() },
                 );
                 Ok(Reply::done("Every notice is marked seen."))
             }
             Some("clear") => {
-                let page = self.remote_call;
+                let page = self.outside_call();
                 self.with_state(
                     |state| if page { state.notices.clear_all_for_page() } else { state.notices.clear_all() },
                 );
@@ -2587,7 +2629,7 @@ impl crate::App {
             lines.push("The old sync script's sign-in is on this computer: sp canva import takes it over.".to_owned());
         }
         // The steps name places in the user's home folder: said at the computer only.
-        if settings.old_script_warning && !self.remote_call {
+        if settings.old_script_warning && !self.outside_call() {
             lines.push(
                 "Switch the old sync script off now (whichever refreshes the sign-in next breaks the other's):"
                     .to_owned(),
@@ -2621,7 +2663,7 @@ impl crate::App {
                 let connected = self.voxlive.status == crate::voxlive::Status::Connected;
                 // A remote page is told only the kind of key, never its characters.
                 let hint = self.voxlive.key_hint().map(|hint| {
-                    if self.remote_call { format!("{}…", hint.chars().take(4).collect::<String>()) } else { hint }
+                    if self.outside_call() { format!("{}…", hint.chars().take(4).collect::<String>()) } else { hint }
                 });
                 let count = self.voxlive.screens.len();
                 // A refusal or a problem is a sentence that names VoxLive already.
@@ -3102,6 +3144,31 @@ impl crate::App {
         Ok(Reply::done(done))
     }
 
+    /// A chapter or verse the book doesn't have, said rather than read as the last one (as
+    /// typing in Scripture Lookup reads it): counted in the first translation, which numbers the
+    /// passage, and named in the language typed.
+    pub(crate) fn bible_reference_problem(&mut self, reference: &str) -> Option<String> {
+        let running = self.running.as_mut()?;
+        let page = &mut running.home_state.bible;
+        let language = page.typed_language(reference);
+        // Counted in the Bible of the numbering it is read in (the language typed's).
+        let lead = page.lead().and_then(|lead| page.shelf.get(lead).ok());
+        if let (Some(bible), Some(lead)) = (page.counted_in(reference), lead)
+            && let Ok(range) = sp_bible::parse_reference_in(reference, &lead.info.language)
+        {
+            let book = sp_bible::book_name(range.start.book, &language);
+            let chapters = bible.chapter_count(range.start.book);
+            if chapters > 0 && (range.start.chapter > chapters || range.end.chapter > chapters) {
+                return Some(format!("{book} has {chapters} chapters."));
+            }
+            let verses = bible.last_verse(range.start.book, range.start.chapter);
+            if verses > 0 && range.start.verse != sp_bible::LAST && range.start.verse > verses {
+                return Some(format!("{book} {} has {verses} verses.", range.start.chapter));
+            }
+        }
+        None
+    }
+
     fn ctl_bible(&mut self, args: &[String]) -> Result<Reply, String> {
         if let Some(result) = self.ctl_bible_more(args) {
             return result;
@@ -3129,27 +3196,8 @@ impl crate::App {
             return Err("Which passage? For example: bible John 3:16-18".to_owned());
         }
         let live = self.show.live().map(|at| at.presentation);
-        // A chapter or verse the book doesn't have is said, rather than read as the last one
-        // (as typing in Scripture Lookup reads it): counted in the first translation, which
-        // numbers the passage, and named in the language typed.
-        if let Some(running) = self.running.as_mut() {
-            let page = &mut running.home_state.bible;
-            let language = page.typed_language(&reference);
-            // Counted in the Bible of the numbering it is read in (the language typed's).
-            let lead = page.lead().and_then(|lead| page.shelf.get(lead).ok());
-            if let (Some(bible), Some(lead)) = (page.counted_in(&reference), lead)
-                && let Ok(range) = sp_bible::parse_reference_in(&reference, &lead.info.language)
-            {
-                let book = sp_bible::book_name(range.start.book, &language);
-                let chapters = bible.chapter_count(range.start.book);
-                if chapters > 0 && (range.start.chapter > chapters || range.end.chapter > chapters) {
-                    return Err(format!("{book} has {chapters} chapters."));
-                }
-                let verses = bible.last_verse(range.start.book, range.start.chapter);
-                if verses > 0 && range.start.verse != sp_bible::LAST && range.start.verse > verses {
-                    return Err(format!("{book} {} has {verses} verses.", range.start.chapter));
-                }
-            }
+        if let Some(problem) = self.bible_reference_problem(&reference) {
+            return Err(problem);
         }
         let (found, message, title, first) = {
             let running = self.running.as_mut().ok_or("The app isn't ready.")?;
@@ -3229,10 +3277,21 @@ impl crate::App {
         let into_words = into.map_or_else(String::new, |name| format!(" into the library {name}"));
         match args.get(1).map(|w| w.to_lowercase()).as_deref() {
             Some("new") => {
+                // `song new TITLE --words TEXT`: the words given as song text, in one word (an
+                // AI assistant's, a script's), every other word the title.
+                let mut words = args[2..].to_vec();
+                let given = match words.iter().position(|w| w == "--words") {
+                    Some(at) => {
+                        let text = words.get(at + 1).cloned().ok_or("song new TITLE --words TEXT")?;
+                        words.drain(at..=at + 1);
+                        Some(text)
+                    }
+                    None => None,
+                };
+                let words = &words[..];
                 // `song new TITLE [FILE.txt]`: the file is the last word when it names a file.
-                let words = &args[2..];
                 // From a remote page every word is the title: the disk is never looked at.
-                let files = !self.remote_call;
+                let files = !self.outside_call() && given.is_none();
                 let (title_words, file) = match words.last() {
                     Some(last) if files && words.len() > 1 && Path::new(last).is_file() => {
                         (&words[..words.len() - 1], Some(last))
@@ -3251,11 +3310,12 @@ impl crate::App {
                 if title.trim().is_empty() {
                     return Err("song new TITLE [FILE.txt]".to_owned());
                 }
-                let words = match file {
-                    Some(file) => {
+                let words = match (file, given) {
+                    (Some(file), _) => {
                         sp_model::decode_text(&std::fs::read(file).map_err(|e| format!("Could not read {file}: {e}"))?)
                     }
-                    None => String::new(),
+                    (None, Some(given)) => given,
+                    (None, None) => String::new(),
                 };
                 let request = crate::home::NewSong { title: title.trim().to_owned(), theme: None, words, focus: false };
                 self.with_state(|state| state.new_song_request = Some(request));
@@ -3711,6 +3771,8 @@ mod tests {
             "menu",
             "voxlive screens",
             "help song",
+            "bible text John 3:16",
+            "bible search valley",
         ] {
             assert!(only_reads(&words(read)), "{read} only reads");
         }
@@ -3731,6 +3793,9 @@ mod tests {
             "go River 2",
             "next",
             "bible John 3:16",
+            "bible John 3:16 --add",
+            "bible install ASV",
+            "playlist passage John 3:16 in Friday",
             "song text River words.txt",
             "library add River to Hymns",
             "something new",
@@ -3775,7 +3840,7 @@ mod tests {
 
     #[test]
     fn requests_and_replies_round_trip_as_lines_of_json() {
-        let request = Request { v: PROTOCOL, args: names(&["go", "Amazing Grace", "3"]) };
+        let request = Request { v: PROTOCOL, args: names(&["go", "Amazing Grace", "3"]), mcp: None };
         let text = serde_json::to_string(&request).unwrap();
         assert!(!text.contains('\n'));
         let back: Request = serde_json::from_str(&text).unwrap();
@@ -3901,6 +3966,40 @@ mod tests {
             assert!(!reply.ok);
             assert!(reply.text.contains(wanted), "{}", reply.text);
         }
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// `sp mcp` marks its requests as an AI assistant's; the mark reaches the app, and a request
+    /// of another protocol version (an app from before the mark, or a command line from
+    /// before) is refused rather than carried out without it.
+    #[test]
+    fn an_assistants_request_carries_its_mark_and_another_version_is_refused() {
+        let folder = socket_folder("mcp");
+        let path = folder.join("c.sock");
+        let heard: std::sync::Arc<std::sync::Mutex<Vec<Option<McpCall>>>> = Default::default();
+        let keep = heard.clone();
+        let _listening = listen_at(path.clone(), move |incoming: Incoming| {
+            keep.lock().unwrap().push(incoming.request.mcp.clone());
+            let _ = incoming.reply.send(Reply::done("heard"));
+        })
+        .expect("listening");
+        let call = McpCall { tool: "show_song".to_owned(), asked: true, check: true };
+        let reply = send_as(|| Some(path.clone()), &names(&["status"]), Some(&call)).expect("a reply");
+        assert!(reply.ok);
+        say_to(&path, &["status"]).expect("a reply");
+        assert_eq!(*heard.lock().unwrap(), vec![Some(call.clone()), None], "sp's own requests carry no mark");
+        // What the server sends is version 2 with the mark: an app that knows only version 1
+        // refuses it, as this one refuses version 1.
+        let sent = serde_json::to_string(&Request { v: PROTOCOL, args: names(&["status"]), mcp: Some(call) }).unwrap();
+        assert!(sent.contains("\"v\":2") && sent.contains("\"mcp\""), "{sent}");
+        let mut stream = UnixStream::connect(&path).expect("connected");
+        let old = "{\"v\": 1, \"args\": [\"next\"], \"mcp\": {\"tool\": \"next_slide\", \"asked\": true}}\n";
+        stream.write_all(old.as_bytes()).expect("sent");
+        let mut line = String::new();
+        BufReader::new(stream).read_line(&mut line).expect("answered");
+        let reply: Reply = serde_json::from_str(line.trim()).expect("a reply");
+        assert!(!reply.ok && reply.text.contains("speaks version 1"), "{}", reply.text);
+        assert_eq!(heard.lock().unwrap().len(), 2, "never reached the app");
         let _ = std::fs::remove_dir_all(&folder);
     }
 
