@@ -831,25 +831,27 @@ fn load_fonts(ctx: &egui::Context) {
 
 /// How a line of words is set where it is shown: its face (the heavier cut, or the fixed-width
 /// face, where it uses them), its colour, the room added between its letters (as [`spaced`]
-/// adds it) and whether it is shown in capitals (as [`cap`] shows it). A field that retypes the
-/// words sets them the same way.
+/// adds it), whether it is shown in capitals (as [`cap`] shows it) and the height of its line,
+/// where that is set rather than the face's own (a playlist row's title). A field that retypes
+/// the words sets them the same way.
 #[derive(Clone)]
 pub struct Lettering {
     pub font: FontId,
     pub ink: Color32,
     pub spacing: f32,
     pub capitals: bool,
+    pub line: Option<f32>,
 }
 
 impl Lettering {
     /// Words in a face and a colour, nothing more.
     pub fn plain(font: FontId, ink: Color32) -> Lettering {
-        Lettering { font, ink, spacing: 0.0, capitals: false }
+        Lettering { font, ink, spacing: 0.0, capitals: false, line: None }
     }
 
     /// Words set as [`cap`] sets them.
     pub fn cap(ink: Color32) -> Lettering {
-        Lettering { font: fixed_semibold(11.5), ink, spacing: 0.6, capitals: true }
+        Lettering { font: fixed_semibold(11.5), ink, spacing: 0.6, capitals: true, line: None }
     }
 
     /// The words on one line, as they are shown. In capitals each letter stands for one letter
@@ -874,6 +876,7 @@ impl Lettering {
             font_id: self.font.clone(),
             color: self.ink,
             extra_letter_spacing: self.spacing,
+            line_height: self.line,
             ..Default::default()
         };
         let mut job = egui::text::LayoutJob::single_section(shown, format);
@@ -1646,7 +1649,7 @@ pub const LIST_BETWEEN: f32 = 6.0;
 /// How a list picture's name is set: the fixed-width face, heavier, in capitals, with half a
 /// point between the letters, as a slide tile's strip is set.
 pub fn list_name_look(ink: Color32) -> Lettering {
-    Lettering { font: fixed_semibold(12.0), ink, spacing: 0.5, capitals: true }
+    Lettering { font: fixed_semibold(12.0), ink, spacing: 0.5, capitals: true, line: None }
 }
 
 /// A list picture's caption: its name, then a dot and its kind if it has one, on one line that
@@ -2155,6 +2158,13 @@ fn row_shape(ctx: &egui::Context, look: &ListRow, width: f32) -> RowShape {
     shape
 }
 
+/// Where a row's title block (its lines, a tag on a line of its own, the version's pill),
+/// `block` high, starts: in the middle of the row, a half pixel high. The field that renames a
+/// placeholder puts its words where this puts the title's.
+fn title_top(row: Rect, block: f32) -> f32 {
+    row.center().y - block / 2.0 - 0.5
+}
+
 /// Draws one row of the left column's list: 42 high with a title of one line, 48 with two (or
 /// a tag on its own line), taller with a version's pill. Returns its response and where its
 /// "more" button goes (the caller makes the button after, so that it takes its own clicks).
@@ -2216,10 +2226,7 @@ fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
         TEXT_DIM
     };
     let pill = look.version.is_some();
-    // The title block (its lines, a tag on a line of its own, the version's pill) is one block
-    // in the middle of the row, a half pixel high so that a title in a row alone sits on the
-    // pixels the field that renames it puts its words on.
-    let top = row.center().y - shape.block_height(pill) / 2.0 - 0.5;
+    let top = title_top(row, shape.block_height(pill));
     let painter = ui.painter().with_clip_rect(row);
     if !look.renaming {
         painter.galley(pos2(left, top), shape.title.clone(), ink);
@@ -4885,13 +4892,19 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 ..ListRow::default()
             };
             let (mut response, more) = list_row(ui, &look);
-            // A placeholder is renamed in place, as a header is.
+            // A placeholder is renamed in place, as a header is. The words are set as the row
+            // sets its title, in a line as high as the title's and on the middle of it, so they
+            // stay on the same pixels whatever the face (the system's, whose own line may be
+            // taller or shorter than the title's).
             if renaming && let Some((_, typed)) = state.renaming_header.as_mut() {
                 let row = response.rect;
                 let focus = std::mem::take(&mut rename_started);
-                let at = pos2(row.min.x + 48.0, row.center().y);
+                let at = pos2(row.min.x + 48.0, title_top(row, TITLE_LINE) + TITLE_LINE / 2.0);
                 // Faint, as a placeholder's name is, and short of its mark at the right.
-                let look = Lettering::plain(FontId::proportional(13.5), TEXT_FAINT.gamma_multiply(0.7));
+                let look = Lettering {
+                    line: Some(TITLE_LINE),
+                    ..Lettering::plain(FontId::proportional(13.5), TEXT_FAINT.gamma_multiply(0.7))
+                };
                 let right = more.min.x - MORE_EDGE - 14.0 - 8.0;
                 if let Some(done) = rename_in_row(ui, typed, &look, at, right, focus) {
                     renamed = Some(done.map(|name| (index, name)));
