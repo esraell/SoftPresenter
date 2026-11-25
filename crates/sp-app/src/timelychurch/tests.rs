@@ -490,6 +490,8 @@ fn null_fields_and_other_spellings_read() {
         "not a service"
     ]}));
     assert_eq!(list.len(), 1, "what doesn't read is left out, not the whole list");
+    let read = ServicesReply::read(r#"{"services": [{"id": 1}, 7, "x"]}"#).expect("a list");
+    assert_eq!((read.services.len(), read.dropped), (1, 2), "and counted, so nothing is taken for removed");
     assert_eq!(from_service(&list[0], None).name, "2026-12-06", "a service with no name is named by its date");
     let planned = from_service(&list[0], None);
     assert!(matches!(&planned.items[0], Planned::Song { song, .. } if song.as_str() == "15"));
@@ -796,6 +798,13 @@ mod with_the_demo_church {
         assert!(!files.settings().connected && files.settings().disconnected_there);
         assert!(files.cached().is_none(), "the list's ETag goes with the connection");
         assert!(connection.check_now().is_err());
+        // Another church: the last one's songs shown are never told to it.
+        let other = MockChurch::start();
+        connection.pair(&other.address, CODE).expect("started");
+        until(&mut connection, |c| c.status != Status::Pairing);
+        assert_eq!(connection.status, Status::Connected);
+        assert!(connection.uses.counted.is_empty() && files.uses().counted.is_empty());
+        assert!(connection.settings.songs.is_empty(), "nothing seen of the last church counts");
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -184,6 +184,8 @@ pub struct Church {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ServicesReply {
     pub services: Vec<Service>,
+    /// How many entries of the list couldn't be read, and were left out.
+    pub dropped: usize,
 }
 
 impl ServicesReply {
@@ -197,8 +199,8 @@ impl ServicesReply {
             }
             _ => return None,
         };
-        let services = list.iter().filter_map(|service| Service::deserialize(service).ok()).collect();
-        Some(ServicesReply { services })
+        let services: Vec<Service> = list.iter().filter_map(|service| Service::deserialize(service).ok()).collect();
+        Some(ServicesReply { dropped: list.len() - services.len(), services })
     }
 }
 

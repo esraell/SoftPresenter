@@ -109,7 +109,7 @@ removed it). Older builds drop the mark when they save. At each check:
 | Changed | Untouched | Made again. |
 | Changed | Changed by the church | Kept; TimelyChurch's version offered, said once (`sp timelychurch use-newer PLAYLIST` takes it). |
 | New | — | A new playlist, at the end of the list. |
-| Gone from a list answered now, its date still inside the dates asked for | Any | Noted as removed in TimelyChurch (the card says so); never deleted. |
+| Gone from a list answered now, its date still inside the dates asked for (and every service in the list could be read) | Any | Noted as removed in TimelyChurch (the card says so); never deleted. |
 | Its date has passed | Any | It has only dropped out of the dates asked for: left as it is. |
 | Any | Deleted by the church | Not made again. |
 
@@ -132,12 +132,14 @@ or the screens'.
    TimelyChurch deleted too, in case it comes back). Each song's reply is kept as sent
    (`TimelyChurch/songs/`), so a newer version offered can be taken later with no network.
 
-With nothing changed, a check is one short request.
+A song that couldn't be fetched (no network part way, an answer that wasn't a song) leaves its
+services not taken as seen, so the next check asks for their songs again. With nothing
+changed, a check is one short request.
 
 **Applying** happens on the window's thread. New songs and new playlists come at once. Changes
 to songs and playlists wait while anything is on screen (as the catalog's updates do), a song
-open in the editor waits until it is closed, and no new check starts while a check's findings
-wait (Check Now still does). Notices say what came, what was brought up to date, what is offered
+open in the editor waits until it is closed; what waits is looked at again every 20 seconds, and
+no new check starts meanwhile (Check Now still does). Notices say what came, what was brought up to date, what is offered
 and what was removed.
 
 **Problems:** a 401 or 403 means the computer was disconnected in TimelyChurch: the token is
@@ -155,7 +157,8 @@ service, on the service's date (the computer's date), and the song is of the chu
 now. It counts **once per song per service**: the sound check and the service on the day are
 one use, and showing the song on another day (a rehearsal in the week) is none. The count is
 remembered on disk (`TimelyChurch/song-uses.json`), so starting the app again doesn't count it
-again.
+again. Pairing with another church lets go of the last one's uses not yet sent: its ids are its
+own.
 
 Each use is queued on disk with its own idempotency key, made once when it is queued from what
 it is (the service and the song: the same use always has the same key), and sent while

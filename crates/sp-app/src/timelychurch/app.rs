@@ -86,8 +86,15 @@ impl crate::App {
             self.timelychurch.start_check(keys, today(), now());
             wake = soonest(wake, Instant::now() + Duration::from_millis(250));
         }
-        if self.timelychurch.waiting.is_some() && self.running.is_some() && !self.timelychurch_apply() {
-            wake = soonest(wake, Instant::now() + APPLY_AGAIN);
+        // What waits to be applied (something was on screen) is looked at again now and then,
+        // not each time the app wakes.
+        let due = self.timelychurch.apply_at.is_none_or(|at| at <= Instant::now());
+        if self.timelychurch.waiting.is_some() && self.running.is_some() && due {
+            self.timelychurch.apply_at =
+                if self.timelychurch_apply() { None } else { Some(Instant::now() + APPLY_AGAIN) };
+        }
+        if let Some(at) = self.timelychurch.apply_at.filter(|_| self.timelychurch.waiting.is_some()) {
+            wake = soonest(wake, at);
         }
         self.timelychurch_count_uses();
         self.timelychurch_view();
@@ -114,6 +121,16 @@ impl crate::App {
         }
     }
 
+    /// The places of the TimelyChurch songs in the library, by their marks' keys. Should two
+    /// share a key (a song duplicated keeps its mark), the first, the one made, is the one.
+    fn timelychurch_places(&self) -> HashMap<String, usize> {
+        let mut places = HashMap::new();
+        for (at, key) in self.timelychurch_copies() {
+            places.entry(key).or_insert(at);
+        }
+        places
+    }
+
     /// The TimelyChurch songs in the library: their places and their marks' keys.
     pub(crate) fn timelychurch_copies(&self) -> Vec<(usize, String)> {
         let removed = self.running.as_ref().map(|r| r.home_state.removed_songs.clone()).unwrap_or_default();
@@ -138,10 +155,12 @@ impl crate::App {
             self.running.as_ref().and_then(|r| r.home_state.editing.as_ref().map(|draft| draft.at.presentation));
         let church = self.timelychurch.settings.address.clone();
         let when = now();
-        let mut complete = full;
+        // Cleared only where something has to wait.
+        let mut complete = true;
         let mut done = Done::default();
-        let mut copies: HashMap<String, usize> =
-            self.timelychurch_copies().into_iter().map(|(at, key)| (key, at)).collect();
+        let mut copies = self.timelychurch_places();
+        // Whether this pass changed anything: only then is it saved, said and drawn.
+        let mut changed = false;
         for ((song, arrangement), sent) in &fetched.songs {
             let made = super::make_song(&church, sent, sp_model::MOST_LINES, when);
             let key = made.song.catalog.as_ref().map(|mark| mark.key.clone()).unwrap_or_default();
@@ -151,6 +170,7 @@ impl crate::App {
                     let (at, _) = self.timelychurch_file(made.song);
                     copies.insert(key.clone(), at);
                     done.songs_added += 1;
+                    changed = true;
                     crate::applog::event("timelychurch", &said);
                 }
                 Some(at) => {
@@ -171,6 +191,7 @@ impl crate::App {
                     }
                     if let Some(song) = song {
                         self.replace_song_quietly(at, song);
+                        changed = true;
                     }
                 }
             }
@@ -199,6 +220,7 @@ impl crate::App {
                     self.show.presentations().get(at).is_some_and(|old| old.catalog.as_ref().is_some_and(|m| !m.gone))
                 }) {
                     self.replace_song_quietly(at, song);
+                    changed = true;
                 }
             }
             self.timelychurch.settings.saw_song(SongSeen {
@@ -247,14 +269,14 @@ impl crate::App {
                     let step = playlist_step(&services.list[at], &made);
                     let playlist = &mut services.list[at];
                     let Some(origin) = playlist.origin.as_mut() else { continue };
-                    let mut changed = false;
+                    let mut playlist_changed = false;
                     if origin.removed {
                         origin.removed = false;
-                        changed = true;
+                        playlist_changed = true;
                     }
                     if origin.date != planned.date {
                         origin.date.clone_from(&planned.date);
-                        changed = true;
+                        playlist_changed = true;
                     }
                     match step {
                         PlaylistStep::Nothing => {}
@@ -265,7 +287,7 @@ impl crate::App {
                             origin.newer = None;
                             playlist.name = made.name;
                             playlist.items = made.items;
-                            changed = true;
+                            playlist_changed = true;
                             if front {
                                 services.chosen = None;
                             }
@@ -273,18 +295,22 @@ impl crate::App {
                         PlaylistStep::Offer(newer) => {
                             origin.newer = Some(newer);
                             done.playlists_offered.push(playlist.name.clone());
-                            changed = true;
+                            playlist_changed = true;
                         }
                         PlaylistStep::Withdraw => {
                             origin.newer = None;
-                            changed = true;
+                            playlist_changed = true;
                         }
                     }
-                    services.changed |= changed;
+                    services.changed |= playlist_changed;
+                    changed |= playlist_changed;
                 }
                 None if self.timelychurch.settings.let_go.contains(key) => {}
                 // Followed before and gone from the playlists: the church deleted it.
-                None if seen_before.contains(key) => self.timelychurch.settings.let_go.push(key.clone()),
+                None if seen_before.contains(key) => {
+                    self.timelychurch.settings.let_go.push(key.clone());
+                    changed = true;
+                }
                 None => {
                     done.new_playlists.push(made.name.clone());
                     services.list.push(Service {
@@ -299,14 +325,16 @@ impl crate::App {
                         ..made
                     });
                     services.changed = true;
+                    changed = true;
                 }
             }
         }
         if complete {
             // A service no longer in a list answered now, while its date is still inside the
             // dates asked for, was removed in TimelyChurch. One whose date has passed has only
-            // dropped out of the dates asked for.
-            if fetched.fresh {
+            // dropped out of the dates asked for. A list with a service that couldn't be read
+            // says nothing of what is missing from it.
+            if fetched.fresh && fetched.list.dropped == 0 {
                 for key in removed_services(&self.timelychurch.settings.services, &keys, &fetched.from) {
                     let playlist = services.list.iter_mut().find(|playlist| {
                         playlist.origin.as_ref().is_some_and(|o| o.source == super::SOURCE && o.key == key)
@@ -320,22 +348,36 @@ impl crate::App {
                     }
                 }
             }
+            // A service with a song that couldn't be fetched isn't taken as seen as it is now,
+            // so the next check asks for its songs again.
+            let failed = |service: &super::Service| {
+                service.items.iter().any(|item| {
+                    let asked = (item.song_id.clone().unwrap_or_default(), item.arrangement_id.clone());
+                    item.song_id.is_some() && fetched.failed.contains(&asked)
+                })
+            };
             self.timelychurch.settings.services = follow
                 .iter()
                 .zip(&keys)
-                .map(|((service, _), key)| super::store::ServiceSeen {
+                .map(|((service, setlist), key)| super::store::ServiceSeen {
                     key: key.clone(),
-                    updated_at: service.updated_at.clone(),
+                    updated_at: if failed(service) || setlist.is_some_and(failed) {
+                        None
+                    } else {
+                        service.updated_at.clone()
+                    },
                     date: service.date.clone(),
                 })
                 .collect();
             self.timelychurch.settings.let_go.retain(|key| keys.contains(key));
             self.timelychurch.applied(&fetched);
-        } else {
+        } else if changed {
             self.timelychurch.save_settings();
         }
         self.timelychurch_say(&done);
-        if let Some(running) = self.running.as_mut() {
+        if (changed || complete)
+            && let Some(running) = self.running.as_mut()
+        {
             running.home_window.request_redraw();
         }
         complete
@@ -571,8 +613,7 @@ impl crate::App {
     pub(crate) fn timelychurch_use_newer_playlist(&mut self, at: usize) -> Result<String, String> {
         let church = self.timelychurch.settings.address.clone();
         let list = self.timelychurch.list.clone();
-        let copies: HashMap<String, usize> =
-            self.timelychurch_copies().into_iter().map(|(at, key)| (key, at)).collect();
+        let copies = self.timelychurch_places();
         let Some(running) = self.running.as_mut() else { return Err("The window isn't open yet.".to_owned()) };
         let song_keys = running.home_state.song_keys.clone();
         let services = &mut running.home_state.services;

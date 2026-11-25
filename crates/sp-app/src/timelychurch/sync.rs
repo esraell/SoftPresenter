@@ -69,6 +69,8 @@ pub struct Fetched {
     pub songs: Vec<((Id, Option<Id>), Song)>,
     /// Songs TimelyChurch no longer has.
     pub gone: Vec<(Id, Option<Id>)>,
+    /// Songs that couldn't be fetched this time (the network, or an answer that wasn't a song).
+    pub failed: Vec<(Id, Option<Id>)>,
     /// Problems with single songs, for the log.
     pub problems: Vec<String>,
 }
@@ -102,6 +104,9 @@ pub struct Connection {
     forced: bool,
     /// What the last check found, until the app has applied all of it.
     pub waiting: Option<Fetched>,
+    /// When to try applying what waits again (it waited because something was on screen);
+    /// `None`: as soon as the app looks.
+    pub apply_at: Option<Instant>,
     /// The services list last applied (or kept from before), for what a song use says: the
     /// service and the key it was sung in.
     pub list: ServicesReply,
@@ -147,6 +152,7 @@ impl Connection {
             check_again: false,
             forced: false,
             waiting: None,
+            apply_at: None,
             list: ServicesReply::default(),
             looked: None,
             uses,
@@ -433,8 +439,13 @@ impl Connection {
             Answer::Paired(_, address, Ok(paired)) => {
                 let same_church = super::church_part(&address) == super::church_part(&self.settings.address);
                 if !same_church {
-                    // Another church: nothing seen of the last one counts for this one.
+                    // Another church: nothing seen of the last one counts for this one, and the
+                    // last one's songs shown are never told to this one (its ids are its own).
                     self.settings = Settings::default();
+                    self.uses = UseBook::default();
+                    if let Some(files) = &self.files {
+                        let _ = files.save_uses(&self.uses);
+                    }
                 }
                 if let Some(files) = &self.files {
                     files.forget_cached();
@@ -486,6 +497,7 @@ impl Connection {
                             }
                         }
                         self.waiting = Some(fetched);
+                        self.apply_at = None;
                         self.save_settings();
                         self.next_check = Some(Instant::now() + CHECK_EVERY);
                     }
@@ -637,7 +649,10 @@ fn check(input: &CheckInput) -> Result<Fetched, Problem> {
             Ok(None) => fetched.gone.push((song, arrangement)),
             // A refused token or a "wait" stops the check: what was fetched is let go.
             Err(problem @ (Problem::Disconnected | Problem::Wait(_))) => return Err(problem),
-            Err(Problem::Unreachable(why) | Problem::Other(why)) => fetched.problems.push(why),
+            Err(Problem::Unreachable(why) | Problem::Other(why)) => {
+                fetched.problems.push(why);
+                fetched.failed.push((song, arrangement));
+            }
         }
     }
     Ok(fetched)
