@@ -1327,6 +1327,32 @@ mod tests {
     }
 
     #[test]
+    fn sp_gets_a_screens_status_in_english_whatever_the_window_speaks() {
+        use crate::i18n::{Language, with_language};
+        let displays = [DisplayInfo { index: 1, name: "Projector".into(), w: 1920, h: 1080, ..Default::default() }];
+        with_language(Language::Spanish, || {
+            // The one-word statuses, which english_of leaves alone, and sentences it puts back.
+            for placed in [
+                Placed::Nothing(String::new()),
+                Placed::Window,
+                Placed::Fullscreen(1),
+                Placed::Ndi("Santuario".to_owned()),
+            ] {
+                let said = describe(&placed, &displays);
+                let english = with_language(Language::English, || describe(&placed, &displays));
+                assert_ne!(said, english, "the window speaks Spanish");
+                assert_eq!(status_in_english(&said), english);
+            }
+            assert_eq!(status_in_english("Apagada"), "Off");
+            // A reason given when the screens are switched off is said as it was made.
+            let switched_off =
+                describe(&Placed::Nothing(t("screens.status.switched_off", "Switched off").to_owned()), &[]);
+            assert_ne!(switched_off, "Switched off");
+            assert_eq!(status_in_english(&switched_off), "Switched off");
+        });
+    }
+
+    #[test]
     fn one_display_and_one_ndi_name_serve_one_screen_each() {
         // The words are checked in English, whatever another test sets.
         crate::i18n::with_language(crate::i18n::Language::English, || {

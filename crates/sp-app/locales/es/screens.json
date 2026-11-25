@@ -94,9 +94,9 @@
 
   "screens.decklink.format": "Formato",
   "screens.decklink.format.hint": "El formato de vídeo que envía la tarjeta. Ponlo como lo espera el mezclador, la grabadora o el proyector al que va: tienen que coincidir exactamente. Una pantalla nueva empieza en el formato puesto para la tarjeta en Desktop Video Setup; si no hay ninguno (o SoftPresenter no puede reproducirlo), en 1080i59.94, el formato HD habitual donde la corriente es de 60 Hz (1080i50 donde es de 50 Hz). Un formato 720p se reduce a partir de la imagen de 1920 × 1080 de SoftPresenter.",
-  "screens.decklink.keyer": "Clave",
-  "screens.decklink.keyer.hint": "Apagada: la imagen sale opaca. Relleno y clave: la tarjeta envía la imagen por este conector y su clave (blanca donde es opaca, negra donde es transparente) por el conector emparejado, a la vez, para la clave de un mezclador: mejor que una segunda pantalla como clave de esta. Sobre su entrada: la tarjeta pone la imagen sobre el vídeo que le entra. Haz la pantalla transparente (en Aspecto) para que solo se incruste la letra.",
-  "screens.decklink.keyer.off": "Apagada",
+  "screens.decklink.keyer": "Incrustador",
+  "screens.decklink.keyer.hint": "Apagado: la imagen sale opaca. Relleno y clave: la tarjeta envía la imagen por este conector y su clave (blanca donde es opaca, negra donde es transparente) por el conector emparejado, a la vez, para el incrustador de un mezclador: mejor que una segunda pantalla como clave de esta. Sobre su entrada: la tarjeta pone la imagen sobre el vídeo que le entra. Haz la pantalla transparente (en Aspecto) para que solo se incruste la letra.",
+  "screens.decklink.keyer.off": "Apagado",
   "screens.decklink.keyer.external": "Relleno y clave",
   "screens.decklink.keyer.internal": "Sobre su entrada",
   "screens.decklink.not_connected": "{device} no está conectada ahora. La pantalla sale por ella en cuanto lo esté.",
