@@ -64,6 +64,8 @@
   "bibles.window.remove": "Quitar",
   "bibles.window.none_installed": "Ninguna Biblia instalada coincide.",
   "bibles.window.available": "DISPONIBLES",
+  "bibles.window.your_languages": "Tus idiomas",
+  "bibles.window.other_languages": "Otros idiomas",
   "bibles.window.no_downloads": "Las descargas no están disponibles en esta copia. Para instalar una Biblia, suelta su archivo en la ventana o usa Instalar desde archivo…",
   "bibles.window.downloading": "Descargando…",
   "bibles.window.all_installed": "Todas las Biblias que se ofrecen ya están instaladas.",

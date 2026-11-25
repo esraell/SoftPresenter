@@ -513,7 +513,7 @@ deleted)".
 | `bible view [page\|slides]` | How the Bible page shows a passage: its chapter as a page to read, or its slides (with a slide a verse, the chapter's, the passage's ringed); without a word, says which |
 | `bible books [keypad\|lists]` | How the page's left column offers the books: a key for every book, or the book, chapter and verse lists |
 | `bible language [auto\|en\|ru\|uk]` | The language the operator reads the page in (book names, the reference, the page, the find box's Bible rows): Auto, or one with a Bible in use; the slides on screen never change with it |
-| `bibles` | The Bibles installed, and those that can be downloaded |
+| `bibles` | The Bibles installed, and those that can be downloaded: those in the languages the person uses first, under `Your languages:`, then the rest under `Other languages:`, as the Bibles window lists them (no headings when none are in the person's languages) |
 | `bible install NAME\|FILE [--name NAME] [--short SHORT] [--language CODE]`, `bible remove NAME --yes` | Downloads an offered Bible as a job, or installs a Bible file: the app's own `.spbible`, or Zefania, OSIS, Beblia or `<b>`/`<c>`/`<v>` XML, USFM or USX (a file, a zip, or a folder of books), told by what it holds and made into the app's own; the reply says what came in (books, verses, empty verses, books left out, how it is numbered). The file is read in the background (as a job; the command waits for it, and says what came in). The flags give what the file doesn't say, or say otherwise; one that doesn't say its name, short name or language is refused with the flags to add. The same Bible installed again replaces the earlier copy, which goes to the Trash ("Replaced your earlier …"). `remove` removes one (the four that come with the app stay) |
 
 References are typed as on the Bible page, in English, Russian or Ukrainian: `John 3:16-18`,
@@ -1631,6 +1631,7 @@ the command's facts where it has any:
 | `song info SONG` | `id`, `title`, `artist`, `author`, `publisher`, `year`, `ccli`, `slides`, `theme`, `transition`, `loops` |
 | `search WORDS` | `[{"song": "Blessed Assurance", "number": 1, "id": "e698…", "title": false, "slides": [1]}]` |
 | `bible text REFERENCE` | `passage` (as a playlist keeps it), `bibles` (the translations' ids), and `slides`: `[{"slide": 1, "group": "John 3:16", "words": "…"}]` |
+| `bibles` | `installed` (`name`, `short`, `language`, `shipped`), `your_languages` (their codes, in order: `["ru", "uk"]`) and `offered`, in the order listed: `name`, `short`, `language`, `yours` (true in one of the person's languages), `downloading` |
 | `bible search WORDS` | `[{"verse": "John 3:16", "chapter": …, "words": "…", "bible": "KJV"}]` |
 | `song import` | `imported`, `making` (presentations still being turned into slides), `opening` (song bundles still being read), `notes` (pictures or videos a bundle's song came without, and what a bundle left out), `pictures` and `videos` (how many a bundle brought into the media bin), `problems` (songs not imported, those already in the library among them) |
 | `settings` | Every setting, as the app keeps it |

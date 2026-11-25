@@ -178,7 +178,7 @@ screens now?") and goes ahead only on Yes.
 | `read_song` | A song's words as song text (groups, slides, translation under `--`), with its details | the first switch |
 | `look_up_bible` | A passage's verses in the translations the Bible page uses, leaving the page as it is | the first switch |
 | `search_bible` | Verses holding the words given, leaving the Bible page as it is | the first switch |
-| `list_bibles` | The Bibles installed, and those that can be downloaded | the first switch |
+| `list_bibles` | The Bibles installed, and those that can be downloaded, those in the languages the person uses first (`in_your_languages`) | the first switch |
 | `list_playlists` | The playlists, and which is in front | the first switch |
 | `read_playlist` | A playlist's items in order (each with its kind, title and id), the one in front if none is named | the first switch |
 | `list_media` | The pictures and videos in the media bin | the first switch |

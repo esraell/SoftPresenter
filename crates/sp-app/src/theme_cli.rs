@@ -15,6 +15,29 @@ fn on_off(value: &str) -> Result<bool, String> {
     }
 }
 
+/// The lines of `bibles` for the Bibles to download (`offered`, as [`crate::bible::offered_in_order`]
+/// orders them, each marked true in one of the person's languages): under "Your languages:" and
+/// "Other languages:" when some are in the person's languages, as the Bibles window heads them;
+/// as one list when none are. Nothing when there is none to download.
+fn offered_lines(offered: &[(bool, &crate::bible::Offered)], busy: impl Fn(&str) -> bool) -> Vec<String> {
+    if offered.is_empty() {
+        return Vec::new();
+    }
+    let parted = offered.iter().any(|(yours, _)| *yours);
+    let indent = if parted { "    " } else { "  " };
+    let mut lines = vec!["To download (bible install NAME):".to_owned()];
+    let mut part = None;
+    for &(yours, bible) in offered {
+        if parted && part != Some(yours) {
+            part = Some(yours);
+            lines.push(if yours { "  Your languages:" } else { "  Other languages:" }.to_owned());
+        }
+        let downloading = if busy(bible.id) { ", downloading" } else { "" };
+        lines.push(format!("{indent}{} ({}, {}){downloading}", bible.name, bible.short, bible.language));
+    }
+    lines
+}
+
 impl crate::App {
     /// `bible text|search|rows|options|history|install|remove …` and `bibles`; `None` for a
     /// passage to look up.
@@ -241,7 +264,8 @@ impl crate::App {
         Ok(Reply::with(numbered(&lines), serde_json::json!(data)))
     }
 
-    /// `bibles`: the Bibles installed, and those that can be downloaded.
+    /// `bibles`: the Bibles installed, and those that can be downloaded, the person's languages
+    /// first, as the Bibles window lists them.
     pub(crate) fn ctl_bibles(&self) -> Result<Reply, String> {
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
         let shelf = &state.bible.shelf;
@@ -255,18 +279,16 @@ impl crate::App {
                 if bible.shipped { ", comes with the app" } else { "" }
             ));
         }
-        let offered: Vec<&crate::bible::Offered> =
-            crate::bible::OFFERED.iter().filter(|b| shelf.position(b.id).is_none()).collect();
-        if !offered.is_empty() {
-            lines.push("To download (bible install NAME):".to_owned());
-            for bible in &offered {
-                let busy = if state.bible.downloads.is_busy(bible.id) { ", downloading" } else { "" };
-                lines.push(format!("  {} ({}, {}){busy}", bible.name, bible.short, bible.language));
-            }
-        }
+        let yours = crate::bible::your_languages_now(shelf);
+        let offered: Vec<(bool, &crate::bible::Offered)> = crate::bible::offered_in_order(&yours)
+            .into_iter()
+            .filter(|(_, b)| shelf.position(b.id).is_none())
+            .collect();
+        lines.extend(offered_lines(&offered, |id| state.bible.downloads.is_busy(id)));
         let data = serde_json::json!({
             "installed": shelf.bibles.iter().map(|b| serde_json::json!({"name": b.name, "short": b.short, "language": b.language, "shipped": b.shipped})).collect::<Vec<_>>(),
-            "offered": offered.iter().map(|b| serde_json::json!({"name": b.name, "short": b.short, "language": b.language, "downloading": state.bible.downloads.is_busy(b.id)})).collect::<Vec<_>>(),
+            "your_languages": yours,
+            "offered": offered.iter().map(|(mine, b)| serde_json::json!({"name": b.name, "short": b.short, "language": b.language, "yours": mine, "downloading": state.bible.downloads.is_busy(b.id)})).collect::<Vec<_>>(),
         });
         Ok(Reply::with(lines.join("\n"), data))
     }
@@ -671,5 +693,30 @@ impl crate::App {
         };
         self.change_song(at, changed);
         Ok(Reply::done(format!("{}: {said}.", presentation.title)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bibles_lists_the_persons_languages_first_under_their_headings() {
+        let offered = crate::bible::offered_in_order(&["ru", "uk"]);
+        let lines = offered_lines(&offered, |id| id == "ukronpu");
+        assert_eq!(lines[0], "To download (bible install NAME):");
+        assert_eq!(lines[1], "  Your languages:");
+        assert!(lines[2].starts_with("    ") && lines[2].ends_with(", Russian)"), "{}", lines[2]);
+        let others = lines.iter().position(|line| line == "  Other languages:").expect("Other languages:");
+        assert!(lines[2..others].iter().all(|line| line.contains(", Russian)") || line.contains(", Ukrainian)")));
+        assert!(lines[2..others].iter().any(|line| line.ends_with(", Ukrainian), downloading")));
+        assert!(lines[others + 1..].iter().all(|line| line.starts_with("    ") && !line.contains(", Russian)")));
+        assert_eq!(lines.len(), crate::bible::OFFERED.len() + 3);
+        // None in the person's languages: one list, as before, with no headings.
+        let lines = offered_lines(&crate::bible::offered_in_order(&[]), |_| false);
+        assert_eq!(lines.len(), crate::bible::OFFERED.len() + 1);
+        assert!(lines[1..].iter().all(|line| line.starts_with("  ") && !line.starts_with("   ")));
+        // Nothing to download: nothing said.
+        assert!(offered_lines(&[], |_| false).is_empty());
     }
 }

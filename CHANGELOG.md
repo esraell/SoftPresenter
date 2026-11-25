@@ -5,6 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- The Bibles window lists Bibles in the languages you use first, under Your languages, then the rest under Other languages: SoftPresenter's language, your computer's preferred languages and the languages of Bibles you installed. With the app in Russian, the Russian Bible to download is at the top instead of near the end of the list; `sp bibles` lists them the same way.
 - The phone Remote Control page speaks Russian and Ukrainian too, following the app's language.
 - Song parts named in Russian, Ukrainian or Spanish (Куплет 2, Припев, Приспів, Estribillo…) get the same colours and jump keys as English ones: C goes to «Припев», S to «Куплет 2».
 - The app can be used in Russian: choose Русский in Settings › Language or in the setup, and every button, menu, notice and window changes at once, in plain church words (Служение, список, куплет, припев, экраны для зала).

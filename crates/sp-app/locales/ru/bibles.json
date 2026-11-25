@@ -64,6 +64,8 @@
   "bibles.window.remove": "Удалить",
   "bibles.window.none_installed": "Среди установленных Библий совпадений нет.",
   "bibles.window.available": "ДОСТУПНЫЕ",
+  "bibles.window.your_languages": "Ваши языки",
+  "bibles.window.other_languages": "Другие языки",
   "bibles.window.no_downloads": "В этой копии скачивание недоступно. Чтобы установить Библию, перетащите её файл в окно или нажмите «Установить из файла…».",
   "bibles.window.downloading": "Скачивание…",
   "bibles.window.all_installed": "Все предложенные Библии уже установлены.",

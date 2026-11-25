@@ -275,6 +275,7 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
 - The Bibles window (`bible.rs`, `manage_bibles`): a search box, Install from File… (the
   system's window for choosing a file, `handle_bible_file_request` in `main.rs`), Done; the
   Bibles installed, each with Remove (but for the four built in); those offered, by language,
+  the languages the person uses first (`your_languages_now`, `offered_in_order`),
   with Install. A Bible file dropped on the window (`file_drop::Kind::Bible`, found while it
   is held over the window; a file of any other ending is looked into when dropped) or chosen
   is read on a thread of its own (`App::start_bible_work` in `main.rs`, running

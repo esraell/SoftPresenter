@@ -64,6 +64,8 @@
   "bibles.window.remove": "Вилучити",
   "bibles.window.none_installed": "Немає встановленої Біблії, що відповідає пошуку.",
   "bibles.window.available": "ДОСТУПНІ",
+  "bibles.window.your_languages": "Ваші мови",
+  "bibles.window.other_languages": "Інші мови",
   "bibles.window.no_downloads": "У цій копії завантаження недоступні. Щоб встановити Біблію, перетягніть її файл на вікно або скористайтеся «Встановити з файлу…».",
   "bibles.window.downloading": "Завантаження…",
   "bibles.window.all_installed": "Усі запропоновані Біблії вже встановлено.",

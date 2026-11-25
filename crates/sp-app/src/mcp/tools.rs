@@ -697,7 +697,13 @@ fn list_bibles(app: &dyn App, tool: &str) -> Result<Answer, String> {
         ),
         "to_download": renamed(
             &reply.data["offered"],
-            &[("name", "name"), ("short", "short_name"), ("language", "language"), ("downloading", "downloading_now")],
+            &[
+                ("name", "name"),
+                ("short", "short_name"),
+                ("language", "language"),
+                ("yours", "in_your_languages"),
+                ("downloading", "downloading_now"),
+            ],
         ),
     });
     Ok(Answer::with(reply.text, facts))

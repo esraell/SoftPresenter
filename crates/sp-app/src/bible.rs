@@ -9,7 +9,7 @@ use sp_bible::{Bible, Numbering, VerseRef, convert, parse_reference_in};
 use sp_model::{Group, Object, Presentation, Rgba, Role, Slide, Uuid};
 
 use crate::home::BibleTarget;
-use crate::i18n::{t, tf, tn};
+use crate::i18n::{t, tf, tk, tn};
 
 /// Where a Bible's file is.
 #[derive(Clone)]
@@ -555,8 +555,9 @@ pub struct Offered {
 
 /// The Bibles offered under "Free", grouped by language, in the order of the languages' own
 /// names as the Bibles window shows them ([`language_name`]): those in Latin letters first (an
-/// accented letter read as the plain one), then the other alphabets. The four that come with
-/// the app are not here.
+/// accented letter read as the plain one), then the other alphabets. The window and `sp bibles`
+/// list the person's languages before the rest ([`offered_in_order`]). Each language is named in
+/// English, as [`LANGUAGES`] names it. The four that come with the app are not here.
 pub const OFFERED: &[Offered] = &[
     Offered {
         language: "Czech",
@@ -1673,46 +1674,191 @@ pub fn list_row_id(id: impl std::hash::Hash + std::fmt::Debug) -> egui::Id {
     egui::Id::unique(("bible lists", id))
 }
 
+/// How the Bibles window names a language.
+enum OwnName {
+    /// As people who speak it write it.
+    Is(&'static str),
+    /// Its own name and what it is called in the language set (a key and its English, as
+    /// [`tk`](crate::i18n::tk) pairs them), for an alphabet the operator may not read.
+    Words((&'static str, &'static str)),
+}
+
+/// A language Bibles are offered in.
+struct KnownLanguage {
+    /// Its ISO 639 code: what a Bible's language and the languages the person uses are matched
+    /// by.
+    code: &'static str,
+    /// The other codes systems and Bible files give it: three letters, older codes, a written
+    /// form of it (`nb`, `nn` for Norwegian) or an older form (`grc`, `hbo`).
+    also: &'static [&'static str],
+    /// Its name in English, as [`OFFERED`] names it.
+    english: &'static str,
+    own: OwnName,
+}
+
+/// Every language a Bible is offered in, and the app's own: the one table that turns a code or
+/// an English name into the language's code, and names it in the Bibles window.
+const LANGUAGES: &[KnownLanguage] = &[
+    KnownLanguage { code: "en", also: &["eng"], english: "English", own: OwnName::Is("English") },
+    KnownLanguage { code: "ru", also: &["rus"], english: "Russian", own: OwnName::Is("Русский") },
+    KnownLanguage { code: "uk", also: &["ukr"], english: "Ukrainian", own: OwnName::Is("Українська") },
+    KnownLanguage { code: "de", also: &["deu", "ger"], english: "German", own: OwnName::Is("Deutsch") },
+    KnownLanguage { code: "fr", also: &["fra", "fre"], english: "French", own: OwnName::Is("Français") },
+    KnownLanguage { code: "es", also: &["spa"], english: "Spanish", own: OwnName::Is("Español") },
+    KnownLanguage { code: "pt", also: &["por"], english: "Portuguese", own: OwnName::Is("Português") },
+    KnownLanguage { code: "cs", also: &["ces", "cze"], english: "Czech", own: OwnName::Is("Čeština") },
+    KnownLanguage { code: "da", also: &["dan"], english: "Danish", own: OwnName::Is("Dansk") },
+    KnownLanguage { code: "nl", also: &["nld", "dut"], english: "Dutch", own: OwnName::Is("Nederlands") },
+    KnownLanguage { code: "eo", also: &["epo"], english: "Esperanto", own: OwnName::Is("Esperanto") },
+    KnownLanguage { code: "eu", also: &["eus", "baq"], english: "Basque", own: OwnName::Is("Euskara") },
+    KnownLanguage { code: "fi", also: &["fin"], english: "Finnish", own: OwnName::Is("Suomi") },
+    KnownLanguage { code: "hu", also: &["hun"], english: "Hungarian", own: OwnName::Is("Magyar") },
+    KnownLanguage { code: "it", also: &["ita"], english: "Italian", own: OwnName::Is("Italiano") },
+    KnownLanguage { code: "mg", also: &["mlg"], english: "Malagasy", own: OwnName::Is("Malagasy") },
+    KnownLanguage {
+        code: "no",
+        also: &["nb", "nn", "nor", "nob", "nno"],
+        english: "Norwegian",
+        own: OwnName::Is("Norsk"),
+    },
+    KnownLanguage { code: "pl", also: &["pol"], english: "Polish", own: OwnName::Is("Polski") },
+    KnownLanguage { code: "sr", also: &["srp"], english: "Serbian", own: OwnName::Is("Srpski · Српски") },
+    KnownLanguage { code: "sv", also: &["swe"], english: "Swedish", own: OwnName::Is("Svenska") },
+    // Filipino is the standard form of Tagalog: a computer set to it reads Tagalog Bibles.
+    KnownLanguage { code: "tl", also: &["tgl", "fil"], english: "Tagalog", own: OwnName::Is("Tagalog") },
+    KnownLanguage { code: "tlh", also: &[], english: "Klingon", own: OwnName::Is("tlhIngan Hol") },
+    KnownLanguage {
+        code: "el",
+        also: &["ell", "gre", "grc"],
+        english: "Greek",
+        own: OwnName::Words(tk("bibles.language.greek", "Ελληνικά · Greek")),
+    },
+    KnownLanguage {
+        code: "he",
+        also: &["heb", "hbo", "iw"],
+        english: "Hebrew",
+        own: OwnName::Words(tk("bibles.language.hebrew", "עברית · Hebrew")),
+    },
+    KnownLanguage {
+        code: "ar",
+        also: &["ara"],
+        english: "Arabic",
+        own: OwnName::Words(tk("bibles.language.arabic", "العربية · Arabic")),
+    },
+    KnownLanguage {
+        code: "hy",
+        also: &["hye", "arm"],
+        english: "Armenian",
+        own: OwnName::Words(tk("bibles.language.armenian", "Հայերեն · Armenian")),
+    },
+    KnownLanguage {
+        code: "zh",
+        also: &["zho", "chi"],
+        english: "Chinese",
+        own: OwnName::Words(tk("bibles.language.chinese", "中文 · Chinese")),
+    },
+    KnownLanguage {
+        code: "ko",
+        also: &["kor"],
+        english: "Korean",
+        own: OwnName::Words(tk("bibles.language.korean", "한국어 · Korean")),
+    },
+    KnownLanguage {
+        code: "fa",
+        also: &["fas", "per"],
+        english: "Persian",
+        own: OwnName::Words(tk("bibles.language.persian", "فارسی · Persian")),
+    },
+];
+
+/// The language a code or an English name stands for: `uk`, `ukr`, "Ukrainian", and a code
+/// with a script or country after it as systems and files write them (`zh-Hant`, `nb-NO`,
+/// `uk_UA.UTF-8`), in any case.
+fn known_language(language: &str) -> Option<&'static KnownLanguage> {
+    let lower = language.trim().to_lowercase();
+    let first = lower.split(['-', '_', '.', '@']).next().unwrap_or_default();
+    if first.is_empty() {
+        return None;
+    }
+    LANGUAGES
+        .iter()
+        .find(|known| known.code == first || known.also.contains(&first) || known.english.eq_ignore_ascii_case(first))
+}
+
+/// A language's ISO code, from a code or an English name as [`known_language`] reads them; `None`
+/// for one no Bible is offered in.
+pub fn iso_code(language: &str) -> Option<&'static str> {
+    known_language(language).map(|known| known.code)
+}
+
 /// A language as people who speak it write it, for the Bibles window: from a language code
-/// (`uk`) or an English name ("Ukrainian").
+/// (`uk`) or an English name ("Ukrainian"). One not known is shown as it is.
 pub fn language_name(language: &str) -> String {
-    let lower = language.to_lowercase();
-    // A code with a script or country after it (zh-Hant, pt-BR) is named by its language.
-    let code = lower.split(['-', '_']).next().unwrap_or_default();
-    let native = match code {
-        "en" | "english" => "English",
-        "ru" | "russian" => "Русский",
-        "uk" | "ukrainian" => "Українська",
-        "de" | "german" => "Deutsch",
-        "fr" | "french" => "Français",
-        "es" | "spanish" => "Español",
-        "pt" | "portuguese" => "Português",
-        "cs" | "czech" => "Čeština",
-        "da" | "danish" => "Dansk",
-        "nl" | "dutch" => "Nederlands",
-        "eo" | "esperanto" => "Esperanto",
-        "eu" | "basque" => "Euskara",
-        "fi" | "finnish" => "Suomi",
-        "hu" | "hungarian" => "Magyar",
-        "it" | "italian" => "Italiano",
-        "mg" | "malagasy" => "Malagasy",
-        "nb" | "nn" | "no" | "norwegian" => "Norsk",
-        "pl" | "polish" => "Polski",
-        "sr" | "serbian" => "Srpski · Српски",
-        "sv" | "swedish" => "Svenska",
-        "tl" | "tagalog" => "Tagalog",
-        "tlh" | "klingon" => "tlhIngan Hol",
-        // The language's own name, and what it is called in the language set.
-        "el" | "grc" | "greek" => t("bibles.language.greek", "Ελληνικά · Greek"),
-        "he" | "hbo" | "hebrew" => t("bibles.language.hebrew", "עברית · Hebrew"),
-        "ar" | "arabic" => t("bibles.language.arabic", "العربية · Arabic"),
-        "hy" | "armenian" => t("bibles.language.armenian", "Հայերեն · Armenian"),
-        "zh" | "chinese" => t("bibles.language.chinese", "中文 · Chinese"),
-        "ko" | "korean" => t("bibles.language.korean", "한국어 · Korean"),
-        "fa" | "persian" => t("bibles.language.persian", "فارسی · Persian"),
-        _ => return language.to_owned(),
+    match known_language(language).map(|known| &known.own) {
+        Some(OwnName::Is(name)) => (*name).to_owned(),
+        Some(OwnName::Words((key, english))) => t(key, english).to_owned(),
+        None => language.to_owned(),
+    }
+}
+
+/// The languages the person uses, as codes, each once, in the order they count: the languages
+/// the church shows (`church`, once the setup asks), the app's language as chosen in Settings ›
+/// Language (`chosen`; `None` for This computer's, which is the computer's first language, or
+/// English until the computer has said), the computer's other preferred languages (`computer`,
+/// as the system writes them, its first language first), then the languages of the Bibles
+/// installed (`installed`: not those built in, which every copy has). A code no Bible is offered
+/// in is left out.
+pub fn your_languages(
+    church: &[String],
+    chosen: Option<&str>,
+    computer: &[String],
+    installed: &[&str],
+) -> Vec<&'static str> {
+    let app = chosen.or(computer.first().map(String::as_str)).unwrap_or("en");
+    let mut out: Vec<&'static str> = Vec::new();
+    let every = church
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(app))
+        .chain(computer.iter().map(String::as_str))
+        .chain(installed.iter().copied());
+    for code in every.filter_map(iso_code) {
+        if !out.contains(&code) {
+            out.push(code);
+        }
+    }
+    out
+}
+
+/// [`your_languages`] now: the church's languages, the Language setting, the computer's
+/// preferred languages and the Bibles on the shelf that didn't come with the app.
+pub fn your_languages_now(shelf: &Shelf) -> Vec<&'static str> {
+    let chosen = match crate::i18n::choice() {
+        crate::i18n::Choice::Is(language) => Some(language.code()),
+        crate::i18n::Choice::Computer => None,
     };
-    native.to_owned()
+    let installed: Vec<&str> =
+        shelf.bibles.iter().filter(|bible| !bible.shipped).map(|bible| bible.language.as_str()).collect();
+    your_languages(&crate::songbooks::church_languages(), chosen, &crate::i18n::computer_tags(), &installed)
+}
+
+/// The Bibles offered, in the order the Bibles window and `sp bibles` list them: those in the
+/// person's languages first (`yours`, from [`your_languages`]), a language at a time in that
+/// order, then the rest as [`OFFERED`] has them. Each is marked true when it is in one of the
+/// person's languages.
+pub fn offered_in_order(yours: &[&str]) -> Vec<(bool, &'static Offered)> {
+    let code_of = |bible: &Offered| iso_code(bible.language);
+    let mut out: Vec<(bool, &'static Offered)> = Vec::with_capacity(OFFERED.len());
+    for code in yours {
+        out.extend(OFFERED.iter().filter(|bible| code_of(bible) == Some(*code)).map(|bible| (true, bible)));
+    }
+    out.extend(
+        OFFERED
+            .iter()
+            .filter(|bible| code_of(bible).is_none_or(|code| !yours.contains(&code)))
+            .map(|bible| (false, bible)),
+    );
+    out
 }
 
 /// Puts downloads that have just ended on the shelf, or says what went wrong. Done every
@@ -1730,8 +1876,9 @@ pub fn collect_downloads(options: &mut BibleOptions, shelf: &mut Shelf, download
 }
 
 /// The Bibles window: a search box, the Bibles installed (each with a Remove button, but for
-/// the ones built in), and every Bible that can be downloaded, grouped by language, each with
-/// its terms and an Install button that shows the download going on. Removing asks nothing
+/// the ones built in), and every Bible that can be downloaded, grouped by language, the
+/// person's languages first ([`offered_in_order`]), each with its terms and an Install button
+/// that shows the download going on. Removing asks nothing
 /// more: the file goes to the Trash and can be put back. Escape or Done closes it.
 pub fn manage_bibles(
     ctx: &egui::Context,
@@ -1740,6 +1887,7 @@ pub fn manage_bibles(
     downloads: &mut crate::bible_store::Downloads,
 ) {
     let can_download = crate::bible_store::download_base().is_some();
+    let ordered = offered_in_order(&your_languages_now(shelf));
     let frame = Frame::new()
         .fill(Color32::from_rgb(38, 38, 40))
         .stroke(Stroke::new(1.0, Color32::from_white_alpha(22)))
@@ -1825,11 +1973,29 @@ pub fn manage_bibles(
                         ),
                     );
                 }
+                // The person's languages first, under a heading of their own, then the others
+                // under theirs; with none of the person's to show, no headings, as before.
+                let shown: Vec<(bool, &Offered)> = ordered
+                    .iter()
+                    .copied()
+                    .filter(|(_, bible)| {
+                        shelf.position(bible.id).is_none() && matches(bible.name, bible.short, bible.language)
+                    })
+                    .collect();
+                let parted = shown.iter().any(|(yours, _)| *yours);
+                let mut part = None;
                 let mut language = "";
-                let mut shown = 0;
-                for bible in OFFERED {
-                    if shelf.position(bible.id).is_some() || !matches(bible.name, bible.short, bible.language) {
-                        continue;
+                for &(yours, bible) in &shown {
+                    if parted && part != Some(yours) {
+                        part = Some(yours);
+                        part_heading(
+                            ui,
+                            if yours {
+                                t("bibles.window.your_languages", "Your languages")
+                            } else {
+                                t("bibles.window.other_languages", "Other languages")
+                            },
+                        );
                     }
                     if bible.language != language {
                         language = bible.language;
@@ -1837,7 +2003,6 @@ pub fn manage_bibles(
                         ui.label(egui::RichText::new(language_name(language)).font(crate::studio::semibold(12.5)).color(DIM));
                         ui.add_space(2.0);
                     }
-                    shown += 1;
                     let right = if downloads.is_busy(bible.id) {
                         Right::Note(t("bibles.window.downloading", "Downloading…"))
                     } else if can_download {
@@ -1850,7 +2015,7 @@ pub fn manage_bibles(
                         downloads.start(bible.id, bible.checksum, move || ctx.request_repaint());
                     }
                 }
-                if shown == 0 && can_download {
+                if shown.is_empty() && can_download {
                     nothing(
                         ui,
                         if typed.is_empty() {
@@ -1890,6 +2055,18 @@ fn terms_shown(terms: &'static str) -> &'static str {
 /// True while any Bible is downloading.
 fn downloads_busy(downloads: &crate::bible_store::Downloads) -> bool {
     OFFERED.iter().any(|bible| downloads.is_busy(bible.id))
+}
+
+/// The name of a part of the Bibles to download (the person's languages, then the others): a
+/// little larger and brighter than the languages' names under it, with a faint line to the edge.
+fn part_heading(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(text).font(crate::studio::semibold(13.5)).color(INK));
+        let rest = ui.available_rect_before_wrap();
+        let y = ui.min_rect().center().y;
+        ui.painter().hline((rest.left() + 4.0)..=rest.right(), y, Stroke::new(1.0, Color32::from_white_alpha(40)));
+    });
 }
 
 fn heading(ui: &mut egui::Ui, text: &str) {
@@ -2242,6 +2419,118 @@ mod tests {
                 languages.push(bible.language);
             }
         }
+    }
+
+    #[test]
+    fn every_offered_language_has_one_code_of_its_own() {
+        let mut codes: Vec<(&str, &str)> = Vec::new();
+        for bible in OFFERED {
+            let code = iso_code(bible.language).unwrap_or_else(|| panic!("{} has no code", bible.language));
+            match codes.iter().find(|(seen, _)| *seen == code) {
+                Some((_, named)) => assert_eq!(*named, bible.language, "{code} is two languages"),
+                None => codes.push((code, bible.language)),
+            }
+            // Its code names it as its English name does.
+            assert_eq!(language_name(code), language_name(bible.language));
+        }
+        // Codes and aliases are each one language's.
+        let mut every: Vec<&str> = Vec::new();
+        for known in LANGUAGES {
+            for code in std::iter::once(known.code).chain(known.also.iter().copied()) {
+                assert!(!every.contains(&code), "{code} is given twice");
+                assert_eq!(code, code.to_ascii_lowercase());
+                every.push(code);
+            }
+        }
+        // The app's own languages are there.
+        for language in crate::i18n::Language::ALL {
+            assert_eq!(iso_code(language.code()), Some(language.code()));
+        }
+    }
+
+    #[test]
+    fn a_language_is_found_by_any_code_systems_and_files_give_it() {
+        for (given, code) in [
+            ("nb-NO", "no"),
+            ("nn", "no"),
+            ("Norwegian", "no"),
+            ("zh-Hant", "zh"),
+            ("zh_CN.UTF-8", "zh"),
+            ("grc", "el"),
+            ("hbo", "he"),
+            ("rus", "ru"),
+            ("UKR", "uk"),
+            ("uk_UA.UTF-8@euro", "uk"),
+            ("pt-BR", "pt"),
+            ("fil", "tl"),
+            ("english", "en"),
+            ("RUSSIAN", "ru"),
+        ] {
+            assert_eq!(iso_code(given), Some(code), "{given}");
+        }
+        for unknown in ["", " ", "xx", "C", "POSIX", "be-BY", "Englishish"] {
+            assert_eq!(iso_code(unknown), None, "{unknown:?}");
+        }
+    }
+
+    fn tags(tags: &[&str]) -> Vec<String> {
+        tags.iter().map(|tag| (*tag).to_owned()).collect()
+    }
+
+    #[test]
+    fn your_languages_are_the_apps_then_the_computers_then_the_installed_bibles() {
+        // The app in Russian, a computer preferring Ukrainian then English, a Spanish Bible
+        // installed.
+        assert_eq!(your_languages(&[], Some("ru"), &tags(&["uk-UA", "en-US"]), &["es"]), ["ru", "uk", "en", "es"]);
+        // This computer's: the computer's own language comes first, and English isn't added for
+        // the app's words being in English (a German computer, with no German words).
+        assert_eq!(your_languages(&[], None, &tags(&["uk-UA", "en-US"]), &[]), ["uk", "en"]);
+        assert_eq!(your_languages(&[], None, &tags(&["de-DE"]), &[]), ["de"]);
+        // Before the computer has said, the app is in English.
+        assert_eq!(your_languages(&[], None, &[], &[]), ["en"]);
+        // Each once, however it is written.
+        assert_eq!(
+            your_languages(&[], Some("uk"), &tags(&["uk-UA", "ru", "ru_RU.UTF-8", "en"]), &["ukr", "rus", "en"]),
+            ["uk", "ru", "en"]
+        );
+        // Codes no Bible is offered in, or none at all, are left out.
+        assert_eq!(your_languages(&[], Some("es"), &tags(&["be-BY", "xx", "", "C"]), &["", "xx"]), ["es"]);
+        // The languages the church shows, once the setup asks, come first.
+        assert_eq!(
+            your_languages(&tags(&["ru", "en"]), Some("uk"), &tags(&["uk", "de"]), &["es"]),
+            ["ru", "en", "uk", "de", "es"]
+        );
+    }
+
+    #[test]
+    fn the_persons_languages_are_offered_first_and_the_rest_as_before() {
+        let ordered = offered_in_order(&["ru", "uk", "en", "es"]);
+        assert_eq!(ordered.len(), OFFERED.len());
+        let languages: Vec<&str> = ordered.iter().map(|(_, bible)| bible.language).collect();
+        let mut groups: Vec<&str> = languages.clone();
+        groups.dedup();
+        assert_eq!(groups[..4], ["Russian", "Ukrainian", "English", "Spanish"]);
+        // Marked as the person's exactly while in those four.
+        let yours = ordered.iter().take_while(|(yours, _)| *yours).count();
+        assert!(ordered[yours..].iter().all(|(yours, _)| !yours));
+        assert_eq!(
+            yours,
+            OFFERED.iter().filter(|b| ["Russian", "Ukrainian", "English", "Spanish"].contains(&b.language)).count()
+        );
+        // Within a language, and among the others, the list's own order.
+        let rest: Vec<&str> = ordered[yours..].iter().map(|(_, bible)| bible.id).collect();
+        let before: Vec<&str> = OFFERED
+            .iter()
+            .filter(|b| !["Russian", "Ukrainian", "English", "Spanish"].contains(&b.language))
+            .map(|b| b.id)
+            .collect();
+        assert_eq!(rest, before);
+        let english: Vec<&str> = ordered.iter().filter(|(_, b)| b.language == "English").map(|(_, b)| b.id).collect();
+        let english_before: Vec<&str> = OFFERED.iter().filter(|b| b.language == "English").map(|b| b.id).collect();
+        assert_eq!(english, english_before);
+        // With none of the person's, the list is as it was.
+        let plain: Vec<&str> = offered_in_order(&[]).iter().map(|(_, b)| b.id).collect();
+        assert_eq!(plain, OFFERED.iter().map(|b| b.id).collect::<Vec<_>>());
     }
 
     #[test]

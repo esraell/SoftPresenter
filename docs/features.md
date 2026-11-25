@@ -1118,7 +1118,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Károli, Biblia Gdańska, Diodati and Riveduta, and twenty-eight in English). Options › Bibles opens the Bibles window: a search box,
   the Bibles installed (each with Remove, but for the four built in), and every Bible that can
   be downloaded, grouped by language and written in it, with its terms and an Install button
-  that shows the download going on. Removing a Bible a translation row shows takes that row
+  that shows the download going on. **The languages you use come first**, under Your
+  languages, then the rest under Other languages, in the order they were: the languages the
+  church shows (once the setup asks), the app's language as chosen in Settings › Language (with
+  This computer's, the computer's own), the computer's other preferred languages (a Mac's
+  preferred languages, Windows' language list, `LANGUAGE` elsewhere), then the languages of the
+  Bibles you installed (the four built in don't count, as every copy has them). Languages are
+  matched by their codes, so `ru-RU`, `rus` and Russian are one. With none of yours to show
+  (all installed, or none matches the search) the list has no headings, as before. `sp bibles`
+  lists them in the same order, under the same headings. Removing a Bible a translation row shows takes that row
   away and gives the boxes out again; removing one no row shows leaves every row's boxes as
   they were.
 - **A Bible file the church has installs too**, in the formats other programs keep Bibles in:
