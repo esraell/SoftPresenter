@@ -461,14 +461,8 @@ fn screens_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
         0.575,
         f32::INFINITY,
     );
-    let seen = parts::words(
-        ui,
-        &t("settings.screens.seen", "Everyone watching sees these").to_uppercase(),
-        fixed(11.5),
-        TEXT_FAINT,
-        0.575,
-        f32::INFINITY,
-    );
+    let seen_words = t("settings.screens.seen", "Everyone watching sees these").to_uppercase();
+    let seen = |ui: &egui::Ui, wrap: f32| parts::words(ui, &seen_words, fixed(11.5), TEXT_FAINT, 0.575, wrap);
     // Identify, then a rule, the caption and the switch on the same line where they fit; where
     // they don't, the caption and the switch on a line of their own under Identify (and the
     // switch on a line of its own too, narrower still).
@@ -513,13 +507,18 @@ fn screens_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     if let Some(at) = clicked {
         state.test_pattern = patterns[at].0;
     }
-    // The note goes beside the switch where there is room, else under it.
-    if track.max.x + 12.0 + seen.size().x <= strip.max.x {
-        ui.painter().galley(pos2(track.max.x + 12.0, track.center().y - seen.size().y / 2.0), seen, TEXT_FAINT);
+    // The note goes beside the switch where there is room, on two lines if it must, as the
+    // design's; else under it.
+    let beside = strip.max.x - track.max.x - 12.0;
+    let wrapped = seen(ui, beside.max(1.0));
+    if beside >= 120.0 && wrapped.rows.len() <= 2 && wrapped.size().x <= beside + 0.5 {
+        let at = pos2(track.max.x + 12.0, track.center().y - wrapped.size().y / 2.0);
+        ui.painter().galley(at, wrapped, TEXT_FAINT);
     } else {
+        let whole = seen(ui, f32::INFINITY);
         ui.add_space(6.0);
-        let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), seen.size().y), Sense::hover());
-        ui.painter().galley(place.min, seen, TEXT_FAINT);
+        let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), whole.size().y), Sense::hover());
+        ui.painter().galley(place.min, whole, TEXT_FAINT);
     }
     ui.add_space(14.0);
     card(
