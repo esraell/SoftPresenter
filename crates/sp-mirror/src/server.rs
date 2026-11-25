@@ -43,8 +43,9 @@ const MAX_CONNECTIONS: usize = 8;
 const MAX_CONNECTIONS_EACH: usize = 3;
 /// How many connections one address may open in a minute.
 const MAX_PER_MINUTE: usize = 30;
-/// How long an address the operator refused (or did not answer) is not asked about again, so
-/// that nobody can keep a question in front of the operator.
+/// How long an address the operator refused (Don't Allow) is not asked about again, so that
+/// nobody can keep a question in front of the operator. An address that was only not answered
+/// in time may try again at once.
 const REFUSED_TIME: Duration = Duration::from_secs(60);
 /// How many times in ten seconds a sender's picture may change size (each is a new FFmpeg).
 const MAX_SIZE_CHANGES: usize = 8;
@@ -83,8 +84,9 @@ struct State {
     recent: Vec<(IpAddr, Instant)>,
     /// The addresses of the control connections being served.
     serving: Vec<IpAddr>,
-    /// The addresses refused lately, and when.
-    refused: Vec<(IpAddr, Instant)>,
+    /// The addresses refused lately, when, and whether the operator has been told that one
+    /// tried again.
+    refused: Vec<(IpAddr, Instant, bool)>,
 }
 
 pub struct Shared {
@@ -293,17 +295,20 @@ impl Shared {
     fn remember_refused(&self, peer: IpAddr) {
         if let Ok(mut state) = self.state.lock() {
             let now = Instant::now();
-            state.refused.retain(|(_, at)| now.duration_since(*at) < REFUSED_TIME);
+            state.refused.retain(|(_, at, _)| now.duration_since(*at) < REFUSED_TIME);
             if state.refused.len() < 256 {
-                state.refused.push((peer, now));
+                state.refused.push((peer, now, false));
             }
         }
     }
 
-    fn refused_lately(&self, peer: IpAddr) -> bool {
-        self.state.lock().is_ok_and(|state| {
-            state.refused.iter().any(|(address, at)| *address == peer && at.elapsed() < REFUSED_TIME)
-        })
+    /// Whether this address was refused less than [`REFUSED_TIME`] ago, and if so whether this
+    /// is the first time it has tried again (the operator is told of that once).
+    fn refused_lately(&self, peer: IpAddr) -> Option<bool> {
+        let mut state = self.state.lock().ok()?;
+        let entry =
+            state.refused.iter_mut().find(|(address, at, _)| *address == peer && at.elapsed() < REFUSED_TIME)?;
+        Some(!std::mem::replace(&mut entry.2, true))
     }
 }
 
@@ -553,8 +558,13 @@ fn setup(
         let name = clean(&asked.name, "A device");
         let model = clean(&asked.model, "unknown");
         let ended = Arc::new(AtomicBool::new(false));
-        if shared.config.ask && shared.refused_lately(peer.ip()) {
+        if shared.config.ask
+            && let Some(first_again) = shared.refused_lately(peer.ip())
+        {
             log(format!("{name} was not asked about: its address was refused less than a minute ago"));
+            if first_again {
+                say(json!({ "event": "refused", "name": name, "why": "denied_lately" }));
+            }
             return Response::status(453, "Not Enough Bandwidth").closing();
         }
         let (answer, answers) = mpsc::channel();
@@ -594,7 +604,7 @@ fn setup(
             };
             if let Some(why) = why {
                 log(format!("the sender waited {waited} ms for an answer"));
-                if why == "denied" || why == "timeout" {
+                if why == "denied" {
                     shared.remember_refused(peer.ip());
                 }
                 shared.close(id, why, false);
@@ -932,10 +942,12 @@ mod tests {
         }
         assert!(!shared.take_place(other));
         // A refused address is remembered; another is not.
-        assert!(!shared.refused_lately(one));
+        assert_eq!(shared.refused_lately(one), None);
         shared.remember_refused(one);
-        assert!(shared.refused_lately(one));
-        assert!(!shared.refused_lately(other));
+        // The first try again is said to the operator; the ones after are not.
+        assert_eq!(shared.refused_lately(one), Some(true));
+        assert_eq!(shared.refused_lately(one), Some(false));
+        assert_eq!(shared.refused_lately(other), None);
         // Stopping with nobody connected, or answering a sender that is not there, does nothing.
         shared.stop();
         shared.answer(99, true);

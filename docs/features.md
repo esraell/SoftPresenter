@@ -1164,7 +1164,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   With Ask me each time, a device that wants to show its screen is a question in the notices,
   "Anna's iPhone wants to show its screen." with **Allow** and **Don't Allow**, in the
   operator's window only; unanswered for half a minute, the device is turned away and can try
-  again. One device at a time: a second is turned away while the first shows. The box holds
+  again; after Don't Allow it is turned away for a minute without another question (a notice
+  says so the first time it tries). One device at a time: a second is turned away while the first shows. The box holds
   the last picture for two seconds when the device goes, then fades, as an NDI Source box does;
   a screen that isn't moving stays as it is. Fits as a picture does (Fit, Fill, Stretch).
   Picture only for now: the device's sound is taken and not played. Films from streaming apps

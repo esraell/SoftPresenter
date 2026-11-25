@@ -19,8 +19,8 @@
 //! A device can never put itself on a screen: its picture shows only where the operator has put
 //! a box and taken the slide live. With "Ask me each time" (the default) the operator is asked
 //! in the notices before a device's picture is taken at all. In a quiet run
-//! (`SOFTPRESENTER_QUIET`) the program is never told to announce itself and listens on this
-//! computer only.
+//! (`SOFTPRESENTER_QUIET`, or one that only saves a picture: the app's own `quiet`) the program
+//! is never told to announce itself and listens on this computer only.
 //!
 //! Unofficial: this works with Apple's Screen Mirroring but isn't made or supported by Apple,
 //! and an Apple update may stop it working; Settings says so where it is switched on.
@@ -54,7 +54,7 @@ const BYTES_MOST: u64 = 4096 * 2304 * 4;
 /// How often a connected device's last picture is kept from fading while its screen is still.
 const KEEP_EVERY: Duration = Duration::from_millis(500);
 /// How long the helper is given to leave by itself once its input is closed.
-const LEAVE_WITHIN: Duration = Duration::from_millis(600);
+const LEAVE_WITHIN: Duration = Duration::from_millis(1500);
 /// A helper that ran this long before it stopped is started again at once, as if it never failed.
 const RAN_WELL: Duration = Duration::from_secs(60);
 
@@ -149,13 +149,6 @@ pub fn helper_program() -> Option<PathBuf> {
     let file = if cfg!(windows) { format!("{PROGRAM}.exe") } else { PROGRAM.to_owned() };
     let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
     [dir.join(&file), dir.join("../Resources").join(&file)].into_iter().find(|place| place.is_file())
-}
-
-/// Whether this is a quiet run, which never announces itself.
-fn quiet() -> bool {
-    // Testing aid: SOFTPRESENTER_QUIET=1 keeps the helper on this computer only (127.0.0.1),
-    // announcing nothing, so a test copy never shows up on anyone's phone.
-    std::env::var_os("SOFTPRESENTER_QUIET").is_some_and(|v| !v.is_empty())
 }
 
 /// The command line the helper is started with. Nothing a device says, and nothing the operator
@@ -381,6 +374,8 @@ fn read_pictures(mut pictures: impl Read, shared: &Shared, wake: &Waker) {
 /// What the app does with mirrored screens.
 pub struct Mirror {
     saved: Saved,
+    /// A quiet run: the helper is never told to announce itself.
+    quiet: bool,
     shared: Arc<Shared>,
     helper: Option<Helper>,
     /// How many times running it has failed in a row, and when to try again.
@@ -436,8 +431,11 @@ pub enum Request {
 }
 
 impl Mirror {
-    /// Reads the settings; nothing runs yet.
-    pub fn open() -> Mirror {
+    /// Reads the settings; nothing runs yet. `quiet` is the app's own word for a run that must
+    /// stay out of the way (`SOFTPRESENTER_QUIET`, or a run that only saves a picture): its
+    /// helper listens on this computer only (127.0.0.1) and announces nothing, so a test copy
+    /// never shows up on anyone's phone.
+    pub fn open(quiet: bool) -> Mirror {
         let saved = settings_file()
             .and_then(|file| std::fs::read_to_string(file).ok())
             .and_then(|text| serde_json::from_str::<Saved>(&text).ok())
@@ -451,6 +449,7 @@ impl Mirror {
             .unwrap_or_default();
         Mirror {
             saved,
+            quiet,
             shared: Arc::default(),
             helper: None,
             failures: 0,
@@ -527,7 +526,7 @@ impl Mirror {
         let port = std::env::var("SOFTPRESENTER_MIRROR_PORT").ok().and_then(|port| port.parse::<u16>().ok());
         let mut command = Command::new(&program);
         command
-            .args(helper_arguments(&ffmpeg, quiet(), port))
+            .args(helper_arguments(&ffmpeg, self.quiet, port))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -570,7 +569,10 @@ impl Mirror {
             .map_err(|e| could_not(&e))?;
         crate::applog::event(
             "mirror",
-            &format!("started the helper{}", if quiet() { " (quiet: this computer only, not announced)" } else { "" }),
+            &format!(
+                "started the helper{}",
+                if self.quiet { " (quiet: this computer only, not announced)" } else { "" }
+            ),
         );
         self.helper = Some(Helper { child, input, events, since: Instant::now() });
         Ok(())
@@ -1001,6 +1003,11 @@ impl crate::App {
                     "timeout" => notices.info(tf(
                         "mirror.refused.timeout",
                         "{name} wanted to show its screen and wasn\u{2019}t answered in time. It can try again.",
+                        &[("name", &name)],
+                    )),
+                    "denied_lately" => notices.info(tf(
+                        "mirror.refused.lately",
+                        "{name} tried again and was turned away: you chose Don\u{2019}t Allow less than a minute ago.",
                         &[("name", &name)],
                     )),
                     _ => {}

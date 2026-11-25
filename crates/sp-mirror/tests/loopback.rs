@@ -654,6 +654,13 @@ fn a_sender_the_operator_does_not_allow_gets_nothing() {
     let (ekey, _) = sender.begin(1);
     sender.setup_session(&ekey, "Someone again");
     assert_eq!(sender.answer().unwrap().0, 453);
+    // The operator is told once that it tried again, and not after that.
+    let again = helper.expect("refused");
+    assert_eq!((again["name"].as_str(), again["why"].as_str()), (Some("Someone again"), Some("denied_lately")));
+    let mut sender = Sender::connect(helper.control);
+    let (ekey, _) = sender.begin(1);
+    sender.setup_session(&ekey, "Someone yet again");
+    assert_eq!(sender.answer().unwrap().0, 453);
     assert!(helper.events.try_iter().all(|event| event["event"] == "log"));
     helper.finish();
 }
@@ -787,7 +794,9 @@ fn measure_the_delay_of_a_1080p_stream() {
 /// its port). It asks, waits to be allowed, then sends the test pattern over and over.
 ///
 /// `SOFTPRESENTER_MIRROR_SEND_TO=<port> cargo test -p sp-mirror -- --ignored --nocapture send_to`
-/// (`SOFTPRESENTER_MIRROR_SEND_SECONDS` is how long, 6 if not given). 127.0.0.1 only.
+/// (`SOFTPRESENTER_MIRROR_SEND_SECONDS` is how long, 6 if not given; `SOFTPRESENTER_MIRROR_CLIP`
+/// is a 1920×1080 stream of your own to send instead of the small one, as for the measuring
+/// test). 127.0.0.1 only.
 #[test]
 #[ignore = "a sender for a receiver started by hand"]
 fn send_to_a_receiver_that_is_running() {
@@ -807,16 +816,23 @@ fn send_to_a_receiver_that_is_running() {
     let video_port = sender.setup_streams(31);
     assert_eq!(sender.request("RECORD", "rtsp://127.0.0.1/1", None, &[]).0, 200);
     let mut video = VideoOut::connect(video_port, &key, 31);
-    let clip = wide();
+    let clip = match std::env::var_os("SOFTPRESENTER_MIRROR_CLIP").map(PathBuf::from) {
+        Some(path) => {
+            let hevc = path.extension().is_some_and(|extension| extension == "hevc");
+            clip(&std::fs::read(&path).unwrap(), hevc, 1920, 1080)
+        }
+        None => wide(),
+    };
     video.settings(&clip);
     let until = Instant::now() + Duration::from_secs(seconds);
     let mut sent = 0;
     let mut last_feedback = Instant::now();
     while Instant::now() < until {
         for picture in &clip.pictures {
+            let started = Instant::now();
             video.picture(picture);
             sent += 1;
-            std::thread::sleep(Duration::from_millis(33));
+            std::thread::sleep(Duration::from_millis(33).saturating_sub(started.elapsed()));
         }
         if last_feedback.elapsed() > Duration::from_secs(2) {
             last_feedback = Instant::now();

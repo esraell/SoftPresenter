@@ -123,30 +123,95 @@ impl Record<'_> {
     }
 }
 
+/// The two records as the responder takes them. Building them touches no network.
+fn services(record: &Record<'_>, port: u16) -> Result<[mdns_sd::ServiceInfo; 2], String> {
+    let host = format!("softpresenter-{}.local.", record.device_id.replace(':', "").to_lowercase());
+    let service = |kind: &str, instance: &str, txt: Vec<(&'static str, String)>| {
+        mdns_sd::ServiceInfo::new(kind, instance, &host, "", port, &txt[..])
+            .map(mdns_sd::ServiceInfo::enable_addr_auto)
+            .map_err(|error| error.to_string())
+    };
+    Ok([
+        service("_airplay._tcp.local.", record.name, record.airplay_txt())?,
+        service("_raop._tcp.local.", &record.raop_instance(), record.raop_txt())?,
+    ])
+}
+
 /// Announces the receiver on the local network until the value returned is dropped. This is
 /// the only place that sends anything nobody asked for; it is not called without `--announce`.
 pub fn announce(record: &Record<'_>, port: u16) -> Result<Announced, String> {
+    // Testing aid: SOFTPRESENTER_MIRROR_ANNOUNCE=system announces through the Mac's own
+    // Bonjour (the `dns-sd` tool) instead of this program's responder, to find out with a real
+    // phone which of the two it sees more reliably.
+    #[cfg(target_os = "macos")]
+    if std::env::var_os("SOFTPRESENTER_MIRROR_ANNOUNCE").is_some_and(|way| way == "system") {
+        return announce_with_the_system(record, port);
+    }
     let daemon = mdns_sd::ServiceDaemon::new().map_err(|error| error.to_string())?;
-    let host = format!("softpresenter-{}.local.", record.device_id.replace(':', "").to_lowercase());
-    let register = |kind: &str, instance: &str, txt: Vec<(&'static str, String)>| -> Result<(), String> {
-        let info = mdns_sd::ServiceInfo::new(kind, instance, &host, "", port, &txt[..])
-            .map_err(|error| error.to_string())?
-            .enable_addr_auto();
-        daemon.register(info).map_err(|error| error.to_string())
-    };
-    register("_airplay._tcp.local.", record.name, record.airplay_txt())?;
-    register("_raop._tcp.local.", &record.raop_instance(), record.raop_txt())?;
-    Ok(Announced { daemon })
+    for service in services(record, port)? {
+        daemon.register(service).map_err(|error| error.to_string())?;
+    }
+    Ok(Announced { daemon: Some(daemon), tools: Vec::new() })
+}
+
+/// The words `dns-sd -R` takes for a record: the name, the kind, the domain, the port and each
+/// field as `key=value`. Every word is this program's own; none comes from a sender.
+#[cfg(any(target_os = "macos", test))]
+fn system_words(instance: &str, kind: &str, port: u16, txt: &[(&'static str, String)]) -> Vec<String> {
+    let mut words = vec!["-R".to_owned(), instance.to_owned(), kind.to_owned(), "local".to_owned(), port.to_string()];
+    words.extend(txt.iter().map(|(key, value)| format!("{key}={value}")));
+    words
+}
+
+/// Starts a tool that must never outlive this program (it holds a record for as long as it
+/// runs). A shell starts it and waits on a pipe from this program: the pipe closes however this
+/// program ends, even killed, and the shell then stops the tool. Closing the child's standard
+/// input does the same on purpose.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn held_tool(program: &str, words: &[String]) -> std::io::Result<std::process::Child> {
+    std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(r#""$@" >/dev/null 2>&1 & tool=$!; read -r line; kill "$tool""#)
+        .arg("softpresenter-mirror")
+        .arg(program)
+        .args(words)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+}
+
+#[cfg(target_os = "macos")]
+fn announce_with_the_system(record: &Record<'_>, port: u16) -> Result<Announced, String> {
+    let mut tools = Vec::new();
+    for (instance, kind, txt) in [
+        (record.name.to_owned(), "_airplay._tcp", record.airplay_txt()),
+        (record.raop_instance(), "_raop._tcp", record.raop_txt()),
+    ] {
+        let tool = held_tool("/usr/bin/dns-sd", &system_words(&instance, kind, port, &txt))
+            .map_err(|error| format!("dns-sd: {:?}", error.kind()))?;
+        tools.push(tool);
+    }
+    Ok(Announced { daemon: None, tools })
 }
 
 /// The announcement; dropping it takes the records back.
 pub struct Announced {
-    daemon: mdns_sd::ServiceDaemon,
+    daemon: Option<mdns_sd::ServiceDaemon>,
+    /// The system's own tools holding the records, when it was asked to announce them.
+    tools: Vec<std::process::Child>,
 }
 
 impl Drop for Announced {
     fn drop(&mut self) {
-        if let Ok(done) = self.daemon.shutdown() {
+        // The system's tools first: closing each one's pipe stops it at once.
+        for tool in &mut self.tools {
+            drop(tool.stdin.take());
+            let _ = tool.wait();
+        }
+        if let Some(daemon) = &self.daemon
+            && let Ok(done) = daemon.shutdown()
+        {
             let _ = done.recv_timeout(std::time::Duration::from_millis(500));
         }
     }
@@ -194,6 +259,64 @@ mod tests {
         let bytes = record.airplay_txt_bytes();
         assert_eq!(bytes[0] as usize, "deviceid=AA:BB:CC:DD:EE:FF".len());
         assert_eq!(&bytes[1..27], b"deviceid=AA:BB:CC:DD:EE:FF");
+    }
+
+    /// Built, never registered: this touches no network.
+    #[test]
+    fn the_records_are_ones_the_responder_takes() {
+        let [airplay, raop] = services(&record(), 7100).unwrap();
+        assert_eq!(airplay.get_type(), "_airplay._tcp.local.");
+        assert_eq!(airplay.get_fullname(), "SoftPresenter \u{2014} Front Mac._airplay._tcp.local.");
+        assert_eq!(airplay.get_property_val_str("model"), Some("SoftPresenter1,1"));
+        assert_eq!(airplay.get_hostname(), "softpresenter-aabbccddeeff.local.");
+        assert!(airplay.is_addr_auto());
+        assert_eq!(raop.get_type(), "_raop._tcp.local.");
+        assert!(raop.get_fullname().starts_with("AABBCCDDEEFF@SoftPresenter"));
+        assert_eq!(raop.get_property_val_str("ft"), Some("0x527FFEE6,0x400"));
+        // The longest name there can be is still a record.
+        let long = "\u{2014}".repeat(16);
+        let record = Record { name: announced_name(&long), ..record() };
+        assert!(record.raop_instance().len() <= 63);
+        services(&record, 7100).unwrap();
+    }
+
+    #[test]
+    fn the_systems_tool_is_given_only_this_programs_own_words() {
+        let record = record();
+        let words = system_words(record.name, "_airplay._tcp", 7100, &record.airplay_txt());
+        assert_eq!(&words[..5], ["-R", "SoftPresenter \u{2014} Front Mac", "_airplay._tcp", "local", "7100"]);
+        assert!(words.contains(&"model=SoftPresenter1,1".to_owned()));
+        assert!(words.contains(&"features=0x527FFEE6,0x400".to_owned()));
+    }
+
+    /// With a stand-in for the system's tool (nothing is announced): the tool runs while the
+    /// pipe is open, and is stopped when it closes.
+    #[cfg(unix)]
+    #[test]
+    fn a_held_tool_is_stopped_when_its_pipe_closes() {
+        let folder = std::env::temp_dir().join(format!("sp-mirror-held-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let (running, stopped) = (folder.join("running"), folder.join("stopped"));
+        // A stand-in that says when it runs and when it is told to stop.
+        let script = format!(
+            "trap 'echo x > \"{}\"; exit 0' TERM; echo x > \"{}\"; while :; do sleep 0.05; done",
+            stopped.display(),
+            running.display()
+        );
+        let mut tool = held_tool("/bin/sh", &["-c".to_owned(), script]).unwrap();
+        let wait_for = |file: &std::path::Path| {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !file.exists() && std::time::Instant::now() < until {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            file.exists()
+        };
+        assert!(wait_for(&running));
+        assert!(!stopped.exists());
+        drop(tool.stdin.take());
+        tool.wait().unwrap();
+        assert!(wait_for(&stopped));
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

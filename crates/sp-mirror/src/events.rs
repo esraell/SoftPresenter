@@ -12,13 +12,18 @@ pub const MAX_NAME_CHARS: usize = 64;
 /// A sender's own words made safe to show: control characters and the marks that turn text
 /// round or hide it are dropped, the rest is cut to a length. Empty words become `fallback`.
 pub fn clean(raw: &str, fallback: &str) -> String {
+    clean_to(raw, MAX_NAME_CHARS, fallback)
+}
+
+/// As [`clean`], cut to `most` characters: for a line of text that is not a name.
+pub fn clean_to(raw: &str, most: usize, fallback: &str) -> String {
     let cleaned: String = raw
         .chars()
         .filter(|c| {
             !c.is_control()
                 && !matches!(*c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
         })
-        .take(MAX_NAME_CHARS)
+        .take(most)
         .collect();
     let cleaned = cleaned.trim();
     if cleaned.is_empty() { fallback.to_owned() } else { cleaned.to_owned() }
@@ -56,6 +61,8 @@ mod tests {
         assert_eq!(clean("\n\t \u{7f}", "A device"), "A device");
         assert_eq!(clean(&"x".repeat(5000), "A device").chars().count(), MAX_NAME_CHARS);
         assert_eq!(clean(&"\u{1F600}".repeat(100), "A device").chars().count(), MAX_NAME_CHARS);
+        assert_eq!(clean_to(&"x".repeat(5000), 200, "?").chars().count(), 200);
+        assert_eq!(clean_to("\u{1b}[31mbad\r\n", 200, "?"), "[31mbad");
     }
 
     #[test]

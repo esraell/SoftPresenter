@@ -731,7 +731,11 @@ announced on the network.
 **Measured** (an M-series Mac, the app's FFmpeg 9.0.2, 1920×1080, from the picture leaving the
 sender's socket to the picture on the helper's standard output): H.264 at 30 a second, median
 14 ms (95th 51 ms on a busy computer); at 60 a second, 9 ms; HEVC at 30 a second, 7 ms. The
-app then shows it at the next refresh.
+app then shows it at the next refresh. Through a quiet test copy of the app for 20 seconds
+(a build without optimisation, 1920×1080 H.264 at 30 a second, the box on a live slide): 540
+pictures in, 540 decoded, none replaced by a newer one before the app took it; the app at
+about 10% of one processor and its memory level (some 135 MB above idle), the helper at 2%
+and 26 MB.
 
 **Differences from the plan above.**
 
@@ -741,8 +745,9 @@ app then shows it at the next refresh.
   NV12 would be a third of that and is worth it if a slower computer struggles (M3).
 - Legacy pairing is not advertised (as planned), but a sender that pairs anyway is answered.
 - Limits beyond the plan's: three connections from one address; an address the operator
-  refused is not asked about again for a minute; a picture may change size eight times in ten
-  seconds; a property list may unfold to 2048 values and 256 KB.
+  refused with Don't Allow is not asked about again for a minute (the operator is told once
+  that it tried); a picture may change size eight times in ten seconds; a property list may
+  unfold to 2048 values and 256 KB.
 - `sp mirror` exists already (the plan had it in M4), so a test copy can be driven.
 
 **What only a real device answers** (section 7's list): whether an iPhone lists and accepts a
@@ -762,9 +767,13 @@ way); FairPlay against a real sender; H.264 or HEVC; the delay on glass.
    screen.
 4. On the iPhone: Control Centre › Screen Mirroring. "SoftPresenter — <this Mac's name>" should
    be in the list within a few seconds. Tap it.
-5. SoftPresenter's notices show "<the iPhone's name> wants to show its screen." Choose
-   **Allow**. The iPhone's screen should appear in the box within a second or two; turn the
-   phone on its side and the picture should follow.
+5. In SoftPresenter the notices button turns amber with a "?" (the question does not open by
+   itself). Open the notices: "<the iPhone's name> wants to show its screen." Choose **Allow**
+   within 30 seconds; after that the iPhone is turned away, a notice says so, and it can try
+   again at once. (After **Don't Allow** the same iPhone is turned away for a minute without
+   being asked about; a notice says so the first time it tries.) The iPhone's screen should
+   appear in the box within a second or two; turn the phone on its side and the picture should
+   follow.
 6. Stop from the iPhone (Stop Mirroring) or with Stop in the pane.
 
 The log (`~/Library/Logs/SoftPresenter/SoftPresenter.log`, lines with `[mirror]`) should say,
@@ -781,7 +790,7 @@ stops says what to try:
 
 | What happens | What it means, and what to try |
 |---|---|
-| SoftPresenter is not in the iPhone's list, and the log has no `a connection from` | The iPhone does not see the announcement: Local Network permission (System Settings › Privacy & Security › Local Network), a firewall, or a Wi-Fi that keeps devices apart. `dns-sd -B _airplay._tcp` in Terminal on the Mac should list it |
+| SoftPresenter is not in the iPhone's list, and the log has no `a connection from` | The iPhone does not see the announcement: Local Network permission (System Settings › Privacy & Security › Local Network), a firewall, or a Wi-Fi that keeps devices apart. `dns-sd -B _airplay._tcp` in Terminal on the Mac should list it. If it is not listed even there, the helper's own responder is not getting on beside the Mac's: start the app from Terminal with `SOFTPRESENTER_MIRROR_ANNOUNCE=system` set (as in the next row), which announces through the Mac's own Bonjour instead, and say which of the two worked |
 | It is in the list on a Mac's Screen Mirroring but not an iPhone's, or tapping it fails at once with only `GET /info` in the log | The iPhone may not take a model name that is not Apple's. Quit, start it from Terminal with `SOFTPRESENTER_MIRROR_MODEL=AppleTV3,2 target/release/SoftPresenter.app/Contents/MacOS/softpresenter`, and try again. If that is what it takes, it is the owner's decision whether a build may say so (section 1.2) |
 | The log reaches `asks to show its screen` and the iPhone gives up before Allow is pressed | The iPhone does not wait at `SETUP`: note how long it waited (the log says). The second way of asking (section 5) is then needed |
 | `the video stream connected` but no `first picture`, or `the codec's settings were not understood` | The picture's format differs from what the open receivers describe. Try once with `SOFTPRESENTER_MIRROR_H264_ONLY=1` set the same way, which stops the iPhone choosing HEVC |

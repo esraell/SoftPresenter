@@ -11421,6 +11421,9 @@ fn main() -> ExitCode {
         canva::Client::new(canva::Places::for_app(), Some(wake))
     };
     start_steps::mark("canva client made");
+    // A run that only saves a picture, or is asked to stay out of the way, never announces
+    // itself to phones (the same test as `App::quiet`, made before `options` is given away).
+    let quiet_run = options.capture_home.is_some() || std::env::var_os("SOFTPRESENTER_QUIET").is_some();
     let mut app = App {
         options,
         waker: Some(event_loop.create_proxy()),
@@ -11435,7 +11438,7 @@ fn main() -> ExitCode {
         drop_pointer: None,
         bible_jobs: Vec::new(),
         waiting: Vec::new(),
-        mirror: mirror::Mirror::open(),
+        mirror: mirror::Mirror::open(quiet_run),
         remote,
         remote_started: false,
         remote_pages_seen: 0,

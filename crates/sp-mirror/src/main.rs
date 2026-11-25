@@ -183,8 +183,9 @@ fn main() -> std::process::ExitCode {
     let pictures = shared.pictures.clone();
     std::thread::spawn(move || {
         pictures.write_to(std::io::stdout().lock());
-        // SoftPresenter no longer takes pictures: it has gone.
-        std::process::exit(0);
+        // SoftPresenter no longer takes pictures. Its end of standard input closes with it, and
+        // the program leaves from there, by the one way out that takes the announcement back.
+        events::log("standard output closed; no more pictures are written");
     });
     server::serve(&shared, listeners);
     let announced = if arguments.announce {

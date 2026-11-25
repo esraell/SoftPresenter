@@ -242,7 +242,7 @@ fn say_ffmpeg_lines(stderr: impl Read) {
         if said < 12 {
             said += 1;
             let text = String::from_utf8_lossy(&line);
-            crate::events::log(format!("FFmpeg: {}", crate::events::clean(&text, "(nothing)")));
+            crate::events::log(format!("FFmpeg: {}", crate::events::clean_to(&text, 200, "(nothing)")));
         }
     }
 }

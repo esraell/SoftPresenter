@@ -95,6 +95,7 @@ person:
 | `SOFTPRESENTER_NDI=<name>` | Also send over NDI under this name, this run only |
 | `SOFTPRESENTER_MIRROR_PORT=<n>` | The port a quiet run's `softpresenter-mirror` listens on (any free one without it), so a test sender knows where to connect. A quiet run's helper listens on 127.0.0.1 only and never announces itself, whatever this says |
 | `SOFTPRESENTER_MIRROR_MODEL=<model>` | `softpresenter-mirror` says it is this model instead of its own (`SoftPresenter1,1`), to find out with a real phone whether a name of our own is accepted. Only the owner decides whether a build may ever say another model |
+| `SOFTPRESENTER_MIRROR_ANNOUNCE=system` | On a Mac, `softpresenter-mirror` announces itself through the system's own Bonjour (the `dns-sd` tool) instead of its own responder, to find out with a real phone which is seen more reliably. Never in a quiet run, which announces nothing |
 | `SOFTPRESENTER_MIRROR_H264_ONLY=1` | `softpresenter-mirror` leaves out the feature bit that lets a sender choose HEVC, to tell a codec problem from a protocol one |
 | `SOFTPRESENTER_HIDE_DECKLINK=1` | Behave as on a computer without Desktop Video (the DeckLink driver) |
 | `SOFTPRESENTER_PRETEND_DECKLINK=1` | List made-up DeckLink devices ("Pretend DeckLink (1)"…) in place of real ones; what they are sent goes nowhere |

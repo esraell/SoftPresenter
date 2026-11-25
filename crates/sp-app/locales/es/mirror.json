@@ -32,5 +32,6 @@
   "mirror.connected": "{name} está mostrando su pantalla.",
   "mirror.stopped": "{name} dejó de mostrar su pantalla.",
   "mirror.refused.busy": "{name} intentó mostrar su pantalla, pero otro dispositivo ya está mostrando la suya.",
+  "mirror.refused.lately": "{name} lo intentó de nuevo y no se le dejó entrar: elegiste No permitir hace menos de un minuto.",
   "mirror.refused.timeout": "{name} quería mostrar su pantalla y no se le respondió a tiempo. Puede intentarlo de nuevo."
 }
