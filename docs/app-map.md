@@ -492,8 +492,20 @@ fade as a `Fade`: the two scenes, and, when the fade is cached, a texture of eac
   new size). Not used while the slide has a video, NDI or web box, the Announcements layer has a
   video, the slide builds or scrolls, screens are identified, or on stage, see-through and key
   screens.
-- NDI and DeckLink outputs never fade (they get the new picture at once), and stage screens change
-  at once, so none of them is touched.
+- NDI and DeckLink outputs fade with the windows, by the same clock (`Output::begin_ndi_fades`,
+  `NdiFade`): each picture drawn for them (`ndi_groups`) keeps the scene it was last sent
+  (`ndi_shown`) and fades from it, cached like a window's when nothing moves. The fade's steps
+  give them a picture when one is owed (`fade_owes_ndi`: each new picture of a playing video,
+  or one every thirtieth of a second while only the fade moves) and none is on its way back
+  from the GPU (`Output::step_ndi_fade`); `send_ndi_of` draws a fading picture as far as the
+  fade has got whoever asks, and copies it straight from a window's texture when that window
+  has just painted the same picture at NDI's size (`window_is_ndi_picture`). After the fade
+  the whole new picture goes with the video's next picture, or at NDI's next picture time
+  (`ndi_after_fade`). The fade's log line says how many of its pictures went to NDI and
+  DeckLink. Stage screens change at once.
+- The time on the stage screens draws only them (`Which::Stage`, and `Which::MovingAndStage`
+  with a playing video's picture as a second begins: `video_drawing`), so the slides kept over
+  a video stay and the other NDI sources are sent nothing for it.
 
 `crates/sp-render/tests/golden.rs` compares each kind through five points of a fade, cached against
 drawn from the slides, with outlined, shadowed words and a translation line over a picture.

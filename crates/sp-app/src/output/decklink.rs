@@ -3,7 +3,7 @@
 //! NDI pictures and read back from the GPU once (`send_ndi`, `finish_ndi`), then handed to the
 //! output's own thread (`sp_decklink::DeckLinkOutput`), which turns them into the card's frames
 //! and plays them on the card's clock. Handing them over never waits, so the card can never
-//! hold up the screens. As over NDI, a new slide goes at once, without a dissolve.
+//! hold up the screens. As over NDI, a new slide fades in as it does in the windows.
 
 use std::sync::{Arc, Mutex};
 

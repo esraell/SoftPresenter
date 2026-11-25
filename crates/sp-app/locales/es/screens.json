@@ -39,7 +39,7 @@
   "screens.about.display": "Si se desconecta este monitor, la pantalla no se ve en ningún sitio hasta que vuelva; nunca pasa a otro monitor.",
   "screens.about.window": "Una ventana normal, para hacer pruebas o para capturarla con otro programa.",
   "screens.about.ndi": "Otros ordenadores de la red pueden mostrar esta pantalla, a 1920 × 1080. NDI® es una marca registrada de Vizrt NDI AB.",
-  "screens.about.decklink": "Sale por una tarjeta DeckLink de Blackmagic Design, por su conector, en el formato elegido aquí. Una diapositiva nueva entra al momento, sin fundido.",
+  "screens.about.decklink": "Sale por una tarjeta DeckLink de Blackmagic Design, por su conector, en el formato elegido aquí. Una diapositiva nueva entra con un fundido, como en las demás pantallas.",
   "screens.about.off": "Esta pantalla se queda en la lista y no se ve en ningún sitio.",
 
   "screens.look": "Aspecto",

@@ -475,6 +475,72 @@ impl NdiChange {
     }
 }
 
+/// Which screens a drawing draws: all of them, or only those something changes by itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Which {
+    /// Every screen: anything may have changed.
+    All,
+    /// Those whose picture moves: a playing video's new picture, or a step of a fade.
+    Moving,
+    /// Those, and the stage screens for the time on them, at the start of a second.
+    MovingAndStage,
+    /// The stage screens alone, for the time on them.
+    Stage,
+}
+
+impl Which {
+    /// Whether the drawing draws a screen; `moving` says its picture moves, `stage` that it is
+    /// a stage screen.
+    fn takes(self, moving: bool, stage: bool) -> bool {
+        match self {
+            Which::All => true,
+            Which::Moving => moving,
+            Which::MovingAndStage => moving || stage,
+            Which::Stage => stage,
+        }
+    }
+}
+
+/// What a playing video's new picture has drawn. `steady` says nothing else moves (no fade, no
+/// build, nothing scrolling); `second` that a second has begun with something on the screens
+/// showing the time; `audience` that an audience screen shows it (a message or linked text with
+/// the time or a timer), not only the stage screens.
+fn video_drawing(steady: bool, second: bool, audience: bool) -> Which {
+    match (steady, second) {
+        (false, _) => Which::All,
+        (true, false) => Which::Moving,
+        (true, true) if audience => Which::All,
+        (true, true) => Which::MovingAndStage,
+    }
+}
+
+/// Whether two screens show the same picture at the same size: one screen, or two that both
+/// show the show as it is. `own_way` says a screen shows it its own way (a stage screen, one
+/// being identified, one with a look or a theme of its own).
+fn same_picture(one: Uuid, other: Uuid, own_way: impl Fn(Uuid) -> bool) -> bool {
+    one == other || (!own_way(one) && !own_way(other))
+}
+
+/// Whether a step of a fade owes the NDI sources and DeckLink outputs a picture, so that they
+/// get the fade at their own pace and not at the windows'. While a video gives pictures, each
+/// new picture of it is one for them, as outside a fade (`moved`; `since_video` is how long ago
+/// the last came). While nothing else moves, one is owed each time NDI's own picture time has
+/// passed (`due`).
+fn fade_owes_ndi(moved: bool, since_video: Option<Duration>, due: bool) -> bool {
+    let video_moves = since_video.is_some_and(|since| since < 2 * sp_ndi::FRAME);
+    moved || (!video_moves && due)
+}
+
+/// When the next picture of a fade is due to the NDI sources after one drawn `now`, the one
+/// before having been due at `due`: one picture's time after that, so the pace holds whatever
+/// the windows' steps are; from now when that has fallen a picture or more behind.
+fn next_ndi_due(due: Option<Instant>, now: Instant) -> Instant {
+    match due {
+        Some(due) if now < due + sp_ndi::FRAME => due + sp_ndi::FRAME,
+        _ => now + sp_ndi::FRAME,
+    }
+}
+
 /// One NDI source as a drawing finds it: whether a picture is wanted for it, and whether it
 /// shows the show its own way (a stage screen, one being identified, one with a look or a
 /// theme of its own, one whose key another source sends) and so needs a picture of its own.
@@ -944,6 +1010,27 @@ impl Fade {
     }
 }
 
+/// A fade under way in an NDI picture (one of `ndi_groups`), at NDI's size: the sources and the
+/// DeckLink outputs it goes to are sent the fade the windows show.
+struct NdiFade {
+    /// The screen the picture is drawn for.
+    of: Uuid,
+    fade: Fade,
+    /// `Output::video_moves` when the picture faded to was built: a new picture of a video since
+    /// then builds it again, when it is next drawn.
+    built: u64,
+}
+
+/// What a fade drew, for the log line it ends with: when it began, its steps in the windows,
+/// whether any window's were from textures, and how many drawings went to NDI and DeckLink.
+#[derive(Clone, Copy)]
+struct FadeDrawn {
+    since: Instant,
+    steps: u32,
+    cached: bool,
+    sent: u32,
+}
+
 struct Target {
     id: Uuid,
     /// The screen's name when its window opened, for the log.
@@ -1211,9 +1298,8 @@ struct Output {
     fade_cache: bool,
     /// The slides kept in textures over a playing video, for the screens that show one.
     steady: Vec<Steady>,
-    /// The fade under way's pictures drawn so far, whether any window's was from textures, and
-    /// the fade's start they are of, for the log line each fade ends with.
-    fade_drawn: Option<(Instant, u32, bool)>,
+    /// What the fade under way has drawn so far, for the log line each fade ends with.
+    fade_drawn: Option<FadeDrawn>,
     /// Blends the textures of a cached fade (see `Draw`).
     blend: sp_render::FadeBlend,
     /// The NDI sources that are switched on, and the texture their picture is drawn into.
@@ -1240,6 +1326,20 @@ struct Output {
     /// The sources the NDI pictures were last drawn for, each with how many times receivers
     /// had come to it by then.
     ndi_drawn_for: Vec<(Uuid, u32)>,
+    /// The whole picture last drawn for each NDI picture, by the screen it is drawn for, kept so
+    /// that the next can fade in over it; and the fades under way in them, which follow the
+    /// windows' clock (`fading`).
+    ndi_shown: Vec<(Uuid, vello::Scene)>,
+    ndi_fades: Vec<NdiFade>,
+    /// In a fade: whether a step owes the sources a picture it could not draw yet, and when the
+    /// next is due while nothing but the fade moves (see `fade_owes_ndi`).
+    ndi_fade_owed: bool,
+    ndi_fade_due: Option<Instant>,
+    /// After a fade: when the sources are owed the whole new picture, if no drawing of them all
+    /// has come by then (the fade's last picture for them may be a step short of its end).
+    ndi_after_fade: Option<Instant>,
+    /// How many times a video (or a box's video or NDI picture) has given a new picture.
+    video_moves: u64,
     /// NDI pictures lost on their way back from the GPU: whether to draw again, and what the
     /// operator is told. Said in the log once while it lasts.
     ndi_lost: Lost,
@@ -1397,6 +1497,12 @@ fn run(
         ndi_dirty: None,
         ndi_put_off: false,
         ndi_drawn_for: Vec::new(),
+        ndi_shown: Vec::new(),
+        ndi_fades: Vec::new(),
+        ndi_fade_owed: false,
+        ndi_fade_due: None,
+        ndi_after_fade: None,
+        video_moves: 0,
         ndi_lost: Lost::default(),
         ndi_lost_trouble: crate::applog::Lasting::default(),
         // Testing aid: SOFTPRESENTER_NDI_LOSE (see `PretendLost`).
@@ -1556,12 +1662,14 @@ fn run(
                     // or video in a box, wakes this far more often than that).
                     let new_second =
                         !output.plays_video() || into_second + output.video_poll() >= Duration::from_secs(1);
-                    if !new_second {
+                    // While a video gives pictures, the one that comes as a second begins draws
+                    // the time with it (`draw_video`).
+                    let video_draws_it =
+                        output.video_came_at.is_some_and(|came| came.elapsed() < Duration::from_secs(1));
+                    if !new_second || video_draws_it {
                         continue;
                     }
-                    if output.overlay.message.as_ref().is_some_and(|(text, _)| crate::messages::has_tokens(text))
-                        || output.links_tick()
-                    {
+                    if output.audience_ticks() {
                         output.draw(false);
                     } else {
                         output.draw_stage();
@@ -1606,6 +1714,13 @@ fn run(
             // Drawing waits for the screen's next refresh, which paces the fade and the builds.
             if output.fading.is_some() {
                 output.step_fade();
+                // With no window to wait for (only NDI or DeckLink fade), a pause paces the
+                // steps, as a covered window's does.
+                if output.targets.is_empty() {
+                    let pausing = Instant::now();
+                    std::thread::sleep(next_picture::STILL_WAIT);
+                    output.held.since(Part::Pause, For::Nothing, pausing);
+                }
             } else {
                 output.take_video_picture();
                 output.draw(false);
@@ -1763,6 +1878,8 @@ fn run(
                         target.fade = None;
                         target.shown = None;
                     }
+                    output.ndi_fades.clear();
+                    output.ndi_shown.clear();
                 }
                 OutputMsg::PreviewScreen(screen) => {
                     if output.preview_screen != screen {
@@ -2435,41 +2552,54 @@ impl Output {
     /// changed since the last receiver left, the picture sent then, which is still the one on
     /// the screens.
     fn send_ndi(&mut self, frame: &Frame, changed: NdiChange) {
-        self.send_ndi_of(frame, changed, false);
+        self.send_ndi_of(frame, changed, Which::All, &[]);
     }
 
-    /// [`Output::send_ndi`], with `moving_only` for the drawing of a playing video's new
-    /// picture: only the pictures that show the video are drawn, and only the sources that show
-    /// it have the one they sent put out of date.
-    fn send_ndi_of(&mut self, frame: &Frame, changed: NdiChange, moving_only: bool) {
+    /// [`Output::send_ndi`] for a drawing of some of the screens (`which`): a playing video's
+    /// new picture or a step of a fade (only the pictures that move are drawn, and only the
+    /// sources that show them have the one they sent put out of date), or the time on the
+    /// stage screens (only theirs).
+    ///
+    /// A picture that is fading (`ndi_fades`) is drawn as far as the fade has got, whoever asks:
+    /// the two slides' textures blended, or the fade drawn from the slides, as a window's is.
+    /// `windows` are the windows a step of the fade has just painted: one that shows the very
+    /// picture at NDI's size has it copied back from its own texture, with nothing painted again.
+    fn send_ndi_of(&mut self, frame: &Frame, changed: NdiChange, which: Which, windows: &[usize]) {
         self.finish_ndi();
         if self.ndi.is_empty() && self.decklink.is_empty() {
             return;
         }
-        // The slides kept over a video are good for as long as only the video moves.
-        let only_video = moving_only;
-        if !only_video {
+        // The slides kept over a video are good for as long as the slide stays as it is.
+        let kept = which != Which::All;
+        if !kept {
             self.steady.clear();
         }
         let seen = self.ndi_seen();
-        // Only the pictures that show a video are drawn for its new picture when all is as it
-        // should be: every source has the last picture drawn for it, none is owed or put off.
-        // Anything else is drawn whole, so what is owed to a source is never counted done by a
-        // drawing that left it out.
-        let moving_only = moving_only
-            && ndi_settled(
-                &seen,
-                &self.ndi_drawn_for,
-                self.ndi_state == Shown::default() && !self.ndi_lost.owed() && self.ndi_dirty.is_none(),
-            );
+        // Only some of the pictures are drawn when all is as it should be: every source has the
+        // last picture drawn for it, none is owed or put off. Anything else is drawn whole, so
+        // what is owed to a source is never counted done by a drawing that left it out.
+        let settled = ndi_settled(
+            &seen,
+            &self.ndi_drawn_for,
+            self.ndi_state == Shown::default()
+                && !self.ndi_lost.owed()
+                && self.ndi_dirty.is_none()
+                && self.ndi_after_fade.is_none(),
+        );
+        let which = if settled { which } else { Which::All };
+        // A whole drawing is the one owed after a fade, now or once the picture on its way
+        // back is here.
+        if which == Which::All {
+            self.ndi_after_fade = None;
+        }
         // A drawing put off while a picture was on its way back is drawn now, or not drawn
         // because nobody is watching any more: what it changed counts as changed now.
         let changed = changed.with(self.ndi_dirty);
         // Another picture is asked for, which a source nobody is watching will not get: the
         // one it had is out of date. (Said for every such picture; the source acts on it once.)
         let mut forget = ndi_out_of_date(&seen, changed);
-        if moving_only {
-            forget.retain(|id| self.shows_video(*id));
+        if which != Which::All {
+            forget.retain(|id| which.takes(self.ndi_moves(*id), self.is_stage(*id)));
         }
         // A picture still on its way back from the GPU does not go to a source nobody is
         // watching any more, which would throw it away. It was newer than the one the source
@@ -2488,6 +2618,8 @@ impl Output {
             self.ndi_dirty = None;
             self.ndi_put_off = false;
             self.ndi_drawn_for.clear();
+            self.ndi_shown.clear();
+            self.ndi_fades.clear();
             self.ndi_state.not_asked();
             self.ndi_trouble = crate::applog::Lasting::default();
             self.ndi_lost = Lost::default();
@@ -2508,6 +2640,10 @@ impl Output {
         self.ndi_dirty = None;
         self.ndi_put_off = false;
         self.ndi_lost.painting();
+        // A picture no longer drawn is not one for the next to fade in over.
+        if which == Which::All {
+            self.ndi_shown.retain(|(of, _)| groups.iter().any(|group| group.of == *of));
+        }
         self.ndi_drawn_for =
             seen.iter().filter(|source| source.wanted).map(|source| (source.id, source.arrivals)).collect();
         let (w, h) = NDI_SIZE;
@@ -2526,17 +2662,42 @@ impl Output {
                 break;
             }
             // Its picture is the one its sources are sending.
-            if moving_only && !self.shows_video(group.of) {
+            if !which.takes(self.ndi_moves(group.of), self.is_stage(group.of)) {
+                continue;
+            }
+            // A fade that is only beginning (the windows are still to be drawn, and its clock
+            // to be started) is drawn by its first step, in this same pass: what the sources
+            // have until then is the picture it fades from.
+            let fading = self.ndi_fades.iter().position(|fade| fade.of == group.of);
+            if fading.is_some() && self.windows_behind {
                 continue;
             }
             // A see-through screen's picture is painted on clear, and goes with its alpha; its
             // keys are made from these same pixels, on their sources' own threads.
             let see_through = self.see_through(group.of);
-            let steady = if only_video { self.steady_scene(group.of, frame, w, h) } else { None };
-            let scene = steady.unwrap_or_else(|| self.scene_for(group.of, frame, w, h));
             let target = self.ndi_target.get_or_insert_with(|| target_texture(&self.device, w, h)).clone();
-            let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-            if let Err(e) = self.paint(&scene, &view, w, h, see_through.is_some(), For::Ndi(group.of)) {
+            // A window that has just painted this step of the fade at this size holds the
+            // picture already.
+            let window =
+                fading.and_then(|_| windows.iter().copied().find(|index| self.window_is_ndi_picture(*index, group.of)));
+            let painted = match (window, fading) {
+                (Some(_), _) => Ok(()),
+                (None, Some(at)) => self.paint_ndi_fade(at, frame, &target),
+                (None, None) => {
+                    let steady = if kept { self.steady_scene(group.of, frame, w, h) } else { None };
+                    let scene = steady.unwrap_or_else(|| self.scene_for(group.of, frame, w, h));
+                    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+                    let painted = self.paint(&scene, &view, w, h, see_through.is_some(), For::Ndi(group.of));
+                    // Kept for the next picture to fade in over.
+                    if painted.is_ok() {
+                        self.ndi_shown.retain(|(of, _)| *of != group.of);
+                        self.ndi_shown.push((group.of, scene));
+                    }
+                    painted
+                }
+            };
+            let target = window.and_then(|index| self.targets.get(index)).map_or(target, |shown| shown.texture.clone());
+            if let Err(e) = painted {
                 let message = format!("The NDI picture could not be drawn: {e}");
                 if self.ndi_trouble.is_news(&message) {
                     crate::applog::problem("output", &message);
@@ -2804,14 +2965,15 @@ impl Output {
     /// the frame asks for a dissolve; anything else (a resize, an uncovered window) is drawn
     /// at once.
     fn draw(&mut self, new_picture: bool) {
-        self.draw_with(new_picture, false);
+        self.draw_with(new_picture, Which::All);
     }
 
     /// Draws what a new picture of a playing video changes, and nothing else: a screen that
     /// does not show the video (one without the media layer, a see-through one, a stage screen
     /// that follows no screen showing it) is not painted, shown, read back from the GPU or sent
-    /// again, for its picture is the one it has. The screens are all drawn once in each second
-    /// when something on them shows the time, and whole while anything else moves or fades.
+    /// again, for its picture is the one it has. As a second begins, the stage screens are
+    /// drawn with them for the time they show, and every screen when an audience screen shows
+    /// the time (see `video_drawing`); all are drawn whole while anything else moves or fades.
     fn draw_video(&mut self) {
         let second =
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs());
@@ -2824,14 +2986,13 @@ impl Output {
             && !self.building()
             && !self.scrolling()
             && !self.identify_breathing();
-        self.draw_with(false, steady && !time_moves);
+        self.draw_with(false, video_drawing(steady, time_moves, self.audience_ticks()));
     }
 
-    /// Draws the screens: all of them, or with `moving_only` just those a playing video's new
-    /// picture changes.
-    fn draw_with(&mut self, new_picture: bool, moving_only: bool) {
+    /// Draws the screens: all of them, or just those `which` takes.
+    fn draw_with(&mut self, new_picture: bool, which: Which) {
         let started = Instant::now();
-        self.draw_now(new_picture, moving_only);
+        self.draw_now(new_picture, which);
         self.timing.add(started.elapsed());
         // How each NDI source's pictures went out is its own line, from its own thread.
         let (videos, screens, ndi) = (self.video_pictures, self.targets.len(), self.ndi.len());
@@ -2951,25 +3112,28 @@ impl Output {
         true
     }
 
-    fn draw_now(&mut self, new_picture: bool, moving_only: bool) {
+    fn draw_now(&mut self, new_picture: bool, which: Which) {
         // A drawing of the screens a video changes says nothing of the others.
-        if moving_only {
-            self.round.begin_part();
-        } else {
+        if which == Which::All {
             self.round.begin();
+        } else {
+            self.round.begin_part();
         }
         // Cheap copies: the picture and the slide are shared, not duplicated.
         let frame = self.frame.clone();
         self.windows_behind = true;
         // A whole drawing is made for anything that could change a slide: the slides kept over
         // a video are made again from what is shown now.
-        if !moving_only {
+        if which == Which::All {
             self.steady.clear();
         }
-        self.send_ndi_of(&frame, NdiChange::Any, moving_only);
-        self.capture(&frame);
         // How far a fade already under way has got, before the clock is started again.
         let amount = self.fading.map(|(started, look)| fade_amount(started, look.duration()));
+        // The NDI and DeckLink pictures fade as the windows do: a new picture's fades are set
+        // up here, and its steps draw them (`fade_step`); what changes at once is drawn now.
+        let ndi_fading = which == Which::All && self.begin_ndi_fades(&frame, new_picture, amount);
+        self.send_ndi_of(&frame, NdiChange::Any, which, &[]);
+        self.capture(&frame);
         let mut fading = false;
         // The stage screens are drawn after the others, with the fade's clock started: a stage
         // screen may show another screen's picture, which is then the one of this drawing.
@@ -2982,7 +3146,7 @@ impl Output {
                 (target.id, target.config.width, target.config.height)
             };
             if !clock_started && self.is_stage(id) {
-                self.set_fading(fading.then(|| (Instant::now(), self.look)));
+                self.set_fading((fading || ndi_fading).then(|| (Instant::now(), self.look)));
                 self.windows_behind = false;
                 clock_started = true;
             }
@@ -2993,10 +3157,10 @@ impl Output {
                 (target.shown, target.fade) = (None, None);
                 continue;
             }
-            if moving_only && !self.shows_video(id) && self.targets[index].up_to_date() {
+            if !which.takes(self.shows_video(id), self.is_stage(id)) && self.targets[index].up_to_date() {
                 continue;
             }
-            let steady = if moving_only { self.steady_scene(id, &frame, w, h) } else { None };
+            let steady = if which == Which::All { None } else { self.steady_scene(id, &frame, w, h) };
             let scene = steady.unwrap_or_else(|| self.scene_for(id, &frame, w, h));
             // Stage screens change at once: the people on stage need the words now. So does a
             // key with no fill to follow, which is black.
@@ -3023,14 +3187,14 @@ impl Output {
             }
         }
         if !clock_started {
-            self.set_fading(fading.then(|| (Instant::now(), self.look)));
+            self.set_fading((fading || ndi_fading).then(|| (Instant::now(), self.look)));
         }
         self.windows_behind = false;
         // The preview follows, fading if the screens do.
-        if !moving_only || self.shows_video(self.preview_screen.unwrap_or(Uuid::nil())) {
+        if which == Which::All || self.shows_video(self.preview_screen.unwrap_or(Uuid::nil())) {
             self.draw_live_preview(&frame, new_picture);
         }
-        if fading {
+        if fading || ndi_fading {
             self.fade_step();
         }
         self.end_round();
@@ -3084,8 +3248,8 @@ impl Output {
         self.round.note(&painted.as_ref().map(|_| ()).map_err(Clone::clone));
     }
 
-    /// Starts, starts again or ends the fade under way in the windows, each kept for saying what
-    /// held up an NDI picture (a fade's steps draw the windows only).
+    /// Starts, starts again or ends the fade under way (in the windows, and in the NDI and
+    /// DeckLink pictures), each kept for saying what a late NDI picture came during.
     fn set_fading(&mut self, fading: Option<(Instant, sp_model::Transition)>) {
         let now = Instant::now();
         if self.fading.is_some() {
@@ -3342,6 +3506,7 @@ impl Output {
         }
         if new {
             let now = Instant::now();
+            self.video_moves += 1;
             self.video_moved_at = now;
             // A video that stood still for more than two pictures (and less than a stop) is kept
             // for saying what held up an NDI picture.
@@ -3356,9 +3521,12 @@ impl Output {
     /// True when something on the screens changes by itself each second: the time on a stage
     /// screen, or a message with the time or a timer in it.
     fn ticks(&self) -> bool {
-        self.has_stage()
-            || self.overlay.message.as_ref().is_some_and(|(text, _)| crate::messages::has_tokens(text))
-            || self.links_tick()
+        self.has_stage() || self.audience_ticks()
+    }
+
+    /// True when an audience screen shows the time or a timer: in a message, or in linked text.
+    fn audience_ticks(&self) -> bool {
+        self.overlay.message.as_ref().is_some_and(|(text, _)| crate::messages::has_tokens(text)) || self.links_tick()
     }
 
     /// True while text on the audience screens scrolls, so it is drawn again at each refresh.
@@ -3425,18 +3593,173 @@ impl Output {
 
     /// The stage screens' windows whose layouts show a picture of a screen that is fading.
     fn stage_following_fades(&self) -> Vec<usize> {
-        if !self.stage_on {
-            return Vec::new();
-        }
+        (0..self.targets.len()).filter(|&index| self.follows_fade(self.targets[index].id)).collect()
+    }
+
+    /// Whether a stage screen's layout shows a picture of a screen whose window is fading.
+    fn follows_fade(&self, id: Uuid) -> bool {
         let fading = |screen: &Uuid| self.targets.iter().any(|target| target.id == *screen && target.fade.is_some());
-        (0..self.targets.len())
-            .filter(|&index| {
-                let layout = self.stage.iter().find(|(have, _)| *have == self.targets[index].id);
-                layout
-                    .and_then(|(_, layout)| layout.templates.first())
-                    .is_some_and(|template| crate::stage::sources(template).iter().any(fading))
-            })
-            .collect()
+        let layout = self.stage.iter().find(|(have, _)| *have == id).filter(|_| self.stage_on);
+        layout
+            .and_then(|(_, layout)| layout.templates.first())
+            .is_some_and(|template| crate::stage::sources(template).iter().any(fading))
+    }
+
+    /// Whether the picture drawn for a screen on NDI moves by itself: it shows a playing video,
+    /// it is fading, or (a stage screen) it shows a picture of a screen that is.
+    fn ndi_moves(&self, id: Uuid) -> bool {
+        self.shows_video(id) || self.ndi_fades.iter().any(|fade| fade.of == id) || self.follows_fade(id)
+    }
+
+    /// Whether a window holds, at NDI's size, the very picture the NDI sources are sent for
+    /// the screen `of`: that screen's own window, or the window of a screen that shows the show
+    /// as it is when `of` does too.
+    fn window_is_ndi_picture(&self, index: usize, of: Uuid) -> bool {
+        let Some(target) = self.targets.get(index) else { return false };
+        let own_way = |id: Uuid| {
+            self.is_stage(id)
+                || self.identify.iter().any(|(have, ..)| *have == id)
+                || self.looks.iter().any(|(have, _)| *have == id)
+                || self.themes.iter().any(|(have, _)| *have == id)
+        };
+        (target.texture.width(), target.texture.height()) == NDI_SIZE && same_picture(target.id, of, own_way)
+    }
+
+    /// Sets up the fades of the NDI and DeckLink pictures for a drawing of every screen, and
+    /// says whether any is under way: a new picture fades in over the one each was last sent,
+    /// as it does in the windows, by the same clock. Stage screens change at once, and so does a
+    /// picture with none before it. Any other whole drawing ends the fades there were, as it
+    /// does the windows': each then starts from what `fade_start` gives.
+    ///
+    /// The two sides are drawn once into textures when nothing moves on them (`cache_sides`),
+    /// unless a window of NDI's size shows the same picture: its steps are copied back instead.
+    fn begin_ndi_fades(&mut self, frame: &Frame, new_picture: bool, amount: Option<f32>) -> bool {
+        for NdiFade { of, fade, .. } in std::mem::take(&mut self.ndi_fades) {
+            let Fade { from, to, .. } = fade;
+            self.ndi_shown.retain(|(have, _)| *have != of);
+            self.ndi_shown.push((of, fade_start(from, to, amount.unwrap_or(1.0), new_picture)));
+        }
+        self.ndi_fade_owed = false;
+        self.ndi_fade_due = None;
+        if !new_picture || self.look.duration() <= 0.0 || (self.ndi.is_empty() && self.decklink.is_empty()) {
+            return false;
+        }
+        let (w, h) = NDI_SIZE;
+        for group in ndi_groups(&self.ndi_seen()) {
+            let of = group.of;
+            // The people on stage need the words now; a key with no fill to follow is black.
+            if self.is_stage(of) || self.key_of(of).is_some() {
+                continue;
+            }
+            let Some(at) = self.ndi_shown.iter().position(|(have, _)| *have == of) else { continue };
+            let (_, from) = self.ndi_shown.swap_remove(at);
+            let to = self.scene_for(of, frame, w, h);
+            let in_a_window = (0..self.targets.len()).any(|index| self.window_is_ndi_picture(index, of));
+            let cache = if in_a_window {
+                None
+            } else {
+                self.cache_sides(For::Ndi(of), self.see_through(of).is_some(), &from, &to, w, h)
+            };
+            self.ndi_fades.push(NdiFade { of, fade: Fade { from, to, cache }, built: self.video_moves });
+        }
+        !self.ndi_fades.is_empty()
+    }
+
+    /// Draws the step the fade has reached in one NDI picture into NDI's texture: the blend of
+    /// its two textures, or the fade drawn from the two slides, the one faded to built again
+    /// when a playing video has given a new picture since (which moves through the fade).
+    fn paint_ndi_fade(
+        &mut self,
+        at: usize,
+        frame: &Frame,
+        target: &wgpu::Texture,
+    ) -> Result<(), sp_render::PaintError> {
+        let (w, h) = NDI_SIZE;
+        let of = self.ndi_fades[at].of;
+        let see_through = self.see_through(of).is_some();
+        if self.ndi_fades[at].built != self.video_moves {
+            let fresh = self.scene_for(of, frame, w, h);
+            let moves = self.video_moves;
+            let fading = &mut self.ndi_fades[at];
+            // The sides are cached only while nothing moves.
+            fading.fade.cache = None;
+            fading.fade.to = fresh;
+            fading.built = moves;
+        }
+        let (amount, look) = match self.fading {
+            Some((started, look)) => (fade_amount(started, look.duration()), look),
+            None => (1.0, self.look),
+        };
+        let mixing = Instant::now();
+        let fade = &self.ndi_fades[at].fade;
+        let scene = if amount >= 1.0 {
+            fade.to.clone()
+        } else if see_through {
+            see_through_transition(look.kind, &fade.from, &fade.to, amount, w, h)
+        } else if let Some((from, to, weights)) = fade.blend(look, amount) {
+            let drawn = self.blend.draw(&self.device, &self.queue, from, to, weights, target);
+            self.held.since(Part::Paint, For::Ndi(of), mixing);
+            return if drawn {
+                Ok(())
+            } else {
+                Err(sp_render::PaintError::Failed("the fade's pictures are not NDI's size".to_owned()))
+            };
+        } else {
+            fade.mixed(look, amount, w, h)
+        };
+        self.held.since(Part::Scene, For::Ndi(of), mixing);
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        self.paint(&scene, &view, w, h, see_through, For::Ndi(of))
+    }
+
+    /// Gives the NDI sources and DeckLink outputs their picture of a step of the fade, when one
+    /// is owed them (`fade_owes_ndi`) and can be drawn: not while the one before is still on its
+    /// way back from the GPU (it is drawn by a later step, and nothing counts as put off), nor
+    /// after one could not be drawn (it is tried again when the fade ends, so that the room's
+    /// fade is never held up for NDI twice). True when the fade's last step, which draws the
+    /// whole new pictures, was drawn for them, so nothing more is owed once the fade is over.
+    fn step_ndi_fade(&mut self, amount: f32, moved: bool, windows: &[usize]) -> bool {
+        if self.ndi_fades.is_empty() {
+            return false;
+        }
+        let now = Instant::now();
+        let due = self.ndi_fade_due.is_none_or(|due| due <= now);
+        let since_video = self.video_came_at.map(|came| now.saturating_duration_since(came));
+        self.ndi_fade_owed |= fade_owes_ndi(moved, since_video, due);
+        let well = self.ndi_state == Shown::default() && !self.round.slow;
+        if !self.ndi_fade_owed || !self.ndi_pending.is_empty() || !well {
+            return false;
+        }
+        let frame = self.frame.clone();
+        self.send_ndi_of(&frame, NdiChange::Any, Which::Moving, windows);
+        self.ndi_fade_owed = false;
+        self.ndi_fade_due = Some(next_ndi_due(self.ndi_fade_due, now));
+        if let Some(drawn) = &mut self.fade_drawn {
+            drawn.sent += u32::from(!self.ndi_pending.is_empty());
+        }
+        amount >= 1.0 && self.ndi_state == Shown::default()
+    }
+
+    /// Ends the fades of the NDI pictures with the windows': each picture is now the one it
+    /// faded to. Unless the last step drew that (`whole`), the sources are owed it: with the
+    /// next picture of a playing video, or, when nothing moves, at their next picture's time.
+    fn end_ndi_fades(&mut self, whole: bool) {
+        if self.ndi_fades.is_empty() {
+            return;
+        }
+        for NdiFade { of, fade, .. } in std::mem::take(&mut self.ndi_fades) {
+            self.ndi_shown.retain(|(have, _)| *have != of);
+            self.ndi_shown.push((of, fade.to));
+        }
+        let now = Instant::now();
+        if !whole {
+            let video_moves =
+                self.video_came_at.is_some_and(|came| now.saturating_duration_since(came) < 2 * sp_ndi::FRAME);
+            let wait = if video_moves { 2 * sp_ndi::FRAME } else { Duration::ZERO };
+            self.ndi_after_fade = Some(self.ndi_fade_due.map_or(now, |due| due.max(now)) + wait);
+        }
+        self.ndi_fade_owed = false;
+        self.ndi_fade_due = None;
     }
 
     /// True when there is a stage screen to keep the time on.
@@ -3465,9 +3788,9 @@ impl Output {
             }
         }
         // A stage screen sent over NDI gets the new time too, the same way as every NDI picture
-        // (never waited on).
+        // (never waited on); the other sources' pictures are left as they are.
         if self.ndi.iter().any(|(id, _)| self.is_stage(*id)) || self.decklink.iter().any(|(id, _)| self.is_stage(*id)) {
-            self.send_ndi(&frame, NdiChange::Stage);
+            self.send_ndi_of(&frame, NdiChange::Stage, Which::Stage, &[]);
         }
         self.end_round();
     }
@@ -3484,13 +3807,21 @@ impl Output {
     fn fade_step(&mut self) {
         let Some((started, look)) = self.fading else { return };
         let amount = fade_amount(started, look.duration());
-        let cached = self.targets.iter().any(|target| target.fade.as_ref().is_some_and(|fade| fade.cache.is_some()));
-        let (_, steps, was_cached) =
-            self.fade_drawn.filter(|(since, ..)| *since == started).unwrap_or((started, 0, false));
-        self.fade_drawn = Some((started, steps + 1, was_cached || cached));
+        let cached = self.targets.iter().any(|target| target.fade.as_ref().is_some_and(|fade| fade.cache.is_some()))
+            || self.ndi_fades.iter().any(|fading| fading.fade.cache.is_some());
+        let mut drawn = self.fade_drawn.filter(|drawn| drawn.since == started).unwrap_or(FadeDrawn {
+            since: started,
+            steps: 0,
+            cached: false,
+            sent: 0,
+        });
+        drawn.steps += 1;
+        drawn.cached |= cached;
+        self.fade_drawn = Some(drawn);
         // A video playing behind the new slide keeps moving through the fade: each new picture
         // of it builds the picture being faded to again.
-        if self.take_video_picture() {
+        let moved = self.take_video_picture();
+        if moved {
             let frame = self.frame.clone();
             for index in 0..self.targets.len() {
                 let (id, w, h) = {
@@ -3510,6 +3841,13 @@ impl Output {
         }
         // Stage screens showing a picture of a screen that is fading are drawn again with it.
         let following = self.stage_following_fades();
+        // A stage screen on NDI or DeckLink that shows such a picture is owed it whole once the
+        // fade is over: its last step is not known to it as one.
+        let followed_on_ndi = (self.ndi.iter().map(|(id, _)| *id))
+            .chain(self.decklink.iter().map(|(id, _)| *id))
+            .any(|id| self.follows_fade(id));
+        // The windows whose step was painted, whose pictures NDI may be given as they are.
+        let mut stepped = Vec::new();
         for index in 0..self.targets.len() {
             let Some(fade) = self.targets[index].fade.take() else { continue };
             if amount >= 1.0 {
@@ -3518,6 +3856,7 @@ impl Output {
                 // textures of a cached fade go with it.)
                 let Fade { from, to, .. } = fade;
                 let painted = self.present(index, &to);
+                stepped.extend(painted.then_some(index));
                 self.targets[index].shown = Some(if painted { to } else { from });
             } else {
                 let (id, w, h) =
@@ -3526,8 +3865,8 @@ impl Output {
                 // A cached fade that is a plain sum of its two pictures is one pass over their
                 // textures; any other is drawn by the renderer (from the textures if cached).
                 let plain = if self.see_through(id).is_some() { None } else { fade.blend(look, amount) };
-                if let Some((from, to, weights)) = plain {
-                    self.present_draw(index, Draw::Blend(from, to, weights));
+                let painted = if let Some((from, to, weights)) = plain {
+                    self.present_draw(index, Draw::Blend(from, to, weights))
                 } else {
                     let mixing = Instant::now();
                     let scene = if self.see_through(id).is_some() {
@@ -3536,8 +3875,9 @@ impl Output {
                         fade.mixed(look, amount, w, h)
                     };
                     self.held.since(Part::Scene, For::Window(id), mixing);
-                    self.present(index, &scene);
-                }
+                    self.present(index, &scene)
+                };
+                stepped.extend(painted.then_some(index));
                 self.targets[index].fade = Some(fade);
             }
         }
@@ -3553,37 +3893,45 @@ impl Output {
             }
         }
         self.step_live_preview(Some(amount));
-        if amount >= 1.0 || self.targets.iter().all(|target| target.fade.is_none()) {
-            if let Some((since, steps, cached)) = self.fade_drawn.take().filter(|(since, ..)| *since == started) {
-                let seconds = since.elapsed().as_secs_f32().max(0.001);
+        // NDI pictures that have come back from the GPU are handed over at every step, and the
+        // sources and DeckLink outputs are given the step itself when one is owed them. After
+        // the windows: this may paint an NDI picture, and one the GPU is too slow with would
+        // keep the windows' step from being asked for.
+        self.finish_ndi();
+        let whole = self.step_ndi_fade(amount, moved, &stepped) && !followed_on_ndi;
+        let windows_done = self.targets.iter().all(|target| target.fade.is_none());
+        if amount >= 1.0 || (windows_done && self.ndi_fades.is_empty()) {
+            if let Some(drawn) = self.fade_drawn.take().filter(|drawn| drawn.since == started) {
+                let seconds = drawn.since.elapsed().as_secs_f32().max(0.001);
+                let sent = if self.ndi.is_empty() && self.decklink.is_empty() {
+                    String::new()
+                } else {
+                    format!("; {} of its pictures went to NDI and DeckLink", drawn.sent)
+                };
                 crate::applog::event(
                     "output",
                     &format!(
-                        "A {} fade of {seconds:.1} s drew {steps} pictures ({:.0} a second), {}",
+                        "A {} fade of {seconds:.1} s drew {} pictures ({:.0} a second), {}{sent}",
                         look.kind.name(),
-                        steps as f32 / seconds,
-                        if cached { "from textures of the two slides" } else { "from the slides" }
+                        drawn.steps,
+                        drawn.steps as f32 / seconds,
+                        if drawn.cached { "from textures of the two slides" } else { "from the slides" }
                     ),
                 );
             }
             self.set_fading(None);
+            self.end_ndi_fades(whole);
             // An NDI picture that could not be drawn as the fade began, or during it, had no
-            // drawing to be tried again in: the steps of a fade draw the windows only, and the
-            // time set for another try is dropped while one runs (whether it was still being
-            // tried or had been given up for now). It is tried now, as part of this drawing,
-            // which sets a time for the next try if it must.
+            // drawing to be tried again in: a fade's steps give NDI nothing more once one of
+            // its pictures could not be drawn, and the time set for another try is dropped
+            // while a fade runs (whether it was still being tried or had been given up for
+            // now). It is tried now, as part of this drawing, which sets a time for the next
+            // try if it must.
             if self.ndi_state != Shown::default() {
                 let frame = self.frame.clone();
                 self.send_ndi(&frame, NdiChange::Any);
             }
         }
-        // NDI pictures that have come back from the GPU are handed over at every step: NDI
-        // shows the new slide at once, as the stage screens do, not when the windows' fade
-        // ends. After the windows: this may paint an NDI picture that was put off, and one the
-        // GPU is too slow with would keep the windows' step from being asked for. (An NDI
-        // picture that could not be drawn is not tried again here: it waits for the end of
-        // the fade, above, so that the room's fade is never held up for NDI.)
-        self.finish_ndi();
     }
 
     /// How long the thread may sleep with nothing to draw before it must look again: not at
@@ -3600,10 +3948,10 @@ impl Output {
         self.close_again_at.map(|at| at.saturating_duration_since(Instant::now()))
     }
 
-    /// How long until a picture the GPU was too slow with, or NDI pictures lost on their way
-    /// back from it, are due to be drawn again, if any are.
+    /// How long until a picture the GPU was too slow with, NDI pictures lost on their way back
+    /// from it, or the NDI pictures owed after a fade are due to be drawn, if any are.
     fn draw_again_in(&self) -> Option<Duration> {
-        let at = [self.round.again_at, self.ndi_lost.again_at].into_iter().flatten().min()?;
+        let at = [self.round.again_at, self.ndi_lost.again_at, self.ndi_after_fade].into_iter().flatten().min()?;
         Some(at.saturating_duration_since(Instant::now()))
     }
 
@@ -3623,10 +3971,12 @@ impl Output {
         // NDI pictures lost on their way back are drawn again alone: the windows are well.
         // (After a fade, not during one: this waits as the drawing above does.)
         let lost_due = self.ndi_lost.take_due(now);
-        if lost_due {
+        // So is the whole picture the sources are owed after a fade.
+        let after_fade = self.ndi_after_fade.take_if(|at| *at <= now).is_some();
+        if lost_due || after_fade {
             self.draw_ndi();
         }
-        lost_due
+        lost_due || after_fade
     }
 
     /// Paints a picture and shows it in one window; true when it was painted. A picture that
@@ -4676,5 +5026,79 @@ mod tests {
         assert!(!ndi_settled(&[one], &[], true));
         // One nobody is watching has nothing drawn for it, so it holds nothing back.
         assert!(ndi_settled(&[seen(false, false)], &[], true));
+    }
+
+    #[test]
+    fn the_time_on_the_stage_screens_draws_only_the_stage_screens() {
+        // (its picture moves, it is a stage screen)
+        let (main, words_only, stage) = ((true, false), (false, false), (false, true));
+        // The stage screens' clock alone: no audience screen, window or NDI source, is touched.
+        assert!(Which::Stage.takes(stage.0, stage.1));
+        assert!(!Which::Stage.takes(main.0, main.1) && !Which::Stage.takes(words_only.0, words_only.1));
+        // With a new picture of a playing video: what shows the video, and the stage screens.
+        assert!(Which::MovingAndStage.takes(main.0, main.1) && Which::MovingAndStage.takes(stage.0, stage.1));
+        assert!(!Which::MovingAndStage.takes(words_only.0, words_only.1));
+        // A video's new picture alone leaves a stage screen that does not show it as it is.
+        assert!(Which::Moving.takes(main.0, main.1) && !Which::Moving.takes(stage.0, stage.1));
+        assert!(Which::All.takes(words_only.0, words_only.1));
+        // Only the stage screens' own sources are told the time may have changed.
+        assert!(NdiChange::Stage.touches(true) && !NdiChange::Stage.touches(false));
+    }
+
+    #[test]
+    fn a_second_beginning_while_a_video_plays_draws_every_screen_only_when_an_audience_screen_shows_the_time() {
+        // Nothing but the video moves: only what shows it.
+        assert_eq!(video_drawing(true, false, false), Which::Moving);
+        assert_eq!(video_drawing(true, false, true), Which::Moving);
+        // A second begins with only the stage screens showing the time: they are drawn with it,
+        // and the slides kept over the video stay.
+        assert_eq!(video_drawing(true, true, false), Which::MovingAndStage);
+        // A message or linked text with the time on the audience screens: everything.
+        assert_eq!(video_drawing(true, true, true), Which::All);
+        // A fade, a build, scrolling words: everything, whatever the time.
+        assert_eq!(video_drawing(false, false, false), Which::All);
+        assert_eq!(video_drawing(false, true, false), Which::All);
+    }
+
+    #[test]
+    fn a_fade_gives_ndi_a_picture_for_each_picture_of_a_video_or_at_ndis_own_pace() {
+        let ms = Duration::from_millis;
+        // A video's new picture is one for NDI, due or not.
+        assert!(fade_owes_ndi(true, Some(ms(0)), false));
+        // Between two pictures of a video that is giving them, a step of the windows' fade is
+        // not: NDI would be handed two in one picture's time and pass one over.
+        assert!(!fade_owes_ndi(false, Some(ms(16)), true));
+        assert!(!fade_owes_ndi(false, Some(ms(40)), true));
+        // Nothing but the fade moves (no video, or one that stopped): one each picture's time.
+        assert!(fade_owes_ndi(false, None, true));
+        assert!(!fade_owes_ndi(false, None, false));
+        assert!(fade_owes_ndi(false, Some(ms(500)), true));
+        assert!(!fade_owes_ndi(false, Some(ms(500)), false));
+    }
+
+    #[test]
+    fn a_fades_pictures_for_ndi_keep_ndis_pace_whatever_the_windows_steps_are() {
+        let start = Instant::now();
+        let ms = Duration::from_millis;
+        // The first is due a picture's time after it is drawn.
+        assert_eq!(next_ndi_due(None, start), start + sp_ndi::FRAME);
+        // Steps every 8 ms (a covered window) or 16.7 ms: the one drawn a little after it was
+        // due does not push the next back, so thirty a second go out, not fewer.
+        let due = start + sp_ndi::FRAME;
+        assert_eq!(next_ndi_due(Some(due), due + ms(7)), due + sp_ndi::FRAME);
+        // Fallen a picture or more behind (the thread was held): from now, not two at once.
+        assert_eq!(next_ndi_due(Some(due), due + ms(50)), due + ms(50) + sp_ndi::FRAME);
+    }
+
+    #[test]
+    fn a_windows_picture_is_ndis_only_when_both_show_the_same() {
+        let (plain, other_plain, own) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+        let own_way = |id: Uuid| id == own;
+        // The screen's own window, however it shows the show.
+        assert!(same_picture(own, own, own_way) && same_picture(plain, plain, own_way));
+        // Two screens that show the show as it is.
+        assert!(same_picture(plain, other_plain, own_way));
+        // One with a look, a theme, a stage layout or its name on it shows another picture.
+        assert!(!same_picture(plain, own, own_way) && !same_picture(own, other_plain, own_way));
     }
 }

@@ -6510,7 +6510,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             ),
             Output::DeckLink(_) => t(
                 "screens.about.decklink",
-                "Played out of a Blackmagic Design DeckLink card, on its connector, in the format chosen here. A new slide goes at once, without a dissolve.",
+                "Played out of a Blackmagic Design DeckLink card, on its connector, in the format chosen here. A new slide fades in as it does on the other screens.",
             ),
             Output::Off => t("screens.about.off", "This screen is kept in the list and shows nowhere."),
         };

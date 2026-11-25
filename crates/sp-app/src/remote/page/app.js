@@ -2960,7 +2960,7 @@ function scrDestNote(x) {
     : D ? `Fills ${D}. If it is unplugged, this screen waits for it and never moves to another display.`
     : x.to === 'A window' ? 'An ordinary window, 960 × 540, for trying things out or for capturing in other software.'
     : x.to === 'NDI' ? `Other computers on the network can show this screen, at 1920 × 1080.${s.tone === 'ok' ? ` Now: ${s.t.replace('On NDI · ', '')}.` : ''}`
-    : `Played out of the DeckLink card’s ${DECKLINK[x.to].conn}, in the format chosen here. A new slide goes at once, without a dissolve.`;
+    : `Played out of the DeckLink card’s ${DECKLINK[x.to].conn}, in the format chosen here. A new slide fades in as it does on the other screens.`;
   return scrNote(s, 'out', help);
 }
 const nextTint = () => (IDENT.find(([c]) => !DOC.screens.some(x => x.tint === c)) || IDENT[DOC.screens.length % IDENT.length])[0];

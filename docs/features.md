@@ -1335,8 +1335,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   never holds up the screens. That thread plays it on the card's own clock, a few frames
   ahead, as 8-bit BGRA (or 8-bit YUV 4:2:2 where a format can't take BGRA), scaled down for
   720p, and gives the card the last picture again whenever no new one has come, so the picture
-  never freezes or drops to black because the computer was busy. A new slide goes at once,
-  with no dissolve, as it does over NDI. A device that stops, is taken away or has its profile
+  never freezes or drops to black because the computer was busy. A new slide fades in as it
+  does on the other screens, as it does over NDI, and a video behind it keeps moving through
+  the fade. A device that stops, is taken away or has its profile
   changed in Desktop Video Setup is opened again every two seconds until it plays; the operator
   is told when one stops, the Screens window and `sp screens` say what each is doing, and the
   log has a line each minute for each output: frames played, late and dropped. A quiet run (a
@@ -1400,11 +1401,18 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   slide that has gone: if anything changed while nobody was watching, it sees black (all clear,
   for a see-through screen) until its picture comes. That is longer than a second only when
   the GPU is too slow to draw the picture: it is then tried again like any screen's (during a
-  dissolve, when the dissolve ends, so that the room's fade is never held up for NDI), and the
+  dissolve, when the dissolve ends, and NDI is given no more of that dissolve, so that the
+  room's fade is never held up for NDI twice), and the
   operator is told if it still cannot be drawn. A picture that was drawn and then lost on its way to NDI is drawn
   once more; if that is lost too, the operator is told, and it is drawn again every five
-  seconds until one arrives. A new slide goes to NDI at
-  once, with no dissolve, as it does to the stage screens. The Screens window and `sp screens`
+  seconds until one arrives. A new slide fades in over NDI
+  (and out of a DeckLink card) as it does in the room, by the same clock, and a video playing
+  behind the words keeps moving through the fade: NDI is given a picture of the fade for each
+  picture of the video, or thirty a second when nothing else moves, whatever pace the room's
+  screens draw it at. A window that shows the same picture at 1920 × 1080 has each step copied
+  back as it painted it, so the fade is not drawn twice; otherwise the fade is drawn for NDI
+  as for a window (the two slides once each into textures and then blended, or from the slides
+  while a video moves). Stage screens still change at once. The Screens window and `sp screens`
   say how many receivers each NDI screen has, or that nobody is watching. The number is NDI's
   own (NDI's monitor app, for one, counts as two receivers); with an NDI too old to count
   them, the screen is drawn and sent all the time.
@@ -1424,8 +1432,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   NDI and DeckLink pictures, which are read back from the GPU and sent only for them. A screen
   without the media layer, or a see-through one, keeps the picture it has, so it costs no
   drawing, no showing in its window and no readback while the video plays. The time on stage
-  screens and in messages still moves once a second, and everything is drawn as before while a
-  dissolve, a build, scrolling words or the identify wash is under way. The screens' log line
+  screens moves once a second and draws only the stage screens (their windows and their own
+  NDI pictures; the other NDI screens are sent nothing for it); a message or linked text with
+  the time on the audience screens draws them all once a second, and everything is drawn as
+  before while a dissolve, a build, scrolling words or the identify wash is under way. The screens' log line
   says how much memory the painter holds (the operator window's, how much the thumbnails'
   painter does). On the DeckLink side, a solid picture is turned into the card's BGRA or YUV
   frame in a fifth to a quarter of the time it took, and one scaled to a card's other size
