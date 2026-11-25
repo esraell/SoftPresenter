@@ -33,9 +33,9 @@ jobs:
       - name: Lints
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests
-        run: cargo test --workspace --exclude sp-render
+        run: cargo test --workspace --exclude sp-render --no-fail-fast
       - name: Tests (sp-render, without the picture tests)
-        run: cargo test -p sp-render --lib
+        run: cargo test -p sp-render --lib --no-fail-fast
       - name: Say which tests were left out
         run: >-
           echo "::notice title=Picture tests skipped::crates/sp-render/tests/golden.rs compares

@@ -14,6 +14,7 @@ permissions:
 
 jobs:
   windows:
+    # The name the earlier runs had, so anything that waits on this check by name still finds it.
     name: Build and tests on Windows
     runs-on: windows-latest
     timeout-minutes: 60
@@ -22,6 +23,18 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Git on GitHub's Windows machines turns LF into CRLF as it checks files out;
+      # .gitattributes keeps every text file LF, so the app built here carries the same page,
+      # skills and tables as one built on a Mac. This says so plainly if that ever stops.
+      - name: Text files are checked out with LF line endings
+        shell: bash
+        run: |
+          crlf=$(git ls-files --eol | grep -E 'w/(crlf|mixed)' || true)
+          if [ -n "$crlf" ]; then
+            echo "$crlf"
+            echo "::error title=CRLF in the checkout::These files were checked out with CRLF line endings; .gitattributes should keep them LF."
+            exit 1
+          fi
       - name: Install the Rust version in rust-toolchain.toml
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -32,3 +45,14 @@ jobs:
       - name: Tests (sp-render, without the picture tests)
         if: success() || failure()
         run: cargo test -p sp-render --lib --no-fail-fast
+      # After the tests, so that a lint only Windows' own compiler finds doesn't hide their
+      # results.
+      - name: Lints
+        if: success() || failure()
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Say which tests were left out
+        if: success() || failure()
+        run: >-
+          echo "::notice title=Picture tests skipped::crates/sp-render/tests/golden.rs compares
+          against pictures made on the maintainer's Mac with its GPU and fonts, so it runs there,
+          not here."

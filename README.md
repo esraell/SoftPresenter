@@ -301,7 +301,9 @@ The code is a Rust workspace:
     cargo clippy --workspace --all-targets -- -D warnings
     SOFTPRESENTER_QUIET=1 cargo test --workspace
 
-The picture tests in `sp-render` need a GPU and the macOS system font.
+The picture tests in `sp-render` need a GPU and the macOS system font. The automatic checks run
+the rest on a Mac, on Windows and on Linux (Ubuntu; `.github/workflows/linux.yml` lists the
+packages a Linux build needs), with the lints on all three.
 
 ## Contributing, security and conduct
 
