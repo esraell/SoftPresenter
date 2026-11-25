@@ -28,6 +28,8 @@
 //! real break (a pause, a seek, sound that stopped and started, an input that ran out) lays
 //! an input's samples down afresh at the time they say.
 
+mod ring;
+
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
@@ -259,6 +261,11 @@ impl Mix {
         self.inputs.retain(|input| input.id != id);
     }
 
+    /// Only the inputs `still` says are still there are kept.
+    pub fn keep(&mut self, still: impl Fn(u64) -> bool) {
+        self.inputs.retain(|input| still(input.id));
+    }
+
     /// The next block, once its time has come: when its first sample is heard, and the left
     /// channel's [`BLOCK`] samples and then the right's, every input's sound for that time
     /// added together, silence where there is none. `None` while it is not due yet.
@@ -313,33 +320,43 @@ pub trait Listener: Send + Sync {
     fn play(&self, planar: &[f32], heard: SystemTime);
 }
 
-/// What the taps tell the mix's thread.
-enum Told {
-    Samples {
-        id: u64,
-        gain: Arc<AtomicU32>,
-        rate: u32,
-        channels: u16,
-        samples: Vec<f32>,
-        heard: Instant,
-    },
-    Flush(u64),
-    Gone(u64),
-    /// The listeners have changed.
-    Look,
-}
-
 /// How often the mix's thread looks whether any listener wants sound, while none does.
 const LOOK_EVERY: Duration = Duration::from_millis(500);
 
-/// The app's one mix: its listeners, and the way to its thread.
+/// How often, at least, the mix's thread takes what the inputs have handed over: twice in
+/// each block's time, well inside the time their sound is held before it is due.
+const TAKE_EVERY: Duration = Duration::from_millis(10);
+
+/// Room in each input's ring: about a second of stereo sound at 48,000 samples a second.
+const RING_WORDS: usize = 1 << 17;
+
+/// The moment the mix's times are counted from.
+fn epoch() -> Instant {
+    static EPOCH: OnceLock<Instant> = OnceLock::new();
+    *EPOCH.get_or_init(Instant::now)
+}
+
+/// What an input and the mix's thread share: the ring its samples cross in, how loud it goes
+/// into the mix, and how many times it has been flushed.
+#[derive(Debug)]
+struct Crossing {
+    id: u64,
+    gain: Arc<AtomicU32>,
+    flushes: AtomicU32,
+    ring: ring::Ring,
+}
+
+/// The app's one mix: its inputs, its listeners, and the way to wake its thread.
 struct Hub {
-    tx: Sender<Told>,
+    wake: Sender<()>,
     /// The other end, until the thread is started (by the first listener) and takes it.
-    rx: Mutex<Option<Receiver<Told>>>,
+    woken: Mutex<Option<Receiver<()>>>,
     /// Whether any listener wants sound now: the taps copy nothing while it is false.
     wanted: AtomicBool,
     listeners: Mutex<Vec<(u64, Arc<dyn Listener>)>>,
+    /// Every input there is. Added to and taken from where inputs are made and dropped,
+    /// never on a thread that plays sound.
+    inputs: Mutex<Vec<Arc<Crossing>>>,
     /// Whether a listener is expected, said ahead of its coming ([`expect`]).
     expected: AtomicBool,
     ids: AtomicU64,
@@ -348,12 +365,14 @@ struct Hub {
 fn hub() -> &'static Hub {
     static HUB: OnceLock<Hub> = OnceLock::new();
     HUB.get_or_init(|| {
-        let (tx, rx) = channel();
+        let (wake, woken) = channel();
+        epoch();
         Hub {
-            tx,
-            rx: Mutex::new(Some(rx)),
+            wake,
+            woken: Mutex::new(Some(woken)),
             wanted: AtomicBool::new(false),
             listeners: Mutex::new(Vec::new()),
+            inputs: Mutex::new(Vec::new()),
             expected: AtomicBool::new(false),
             ids: AtomicU64::new(1),
         }
@@ -370,7 +389,7 @@ impl Drop for Listening {
         if let Ok(mut listeners) = hub.listeners.lock() {
             listeners.retain(|(id, _)| *id != self.0);
         }
-        let _ = hub.tx.send(Told::Look);
+        let _ = hub.wake.send(());
     }
 }
 
@@ -382,13 +401,13 @@ pub fn listen(listener: impl Listener + 'static) -> Listening {
     if let Ok(mut listeners) = hub.listeners.lock() {
         listeners.push((id, Arc::new(listener)));
     }
-    if let Some(rx) = hub.rx.lock().ok().and_then(|mut rx| rx.take()) {
-        let started = std::thread::Builder::new().name("sound mix".to_owned()).spawn(move || run(hub, &rx));
+    if let Some(woken) = hub.woken.lock().ok().and_then(|mut woken| woken.take()) {
+        let started = std::thread::Builder::new().name("sound mix".to_owned()).spawn(move || run(hub, &woken));
         if let Err(problem) = started {
             eprintln!("The sound for NDI could not be started: {problem}");
         }
     }
-    let _ = hub.tx.send(Told::Look);
+    let _ = hub.wake.send(());
     Listening(id)
 }
 
@@ -406,12 +425,53 @@ pub fn expect(listener: bool) {
     hub().expected.store(listener, Ordering::Relaxed);
 }
 
+/// What the mix's thread knows of an input: how many flushes it has acted on, and how many
+/// pieces it has seen left out of the ring.
+struct Seen {
+    id: u64,
+    flushes: u32,
+    lost: u64,
+}
+
+/// Takes what every input has handed over into the mix, in the order each handed it over;
+/// lets go of what a flushed input had waiting, and of inputs that have gone. With `keep`
+/// false everything waiting is let go instead (the mix is only beginning).
+fn take_in(hub: &Hub, mix: &mut Mix, seen: &mut Vec<Seen>, samples: &mut Vec<f32>, keep: bool) {
+    let inputs: Vec<Arc<Crossing>> = hub.inputs.lock().map(|inputs| inputs.clone()).unwrap_or_default();
+    seen.retain(|seen| inputs.iter().any(|input| input.id == seen.id));
+    mix.keep(|id| inputs.iter().any(|input| input.id == id));
+    for input in &inputs {
+        let flushes = input.flushes.load(Ordering::Relaxed);
+        let at = seen.iter().position(|seen| seen.id == input.id).unwrap_or_else(|| {
+            seen.push(Seen { id: input.id, flushes, lost: input.ring.lost() });
+            seen.len() - 1
+        });
+        if !keep || seen[at].flushes != flushes {
+            seen[at].flushes = flushes;
+            input.ring.clear();
+            mix.flush(input.id);
+            continue;
+        }
+        while let Some(piece) = input.ring.take(samples) {
+            mix.feed(input.id, &input.gain, piece.rate, piece.channels, samples, Duration::from_micros(piece.heard));
+        }
+        // Pieces left out (this thread was held up too long): the sound starts afresh after
+        // the hole, rather than closing it up and running early.
+        let lost = input.ring.lost();
+        if lost != seen[at].lost {
+            seen[at].lost = lost;
+            mix.flush(input.id);
+        }
+    }
+}
+
 /// The mix's thread: sleeps while nobody wants sound, and otherwise hands every listener that
 /// does a block each 20 ms.
-fn run(hub: &Hub, rx: &Receiver<Told>) {
-    let began = Instant::now();
+fn run(hub: &Hub, woken: &Receiver<()>) {
+    let began = epoch();
     let mut mix = Mix::new();
     let mut mixing = false;
+    let (mut seen, mut samples) = (Vec::new(), Vec::new());
     loop {
         // The listeners as they are now, asked and handed their blocks without holding the
         // list: whoever adds or takes one away (the thread drawing the screens) never waits
@@ -426,33 +486,23 @@ fn run(hub: &Hub, rx: &Receiver<Told>) {
         if !wanted {
             mixing = false;
             // With no listener at all there is nothing to look for until one is added.
-            let told = if any { rx.recv_timeout(LOOK_EVERY).ok() } else { rx.recv().ok() };
-            // Whatever the taps had on its way is let go.
-            if told.is_some() {
-                while rx.try_recv().is_ok() {}
+            let told = if any { woken.recv_timeout(LOOK_EVERY).map_err(|_| ()) } else { woken.recv().map_err(|_| ()) };
+            if told.is_ok() {
+                while woken.try_recv().is_ok() {}
             }
             continue;
         }
         if !mixing {
             mixing = true;
             mix.begin(began.elapsed());
+            // Whatever the inputs handed over when sound was last wanted is long gone by.
+            take_in(hub, &mut mix, &mut seen, &mut samples, false);
         }
-        let mut told = match rx.recv_timeout(mix.due().saturating_sub(began.elapsed())) {
-            Ok(told) => Some(told),
-            Err(RecvTimeoutError::Timeout) => None,
+        match woken.recv_timeout(mix.due().saturating_sub(began.elapsed()).min(TAKE_EVERY)) {
+            Ok(()) | Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
-        };
-        while let Some(now) = told {
-            match now {
-                Told::Samples { id, gain, rate, channels, samples, heard } => {
-                    mix.feed(id, &gain, rate, channels, &samples, heard.saturating_duration_since(began));
-                }
-                Told::Flush(id) => mix.flush(id),
-                Told::Gone(id) => mix.forget(id),
-                Told::Look => {}
-            }
-            told = rx.try_recv().ok();
         }
+        take_in(hub, &mut mix, &mut seen, &mut samples, true);
         while let Some((heard, block)) = mix.block(began.elapsed()) {
             // The block's time by the computer's clock, worked out from what that clock says
             // now: the pictures' times are read off the same clock as they are sent.
@@ -466,14 +516,18 @@ fn run(hub: &Hub, rx: &Receiver<Told>) {
 }
 
 /// One input of the mix: something that plays sound hands its samples over here as it plays
-/// them. Cheap to make and to keep while nobody listens. Dropping it takes its sound out.
+/// them, from the very thread that plays them. Cheap to keep while nobody listens. Dropping
+/// it takes its sound out.
+///
+/// [`Feed::wanted`] and [`Feed::push`] are made for a sound card's thread: they never wait,
+/// take no lock, ask for no memory and call nothing in the system but its clock's reading.
+/// What is pushed crosses to the mix's thread in a ring of fixed size (see `ring`); should
+/// the ring be full, the piece is left out of the mix and the thread goes straight on.
+/// One thread at a time pushes to a feed. Making, flushing and dropping one are for other
+/// threads.
 #[derive(Debug)]
 pub struct Feed {
-    id: u64,
-    gain: Arc<AtomicU32>,
-    /// Whether the mix has been handed anything of this input's, and so has to be told when
-    /// it goes.
-    known: AtomicBool,
+    crossing: Arc<Crossing>,
 }
 
 impl Default for Feed {
@@ -484,11 +538,17 @@ impl Default for Feed {
 
 impl Feed {
     pub fn new() -> Feed {
-        Feed {
-            id: hub().ids.fetch_add(1, Ordering::Relaxed),
+        let hub = hub();
+        let crossing = Arc::new(Crossing {
+            id: hub.ids.fetch_add(1, Ordering::Relaxed),
             gain: Arc::new(AtomicU32::new(1.0f32.to_bits())),
-            known: AtomicBool::new(false),
+            flushes: AtomicU32::new(0),
+            ring: ring::Ring::new(RING_WORDS),
+        });
+        if let Ok(mut inputs) = hub.inputs.lock() {
+            inputs.push(crossing.clone());
         }
+        Feed { crossing }
     }
 
     /// Whether anybody wants sound now. While nobody does, there is no need to copy samples
@@ -498,36 +558,35 @@ impl Feed {
     }
 
     /// Hands over samples, their channels side by side, at `rate`, the first of them heard at
-    /// `heard` (now, or a little ahead). Never waits. They are added to the mix as they are
-    /// but for [`Feed::set_gain`]: hand over what is heard, after the operator's volume.
-    pub fn push(&self, rate: u32, channels: u16, samples: Vec<f32>, heard: Instant) {
+    /// `heard` (now, or a little ahead). Never waits (see [`Feed`]). They are added to the
+    /// mix as they are but for [`Feed::set_gain`]: hand over what is heard, after the
+    /// operator's volume.
+    pub fn push(&self, rate: u32, channels: u16, heard: Instant, samples: impl ExactSizeIterator<Item = f32>) {
         if !Feed::wanted() {
             return;
         }
-        self.known.store(true, Ordering::Relaxed);
-        let _ = hub().tx.send(Told::Samples { id: self.id, gain: self.gain.clone(), rate, channels, samples, heard });
+        let heard = u64::try_from(heard.saturating_duration_since(epoch()).as_micros()).unwrap_or(u64::MAX);
+        self.crossing.ring.put(ring::Piece { rate, channels, heard }, samples);
     }
 
     /// How loud this input goes into the mix from now on (1 as it is, 0 silent), for a
     /// player whose volume is applied after its samples are handed over. It takes hold at
     /// once, for samples handed over ahead of their time too.
     pub fn set_gain(&self, gain: f32) {
-        self.gain.store(gain.max(0.0).to_bits(), Ordering::Relaxed);
+        self.crossing.gain.store(gain.max(0.0).to_bits(), Ordering::Relaxed);
     }
 
     /// What was handed over ahead of its time will not be heard after all (the player was
     /// paused or moved): it is let go.
     pub fn flush(&self) {
-        if self.known.load(Ordering::Relaxed) {
-            let _ = hub().tx.send(Told::Flush(self.id));
-        }
+        self.crossing.flushes.fetch_add(1, Ordering::Relaxed);
     }
 }
 
 impl Drop for Feed {
     fn drop(&mut self) {
-        if self.known.load(Ordering::Relaxed) {
-            let _ = hub().tx.send(Told::Gone(self.id));
+        if let Ok(mut inputs) = hub().inputs.lock() {
+            inputs.retain(|input| input.id != self.crossing.id);
         }
     }
 }
@@ -560,7 +619,9 @@ impl Output {
 }
 
 /// What an [`Output`] plays, on its way to the sound card: every sample is passed on as it
-/// is, and copied for the mix, a chunk at a time, while anybody wants it.
+/// is, and copied for the mix, a chunk at a time, while anybody wants it. It runs on the
+/// sound card's own thread, so the copying never waits, takes no lock and asks for no memory:
+/// each sample goes into room kept from the start, and each full chunk into its feed's ring.
 struct Tap {
     mixed: rodio::mixer::MixerSource,
     channels: u16,
@@ -584,7 +645,9 @@ impl Tap {
             channels,
             rate,
             feed: Feed::new(),
-            chunk: Vec::new(),
+            // Room for a whole chunk from the start: it is filled again and again, and never
+            // grows on the sound card's thread.
+            chunk: Vec::with_capacity((rate / CHUNKS_A_SECOND).max(1) as usize * usize::from(channels)),
             chunk_len: (rate / CHUNKS_A_SECOND).max(1) as usize * usize::from(channels),
             at: 0,
             began: Instant::now(),
@@ -604,7 +667,7 @@ impl Iterator for Tap {
             self.copying = Feed::wanted();
             if self.copying {
                 self.began = Instant::now();
-                self.chunk = Vec::with_capacity(self.chunk_len);
+                self.chunk.clear();
             }
         }
         if self.copying {
@@ -614,12 +677,12 @@ impl Iterator for Tap {
         if self.at == self.chunk_len {
             self.at = 0;
             if self.copying {
-                let chunk = std::mem::take(&mut self.chunk);
-                let silent = chunk.iter().all(|sample| *sample == 0.0);
+                let silent = self.chunk.iter().all(|sample| *sample == 0.0);
                 self.quiet = if silent { (self.quiet + 1).min(QUIET_CHUNKS) } else { 0 };
                 // An output playing nothing hands nothing over: the mix is silent without it.
                 if self.quiet < QUIET_CHUNKS {
-                    self.feed.push(self.rate, self.channels, chunk, self.began + OUTPUT_DELAY);
+                    let heard = self.began + OUTPUT_DELAY;
+                    self.feed.push(self.rate, self.channels, heard, self.chunk.iter().copied());
                 }
             }
         }
@@ -961,7 +1024,7 @@ mod tests {
         // Switched off: nothing is asked of the taps, and nothing comes.
         std::thread::sleep(ms(100));
         assert!(!Feed::wanted());
-        feed.push(RATE, 1, vec![0.5; 480], Instant::now());
+        feed.push(RATE, 1, Instant::now(), [0.5; 480].into_iter());
         assert!(heard.recv_timeout(ms(100)).is_err());
         // Switched on: blocks come, steadily, silent until something plays.
         on.store(true, Ordering::Relaxed);
@@ -986,7 +1049,7 @@ mod tests {
         assert!(took > ms(400) && took < ms(1500), "{took:?}");
         // What is handed over is heard, at its loudness.
         feed.set_gain(0.5);
-        feed.push(RATE, 1, vec![0.5; 4800], Instant::now() + ms(50));
+        feed.push(RATE, 1, Instant::now() + ms(50), [0.5; 4800].into_iter());
         let sounded = (0..50).any(|_| heard.recv_timeout(ms(500)).unwrap().0.contains(&0.25));
         assert!(sounded);
         // Switched off again: the blocks stop.

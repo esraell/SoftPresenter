@@ -44,6 +44,9 @@ use crate::sound::Feed;
 /// stayed; most likely by where the player's pictures fall against the screens' drawing).
 const PLAYER_DELAY: Duration = Duration::from_millis(20);
 
+/// As many of a video's channels as are handed to the mix, which keeps the first two.
+const MOST_CHANNELS: usize = 8;
+
 /// The player is never taken to be further ahead of the speakers than this.
 const MOST_AHEAD: f64 = 2.0;
 
@@ -242,7 +245,8 @@ unsafe extern "C-unwind" fn unprepare(_tap: NonNull<MTAudioProcessingTap>) {}
 
 /// The system hands over a piece of sound on its way to being played: it is passed on as it
 /// is, and copied for the mix while anybody wants it. Called on the system's sound thread:
-/// nothing here waits.
+/// nothing here waits, takes a lock or asks for memory (the samples go straight from the
+/// system's buffers into the feed's ring).
 unsafe extern "C-unwind" fn process(
     tap: NonNull<MTAudioProcessingTap>,
     frames: CMItemCount,
@@ -289,39 +293,46 @@ unsafe extern "C-unwind" fn process(
         })
     };
     // Each buffer's samples: as many 32-bit floats as its size says, where the system put them.
-    let floats = |at: usize| -> Option<(*const f32, usize)> {
-        let buffer = list.get(at)?;
-        (!buffer.mData.is_null())
-            .then_some((buffer.mData.cast::<f32>().cast_const(), buffer.mDataByteSize as usize / 4))
+    let floats = |at: usize| -> (*const f32, usize) {
+        list.get(at).filter(|buffer| !buffer.mData.is_null()).map_or((std::ptr::null(), 0), |buffer| {
+            (buffer.mData.cast::<f32>().cast_const(), buffer.mDataByteSize as usize / 4)
+        })
     };
-    let mut samples = Vec::with_capacity(got * usize::from(channels));
+    // Where each channel's samples are and how far apart one sample is from the next: each
+    // channel in a buffer of its own, or side by side in the first buffer. Kept in room of
+    // this call's own (no more channels than that are taken): this thread asks for no memory.
+    let channels_taken = usize::from(channels).min(MOST_CHANNELS);
+    let mut each = [(std::ptr::null::<f32>(), 1usize); MOST_CHANNELS];
     if layout == APART {
-        let Some(each): Option<Vec<(*const f32, usize)>> = (0..usize::from(channels)).map(floats).collect() else {
-            return;
-        };
-        if each.iter().any(|(_, len)| *len < got) {
-            return;
-        }
-        for frame in 0..got {
-            for (data, _) in &each {
-                // SAFETY: `frame` is below `got`, which is no more than the floats this buffer
-                // holds (checked above); the system keeps the buffer for this call. Read
-                // unaligned, since nothing says where the system put it.
-                samples.push(unsafe { data.add(frame).read_unaligned() });
+        for (at, place) in each.iter_mut().enumerate().take(channels_taken) {
+            let (data, len) = floats(at);
+            if len < got {
+                return;
             }
+            *place = (data, 1);
         }
     } else {
-        let Some((data, len)) = floats(0) else { return };
-        let count = got * usize::from(channels);
-        if len < count {
+        let (data, len) = floats(0);
+        if len < got * usize::from(channels) {
             return;
         }
-        for at in 0..count {
-            // SAFETY: `at` is below `count`, which is no more than the floats the buffer
-            // holds (checked above); as above.
-            samples.push(unsafe { data.add(at).read_unaligned() });
+        for (at, place) in each.iter_mut().enumerate().take(channels_taken) {
+            // SAFETY: the buffer holds `got` frames of `channels` floats (checked above), and
+            // `at` is below `channels`, so this is within it.
+            *place = (unsafe { data.add(at) }, usize::from(channels));
         }
     }
+    // The samples in the order the mix takes them: each frame's channels side by side.
+    let sample = |at: usize| {
+        let (data, step) = each[at % channels_taken];
+        // SAFETY: the frame, `at / channels_taken`, is below `got`. A channel in a buffer of
+        // its own holds at least `got` floats, one step apart; channels side by side start at
+        // their place in the first frame and are `channels` apart, within the `got` frames of
+        // `channels` floats the buffer holds (both checked above). The system keeps the
+        // buffers for this call. Read unaligned, since nothing says where the system put them.
+        unsafe { data.add(at / channels_taken * step).read_unaligned() }
+    };
+    let count = got * channels_taken;
     // How far ahead of the speakers this piece is: its time in the video, less the time the
     // item's clock says is playing now, at the speed it is playing.
     let ahead = storage.clock.as_ref().map_or(0.0, |clock| {
@@ -331,9 +342,10 @@ unsafe extern "C-unwind" fn process(
         if speed > 0.0 && ahead.is_finite() { ahead.clamp(0.0, MOST_AHEAD) } else { 0.0 }
     });
     if crate::ffmpeg::tracing() {
+        // Testing aid only (this prints, which the sound's thread should not otherwise do).
         // Once for each second of sound: how far ahead it comes, and the loudest sample of
         // that second as the tap hears it (before the player's volume).
-        let loudest = samples.iter().fold(0.0f32, |loudest, sample| loudest.max(sample.abs()));
+        let loudest = (0..count).map(sample).fold(0.0f32, |loudest, sample| loudest.max(sample.abs()));
         let loudest = f32::from_bits(storage.loudest.fetch_max(loudest.to_bits(), Ordering::Relaxed)).max(loudest);
         let before = storage.traced.fetch_add(got as u64, Ordering::Relaxed);
         if before / u64::from(rate) != (before + got as u64) / u64::from(rate) {
@@ -343,5 +355,6 @@ unsafe extern "C-unwind" fn process(
             );
         }
     }
-    storage.feed.push(rate, channels, samples, Instant::now() + Duration::from_secs_f64(ahead) + PLAYER_DELAY);
+    let heard = Instant::now() + Duration::from_secs_f64(ahead) + PLAYER_DELAY;
+    storage.feed.push(rate, channels_taken as u16, heard, (0..count).map(sample));
 }
