@@ -5158,11 +5158,19 @@ pub fn right_column(
         let on_screen = slide || media || props || message || announcing;
         preview_block(ui, show, state, preview, block, on_screen);
 
-        // The six layer keys: each is lit while its layer shows, and clears that layer alone.
+        // The six layer keys: each is lit while its layer shows, and clears that layer alone. They
+        // stand in the order the screens stack the layers, from the back: the media, the slide,
+        // the announcements, the props, the message on top; then the audio, which is heard.
         let keys_top = block.max.y + 12.0;
         let each = (width - 2.0 * 7.0) / 3.0;
         let hint = crate::keys::clear_hint;
         let layers = [
+            (
+                tk("right.layer.media", "Media"),
+                Layer::Media,
+                media,
+                hint(t("right.layer.media.clear", "Clear the media: take the picture or video off the screens"), "F3"),
+            ),
             (
                 tk("right.layer.slide", "Slide"),
                 Layer::Slides,
@@ -5170,10 +5178,10 @@ pub fn right_column(
                 hint(t("right.layer.slide.clear", "Clear the slide: take the words off the screens"), "F2"),
             ),
             (
-                tk("right.layer.media", "Media"),
-                Layer::Media,
-                media,
-                hint(t("right.layer.media.clear", "Clear the media: take the picture or video off the screens"), "F3"),
+                tk("right.layer.announce", "Announce"),
+                Layer::Announcements,
+                announcing,
+                t("right.layer.announce.clear", "Clear the announcements: take them off the screens").to_owned(),
             ),
             (
                 tk("right.layer.props", "Props"),
@@ -5192,12 +5200,6 @@ pub fn right_column(
                 Layer::Audio,
                 audio,
                 hint(t("right.layer.audio.clear", "Clear the audio: stop it playing"), "F5"),
-            ),
-            (
-                tk("right.layer.announce", "Announce"),
-                Layer::Announcements,
-                announcing,
-                t("right.layer.announce.clear", "Clear the announcements: take them off the screens").to_owned(),
             ),
         ];
         for (place, ((name_key, name_english), layer, lit, hint)) in layers.into_iter().enumerate() {

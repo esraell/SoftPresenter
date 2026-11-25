@@ -11185,8 +11185,9 @@ mod tests {
             pressed,
             modifiers: Modifiers::NONE,
         };
-        // In a window of 1280 by 800 the right column's keys start 390 down and 920 across:
-        // Slide is the first of them, Props the third, and Clear All lies under the two rows.
+        // In a window of 1280 by 800 the right column's keys start 390 down and 920 across, in
+        // the order the layers stack from the back: Media first, then Slide, then Announce; Props
+        // begins the second row, and Clear All lies under the two rows.
         let click = |state: &mut HomeState, at: egui::Pos2| {
             let ctx = egui::Context::default();
             let mut asked = Vec::new();
@@ -11211,16 +11212,13 @@ mod tests {
                 state.editing = EditDraft::of(&show, SlideRef { presentation: 0, slide: 0 });
                 assert!(state.editing.is_some());
             }
+            assert_eq!(click(&mut state, pos2(960.0, 412.0)), vec![Command::Clear(Layer::Media)], "editing: {editing}");
             assert_eq!(
-                click(&mut state, pos2(960.0, 412.0)),
+                click(&mut state, pos2(1080.0, 412.0)),
                 vec![Command::Clear(Layer::Slides)],
                 "editing: {editing}"
             );
-            assert_eq!(
-                click(&mut state, pos2(1200.0, 412.0)),
-                vec![Command::Clear(Layer::Props)],
-                "editing: {editing}"
-            );
+            assert_eq!(click(&mut state, pos2(960.0, 466.0)), vec![Command::Clear(Layer::Props)], "editing: {editing}");
             assert_eq!(click(&mut state, pos2(1090.0, 526.0)), vec![Command::ClearAll], "editing: {editing}");
             assert_eq!(state.editing.is_some(), editing, "clearing leaves the view as it was");
         }

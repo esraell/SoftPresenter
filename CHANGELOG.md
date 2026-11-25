@@ -5,6 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- The six clear buttons on the right are in the order the screens stack the layers, from the back: Media, Slide, Announce, then Props, Messages and Audio. Their keys are the same.
 - The phone and tablet Remote Control page speaks the app's language: Spanish when the app is in Spanish, from the sign-in on, with the same words as the app.
 - Claude and other AI assistants can help prepare services through `sp mcp`: find songs and Bible passages, make songs and playlists. Switch it on in Settings › Integrations; changing the screens needs a second switch, and the assistant asks you each time, showing the words that will go up.
 - Unofficial: an iPhone, iPad or Mac can show its screen in a box on a slide, through its own Screen Mirroring. Switch it on in Settings › Phone Screens; it is off until then, a device shows only where you put a Phone or iPad Screen box, and you're asked before it does. It isn't made or supported by Apple, and an Apple update may stop it working. On a Mac only for now, and without sound yet.
