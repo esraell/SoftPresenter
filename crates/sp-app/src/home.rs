@@ -15325,7 +15325,8 @@ mod tests {
         assert!(page_url(Page::ReportIssue).starts_with("https://github.com/"));
         let mut about = HomeState { preferences_open: true, preferences_pane: Pane::About, ..HomeState::default() };
         let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings(ui, &mut about));
-        let line = format!("Version {version} \u{b7} free and open source, GPL-3.0-or-later");
+        // In the small capitals of its card's line.
+        let line = format!("Version {version} \u{b7} free and open source, GPL-3.0-or-later").to_uppercase();
         assert!(crate::studio::tests::place_of(&drawn, &line).is_some(), "About says the version");
         drawn.drop_without_applying_deltas();
         // Settings > Screens: Identify, and the test patterns one at a time, and Off.

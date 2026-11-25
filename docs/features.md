@@ -2126,11 +2126,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   names every file moved; the window says how many went, only when some did.
 - **What the menu bar did is in the window too, on every system** (Windows and Linux have no menu
   bar; the design has none either): Settings › Screens has Identify and the test patterns (Off,
-  Colour bars, Grid, White: everyone watching sees them); Settings › Song files has Reload
-  songs; Settings › Keys has Show keys on buttons; Settings has Set Up SoftPresenter… under its
-  list (Settings steps aside so the setup opens over the home window); Settings › Command line
-  has where the sp command stands, Install, Use This Copy and Remove; Settings › About has the version, What's new, Open the guide,
-  Report an issue… (a new issue with the version filled in) and Licences…; a click on the
+  Colour bars, Grid, White: everyone watching sees them); Settings › Song files has Read them
+  again (Reload songs) and says what happens when a song was changed elsewhere; Settings › Keys
+  has Show keys on buttons; Settings has Set Up SoftPresenter… under its list (Settings steps
+  aside so the setup opens over the home window); Settings › Command line has the sp command's
+  row, saying where it stands, with Install, Use This Copy and Remove (quiet while sp is where it
+  should be), and what a click did under it; Settings › About has a card with the version and a
+  row each for What's new, Help (Open the guide), Something wrong? (Report an issue…, a new issue
+  with the version filled in) and Licences…; a click on the
   readout under the preview goes to the slide on screen (opens its item and brings the slide
   into view). The media strip has its fold button (a chevron at the right of its heading).
 - On Windows the little triangle on menu buttons (Advanced, Shapes, Add, + Add's arrow) is drawn

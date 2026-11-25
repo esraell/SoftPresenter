@@ -695,27 +695,6 @@ fn transitions(ui: &mut egui::Ui, state: &mut HomeState) {
     }
 }
 
-/// Settings › Groups: each group's colour, and the key that jumps to it.
-fn groups_page(ui: &mut egui::Ui) {
-    let about = t("settings.groups.about", "Each group's colour, and the key that jumps to it.");
-    ui.label(egui::RichText::new(about).color(TEXT_DIM));
-    ui.add_space(8.0);
-    egui::Grid::new("groups").num_columns(3).spacing([16.0, 8.0]).show(ui, |ui| {
-        for (key, names) in sp_model::GROUP_KEYS {
-            let name = names.iter().find(|name| name.contains(' ')).or(names.first()).copied().unwrap_or("");
-            let mut shown = name.to_owned();
-            if let Some(first) = shown.get_mut(0..1) {
-                first.make_ascii_uppercase();
-            }
-            let (swatch, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-            ui.painter().rect_filled(swatch, 4.0, super::color32(sp_model::group_color(name)));
-            ui.label(shown);
-            ui.label(egui::RichText::new(key.to_ascii_uppercase().to_string()).monospace().color(TEXT_DIM));
-            ui.end_row();
-        }
-    });
-}
-
 /// Settings › Language: the words of SoftPresenter itself. The computer's language first (named in
 /// that language), then each language written in itself. A choice shows at once, in this window
 /// and every other.
@@ -785,129 +764,222 @@ fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
 }
 
 /// Settings › Command line: the `sp` command, which controls the running app from a terminal or a
-/// script. It says where sp stands (read again each time the page comes into view, and after each
-/// click) and offers what fits: Install, Use This Copy when sp opens another copy, Remove once it
-/// is there; under the buttons, what the last click did, in place of where it stood.
+/// script. Its row says where sp stands (read again each time the page comes into view, and after
+/// each click) and offers what fits: Install, Use This Copy when sp opens another copy, Remove
+/// once it is there (quiet while sp is where it should be); under the row, what the last click
+/// did.
 fn command_line_page(ui: &mut egui::Ui, state: &mut HomeState) {
     use crate::cli_install::{Status, Tone};
-    use crate::studio::{CARE, TALLY};
-    ui.label(t("settings.cli.about", "The sp command controls SoftPresenter from a terminal or a script."));
-    ui.add_space(4.0);
-    let card = &mut state.command_line;
+    let card_state = &mut state.command_line;
     // Not drawn in the pass before: the page has just come into view (chosen, or the window
     // opened again), so it reads afresh and forgets what it said.
     let pass = ui.ctx().cumulative_pass_nr();
-    if card.drawn.is_none_or(|last| pass != last && pass != last + 1) {
-        card.status = None;
-        card.said = None;
+    if card_state.drawn.is_none_or(|last| pass != last && pass != last + 1) {
+        card_state.status = None;
+        card_state.said = None;
     }
-    card.drawn = Some(pass);
-    let status = card.status.get_or_insert_with(crate::cli_install::status).clone();
+    card_state.drawn = Some(pass);
+    let status = card_state.status.get_or_insert_with(crate::cli_install::status).clone();
     let (install, removable) = match &status {
         Status::Missing => (Some(t("settings.cli.install", "Install")), false),
         Status::Here { findable: true, .. } => (None, true),
         Status::Here { findable: false, .. } => (Some(t("settings.cli.install", "Install")), true),
         Status::Elsewhere { .. } | Status::Gone { .. } => (Some(t("settings.cli.use_this", "Use This Copy")), true),
     };
+    // Remove is quiet while sp is where it should be: there is nothing to put right.
+    let quiet_remove = matches!(status, Status::Here { findable: true, .. });
+    let (_, words) = crate::cli_install::status_words(&status, cfg!(windows));
+    let remove_words = t("settings.cli.remove", "Remove");
+    let install_size = install.map(|words| parts::key_size(ui, words));
+    let remove_size = removable.then(|| parts::key_size(ui, remove_words));
+    let size = vec2(
+        install_size.map_or(0.0, |size| size.x)
+            + remove_size.map_or(0.0, |size| size.x)
+            + if install_size.is_some() && remove_size.is_some() { 8.0 } else { 0.0 },
+        30.0,
+    );
     let mut clicked_install = false;
     let mut clicked_remove = false;
-    ui.horizontal(|ui| {
-        if let Some(words) = install {
-            let hint = t("settings.cli.install.hint", "Puts sp (and softpresenter) where a terminal finds it");
-            clicked_install = ui.button(words).on_hover_text(hint).clicked();
-        }
-        if removable {
-            let hint = t(
-                "settings.cli.remove.hint",
-                "Takes sp and softpresenter away again, with anything SoftPresenter added for them",
-            );
-            clicked_remove = ui
-                .add(
-                    egui::Button::new(egui::RichText::new(t("settings.cli.remove", "Remove")).color(TEXT_DIM))
-                        .frame(false),
-                )
-                .on_hover_text(hint)
-                .clicked();
-        }
-    });
+    card(
+        ui,
+        t("settings.cli", "Command line"),
+        t("settings.cli.about", "The sp command controls SoftPresenter from a terminal or a script."),
+        None,
+        |ui| {
+            row(ui, t("settings.cli.sp", "The sp command"), &words, size, |ui, place| {
+                let mut x = place.min.x;
+                if let (Some(words), Some(wide)) = (install, install_size) {
+                    let rect = Rect::from_min_size(pos2(x, place.min.y), wide);
+                    let hint = t("settings.cli.install.hint", "Puts sp (and softpresenter) where a terminal finds it");
+                    clicked_install = parts::key(ui, rect, ui.scope_id().with("install sp"), words, false)
+                        .on_hover_text(hint)
+                        .clicked();
+                    x += wide.x + 8.0;
+                }
+                if let Some(wide) = remove_size {
+                    let rect = Rect::from_min_size(pos2(x, place.min.y), wide);
+                    let hint = t(
+                        "settings.cli.remove.hint",
+                        "Takes sp and softpresenter away again, with anything SoftPresenter added for them",
+                    );
+                    clicked_remove = parts::key(ui, rect, ui.scope_id().with("remove sp"), remove_words, quiet_remove)
+                        .on_hover_text(hint)
+                        .clicked();
+                }
+            });
+            // What the last click did, under the row; a light for what needs a hand.
+            if let Some((tone, said)) = state.command_line.said.clone() {
+                match tone {
+                    Tone::Care | Tone::Trouble => parts::said_line(ui, Some((tone, &said)), ""),
+                    _ => parts::note(ui, &said),
+                }
+            }
+        },
+    );
+    let card_state = &mut state.command_line;
     if clicked_install {
-        card.said = Some(match crate::cli_install::install() {
+        card_state.said = Some(match crate::cli_install::install() {
             Ok(done) => (
                 if done.add_folder { Tone::Care } else { Tone::Good },
                 crate::cli_install::installed_words(&done, cfg!(windows)),
             ),
             Err(problem) => (Tone::Trouble, problem),
         });
-        card.status = Some(crate::cli_install::status());
+        card_state.status = Some(crate::cli_install::status());
     }
     if clicked_remove {
-        card.said = Some(match crate::cli_install::remove() {
+        card_state.said = Some(match crate::cli_install::remove() {
             Ok(done) => (Tone::Plain, crate::cli_install::removed_words(&done)),
             Err(problem) => (Tone::Trouble, problem),
         });
-        card.status = Some(crate::cli_install::status());
+        card_state.status = Some(crate::cli_install::status());
     }
-    let (tone, words) = card.said.clone().unwrap_or_else(|| crate::cli_install::status_words(&status, cfg!(windows)));
-    let colour = match tone {
-        Tone::Good => READY,
-        Tone::Plain => TEXT_FAINT,
-        Tone::Care => CARE,
-        Tone::Trouble => TALLY,
-    };
-    ui.add_space(2.0);
-    // A line short enough to read at a glance, wrapped beside its dot.
-    let room = (ui.available_width() - 14.0).min(640.0);
-    ui.horizontal_top(|ui| {
-        let (place, _) = ui.allocate_exact_size(vec2(8.0, 16.0), Sense::hover());
-        ui.painter().circle_filled(place.center(), 3.5, colour);
-        ui.vertical(|ui| {
-            ui.set_max_width(room);
-            ui.label(egui::RichText::new(words).size(12.0).color(TEXT_DIM));
-        });
-    });
 }
 
 /// Settings › Song files: songs are plain files that can be changed outside the app; read them
-/// again.
+/// again, and what happens when one was.
 fn song_files_page(ui: &mut egui::Ui, state: &mut HomeState) {
-    ui.label(t("settings.song_files.about", "Songs are plain files that can be changed outside the app."));
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        if ui
-            .button(t("settings.song_files.reload", "Reload songs"))
-            .on_hover_text(t("settings.song_files.reload.hint", "Brings in songs and themes changed outside the app"))
-            .clicked()
-        {
-            state.menu_asked = Some(crate::menubar::Action::ReloadSongs);
-        }
-        ui.label(egui::RichText::new(t("settings.song_files.again", "Read them again")).size(11.5).color(TEXT_DIM));
-    });
+    card(
+        ui,
+        t("settings.song_files.title", "Song files"),
+        t("settings.song_files.about", "Songs are plain files that can be changed outside the app"),
+        None,
+        |ui| {
+            let reload = t("settings.song_files.reload", "Reload songs");
+            let size = parts::key_size(ui, reload);
+            let note = t("settings.song_files.reload.hint", "Brings in songs and themes changed outside the app");
+            row(ui, t("settings.song_files.again", "Read them again"), note, size, |ui, place| {
+                if parts::key(ui, place, ui.scope_id().with("reload songs"), reload, false).clicked() {
+                    state.menu_asked = Some(crate::menubar::Action::ReloadSongs);
+                }
+            });
+            row(
+                ui,
+                t("settings.song_files.changed", "When a song was changed elsewhere"),
+                t("settings.song_files.changed.about", "A bar offers Reload or Keep mine; nothing is swapped unasked"),
+                vec2(0.0, 30.0),
+                |_, _| {},
+            );
+        },
+    );
 }
 
-/// Settings › About: the version, what's new, the guide, reporting a problem and the licences.
+/// Settings › About: the version, what's new, the guide, reporting a problem and the licences,
+/// each a row with its key.
 fn about_page(ui: &mut egui::Ui, state: &mut HomeState) {
-    ui.label(
-        egui::RichText::new(tf(
-            "settings.about.version",
-            "Version {version} \u{b7} free and open source, GPL-3.0-or-later",
-            &[("version", env!("CARGO_PKG_VERSION"))],
-        ))
-        .color(TEXT_DIM),
+    let version = tf(
+        "settings.about.version",
+        "Version {version} \u{b7} free and open source, GPL-3.0-or-later",
+        &[("version", env!("CARGO_PKG_VERSION"))],
     );
-    ui.add_space(12.0);
-    for (label, page) in [
-        (t("settings.about.whats_new", "What\u{2019}s new"), Page::WhatsNew),
-        (t("settings.about.guide", "Open the guide"), Page::Guide),
-        (t("settings.about.report", "Report an issue\u{2026}"), Page::ReportIssue),
-        (t("settings.about.licences", "Licences\u{2026}"), Page::Licences),
-    ] {
-        if ui.button(label).clicked() {
-            open_page(state, page);
+    let mut opened = None;
+    card(ui, "SoftPresenter", &version, None, |ui| {
+        for (label, key, note, page) in [
+            (
+                t("settings.about.whats_new.label", "What\u{2019}s new"),
+                t("settings.about.whats_new", "What\u{2019}s new"),
+                t("settings.about.whats_new.about", "The changes in this version"),
+                Page::WhatsNew,
+            ),
+            (
+                t("settings.about.help", "Help"),
+                t("settings.about.guide", "Open the guide"),
+                t("settings.about.guide.about", "How to set up the screens, run a service and more, on the web"),
+                Page::Guide,
+            ),
+            (
+                t("settings.about.wrong", "Something wrong?"),
+                t("settings.about.report", "Report an issue\u{2026}"),
+                t("settings.about.report.about", "Opens a new issue on GitHub, with the version filled in"),
+                Page::ReportIssue,
+            ),
+            (
+                t("settings.about.licences.label", "Licences"),
+                t("settings.about.licences", "Licences\u{2026}"),
+                t("settings.about.licences.about", "SoftPresenter\u{2019}s and those of the parts it carries"),
+                Page::Licences,
+            ),
+        ] {
+            let size = parts::key_size(ui, key);
+            row(ui, label, note, size, |ui, place| {
+                if parts::key(ui, place, ui.scope_id().with(("about", key)), key, false).clicked() {
+                    opened = Some(page);
+                }
+            });
         }
-        ui.add_space(4.0);
+    });
+    if let Some(page) = opened {
+        open_page(state, page);
     }
 }
 
+/// Settings › Groups: each group's colour, name and the key that jumps to it, in a card with a
+/// heading over each column.
+fn groups_page(ui: &mut egui::Ui) {
+    card(
+        ui,
+        t("settings.pane.groups", "Groups"),
+        t("settings.groups.about", "A song\u{2019}s parts: their names, colours and jump keys"),
+        None,
+        |ui| {
+            let width = ui.available_width();
+            let caps = |ui: &egui::Ui, words: &str| {
+                parts::words(ui, &words.to_uppercase(), fixed_semibold(11.5), TEXT_DIM, 0.575, f32::INFINITY)
+            };
+            let (key_left, row_height) = (width.min(420.0) - 54.0, 38.0);
+            let top = ui.cursor().min;
+            ui.painter().hline(top.x..=top.x + width, top.y + 0.5, egui::Stroke::new(1.0, crate::studio::LINE));
+            let name_heading = caps(ui, t("settings.groups.name", "Name"));
+            let key_heading = caps(ui, t("settings.groups.key", "Key"));
+            let (head, _) = ui.allocate_exact_size(vec2(width, 32.0), Sense::hover());
+            ui.painter().galley(pos2(head.min.x + 38.0, head.min.y + 12.0), name_heading, TEXT_DIM);
+            ui.painter().galley(pos2(head.min.x + key_left, head.min.y + 12.0), key_heading, TEXT_DIM);
+            for (key, names) in sp_model::GROUP_KEYS {
+                let name = names.iter().find(|name| name.contains(' ')).or(names.first()).copied().unwrap_or("");
+                let mut shown = name.to_owned();
+                if let Some(first) = shown.get_mut(0..1) {
+                    first.make_ascii_uppercase();
+                }
+                let (place, _) = ui.allocate_exact_size(vec2(width, row_height), Sense::hover());
+                let swatch = Rect::from_center_size(pos2(place.min.x + 13.0, place.center().y), vec2(26.0, 18.0));
+                ui.painter().rect_filled(swatch, 5.0, super::color32(sp_model::group_color(name)));
+                ui.painter().text(
+                    pos2(place.min.x + 38.0, place.center().y),
+                    Align2::LEFT_CENTER,
+                    shown,
+                    FontId::proportional(13.0),
+                    TEXT,
+                );
+                // The key, as a key cap.
+                let letter = key.to_ascii_uppercase().to_string();
+                let chip = Rect::from_min_size(pos2(place.min.x + key_left, place.center().y - 12.0), vec2(26.0, 24.0));
+                ui.painter().rect_filled(chip, 6.0, crate::studio::BUTTON);
+                ui.painter().text(chip.center(), Align2::CENTER_CENTER, letter, fixed_semibold(11.0), TEXT);
+            }
+            ui.add_space(12.0);
+        },
+    );
+}
 #[cfg(test)]
 mod tests {
     use super::*;
