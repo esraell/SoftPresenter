@@ -15,6 +15,7 @@ use sp_engine::{Command, Show, SlideRef};
 
 use crate::bible::list_row_id;
 use crate::home::{BiblePage, BibleSide, BookPicker, HomeState};
+use crate::i18n::{t, tf, tk, tn};
 use crate::icons::Icon;
 use crate::studio::{
     BUTTON, BUTTON_HOVER, CARD, Column, Flat, HOVER, LEFT_WIDTH, ROW_HOVER, SELECTED, TALLY, TEXT, TEXT_DIM,
@@ -115,18 +116,24 @@ pub fn left_column(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         let width = ui.available_width();
         let (bar, _) = ui.allocate_exact_size(vec2(width, 30.2), Sense::hover());
-        const HIDE: f32 = 43.7;
-        let track = Rect::from_min_max(bar.min, pos2(bar.max.x - HIDE - 6.0, bar.max.y));
+        // Hide is as wide as its words need in the language set, never narrower than in English.
+        let hide_words = t("biblepage.hide", "Hide");
+        let hide_font = FontId::proportional(11.5);
+        let hide_width = crate::studio::flat_button_width(ui, &[hide_words], &hide_font, 8.5).max(43.7);
+        let track = Rect::from_min_max(bar.min, pos2(bar.max.x - hide_width - 6.0, bar.max.y));
         let side = match state.bible.side {
             BibleSide::Books => 0,
             BibleSide::History => 1,
         };
-        let hints = ["The books, chapters and verses", "The passages that were on screen, newest first"];
+        let hints = [
+            t("biblepage.side.books.hint", "The books, chapters and verses"),
+            t("biblepage.side.history.hint", "The passages that were on screen, newest first"),
+        ];
         match even_switch(
             ui,
             "bible side",
             track,
-            &["Books", "History"],
+            &[t("biblepage.side.books", "Books"), t("biblepage.side.history", "History")],
             &hints,
             Some(side),
             FontId::proportional(12.0),
@@ -135,9 +142,12 @@ pub fn left_column(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
             Some(_) => state.bible.side = BibleSide::History,
             None => {}
         }
-        let hide = Rect::from_min_size(pos2(bar.max.x - HIDE, bar.center().y - 12.0), vec2(HIDE, 24.0));
-        if flat_button(ui, hide, list_row_id("hide"), "Hide", FontId::proportional(11.5), Flat::Plain, true)
-            .on_hover_text("Put the books away; Books, beside the reference, brings them back")
+        let hide = Rect::from_min_size(pos2(bar.max.x - hide_width, bar.center().y - 12.0), vec2(hide_width, 24.0));
+        if flat_button(ui, hide, list_row_id("hide"), hide_words, hide_font, Flat::Plain, true)
+            .on_hover_text(t(
+                "biblepage.hide.hint",
+                "Put the books away; Books, beside the reference, brings them back",
+            ))
             .clicked()
         {
             state.bible.lists_open = false;
@@ -158,14 +168,17 @@ pub fn left_column(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
 fn books(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) -> Option<usize> {
     let width = ui.available_width();
     let (head, _) = ui.allocate_exact_size(vec2(width, 35.0), Sense::hover());
-    cap(ui, pos2(head.min.x + 8.0, head.min.y + 16.4), Align2::LEFT_CENTER, "Book", TEXT_DIM);
+    cap(ui, pos2(head.min.x + 8.0, head.min.y + 16.4), Align2::LEFT_CENTER, t("biblepage.book", "Book"), TEXT_DIM);
     // Keypad | Lists, at the right of the heading, where it stays whichever is chosen.
     let at = pos2(head.max.x - 60.0, head.min.y + 16.4 - 12.0);
     let chosen = match page.books {
         BookPicker::Keypad => 0,
         BookPicker::Lists => 1,
     };
-    let hints = ["Every book as a key, then the chapters and verses", "Books, chapters and verses as lists"];
+    let hints = [
+        t("biblepage.books_as.keypad.hint", "Every book as a key, then the chapters and verses"),
+        t("biblepage.books_as.lists.hint", "Books, chapters and verses as lists"),
+    ];
     match crate::studio::icon_switch(ui, "bible books as", at, &[Icon::Grid, Icon::Rows], &hints, Some(chosen)).1 {
         Some(0) => page.books = BookPicker::Keypad,
         Some(_) => page.books = BookPicker::Lists,
@@ -177,7 +190,11 @@ fn books(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) -> Option
     }
     let Some(bible) = page.lead().and_then(|lead| page.shelf.get(lead).ok()) else {
         ui.add(
-            egui::Label::new(egui::RichText::new("Choose a Bible for the first translation.").color(TEXT_DIM)).wrap(),
+            egui::Label::new(
+                egui::RichText::new(t("biblepage.no_bible", "Choose a Bible for the first translation."))
+                    .color(TEXT_DIM),
+            )
+            .wrap(),
         );
         return None;
     };
@@ -304,8 +321,14 @@ fn lists(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<C
             if book == 0 || book == new_testament {
                 let room = if book == 0 { 18.0 } else { 28.0 };
                 let heading = ui.allocate_space(vec2(width, room)).1;
-                let words = if book == 0 { "Old Testament" } else { "New Testament" };
-                list_heading(ui, pos2(heading.min.x + 8.0, heading.max.y - 4.0), Align2::LEFT_BOTTOM, words);
+                // The testament's name, or its short form where the column is too narrow for it.
+                let (key, english) = if book == 0 {
+                    tk("biblepage.lists.old", "Old Testament")
+                } else {
+                    tk("biblepage.lists.new", "New Testament")
+                };
+                let words = crate::studio::within(ui, key, english, fixed_semibold(11.0), 0.8, width - 10.0, true);
+                list_heading(ui, pos2(heading.min.x + 8.0, heading.max.y - 4.0), Align2::LEFT_BOTTOM, &words);
             }
             let rect = ui.allocate_space(vec2(width, ROW)).1;
             ui.add_space(ROW_GAP);
@@ -325,7 +348,7 @@ fn lists(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<C
     });
     // Chapters of the book open.
     let chapters = bible.chapter_count(open_book);
-    numbers_column(ui, "bible chapter list", chapter_column, "Ch", |ui, width| {
+    numbers_column(ui, "bible chapter list", chapter_column, t("biblepage.lists.chapter", "Ch"), |ui, width| {
         for chapter in 1..=chapters {
             let rect = ui.allocate_space(vec2(width, ROW)).1;
             ui.add_space(ROW_GAP);
@@ -346,7 +369,7 @@ fn lists(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<C
     // a double-click the whole chapter with the verse picked.
     let verses =
         if open_chapter == 0 || open_chapter > chapters { 0 } else { bible.last_verse(open_book, open_chapter) };
-    numbers_column(ui, "bible verse list", verse_column, "Verse", |ui, width| {
+    numbers_column(ui, "bible verse list", verse_column, t("biblepage.lists.verse", "Verse"), |ui, width| {
         for verse in 1..=verses {
             let rect = ui.allocate_space(vec2(width, ROW)).1;
             ui.add_space(ROW_GAP);
@@ -363,7 +386,7 @@ fn lists(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<C
             }
             let row = Row { text: &verse.to_string(), chosen, has: true, number: true };
             let response = list_row(ui, list_row_id(("verse", verse)), rect, row)
-                .on_hover_text("Shift-click another to take the passage between them");
+                .on_hover_text(t("biblepage.lists.verse.hint", "Shift-click another to take the passage between them"));
             if response.double_clicked() {
                 clicked = Some(Choice::Verse { verse, shift: false, double: true });
             } else if response.clicked() {
@@ -519,7 +542,8 @@ fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<
             }
             // The chapters of the book open.
             let chapters = bible.chapter_count(open_book);
-            section_heading(ui, &format!("{} \u{b7} chapter", sp_bible::book_name(open_book, &names)), None);
+            let open_name = sp_bible::book_name(open_book, &names);
+            section_heading(ui, &tf("biblepage.keypad.chapter", "{book} \u{b7} chapter", &[("book", open_name)]), None);
             // Opened on the chapter chosen.
             let bring = (scroll && open_chapter > 0).then(|| usize::from(open_chapter) - 1);
             key_grid(ui, usize::from(chapters), bring, |ui, at, rect| {
@@ -536,7 +560,11 @@ fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<
             } else {
                 bible.last_verse(open_book, open_chapter)
             };
-            section_heading(ui, "Verse", Some(" \u{b7} \u{21e7} for a passage"));
+            section_heading(
+                ui,
+                t("biblepage.keypad.verse", "Verse"),
+                Some(tk("biblepage.keypad.passage", " \u{b7} \u{21e7} for a passage")),
+            );
             key_grid(ui, usize::from(verses), None, |ui, at, rect| {
                 let verse = at as u16 + 1;
                 let here = (open_book, open_chapter, verse);
@@ -545,7 +573,10 @@ fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<
                         && here <= (range.end.book, range.end.chapter, range.end.verse)
                 });
                 let response = key(ui, list_row_id(("verse", verse)), rect, &verse.to_string(), true, chosen)
-                    .on_hover_text("Click a verse; Shift-click another to take the passage between them");
+                    .on_hover_text(t(
+                        "biblepage.keypad.verse.hint",
+                        "Click a verse; Shift-click another to take the passage between them",
+                    ));
                 if response.double_clicked() {
                     clicked = Some(Choice::Verse { verse, shift: false, double: true });
                 } else if response.clicked() {
@@ -558,15 +589,17 @@ fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<
 }
 
 /// A section's heading in the keypad, in small capitals with room above it: "Psalms ·
-/// chapter", and a fainter note after it.
-fn section_heading(ui: &mut egui::Ui, text: &str, note: Option<&str>) {
+/// chapter", and a fainter note after it (its key and English), in its short form when the
+/// usual words don't fit after the heading.
+fn section_heading(ui: &mut egui::Ui, text: &str, note: Option<(&'static str, &'static str)>) {
     let width = ui.available_width();
     ui.add_space(14.0);
     let (row, _) = ui.allocate_exact_size(vec2(width, 23.5), Sense::hover());
     let said = cap(ui, pos2(row.min.x, row.min.y + 7.75), Align2::LEFT_CENTER, text, TEXT_DIM);
-    if let Some(note) = note {
+    if let Some((key, english)) = note {
         let clip = Rect::from_min_max(pos2(said.max.x, row.min.y), row.max);
-        let galley = crate::studio::spaced(ui, &note.to_uppercase(), fixed_semibold(11.5), TEXT_FAINT, 0.2);
+        let note = crate::studio::within(ui, key, english, fixed_semibold(11.5), 0.2, clip.width(), true);
+        let galley = crate::studio::spaced(ui, &note, fixed_semibold(11.5), TEXT_FAINT, 0.2);
         ui.painter().with_clip_rect(clip).galley(
             pos2(said.max.x, said.center().y - galley.size().y / 2.0),
             galley,
@@ -621,9 +654,12 @@ fn history(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) -> Opti
     if page.history.is_empty() {
         ui.add(
             egui::Label::new(
-                egui::RichText::new("Passages that were on screen are listed here, newest first.")
-                    .size(13.0)
-                    .color(TEXT_DIM),
+                egui::RichText::new(t(
+                    "biblepage.history.empty",
+                    "Passages that were on screen are listed here, newest first.",
+                ))
+                .size(13.0)
+                .color(TEXT_DIM),
             )
             .wrap(),
         );
@@ -675,13 +711,14 @@ fn history(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) -> Opti
         }
         ui.add_space(10.0);
         let rect = ui.allocate_space(vec2(width, 30.0)).1;
-        let wide = crate::studio::flat_button_width(ui, &["Clear history"], &FontId::proportional(12.5), 13.0);
+        let clear_words = t("biblepage.history.clear", "Clear history");
+        let wide = crate::studio::flat_button_width(ui, &[clear_words], &FontId::proportional(12.5), 13.0);
         let button = Rect::from_min_size(rect.min, vec2(wide, 30.0));
         if flat_button(
             ui,
             button,
             egui::Id::unique("bible history clear"),
-            "Clear history",
+            clear_words,
             FontId::proportional(12.5),
             Flat::Plain,
             true,
@@ -936,9 +973,15 @@ fn page_text(ui: &egui::Ui, text: &str, under: bool, width: f32, note: Option<&s
     ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
-/// The words at the foot of the page: with a slide for every verse of the chapter, or not.
-const PAGE_NOTE: &str = "Click a verse to put it on screen. Space and the arrows go on through the chapter.";
-const PASSAGE_NOTE: &str = "Click the passage to put it on screen; a verse outside it is looked up instead.";
+/// The words at the foot of the page when every verse of the chapter has a slide.
+fn page_note() -> &'static str {
+    t("biblepage.note.page", "Click a verse to put it on screen. Space and the arrows go on through the chapter.")
+}
+
+/// The words at the foot of the page when not every verse of the chapter has a slide.
+fn passage_note() -> &'static str {
+    t("biblepage.note.passage", "Click the passage to put it on screen; a verse outside it is looked up instead.")
+}
 
 /// The page: the passage's chapter to read, a verse to a row with the same verse in the second
 /// Bible under it, the passage's verses brighter. The verse on screen is tinted orange, the one
@@ -1043,7 +1086,7 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         }
         if !cache.lines.is_empty() {
             let note = Rect::from_min_size(origin + vec2(PAD_X, cache.height + 18.0), vec2(width - 2.0 * PAD_X, 40.0));
-            let words = if cache.every_verse { PAGE_NOTE } else { PASSAGE_NOTE };
+            let words = if cache.every_verse { page_note() } else { passage_note() };
             let galley = ui.fonts_mut(|fonts| {
                 fonts.layout(words.to_owned(), FontId::proportional(13.0), TEXT_FAINT, note.width())
             });
@@ -1151,23 +1194,29 @@ pub fn found_list(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     let mut picked: Option<Option<(usize, bool)>> = None;
     let mixed = state.bible.found.iter().any(|found| found.bible != state.bible.found[0].bible);
     let count = state.bible.found.len();
-    let words = if count == 1 { "1 verse".to_owned() } else { format!("{count} verses") };
+    let words = tn("biblepage.found.verses", count as u64, "{n} verse", "{n} verses", &[]);
     let width = ui.available_width();
+    // Close and Whole chapter are as wide as their words need, never narrower than in English.
+    let button_font = FontId::proportional(11.5);
+    let close_words = t("biblepage.found.close", "Close");
+    let close_width = crate::studio::flat_button_width(ui, &[close_words], &button_font, 10.0).max(52.0);
+    let chapter_words = t("biblepage.found.chapter", "Whole chapter");
+    let chapter_width = crate::studio::flat_button_width(ui, &[chapter_words], &button_font, 10.0).max(104.0);
     egui::ScrollArea::vertical().id_salt("bible found").auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 4.0);
         let (head, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
         let said = cap(ui, pos2(head.min.x + PAD_X, head.center().y), Align2::LEFT_CENTER, &words, TEXT_DIM);
-        let close = Rect::from_min_size(pos2(said.max.x + 12.0, head.center().y - 12.0), vec2(52.0, 24.0));
+        let close = Rect::from_min_size(pos2(said.max.x + 12.0, head.center().y - 12.0), vec2(close_width, 24.0));
         if flat_button(
             ui,
             close,
             egui::Id::unique("bible found close"),
-            "Close",
-            FontId::proportional(11.5),
+            close_words,
+            button_font.clone(),
             Flat::Plain,
             true,
         )
-        .on_hover_text("Back to the passage")
+        .on_hover_text(t("biblepage.found.close.hint", "Back to the passage"))
         .clicked()
         {
             picked = Some(None);
@@ -1176,8 +1225,10 @@ pub fn found_list(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
             let reference =
                 if mixed { format!("{} \u{b7} {}", found.reference, found.bible) } else { found.reference.clone() };
             let (row, response) = ui.allocate_exact_size(vec2(width, 48.0), Sense::click());
-            let chapter_button =
-                Rect::from_min_size(pos2(row.max.x - PAD_X - 104.0, row.center().y - 12.0), vec2(104.0, 24.0));
+            let chapter_button = Rect::from_min_size(
+                pos2(row.max.x - PAD_X - chapter_width, row.center().y - 12.0),
+                vec2(chapter_width, 24.0),
+            );
             if response.hovered() {
                 ui.painter().rect_filled(row, 10.0, ROW_HOVER);
             }
@@ -1197,15 +1248,18 @@ pub fn found_list(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
                 ui,
                 chapter_button,
                 egui::Id::unique(("bible found chapter", at)),
-                "Whole chapter",
-                FontId::proportional(11.5),
+                chapter_words,
+                button_font.clone(),
                 Flat::Plain,
                 true,
             )
-            .on_hover_text("Open its chapter, with this verse picked");
+            .on_hover_text(t("biblepage.found.chapter.hint", "Open its chapter, with this verse picked"));
             if chapter.clicked() {
                 picked = Some(Some((at, true)));
-            } else if response.on_hover_text("Open this verse, picked for Enter").clicked() {
+            } else if response
+                .on_hover_text(t("biblepage.found.verse.hint", "Open this verse, picked for Enter"))
+                .clicked()
+            {
                 picked = Some(Some((at, false)));
             }
         }

@@ -9,6 +9,7 @@ use sp_bible::{Bible, Numbering, VerseRef, convert, parse_reference_in};
 use sp_model::{Group, Object, Presentation, Rgba, Role, Slide, Uuid};
 
 use crate::home::BibleTarget;
+use crate::i18n::{t, tf, tn};
 
 /// Where a Bible's file is.
 #[derive(Clone)]
@@ -55,7 +56,14 @@ impl BibleReader {
         match &self.kept {
             Kept::Shipped(bytes) => Bible::from_bytes(bytes).map(Arc::new),
             Kept::File(path) => std::fs::read(path)
-                .map_err(|e| format!("Could not read the {}: {e}", self.name))
+                .map_err(|e| {
+                    let error = e.to_string();
+                    tf(
+                        "bibles.not_read",
+                        "Could not read the {bible}: {error}",
+                        &[("bible", &self.name), ("error", &error)],
+                    )
+                })
                 .and_then(|bytes| Bible::from_bytes(&bytes).map(Arc::new)),
         }
     }
@@ -162,13 +170,27 @@ impl Shelf {
     /// Takes a downloaded Bible off the shelf and moves its file to the Trash. The Bibles that
     /// come with the app cannot be removed.
     pub fn remove(&mut self, index: usize) -> Result<(), String> {
-        let Some(shelved) = self.bibles.get(index) else { return Err("There is no such Bible.".to_owned()) };
+        let Some(shelved) = self.bibles.get(index) else {
+            return Err(t("bibles.no_such", "There is no such Bible.").to_owned());
+        };
         match &shelved.kept {
-            Kept::Shipped(_) => return Err(format!("The {} comes with the app and stays.", shelved.name)),
+            Kept::Shipped(_) => {
+                return Err(tf(
+                    "bibles.built_in_stays",
+                    "The {bible} comes with the app and stays.",
+                    &[("bible", &shelved.name)],
+                ));
+            }
             Kept::File(path) => {
                 if path.exists() {
-                    crate::sweep::to_trash(path)
-                        .map_err(|e| format!("Could not move the {} to the Trash: {e}", shelved.name))?;
+                    crate::sweep::to_trash(path).map_err(|e| {
+                        let error = e.to_string();
+                        tf(
+                            "bibles.not_trashed",
+                            "Could not move the {bible} to the Trash: {error}",
+                            &[("bible", &shelved.name), ("error", &error)],
+                        )
+                    })?;
                 }
             }
         }
@@ -205,13 +227,21 @@ impl Shelf {
 
     /// The Bible at a place on the shelf, reading it the first time.
     pub fn get(&mut self, index: usize) -> Result<Arc<Bible>, String> {
-        let shelved = self.bibles.get_mut(index).ok_or_else(|| "Choose a Bible first.".to_owned())?;
+        let shelved =
+            self.bibles.get_mut(index).ok_or_else(|| t("bibles.choose_first", "Choose a Bible first.").to_owned())?;
         shelved
             .loaded
             .get_or_insert_with(|| match &shelved.kept {
                 Kept::Shipped(bytes) => Bible::from_bytes(bytes).map(Arc::new),
                 Kept::File(path) => std::fs::read(path)
-                    .map_err(|e| format!("Could not read the {}: {e}", shelved.name))
+                    .map_err(|e| {
+                        let error = e.to_string();
+                        tf(
+                            "bibles.not_read",
+                            "Could not read the {bible}: {error}",
+                            &[("bible", &shelved.name), ("error", &error)],
+                        )
+                    })
                     .and_then(|bytes| Bible::from_bytes(&bytes).map(Arc::new)),
             })
             .clone()
@@ -369,7 +399,7 @@ pub fn build_passage(
     options: &BibleOptions,
     template: Option<Uuid>,
 ) -> Result<Presentation, String> {
-    let lead = rows.first().ok_or_else(|| "Choose a Bible first.".to_owned())?;
+    let lead = rows.first().ok_or_else(|| t("bibles.choose_first", "Choose a Bible first.").to_owned())?;
     // A book's short form is read in the first translation's language first: "1 Цар" is
     // 1 Samuel to a Russian Bible and 1 Kings to a Ukrainian one.
     let mut range = parse_reference_in(typed, &lead.bible.info.language)?;
@@ -381,7 +411,11 @@ pub fn build_passage(
     }
     let places: Vec<VerseRef> = lead.bible.verses(range).into_iter().map(|(place, _)| place).collect();
     let (Some(first), Some(last)) = (places.first().copied(), places.last().copied()) else {
-        return Err(format!("The {} has no such verses.", lead.bible.info.name));
+        return Err(tf(
+            "bibles.no_such_verses",
+            "The {bible} has no such verses.",
+            &[("bible", &lead.bible.info.name)],
+        ));
     };
     let in_row = |row: &RowChoice, place: VerseRef| convert(place, lead.bible.info.numbering, row.bible.info.numbering);
     // As the Bible names it (each slide's name, read back to find the verse on screen), or as
@@ -716,24 +750,30 @@ pub fn details_sheet(ctx: &egui::Context, sheet: &mut DetailsSheet, waiting: usi
         ui.set_width(440.0);
         ui.add_space(4.0);
         let title = match waiting {
-            0 => "Install a Bible".to_owned(),
-            1 => "Install a Bible (one more after this)".to_owned(),
-            more => format!("Install a Bible ({more} more after this)"),
+            0 => t("bibles.details.title", "Install a Bible").to_owned(),
+            1 => t("bibles.details.title.one_more", "Install a Bible (one more after this)").to_owned(),
+            more => tf(
+                "bibles.details.title.more",
+                "Install a Bible ({more} more after this)",
+                &[("more", &crate::i18n::count(more as u64))],
+            ),
         };
         ui.label(egui::RichText::new(title).font(crate::studio::semibold(16.0)));
         ui.add_space(4.0);
         let imported = &sheet.imported;
-        let count = |n: usize, one: &str, many: &str| {
-            format!("{} {}", sp_bible::import::grouped(n), if n == 1 { one } else { many })
-        };
+        let books = tn("bibles.details.books", imported.book_count() as u64, "{n} book", "{n} books", &[]);
+        let verses = tn("bibles.details.verses", imported.verse_count() as u64, "{n} verse", "{n} verses", &[]);
         ui.add(
             egui::Label::new(
-                egui::RichText::new(format!(
-                    "{} doesn't say all of this. Check the name, the short name shown on slides and the language, then Install.\n{}: {}, {}.",
-                    imported.file_name,
-                    imported.format.name(),
-                    count(imported.book_count(), "book", "books"),
-                    count(imported.verse_count(), "verse", "verses")
+                egui::RichText::new(tf(
+                    "bibles.details.explain",
+                    "{file} doesn't say all of this. Check the name, the short name shown on slides and the language, then Install.\n{format}: {books}, {verses}.",
+                    &[
+                        ("file", &imported.file_name),
+                        ("format", imported.format.name()),
+                        ("books", &books),
+                        ("verses", &verses),
+                    ],
                 ))
                 .size(11.5)
                 .color(DIM),
@@ -748,9 +788,17 @@ pub fn details_sheet(ctx: &egui::Context, sheet: &mut DetailsSheet, waiting: usi
         let mut enter = false;
         egui::Grid::new("bible details").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
             let fields: [(&str, &str, &mut String); 3] = [
-                ("Name", "The Bible's full name", &mut sheet.about.name),
-                ("Short name", "Shown on slides, such as KJV", &mut sheet.about.short),
-                ("Language", "en, ru, uk…", &mut sheet.about.language),
+                (t("bibles.details.name", "Name"), t("bibles.details.name.hint", "The Bible's full name"), &mut sheet.about.name),
+                (
+                    t("bibles.details.short_name", "Short name"),
+                    t("bibles.details.short_name.hint", "Shown on slides, such as KJV"),
+                    &mut sheet.about.short,
+                ),
+                (
+                    t("bibles.details.language", "Language"),
+                    t("bibles.details.language.hint", "en, ru, uk…"),
+                    &mut sheet.about.language,
+                ),
             ];
             for (at, (label, hint, value)) in fields.into_iter().enumerate() {
                 ui.label(egui::RichText::new(label).color(DIM));
@@ -776,10 +824,10 @@ pub fn details_sheet(ctx: &egui::Context, sheet: &mut DetailsSheet, waiting: usi
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let size = vec2(96.0, 30.0);
                 let emphasis = if ready { crate::studio::Emphasis::Plain } else { crate::studio::Emphasis::Idle };
-                if crate::studio::block_button(ui, size, "Install", "", emphasis).clicked() && ready {
+                if crate::studio::block_button(ui, size, t("bibles.install", "Install"), "", emphasis).clicked() && ready {
                     decided = Some(true);
                 }
-                if crate::studio::block_button(ui, size, "Cancel", "", crate::studio::Emphasis::Plain).clicked() {
+                if crate::studio::block_button(ui, size, t("bibles.details.cancel", "Cancel"), "", crate::studio::Emphasis::Plain).clicked() {
                     decided = Some(false);
                 }
             });
@@ -906,14 +954,21 @@ pub fn options_popup(
 /// What a reference style is called in the Options panel, and what it does.
 fn reference_words(style: ReferenceStyle) -> (&'static str, &'static str) {
     match style {
-        ReferenceStyle::VerseReferences => {
-            ("On every slide", "Each slide names its own verses: John 3:16, then John 3:17")
+        ReferenceStyle::VerseReferences => (
+            t("bibles.reference.every", "On every slide"),
+            t("bibles.reference.every.hint", "Each slide names its own verses: John 3:16, then John 3:17"),
+        ),
+        ReferenceStyle::PassageEach => (
+            t("bibles.reference.passage_each", "Whole passage, every slide"),
+            t("bibles.reference.passage_each.hint", "Each slide names the whole passage: John 3:16-18"),
+        ),
+        ReferenceStyle::PassageLast => (
+            t("bibles.reference.passage_last", "Whole passage, last slide"),
+            t("bibles.reference.passage_last.hint", "Only the last slide names the passage"),
+        ),
+        ReferenceStyle::NoReference => {
+            (t("bibles.reference.none", "None"), t("bibles.reference.none.hint", "No reference on the slides"))
         }
-        ReferenceStyle::PassageEach => {
-            ("Whole passage, every slide", "Each slide names the whole passage: John 3:16-18")
-        }
-        ReferenceStyle::PassageLast => ("Whole passage, last slide", "Only the last slide names the passage"),
-        ReferenceStyle::NoReference => ("None", "No reference on the slides"),
     }
 }
 
@@ -935,23 +990,23 @@ fn choices(
     widgets.inactive.bg_fill = Color32::from_gray(64);
     widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_gray(128));
     widgets.hovered.bg_fill = Color32::from_gray(84);
-    heading(ui, "EACH SLIDE SHOWS");
-    ui.radio_value(&mut options.break_on_new_verse, true, "One verse");
-    ui.radio_value(&mut options.break_on_new_verse, false, "The whole passage")
-        .on_hover_text("All its verses on one slide");
+    heading(ui, t("bibles.options.each_slide", "EACH SLIDE SHOWS"));
+    ui.radio_value(&mut options.break_on_new_verse, true, t("bibles.options.one_verse", "One verse"));
+    ui.radio_value(&mut options.break_on_new_verse, false, t("bibles.options.whole", "The whole passage"))
+        .on_hover_text(t("bibles.options.whole.hint", "All its verses on one slide"));
     ui.add_space(6.0);
-    ui.checkbox(&mut options.show_verse_numbers, "Verse numbers")
-        .on_hover_text("Put each verse's number before its words");
+    ui.checkbox(&mut options.show_verse_numbers, t("bibles.options.numbers", "Verse numbers"))
+        .on_hover_text(t("bibles.options.numbers.hint", "Put each verse's number before its words"));
     let named = if translations.is_empty() {
-        "Translation name".to_owned()
+        t("bibles.options.translation", "Translation name").to_owned()
     } else {
-        format!("Translation name ({translations})")
+        tf("bibles.options.translation.named", "Translation name ({translations})", &[("translations", translations)])
     };
     ui.checkbox(&mut options.display_translation, named)
-        .on_hover_text("Put the Bible's short name after the reference");
+        .on_hover_text(t("bibles.options.translation.hint", "Put the Bible's short name after the reference"));
     ui.add_space(6.0);
     egui::Grid::new("bible slide options").num_columns(2).spacing([10.0, 10.0]).show(ui, |ui| {
-        ui.label("Reference");
+        ui.label(t("bibles.options.reference", "Reference"));
         let (chosen, _) = reference_words(options.reference);
         egui::ComboBox::from_id_salt("bible reference").selected_text(chosen).width(200.0).show_ui(ui, |ui| {
             for style in [
@@ -965,7 +1020,7 @@ fn choices(
             }
         });
         ui.end_row();
-        ui.label("Template");
+        ui.label(t("bibles.options.template", "Template"));
         // Which template of the main theme Bible slides use, each shown as a small picture of
         // where its boxes sit.
         let chosen = themes.template_name(themes.theme, themes.layout).to_owned();
@@ -976,7 +1031,9 @@ fn choices(
             .show_ui(ui, |ui| {
                 for (index, name) in themes.names.iter().enumerate().filter(|(index, _)| *index == themes.theme) {
                     ui.label(
-                        egui::RichText::new(format!("{name} (the main theme)")).font(crate::studio::semibold(12.0)).color(DIM),
+                        egui::RichText::new(tf("bibles.options.main_theme", "{name} (the main theme)", &[("name", name)]))
+                            .font(crate::studio::semibold(12.0))
+                            .color(DIM),
                     );
                     for layout in 0..themes.layouts.get(index).map_or(0, Vec::len) {
                         let (row, response) = ui.allocate_exact_size(vec2(210.0, 40.0), Sense::click());
@@ -1005,13 +1062,18 @@ fn choices(
                 }
             })
             .response
-            .on_hover_text(
+            .on_hover_text(t(
+                "bibles.options.template.hint",
                 "The template of the main theme Bible slides use. Its boxes are what the Verse and Reference menus offer. In the Themes view, right-click a template for this too.",
-            );
+            ));
         ui.end_row();
     });
     ui.add_space(10.0);
-    if ui.button("Manage Bibles…").on_hover_text("Install and remove Bibles").clicked() {
+    if ui
+        .button(t("bibles.options.manage", "Manage Bibles…"))
+        .on_hover_text(t("bibles.options.manage.hint", "Install and remove Bibles"))
+        .clicked()
+    {
         options.manage_open = true;
         options.open = false;
     }
@@ -1022,9 +1084,9 @@ fn choices(
 fn slides_preview(ui: &mut egui::Ui, preview: &SlidesPreview) {
     let width = ui.available_width();
     let caption = if preview.sample {
-        format!("PREVIEW · {} (a sample)", preview.name)
+        tf("bibles.preview.sample", "PREVIEW · {name} (a sample)", &[("name", &preview.name)])
     } else {
-        format!("PREVIEW · {}", preview.name)
+        tf("bibles.preview.named", "PREVIEW · {name}", &[("name", &preview.name)])
     };
     ui.add(
         egui::Label::new(egui::RichText::new(caption).size(11.0).strong().color(Color32::from_gray(140))).truncate(),
@@ -1047,15 +1109,17 @@ fn slides_preview(ui: &mut egui::Ui, preview: &SlidesPreview) {
     match preview.count {
         0 => {}
         1 => {
-            ui.label(egui::RichText::new("1 slide").size(12.0).color(DIM));
+            let one = tn("bibles.preview.slides", 1, "{n} slide", "{n} slides", &[]);
+            ui.label(egui::RichText::new(one).size(12.0).color(DIM));
         }
         count => {
             ui.horizontal_top(|ui| {
                 picture(ui, preview.last, (width * 0.45).round());
                 ui.add_space(8.0);
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("The last").size(12.0).color(INK));
-                    ui.label(egui::RichText::new(format!("{count} slides")).size(12.0).color(DIM));
+                    ui.label(egui::RichText::new(t("bibles.preview.last", "The last")).size(12.0).color(INK));
+                    let slides = tn("bibles.preview.slides", count as u64, "{n} slide", "{n} slides", &[]);
+                    ui.label(egui::RichText::new(slides).size(12.0).color(DIM));
                 });
             });
         }
@@ -1118,8 +1182,9 @@ pub fn language_name(language: &str) -> String {
         "fr" | "french" => "Français",
         "es" | "spanish" => "Español",
         "pt" | "portuguese" => "Português",
-        "el" | "grc" | "greek" => "Ελληνικά · Greek",
-        "he" | "hbo" | "hebrew" => "עברית · Hebrew",
+        // The language's own name, and what it is called in the language set.
+        "el" | "grc" | "greek" => t("bibles.language.greek", "Ελληνικά · Greek"),
+        "he" | "hbo" | "hebrew" => t("bibles.language.hebrew", "עברית · Hebrew"),
         _ => return language.to_owned(),
     };
     native.to_owned()
@@ -1165,21 +1230,28 @@ pub fn manage_bibles(
             let width = 600.0_f32.min(ctx.content_rect().width() - 80.0);
             ui.set_width(width);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Bibles").font(crate::studio::semibold(18.0)).color(Color32::WHITE));
+                ui.label(
+                    egui::RichText::new(t("bibles.window.title", "Bibles"))
+                        .font(crate::studio::semibold(18.0))
+                        .color(Color32::WHITE),
+                );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.button("Done").clicked() {
+                    if ui.button(t("bibles.window.done", "Done")).clicked() {
                         close = true;
                     }
                     if ui
-                        .button("Install from File…")
-                        .on_hover_text("A Bible file you have: Zefania, OSIS, Beblia or other XML, USFM or USX (zipped or not), or .spbible")
+                        .button(t("bibles.window.from_file", "Install from File…"))
+                        .on_hover_text(t(
+                            "bibles.window.from_file.hint",
+                            "A Bible file you have: Zefania, OSIS, Beblia or other XML, USFM or USX (zipped or not), or .spbible",
+                        ))
                         .clicked()
                     {
                         options.file_request = true;
                     }
                     ui.add(
                         egui::TextEdit::singleline(&mut options.manage_search)
-                            .hint_text("Search by name or language")
+                            .hint_text(t("bibles.window.search", "Search by name or language"))
                             .desired_width(200.0),
                     );
                 });
@@ -1197,7 +1269,7 @@ pub fn manage_bibles(
             let height = (ctx.content_rect().height() - 220.0).clamp(240.0, 560.0);
             egui::ScrollArea::vertical().id_salt("bibles window").max_height(height).auto_shrink([false, true]).show(ui, |ui| {
                 ui.set_width(width);
-                heading(ui, "INSTALLED");
+                heading(ui, t("bibles.window.installed", "INSTALLED"));
                 let mut any = false;
                 for (index, bible) in shelf.bibles.iter().enumerate() {
                     if !matches(&bible.name, &bible.short, &bible.language) {
@@ -1205,18 +1277,28 @@ pub fn manage_bibles(
                     }
                     any = true;
                     let detail = format!("{} · {}", bible.short, language_name(&bible.language));
-                    let right = if bible.shipped { Right::Note("Built in") } else { Right::Button("Remove") };
+                    let right = if bible.shipped {
+                        Right::Note(t("bibles.window.built_in", "Built in"))
+                    } else {
+                        Right::Button(t("bibles.window.remove", "Remove"))
+                    };
                     if bible_row(ui, ("installed", index), &bible.name, &detail, None, right) {
                         options.remove = Some(index);
                     }
                 }
                 if !any {
-                    nothing(ui, "No installed Bible matches.");
+                    nothing(ui, t("bibles.window.none_installed", "No installed Bible matches."));
                 }
                 ui.add_space(12.0);
-                heading(ui, "AVAILABLE");
+                heading(ui, t("bibles.window.available", "AVAILABLE"));
                 if !can_download {
-                    nothing(ui, "Downloads aren't available in this copy. Drop a Bible file on the window, or use Install from File…, to install it.");
+                    nothing(
+                        ui,
+                        t(
+                            "bibles.window.no_downloads",
+                            "Downloads aren't available in this copy. Drop a Bible file on the window, or use Install from File…, to install it.",
+                        ),
+                    );
                 }
                 let mut language = "";
                 let mut shown = 0;
@@ -1232,26 +1314,34 @@ pub fn manage_bibles(
                     }
                     shown += 1;
                     let right = if downloads.is_busy(bible.id) {
-                        Right::Note("Downloading…")
+                        Right::Note(t("bibles.window.downloading", "Downloading…"))
                     } else if can_download {
-                        Right::Button("Install")
+                        Right::Button(t("bibles.install", "Install"))
                     } else {
                         Right::Note("")
                     };
-                    if bible_row(ui, ("offered", bible.id), bible.name, bible.short, Some(bible.terms), right) {
+                    if bible_row(ui, ("offered", bible.id), bible.name, bible.short, Some(terms_shown(bible.terms)), right) {
                         let ctx = ui.ctx().clone();
                         downloads.start(bible.id, bible.checksum, move || ctx.request_repaint());
                     }
                 }
                 if shown == 0 && can_download {
-                    nothing(ui, if typed.is_empty() { "Every Bible offered is installed." } else { "No Bible to install matches." });
+                    nothing(
+                        ui,
+                        if typed.is_empty() {
+                            t("bibles.window.all_installed", "Every Bible offered is installed.")
+                        } else {
+                            t("bibles.window.none_offered", "No Bible to install matches.")
+                        },
+                    );
                 }
             });
             ui.add_space(10.0);
             ui.label(
-                egui::RichText::new(
+                egui::RichText::new(t(
+                    "bibles.window.footer",
                     "Every Bible here may be shared freely: public domain, or an open licence. A Bible file you have (Zefania, OSIS, USFM and others, or .spbible) installs when dropped on the window or chosen with Install from File…",
-                )
+                ))
                 .size(11.0)
                 .color(DIM),
             );
@@ -1264,6 +1354,12 @@ pub fn manage_bibles(
     if close || (options.details.is_empty() && ctx.input(|input| input.key_pressed(egui::Key::Escape))) {
         options.manage_open = false;
     }
+}
+
+/// An offered Bible's terms as the window shows them: "Public domain" in the language set, a
+/// licence by its own name (CC BY 4.0) as it is.
+fn terms_shown(terms: &'static str) -> &'static str {
+    if terms == "Public domain" { t("bibles.terms.public_domain", "Public domain") } else { terms }
 }
 
 /// True while any Bible is downloading.

@@ -93,6 +93,8 @@ start with `_` (`"_note"`) are comments.
 | `dock` | the bar under the slides: transitions, Continuous, Undo, Redo, views; theme versions |
 | `right` | the right column: preview, layer keys, Clear All, tool tabs |
 | `media` | the media strip under the slides: its menus, the empty strip, what adding pictures and videos says |
+| `biblepage` | the Bible view's page and left column: Books, History, the keypad and lists |
+| `bibles` | the Bibles window, installing and reading Bibles, and what they say |
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 

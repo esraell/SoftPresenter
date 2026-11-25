@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+use crate::i18n::{t, tf};
 use sha2::{Digest, Sha256};
 use sp_bible::{Bible, Info};
 
@@ -82,19 +83,28 @@ fn file_name(id: &str) -> Option<String> {
 /// copy replaced can be put back.
 fn install_bytes_in(folder: &Path, bytes: &[u8], trash_old: bool) -> Result<(PathBuf, Info), String> {
     let bible = Bible::from_bytes(bytes)?;
-    let name = file_name(&bible.info.id).ok_or_else(|| "This Bible file does not say which Bible it is.".to_owned())?;
-    std::fs::create_dir_all(folder).map_err(|e| format!("Could not make the Bibles folder: {e}"))?;
+    let name = file_name(&bible.info.id)
+        .ok_or_else(|| t("bibles.store.no_id", "This Bible file does not say which Bible it is.").to_owned())?;
+    std::fs::create_dir_all(folder).map_err(|e| {
+        tf("bibles.store.no_folder", "Could not make the Bibles folder: {error}", &[("error", &e.to_string())])
+    })?;
     let path = folder.join(name);
     // Write beside it and rename, so a half-written file is never left under the real name.
     let partial = path.with_extension("spbible.part");
-    std::fs::write(&partial, bytes).map_err(|e| format!("Could not save the Bible: {e}"))?;
+    std::fs::write(&partial, bytes)
+        .map_err(|e| tf("bibles.store.not_saved", "Could not save the Bible: {error}", &[("error", &e.to_string())]))?;
     if trash_old && path.is_file() {
         crate::sweep::to_trash(&path).map_err(|e| {
             let _ = std::fs::remove_file(&partial);
-            format!("Could not move the earlier copy to the Trash: {e}")
+            tf(
+                "bibles.store.not_trashed",
+                "Could not move the earlier copy to the Trash: {error}",
+                &[("error", &e.to_string())],
+            )
         })?;
     }
-    std::fs::rename(&partial, &path).map_err(|e| format!("Could not save the Bible: {e}"))?;
+    std::fs::rename(&partial, &path)
+        .map_err(|e| tf("bibles.store.not_saved", "Could not save the Bible: {error}", &[("error", &e.to_string())]))?;
     // The same Bible kept before the rename is replaced, not left beside it.
     let _ = std::fs::remove_file(path.with_extension("pcbible"));
     Ok((path, bible.info))
@@ -159,7 +169,7 @@ impl Known {
         std::iter::once(base.to_owned())
             .chain((2..1000).map(|n| format!("{base}-{n}")))
             .find(|id| !self.taken(folder, id))
-            .ok_or_else(|| "Too many Bibles are installed under that name.".to_owned())
+            .ok_or_else(|| t("bibles.store.too_many", "Too many Bibles are installed under that name.").to_owned())
     }
 
     /// The Bible installed from a file before (never one built in or offered) under this short
@@ -208,7 +218,9 @@ static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// work started. What is installed goes on the shelf with
 /// [`crate::bible::Shelf::put_installed`].
 pub fn run(work: Work, known: &Known) -> Result<Opened, String> {
-    let folder = folder().ok_or_else(|| "Could not find where to keep Bibles on this computer.".to_owned())?;
+    let folder = folder().ok_or_else(|| {
+        t("bibles.store.no_place", "Could not find where to keep Bibles on this computer.").to_owned()
+    })?;
     run_in(&folder, work, known, true)
 }
 
@@ -283,20 +295,26 @@ fn install_own_file(folder: &Path, path: &Path, known: &Known, trash: bool) -> R
     use std::io::Read;
     let shown =
         sp_bible::import::shown_name(&path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()));
-    let meta = std::fs::metadata(path).map_err(|e| format!("Could not read {shown}: {e}"))?;
+    let meta = std::fs::metadata(path).map_err(|e| {
+        tf("bibles.store.cant_read", "Could not read {file}: {error}", &[("file", &shown), ("error", &e.to_string())])
+    })?;
     // A pipe or device is never opened: opening one can wait for ever.
     if !meta.is_file() {
-        return Err(format!("{shown} isn't a Bible file SoftPresenter can read."));
+        return Err(tf(
+            "bibles.store.not_bible",
+            "{file} isn't a Bible file SoftPresenter can read.",
+            &[("file", &shown)],
+        ));
     }
     if meta.len() > LARGEST {
-        return Err("That file is too large to be a Bible.".to_owned());
+        return Err(t("bibles.store.too_large", "That file is too large to be a Bible.").to_owned());
     }
     let mut bytes = Vec::new();
-    std::fs::File::open(path)
-        .and_then(|file| file.take(LARGEST + 1).read_to_end(&mut bytes))
-        .map_err(|e| format!("Could not read {shown}: {e}"))?;
+    std::fs::File::open(path).and_then(|file| file.take(LARGEST + 1).read_to_end(&mut bytes)).map_err(|e| {
+        tf("bibles.store.cant_read", "Could not read {file}: {error}", &[("file", &shown), ("error", &e.to_string())])
+    })?;
     if bytes.len() as u64 > LARGEST {
-        return Err("That file is too large to be a Bible.".to_owned());
+        return Err(t("bibles.store.too_large", "That file is too large to be a Bible.").to_owned());
     }
     let mut bible = Bible::from_bytes(&bytes)?;
     let own = bible.info.id.clone();
@@ -321,9 +339,9 @@ fn install_own_file(folder: &Path, path: &Path, known: &Known, trash: bool) -> R
     };
     let (kept, info) = install_bytes_in(folder, &bytes, trash && replacing)?;
     let said = if replacing {
-        format!("Replaced your earlier {}.", info.name)
+        tf("bibles.store.replaced", "Replaced your earlier {name}.", &[("name", &info.name)])
     } else {
-        format!("Installed the {}.", info.name)
+        tf("bibles.store.installed", "Installed the {name}.", &[("name", &info.name)])
     };
     Ok(Opened::Installed(kept, info, said))
 }
@@ -336,7 +354,9 @@ fn fetch(address: &str) -> Result<Vec<u8>, String> {
 /// One try: it gives up after two minutes, and a file shorter than the server said it was is
 /// "cut short", never mistaken for the wrong file.
 fn fetch_once(address: &str) -> Result<Vec<u8>, String> {
-    let offline = |e: ureq::Error| format!("Could not download the Bible: {e}");
+    let offline = |e: ureq::Error| {
+        tf("bibles.store.not_downloaded", "Could not download the Bible: {error}", &[("error", &e.to_string())])
+    };
     let agent: ureq::Agent =
         ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(120))).build().into();
     let mut response = agent.get(address).call().map_err(offline)?;
@@ -347,7 +367,7 @@ fn fetch_once(address: &str) -> Result<Vec<u8>, String> {
         .and_then(|value| value.trim().parse::<u64>().ok());
     let bytes = response.body_mut().with_config().limit(LARGEST).read_to_vec().map_err(offline)?;
     if expected.is_some_and(|expected| expected != bytes.len() as u64) {
-        return Err("The Bible's download was cut short. Try again.".to_owned());
+        return Err(t("bibles.store.cut_short", "The Bible's download was cut short. Try again.").to_owned());
     }
     Ok(bytes)
 }
@@ -356,11 +376,19 @@ fn fetch_once(address: &str) -> Result<Vec<u8>, String> {
 fn download_into(folder: &Path, address: &str, id: &str, expected_checksum: &str) -> Result<(PathBuf, Info), String> {
     let bytes = fetch(address)?;
     if checksum(&bytes) != expected_checksum {
-        return Err("The downloaded Bible is not the file this version expects, so it was not installed.".to_owned());
+        return Err(t(
+            "bibles.store.wrong_file",
+            "The downloaded Bible is not the file this version expects, so it was not installed.",
+        )
+        .to_owned());
     }
     // Checked before anything is written, so a wrong file leaves nothing behind.
     if Bible::read_info(&bytes)?.id != id {
-        return Err("The downloaded file is a different Bible, so it was not installed.".to_owned());
+        return Err(t(
+            "bibles.store.other_bible",
+            "The downloaded file is a different Bible, so it was not installed.",
+        )
+        .to_owned());
     }
     install_bytes_in(folder, &bytes, false)
 }
@@ -405,7 +433,9 @@ impl Downloads {
         let address = format!("{}/{id}.pcbible", base.trim_end_matches('/'));
         let work = move || {
             let result = folder()
-                .ok_or_else(|| "Could not find where to keep Bibles on this computer.".to_owned())
+                .ok_or_else(|| {
+                    t("bibles.store.no_place", "Could not find where to keep Bibles on this computer.").to_owned()
+                })
                 .and_then(|folder| download_into(&folder, &address, id, expected_checksum));
             let _ = tx.send((id, result));
             wake();
