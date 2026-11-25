@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use sp_model::Uuid;
 
+use crate::i18n::{t, tf, tg, tgf};
+
 /// The file endings of audio the player can play, as the file chooser lists them.
 pub const AUDIO_ENDINGS: [&str; 9] = ["mp3", "wav", "m4a", "aac", "flac", "ogg", "mp4", "aif", "aiff"];
 
@@ -25,7 +27,10 @@ pub struct Track {
 
 impl Track {
     pub fn of(path: PathBuf) -> Track {
-        let name = path.file_stem().map_or_else(|| "Track".to_owned(), |stem| stem.to_string_lossy().into_owned());
+        let name = path.file_stem().map_or_else(
+            || tg("tools.audio.track_name", "Track").to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        );
         Track { id: Uuid::new_v4(), name, path }
     }
 }
@@ -81,7 +86,7 @@ pub struct Leaving {
 impl Default for Library {
     fn default() -> Library {
         Library {
-            playlists: vec![Playlist::new("Audio".to_owned())],
+            playlists: vec![Playlist::new(first_name())],
             current: 0,
             shuffle: false,
             through: false,
@@ -96,13 +101,13 @@ impl Library {
     pub fn from_json(text: &str) -> Option<Library> {
         if let Ok(tracks) = serde_json::from_str::<Vec<Track>>(text) {
             return Some(Library {
-                playlists: vec![Playlist { tracks, ..Playlist::new("Audio".to_owned()) }],
+                playlists: vec![Playlist { tracks, ..Playlist::new(first_name()) }],
                 ..Library::default()
             });
         }
         let mut library: Library = serde_json::from_str(text).ok()?;
         if library.playlists.is_empty() {
-            library.playlists.push(Playlist::new("Audio".to_owned()));
+            library.playlists.push(Playlist::new(first_name()));
         }
         library.current = library.current.min(library.playlists.len() - 1);
         Some(library)
@@ -205,8 +210,10 @@ impl Library {
     /// ("Playlist" alone is the running order).
     pub fn new_name(&self) -> String {
         let taken = |name: &str| self.playlists.iter().any(|playlist| playlist.name == name);
-        std::iter::once("New Audio Playlist".to_owned())
-            .chain((2..).map(|n| format!("New Audio Playlist {n}")))
+        std::iter::once(tg("tools.audio.new_name", "New Audio Playlist").to_owned())
+            .chain(
+                (2..).map(|n| tgf("tools.audio.new_name.numbered", "New Audio Playlist {n}", &[("n", &n.to_string())])),
+            )
             .find(|name| !taken(name))
             .unwrap_or_default()
     }
@@ -254,11 +261,18 @@ impl Player {
         }
         self.track = None;
         if self.stream.is_none() {
-            let stream = sp_video::sound::Output::open()
-                .map_err(|e| format!("Could not open the computer's sound output: {e}"))?;
+            let stream = sp_video::sound::Output::open().map_err(|e| {
+                tf(
+                    "tools.audio.no_output",
+                    "Could not open the computer's sound output: {error}",
+                    &[("error", &e.to_string())],
+                )
+            })?;
             self.stream = Some(stream);
         }
-        let Some(stream) = &self.stream else { return Err("No sound output.".to_owned()) };
+        let Some(stream) = &self.stream else {
+            return Err(t("tools.audio.no_output.none", "No sound output.").to_owned());
+        };
         let decoder = open(track)?;
         let length = decoder.total_duration();
         let sink = rodio::Sink::connect_new(stream.mixer());
@@ -366,9 +380,26 @@ type FileDecoder = rodio::Decoder<std::io::BufReader<std::fs::File>>;
 
 /// Opens a track's file and reads its sound, saying in words what went wrong if it can't.
 fn open(track: &Track) -> Result<FileDecoder, String> {
-    let file = std::fs::File::open(&track.path).map_err(|e| format!("Could not open {}: {e}", track.name))?;
-    rodio::Decoder::new(std::io::BufReader::new(file))
-        .map_err(|e| format!("{} is not audio SoftPresenter can play ({e}).", track.name))
+    let file = std::fs::File::open(&track.path).map_err(|e| {
+        tf(
+            "tools.audio.not_opened",
+            "Could not open {name}: {error}",
+            &[("name", &track.name), ("error", &e.to_string())],
+        )
+    })?;
+    rodio::Decoder::new(std::io::BufReader::new(file)).map_err(|e| {
+        tf(
+            "tools.audio.not_playable",
+            "{name} is not audio SoftPresenter can play ({error}).",
+            &[("name", &track.name), ("error", &e.to_string())],
+        )
+    })
+}
+
+/// The name of the audio playlist there always is, when none has been made: the app names it
+/// and saves it, in the language set.
+pub fn first_name() -> String {
+    tg("tools.audio.first_name", "Audio").to_owned()
 }
 
 /// Minutes and seconds: "3:07".
@@ -389,12 +420,24 @@ pub fn load() -> Library {
 }
 
 pub fn save(library: &Library) -> Result<(), String> {
-    let path = file().ok_or_else(|| "Could not find where to keep settings on this computer.".to_owned())?;
+    let path = file()
+        .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("Could not make the app's folder: {e}"))?;
+        std::fs::create_dir_all(dir).map_err(|e| {
+            tf(
+                "media.no_folder",
+                "Could not make the app's folder: {error}",
+                &[("error", &crate::notices::write_problem(&e))],
+            )
+        })?;
     }
-    std::fs::write(&path, serde_json::to_string_pretty(library).unwrap_or_default())
-        .map_err(|e| format!("Could not save the audio list: {e}"))
+    std::fs::write(&path, serde_json::to_string_pretty(library).unwrap_or_default()).map_err(|e| {
+        tf(
+            "tools.audio.not_saved",
+            "Could not save the audio list: {error}",
+            &[("error", &crate::notices::write_problem(&e))],
+        )
+    })
 }
 
 #[cfg(test)]
@@ -403,39 +446,45 @@ mod tests {
 
     #[test]
     fn tracks_are_named_by_their_file_and_a_missing_file_says_so() {
-        let track = Track::of(PathBuf::from("/music/Walk In.mp3"));
-        assert_eq!(track.name, "Walk In");
-        assert_eq!(clock(Duration::from_secs(187)), "3:07");
-        // Nothing is played, so no sound output is opened; a missing file fails in words.
-        let mut player = Player::default();
-        assert_eq!(player.playing(), Playing::default());
-        let missing = Track::of(PathBuf::from("/nowhere/none.mp3"));
-        assert!(open(&missing).err().unwrap_or_default().contains("Could not open none"));
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let track = Track::of(PathBuf::from("/music/Walk In.mp3"));
+            assert_eq!(track.name, "Walk In");
+            assert_eq!(clock(Duration::from_secs(187)), "3:07");
+            // Nothing is played, so no sound output is opened; a missing file fails in words.
+            let mut player = Player::default();
+            assert_eq!(player.playing(), Playing::default());
+            let missing = Track::of(PathBuf::from("/nowhere/none.mp3"));
+            assert!(open(&missing).err().unwrap_or_default().contains("Could not open none"));
+        });
     }
 
     #[test]
     fn an_old_list_loads_as_one_playlist_and_tracks_follow_in_order_or_at_random() {
-        let one = Track::of(PathBuf::from("/m/One.mp3"));
-        let two = Track::of(PathBuf::from("/m/Two.mp3"));
-        let three = Track::of(PathBuf::from("/m/Three.mp3"));
-        let old = serde_json::to_string(&vec![one.clone(), two.clone(), three.clone()]).unwrap();
-        let mut library = Library::from_json(&old).unwrap();
-        assert_eq!((library.playlists.len(), library.shown().tracks.len()), (1, 3));
-        assert_eq!(library.after(one.id, |_| 0).map(|t| t.id), Some(two.id));
-        assert_eq!(library.after(three.id, |_| 0).map(|t| t.id), Some(one.id), "after the last, the first");
-        library.shuffle = true;
-        // Shuffle never picks the same track again.
-        for pick in 0..2 {
-            assert_ne!(library.after(two.id, |_| pick).map(|t| t.id), Some(two.id));
-        }
-        library.playlists.push(Playlist {
-            tracks: vec![Track::of(PathBuf::from("/m/Solo.mp3"))],
-            ..Playlist::new(library.new_name())
+        // The words are checked in English, whatever another test sets.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let one = Track::of(PathBuf::from("/m/One.mp3"));
+            let two = Track::of(PathBuf::from("/m/Two.mp3"));
+            let three = Track::of(PathBuf::from("/m/Three.mp3"));
+            let old = serde_json::to_string(&vec![one.clone(), two.clone(), three.clone()]).unwrap();
+            let mut library = Library::from_json(&old).unwrap();
+            assert_eq!((library.playlists.len(), library.shown().tracks.len()), (1, 3));
+            assert_eq!(library.after(one.id, |_| 0).map(|t| t.id), Some(two.id));
+            assert_eq!(library.after(three.id, |_| 0).map(|t| t.id), Some(one.id), "after the last, the first");
+            library.shuffle = true;
+            // Shuffle never picks the same track again.
+            for pick in 0..2 {
+                assert_ne!(library.after(two.id, |_| pick).map(|t| t.id), Some(two.id));
+            }
+            library.playlists.push(Playlist {
+                tracks: vec![Track::of(PathBuf::from("/m/Solo.mp3"))],
+                ..Playlist::new(library.new_name())
+            });
+            assert_eq!(library.playlists[1].name, "New Audio Playlist");
+            let solo = library.playlists[1].tracks[0].id;
+            assert!(library.after(solo, |_| 0).is_none(), "a playlist of one has nothing after");
+            assert_eq!(Library::from_json(&serde_json::to_string(&library).unwrap()), Some(library));
         });
-        assert_eq!(library.playlists[1].name, "New Audio Playlist");
-        let solo = library.playlists[1].tracks[0].id;
-        assert!(library.after(solo, |_| 0).is_none(), "a playlist of one has nothing after");
-        assert_eq!(Library::from_json(&serde_json::to_string(&library).unwrap()), Some(library));
     }
 
     #[test]

@@ -772,7 +772,7 @@ impl crate::App {
             return Err(refused.join("; ") + ".");
         }
         if state.audio.playlists.is_empty() {
-            state.audio.playlists.push(crate::audio::Playlist::new("Audio".to_owned()));
+            state.audio.playlists.push(crate::audio::Playlist::new(crate::audio::first_name()));
         }
         let at = match playlist {
             Some(typed) => {

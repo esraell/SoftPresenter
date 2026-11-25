@@ -246,6 +246,8 @@
   "notices.dialog.filter.media": "Imágenes y vídeos",
   "notices.dialog.follow_folder": "Elige una carpeta para seguir",
   "notices.dialog.add_media": "Añadir imágenes y vídeos",
+  "notices.dialog.add_audio": "Añadir audio",
+  "notices.dialog.filter.audio": "Audio",
   "notices.song.change_not_saved": "El cambio no se guardó. {error}",
   "notices.ask.a_song": "Una canción",
   "notices.ask.a_theme": "Un tema",

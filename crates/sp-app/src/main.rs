@@ -3335,8 +3335,8 @@ impl App {
         match state.audio_request.take() {
             Some(AudioRequest::Add) => {
                 let chosen = rfd::FileDialog::new()
-                    .set_title("Add Audio")
-                    .add_filter("Audio", &audio::AUDIO_ENDINGS)
+                    .set_title(crate::i18n::t("notices.dialog.add_audio", "Add Audio"))
+                    .add_filter(crate::i18n::t("notices.dialog.filter.audio", "Audio"), &audio::AUDIO_ENDINGS)
                     .pick_files()
                     .unwrap_or_default();
                 let tracks = &mut state.audio.shown_mut().tracks;
