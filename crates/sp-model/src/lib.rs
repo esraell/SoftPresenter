@@ -44,7 +44,8 @@ pub mod songbook_examples {
     pub const SONGBOOK: &[u8] = include_bytes!("../tests/songbooks/songbook.sps");
 }
 pub use song_text::{
-    GROUP_KEYS, clean_box_text, group_color, groups_for_key, key_for_group, parse_song_text, to_song_text,
+    GROUP_KEYS, clean_box_text, group_color, group_name_in_english, groups_for_key, key_for_group, parse_song_text,
+    to_song_text,
 };
 pub use spans::{
     Drawn, MOST_SPANS, SpanMix, SpanStyle, TextSpan, byte_ranges, clear_in_spans, edit_text, look_of_range, restyle,

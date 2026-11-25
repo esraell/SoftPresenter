@@ -73,6 +73,52 @@ pub const GROUP_KEYS: [(char, &[&str]); 17] = [
     ('o', &["outro"]),
 ];
 
+/// The words churches name a song's parts with in the app's languages (Russian, Ukrainian,
+/// Spanish), each with the English the group keys and colours know.
+const PART_WORDS: [(&str, &str); 27] = [
+    ("куплет", "verse"),
+    ("estrofa", "verse"),
+    ("verso", "verse"),
+    ("припев", "chorus"),
+    ("приспів", "chorus"),
+    ("coro", "chorus"),
+    ("estribillo", "chorus"),
+    ("бридж", "bridge"),
+    ("брідж", "bridge"),
+    ("мост", "bridge"),
+    ("міст", "bridge"),
+    ("puente", "bridge"),
+    ("предприпев", "prechorus"),
+    ("передприспів", "prechorus"),
+    ("precoro", "prechorus"),
+    ("pre-coro", "prechorus"),
+    ("тег", "tag"),
+    ("вступление", "intro"),
+    ("вступ", "intro"),
+    ("introducción", "intro"),
+    ("окончание", "ending"),
+    ("концовка", "ending"),
+    ("закінчення", "ending"),
+    ("кінцівка", "ending"),
+    ("final", "ending"),
+    ("кода", "outro"),
+    ("coda", "outro"),
+];
+
+/// A group's name as the group keys and colours know it: lower case, and in English when a
+/// church named the part in its own language ("Куплет 2" is "verse 2", "Приспів:" is
+/// "chorus"). Any other name comes back in lower case, as it was.
+pub fn group_name_in_english(name: &str) -> String {
+    let lower = name.trim().trim_end_matches([':', '.']).trim().to_lowercase();
+    let at = lower.find(|c: char| c.is_whitespace() || c.is_ascii_digit()).unwrap_or(lower.len());
+    let (word, rest) = lower.split_at(at);
+    match PART_WORDS.iter().find(|(local, _)| *local == word) {
+        Some((_, english)) if rest.trim().is_empty() => (*english).to_owned(),
+        Some((_, english)) => format!("{english} {}", rest.trim()),
+        None => lower,
+    }
+}
+
 /// The group names a key jumps to, in lower case; empty for a key that jumps nowhere.
 pub fn groups_for_key(key: char) -> &'static [&'static str] {
     let key = key.to_ascii_lowercase();
@@ -81,7 +127,7 @@ pub fn groups_for_key(key: char) -> &'static [&'static str] {
 
 /// The key that jumps to a group with this name, if there is one.
 pub fn key_for_group(name: &str) -> Option<char> {
-    let name = name.trim().to_lowercase();
+    let name = group_name_in_english(name);
     GROUP_KEYS.iter().find(|(_, names)| names.contains(&name.as_str())).map(|(key, _)| key.to_ascii_uppercase())
 }
 
@@ -100,7 +146,7 @@ pub fn group_color(name: &str) -> Rgba {
     ];
     const KNOWN: [(&str, usize); 8] =
         [("verse", 0), ("chorus", 1), ("bridge", 2), ("pre", 3), ("intro", 4), ("ending", 5), ("outro", 5), ("tag", 6)];
-    let lower = name.trim().to_lowercase();
+    let lower = group_name_in_english(name);
     if lower.is_empty() {
         return Rgba::rgb(128, 128, 128);
     }
@@ -189,6 +235,23 @@ fn push_group(groups: &mut Vec<Group>, group: Group) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parts_named_in_russian_ukrainian_or_spanish_get_the_keys_and_colours_of_english_ones() {
+        assert_eq!(group_name_in_english("Куплет 2"), "verse 2");
+        assert_eq!(group_name_in_english("  Приспів: "), "chorus");
+        assert_eq!(group_name_in_english("Estribillo"), "chorus");
+        assert_eq!(group_name_in_english("Куплет2"), "verse 2");
+        assert_eq!(group_name_in_english("Песня"), "песня", "any other name stays as it was");
+        assert_eq!(key_for_group("Куплет 1"), Some('A'));
+        assert_eq!(key_for_group("Куплет 3"), Some('D'));
+        assert_eq!(key_for_group("Припев"), Some('C'));
+        assert_eq!(key_for_group("Передприспів"), Some('P'));
+        assert_eq!(key_for_group("Estrofa 2"), Some('S'));
+        assert_eq!(group_color("Припев 2"), group_color("Chorus"));
+        assert_eq!(group_color("Куплет"), group_color("Verse 4"));
+        assert_eq!(group_color("Бридж"), group_color("Bridge"));
+    }
 
     #[test]
     fn group_keys_name_their_groups_both_ways() {

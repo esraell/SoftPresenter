@@ -280,7 +280,8 @@ impl Show {
         let mut slide = 0;
         for group in &song.groups {
             // The group's first slide that is not disabled.
-            if names.contains(&group.name.trim().to_lowercase().as_str())
+            // A part named in the church's own language ("Припев") answers its English key.
+            if names.contains(&sp_model::group_name_in_english(&group.name).as_str())
                 && let Some(skip) = group.slides.iter().position(|one| one.enabled)
             {
                 return Some(SlideRef { presentation, slide: slide + skip });
