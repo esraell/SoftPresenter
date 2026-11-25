@@ -15,7 +15,7 @@ const WARNING: Color32 = Color32::from_rgb(255, 170, 120);
 fn background_hint() -> &'static str {
     t(
         "screens.background.hint",
-        "Solid: as usual. See-through: clear wherever nothing is drawn, so that a video switcher or streaming software can lay the words over a camera picture.",
+        "Solid: a full picture, as usual. See-through: clear wherever nothing is drawn, for lower thirds over a camera: a video switcher or streaming app lays the words over its camera picture.",
     )
 }
 
@@ -40,6 +40,8 @@ pub fn background_rows(ui: &mut egui::Ui, screens: &mut [Screen], index: usize, 
     let Some(screen) = screens.get(index).filter(|screen| screen.kind == Kind::Audience) else { return false };
     let mut look = screen.look;
     let (id, name) = (screen.id, screen.name.clone());
+    // A screen its DeckLink card keys is see-through by that choice, made beside the keyer.
+    let keyed = screen.keyed();
     // The screens this one can be the key of: the other audience screens that are not keys.
     let fills: Vec<(sp_model::Uuid, String)> = screens
         .iter()
@@ -47,13 +49,14 @@ pub fn background_rows(ui: &mut egui::Ui, screens: &mut [Screen], index: usize, 
         .map(|other| (other.id, other.name.clone()))
         .collect();
     ui.add_space(4.0);
-    if look.key_of.is_none() {
+    if look.key_of.is_none() && !keyed {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(t("screens.background", "Background")).color(TEXT_DIM))
                 .on_hover_text(background_hint());
             ui.add_space(8.0);
             let solid = t("screens.background.solid", "Solid");
-            if ui.add(egui::Button::selectable(look.see_through.is_none(), solid)).clicked() {
+            let solid = ui.add(egui::Button::selectable(look.see_through.is_none(), solid));
+            if solid.on_hover_text(background_hint()).clicked() {
                 look.see_through = None;
             }
             let see_through_words = t("screens.background.see_through", "See-through");
@@ -140,7 +143,7 @@ pub fn background_rows(ui: &mut egui::Ui, screens: &mut [Screen], index: usize, 
                 )
             }
         },
-        (None, Some(_)) => (
+        (None, Some(_)) if !keyed => (
             tf(
                 "screens.background.see_through.about",
                 "\"{name}\" is clear wherever nothing is drawn. It leaves out the media behind the words, the themes' background colours and pictures, and its colour; the words, props, messages and announcements stay. Over NDI the clear parts go with the picture. On a display, a second screen can be its key. The Program preview shows the room's picture, not this one.",
@@ -148,7 +151,7 @@ pub fn background_rows(ui: &mut egui::Ui, screens: &mut [Screen], index: usize, 
             ),
             false,
         ),
-        (None, None) => (String::new(), false),
+        (None, _) => (String::new(), false),
     };
     if !note.is_empty() {
         ui.add_space(4.0);

@@ -1323,8 +1323,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   expects; a screen keeps the format it has, whatever Desktop Video Setup is changed to later.
   Under the format, the Screens window says where it comes from ("1080p30, as Desktop Video
   Setup has it"; "1080i59.94, the usual HD format: Desktop Video Setup sets none"; or for
-  another, "720p50, set in SoftPresenter: Desktop Video Setup has 1080p30"), and so do `sp
-  screens`, `sp decklink` and `decklink-check`. The devices, with each one's own default
+  another, "720p50, set in SoftPresenter: Desktop Video Setup sets none"), and so do `sp
+  screens`, `sp decklink` and `decklink-check`. Where Desktop Video Setup has another format
+  that SoftPresenter can play on the output (and key in, while the card keys), the window says
+  so in amber instead ("Desktop Video Setup has 1080p29.97. A switcher usually needs every input
+  in its own format.") and offers **Use 1080p29.97** beside the format, which switches to it. The devices, with each one's own default
   format, are found on a thread of their own when the app starts (the driver can be slow), and
   found again when one is plugged in or taken away, or `sp decklink` is run. Without the driver there are no DeckLink choices and nothing else changes; a driver
   older than 16.0 is said to be too old. The screen is drawn at 1920 x 1080 with the NDI
@@ -1339,14 +1342,24 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   log has a line each minute for each output: frames played, late and dropped. A quiet run (a
   test) never opens a card. Windows has no DeckLink outputs yet.
 - **Keying with a DeckLink card.** Where the card can key (a DeckLink Duo 2 can once Desktop
-  Video Setup pairs its connectors: one sub-device, full duplex), a DeckLink screen's Keyer
-  can be Fill and key, the card sending the picture on one connector and its key on the one
-  paired with it (on a Duo 2, fill on SDI 2 and key on SDI 1), in step, for a switcher's
-  keyer; or Over its input, the card laying the picture over the video coming into it. Only
-  the choices the card has in its present profile are offered. The screen is made see-through
-  (under Look) so that only the words are keyed: a see-through screen's picture goes to the
-  card with its alpha, straight or premultiplied as its Soft edges say; a solid screen's key is
-  all white, which the Screens window points out. Without a keyer, another screen on a second
+  Video Setup pairs its connectors: one sub-device, full duplex), keying is one choice, the
+  first of a DeckLink audience screen's settings in the Screens window: **Keyer: Off** (no
+  keying: the picture goes out whole, as a display shows it), **Fill and key** (two cables to a
+  switcher's keyer: the card sends the picture on one connector and its key on the one paired
+  with it, on a Duo 2 fill on SDI 2 and key on SDI 1, in step), or **Over the card's input**
+  (the card lays the picture over the video coming into it), with a line under it saying what
+  the choice does. Only the choices the card has in its present profile are offered, and the
+  window says why when the card can't key that way or in the format chosen. Choosing Fill and
+  key or Over the card's input makes the screen see-through, so that only the words are keyed,
+  with premultiplied soft edges, what a switcher's keyer usually expects (an ATEM's Pre
+  Multiplied Key on); choosing Off makes it solid again. So a keyed screen has no Background
+  or Soft edges rows under Look: one small **Soft edges: Premultiplied (usual) / Straight**
+  under the keyer is for the rare switcher that wants straight. Its picture goes to the card
+  with its alpha, as the soft edges say. A keyed screen saved solid by an earlier version
+  (whose key was all white, so the switcher keyed in the whole picture) opens see-through with
+  premultiplied soft edges, once, and the log says so (`[screens] "Lyrics" is keyed by its
+  DeckLink card but was solid…`). A stage screen is never keyed (its picture is always solid), and one
+  saved keyed opens with its keyer off. Without a keyer, another screen on a second
   DeckLink output (or an NDI name) can be the first one's key, as with NDI: the two are made
   from the same picture, read back once, though each output keeps its own clock, so the card's
   own keyer keeps them closer in step. Changing the profile is left to Desktop Video Setup:
@@ -1491,9 +1504,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   opened meanwhile and the slide drawn again once it is there, within a few thousandths of a
   second; until then its words are drawn in fonts already opened, or left out.
 - **See-through screens, for a church that streams.** An audience screen's Background can be
-  Solid (as usual) or See-through: clear wherever nothing is drawn, so a video switcher or
-  streaming software lays the words over its camera picture. A see-through screen leaves out
-  whatever would cover the whole picture: the media behind the words, every theme's background
+  Solid (as usual) or See-through: clear wherever nothing is drawn, for lower thirds over a
+  camera, which a video switcher or streaming app lays the words over (the hint over the choice
+  says so). A DeckLink screen its card keys is see-through by its Keyer choice (above). A
+  see-through screen leaves out whatever would cover the whole picture: the media behind the
+  words, every theme's background
   colour and picture (the announcements' too), and its own colour; its covered edges are cut
   away, not coloured. Everything placed on the slides stays: the words, the layout's and the
   slide's own shapes and pictures (a lower third's bar), props, messages, the copyright line and

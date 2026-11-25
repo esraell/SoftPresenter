@@ -5,7 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-Nothing yet.
+- Keying a DeckLink screen is one choice in the Screens window now: Keyer Off, Fill and key, or Over the card's input. Keying makes the screen see-through with premultiplied soft edges, the usual for a switcher's keyer, so only the words are keyed; a keyed screen left solid before is put right when the app opens. When the screen's format isn't the one Desktop Video Setup has, the window says so in amber, with a button to use it.
 
 ## 0.9.0-dev.13 — 24 November 2026 (development build)
 

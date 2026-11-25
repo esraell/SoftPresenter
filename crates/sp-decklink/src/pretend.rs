@@ -68,8 +68,8 @@ fn modes(keying: bool) -> Vec<Mode> {
 /// Four outputs as a four-connector card shows them, and one more that can key. Their own
 /// default formats, as Desktop Video Setup would set them, cover each way a new output's
 /// format is chosen: the first is set to 1080p30, which a new output starts in; the second to
-/// NTSC, which SoftPresenter doesn't offer; the third to none; the fourth and the keyer don't
-/// say, so a new output on them starts in 1080i59.94.
+/// NTSC, which SoftPresenter doesn't offer; the third to none; the fourth doesn't say, so a new
+/// output on it starts in 1080i59.94; and the keyer is set to 1080p29.97, as for a switcher.
 pub fn devices() -> Vec<Device> {
     let card_modes = [Some(*b"Hp30"), Some(*b"ntsc"), Some(*b"iunk"), None];
     let mut devices: Vec<Device> = (0..4)
@@ -103,7 +103,7 @@ pub fn devices() -> Vec<Device> {
         internal_keying: true,
         external_keying: true,
         modes: modes(true),
-        card_mode: None,
+        card_mode: Some(i64::from(u32::from_be_bytes(*b"Hp29"))),
         card_mode_3d: false,
     });
     devices
@@ -321,7 +321,7 @@ mod tests {
                 "1080i59.94, the usual HD format: Desktop Video Setup has NTSC, which SoftPresenter doesn't offer",
                 "1080i59.94, the usual HD format: Desktop Video Setup sets none",
                 "1080i59.94, the usual HD format: Desktop Video Setup sets none",
-                "1080i59.94, the usual HD format: Desktop Video Setup sets none",
+                "1080p29.97, as Desktop Video Setup has it",
             ]
         );
         assert_eq!(devices[0].default_mode().map(|mode| mode.name.as_str()), Some("1080p30"));

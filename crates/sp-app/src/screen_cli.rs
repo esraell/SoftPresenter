@@ -74,6 +74,94 @@ fn decklink_output(typed: &str, found: &sp_decklink::Found, current: Option<&Out
     }))
 }
 
+/// Weighs the background, the alpha and the keyer given to `screen set` together, once every
+/// setting is read (a keyer given is already set on the screen's DeckLink output), and says
+/// what was set. Keying and the background are one choice: a keyer turned on makes the screen
+/// see-through, premultiplied unless `alpha=` says otherwise, as a switcher's keyer usually
+/// expects; `keyer=off` makes it solid, unless `background=see-through` says otherwise. A keyed
+/// screen can't be made solid but by turning its keyer off.
+fn weigh_background(
+    screen: &mut Screen,
+    keyer: Option<Keyer>,
+    background: Option<bool>,
+    alpha: Option<crate::screens::Alpha>,
+) -> Result<Vec<String>, String> {
+    let keyed_solid =
+        || format!("{} is keyed by its DeckLink card, so it is see-through; keyer=off makes it solid.", screen.name);
+    let mut said = Vec::new();
+    // A keyer given for a screen that isn't on a DeckLink output by the end (output= after it
+    // in the same command) has gone with that output.
+    let keyer = keyer.filter(|_| matches!(screen.output, Output::DeckLink(_)));
+    match keyer {
+        Some(keyer @ (Keyer::External | Keyer::Internal)) => {
+            if screen.kind != Kind::Audience {
+                return Err(format!(
+                    "{} is a stage screen; only an audience screen is keyed by its card.",
+                    screen.name
+                ));
+            }
+            if background == Some(false) {
+                return Err(keyed_solid());
+            }
+            screen.set_keyer(keyer, alpha);
+            let alpha = screen.look.see_through.unwrap_or_default();
+            said.push(format!(
+                "{}, see-through, {} alpha",
+                if keyer == Keyer::External {
+                    "fill and key from the card's keyer"
+                } else {
+                    "keyed by the card over its input"
+                },
+                alpha.name()
+            ));
+            return Ok(said);
+        }
+        Some(Keyer::Off) => {
+            screen.set_keyer(Keyer::Off, None);
+            said.push("keyer off".to_owned());
+            if background.is_none() && alpha.is_none() {
+                said.push("solid".to_owned());
+                return Ok(said);
+            }
+        }
+        None if screen.keyed() && background == Some(false) => return Err(keyed_solid()),
+        // Made a stage screen (kind=stage) while keyed: a stage screen is never keyed.
+        None if screen.kind != Kind::Audience
+            && matches!(&screen.output, Output::DeckLink(out) if out.keyer != Keyer::Off) =>
+        {
+            screen.set_keyer(Keyer::Off, None);
+            said.push("keyer off, as a stage screen is never keyed".to_owned());
+        }
+        None => {}
+    }
+    match (background, alpha) {
+        (Some(false), Some(_)) => {
+            return Err("A solid screen has no alpha; alpha is for background=see-through.".to_owned());
+        }
+        (Some(false), None) => {
+            screen.look.see_through = None;
+            said.push("solid".to_owned());
+        }
+        (Some(true), _) => {
+            let alpha = alpha.or(screen.look.see_through).unwrap_or_default();
+            screen.look.see_through = Some(alpha);
+            said.push(format!("see-through, {} alpha", alpha.name()));
+        }
+        (None, Some(alpha)) if screen.look.see_through.is_some() => {
+            screen.look.see_through = Some(alpha);
+            said.push(format!("{} alpha", alpha.name()));
+        }
+        (None, Some(_)) => {
+            return Err(format!(
+                "{} is solid; add background=see-through to send it see-through with that alpha.",
+                screen.name
+            ));
+        }
+        (None, None) => {}
+    }
+    Ok(said)
+}
+
 impl crate::App {
     /// `screen add|set|delete …`.
     pub(crate) fn ctl_screen(&mut self, args: &[String]) -> Result<Reply, String> {
@@ -158,8 +246,9 @@ impl crate::App {
             state.stage_layouts.iter().map(|l| (l.id, l.name.clone())).collect();
         let mut screen = state.screens[index].clone();
         let mut said = Vec::new();
-        // Solid or see-through, and the alpha, are weighed together once all are read.
+        // Solid or see-through, the alpha and the keyer are weighed together once all are read.
         let (mut background, mut alpha): (Option<bool>, Option<crate::screens::Alpha>) = (None, None);
+        let mut keyer_given = None;
         for setting in &words[at..] {
             let (key, value) = setting.split_once('=').ok_or(usage)?;
             match key.to_lowercase().as_str() {
@@ -274,14 +363,7 @@ impl crate::App {
                         }
                     }
                     out.keyer = keyer;
-                    said.push(
-                        match keyer {
-                            Keyer::Off => "keyer off",
-                            Keyer::External => "fill and key from the card's keyer",
-                            Keyer::Internal => "keyed by the card over its input",
-                        }
-                        .to_owned(),
-                    );
+                    keyer_given = Some(keyer);
                 }
                 "kind" => {
                     screen.kind = match value.to_lowercase().as_str() {
@@ -350,31 +432,7 @@ impl crate::App {
                 other => return Err(format!("{other} isn't a screen setting. {usage}")),
             }
         }
-        match (background, alpha) {
-            (Some(false), Some(_)) => {
-                return Err("A solid screen has no alpha; alpha is for background=see-through.".to_owned());
-            }
-            (Some(false), None) => {
-                screen.look.see_through = None;
-                said.push("solid".to_owned());
-            }
-            (Some(true), _) => {
-                let alpha = alpha.or(screen.look.see_through).unwrap_or_default();
-                screen.look.see_through = Some(alpha);
-                said.push(format!("see-through, {} alpha", alpha.name()));
-            }
-            (None, Some(alpha)) if screen.look.see_through.is_some() => {
-                screen.look.see_through = Some(alpha);
-                said.push(format!("{} alpha", alpha.name()));
-            }
-            (None, Some(_)) => {
-                return Err(format!(
-                    "{} is solid; add background=see-through to send it see-through with that alpha.",
-                    screen.name
-                ));
-            }
-            (None, None) => {}
-        }
+        said.extend(weigh_background(&mut screen, keyer_given, background, alpha)?);
         if (background == Some(true) || screen.look.key_of.is_some()) && screen.kind != Kind::Audience {
             return Err(format!("{} is a stage screen; only an audience screen is see-through or a key.", screen.name));
         }
@@ -648,5 +706,79 @@ fn view_words(kept: &str) -> &'static str {
         "easy" => "Words Only",
         "table" => "table view",
         _ => "grid view",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::screens::Alpha;
+
+    fn on_card(keyer: Keyer, see_through: Option<Alpha>) -> Screen {
+        let mut screen = Screen::new(
+            "Switcher".to_owned(),
+            Output::DeckLink(DeckLinkOut {
+                device: "DeckLink Duo (1)".to_owned(),
+                id: None,
+                mode: "1080p29.97".to_owned(),
+                keyer: Keyer::Off,
+            }),
+        );
+        // As the loop leaves it: the keyer set on the output, the background not yet weighed.
+        if let Output::DeckLink(out) = &mut screen.output {
+            out.keyer = keyer;
+        }
+        screen.look.see_through = see_through;
+        screen
+    }
+
+    #[test]
+    fn a_keyer_given_to_sp_sets_the_background_too_and_an_alpha_given_with_it_wins() {
+        // Keyed: see-through, premultiplied, and said.
+        let mut screen = on_card(Keyer::External, None);
+        let said = weigh_background(&mut screen, Some(Keyer::External), None, None).unwrap();
+        assert_eq!(said, ["fill and key from the card's keyer, see-through, premultiplied alpha"]);
+        assert_eq!(screen.look.see_through, Some(Alpha::Premultiplied));
+        // An alpha in the same command wins, typed before the keyer or after it.
+        let mut screen = on_card(Keyer::Internal, None);
+        let said = weigh_background(&mut screen, Some(Keyer::Internal), None, Some(Alpha::Straight)).unwrap();
+        assert_eq!(said, ["keyed by the card over its input, see-through, straight alpha"]);
+        assert_eq!(screen.look.see_through, Some(Alpha::Straight));
+        // Off: solid.
+        let mut screen = on_card(Keyer::Off, Some(Alpha::Premultiplied));
+        assert_eq!(weigh_background(&mut screen, Some(Keyer::Off), None, None).unwrap(), ["keyer off", "solid"]);
+        assert_eq!(screen.look.see_through, None);
+        // Off, but see-through asked for too (a fill whose key goes out on another output).
+        let mut screen = on_card(Keyer::Off, Some(Alpha::Premultiplied));
+        let said = weigh_background(&mut screen, Some(Keyer::Off), Some(true), None).unwrap();
+        assert_eq!(said, ["keyer off", "see-through, straight alpha"]);
+        let mut screen = on_card(Keyer::Off, None);
+        let refused = weigh_background(&mut screen, Some(Keyer::Off), None, Some(Alpha::Straight)).unwrap_err();
+        assert!(refused.contains("is solid"), "{refused}");
+    }
+
+    #[test]
+    fn a_keyed_screen_cant_be_made_solid_but_by_turning_its_keyer_off() {
+        let mut screen = on_card(Keyer::External, Some(Alpha::Premultiplied));
+        let refused = weigh_background(&mut screen, None, Some(false), None).unwrap_err();
+        assert!(refused.contains("keyer=off makes it solid"), "{refused}");
+        let refused = weigh_background(&mut screen, Some(Keyer::External), Some(false), None).unwrap_err();
+        assert!(refused.contains("keyer=off makes it solid"), "{refused}");
+        // Its soft edges can still change.
+        assert_eq!(weigh_background(&mut screen, None, None, Some(Alpha::Straight)).unwrap(), ["straight alpha"]);
+        assert_eq!(screen.look.see_through, Some(Alpha::Straight));
+        assert!(weigh_background(&mut screen, None, None, None).unwrap().is_empty(), "nothing asked, nothing said");
+        // A stage screen isn't keyed: its picture is always solid, so its key would be all white.
+        let mut stage = Screen { kind: Kind::Stage, ..on_card(Keyer::External, None) };
+        let refused = weigh_background(&mut stage, Some(Keyer::External), None, None).unwrap_err();
+        assert!(refused.contains("stage screen"), "{refused}");
+        // A keyed screen made a stage screen (kind=stage) has its keyer turned off.
+        let said = weigh_background(&mut stage, None, None, None).unwrap();
+        assert_eq!(said, ["keyer off, as a stage screen is never keyed"]);
+        assert!(matches!(&stage.output, Output::DeckLink(out) if out.keyer == Keyer::Off));
+        // A screen not on a DeckLink output by the end of the command keeps its background.
+        let mut window = Screen::new("Window".to_owned(), Output::Window);
+        assert!(weigh_background(&mut window, Some(Keyer::External), None, None).unwrap().is_empty());
+        assert_eq!(window.look.see_through, None);
     }
 }

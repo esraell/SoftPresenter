@@ -10114,6 +10114,13 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                     made
                 });
+                // A keyed DeckLink screen saved solid, before keying and the background were one
+                // choice, sent a key that was all white: made see-through (a stage screen's
+                // keyer turned off) and saved so, once.
+                for said in screens::settle_keying(&mut running.home_state.screens) {
+                    applog::event("screens", &said);
+                    running.home_state.screens_changed = true;
+                }
                 let opening = prefs.start_with.clone();
                 self.prefs_saved = Some(prefs);
                 running.home_state.timers = timers::load();

@@ -70,6 +70,21 @@ impl DeckLinkOut {
         Some((device.format_in_words(&self.mode), from))
     }
 
+    /// The format Desktop Video Setup has for this output, where it isn't the screen's and
+    /// SoftPresenter can play it here (and key in it, when the card keys): the Screens window
+    /// offers to switch to it, as a switcher usually needs every input in its own format. `None`
+    /// when the two are the same, Desktop Video Setup sets none (or one that can't be used), or
+    /// the device isn't connected.
+    pub fn card_format_to_offer(&self, found: &sp_decklink::Found) -> Option<String> {
+        let device = found.find(self.id, &self.device)?;
+        match device.card_format(self.keyer != Keyer::Off) {
+            sp_decklink::CardFormat::Usable(mode) if !mode.name.eq_ignore_ascii_case(self.mode.trim()) => {
+                Some(mode.name.clone())
+            }
+            _ => None,
+        }
+    }
+
     /// What the output thread is to play.
     pub fn wanted(&self) -> sp_decklink::Wanted {
         sp_decklink::Wanted {
@@ -400,6 +415,54 @@ impl Screen {
     pub fn stage(name: String, output: Output) -> Screen {
         Screen { kind: Kind::Stage, ..Screen::new(name, output) }
     }
+
+    /// True for an audience screen played out of a DeckLink card that keys it: fill and key, or
+    /// over the card's input. Such a screen is always see-through (see [`Screen::set_keyer`]).
+    pub fn keyed(&self) -> bool {
+        self.kind == Kind::Audience && matches!(&self.output, Output::DeckLink(out) if out.keyer != Keyer::Off)
+    }
+
+    /// Sets how a DeckLink screen uses its card's keyer, and its background with it, as one
+    /// choice. Keyed (fill and key, or over the card's input), it is see-through, so that only
+    /// the words are keyed, with its soft edges premultiplied, as a switcher's keyer usually
+    /// expects, unless `alpha` says otherwise; off, it is solid, a full picture. Nothing changes
+    /// for a screen on anything else.
+    pub fn set_keyer(&mut self, keyer: Keyer, alpha: Option<Alpha>) {
+        let Output::DeckLink(out) = &mut self.output else { return };
+        out.keyer = keyer;
+        self.look.see_through = match keyer {
+            Keyer::Off => None,
+            Keyer::External | Keyer::Internal => Some(alpha.unwrap_or(Alpha::Premultiplied)),
+        };
+    }
+}
+
+/// Settles the keying of screens saved before keying and the background were one choice, whose
+/// key was all white (every pixel solid), so a switcher keyed in the whole picture: a keyed
+/// audience screen left solid is made see-through, with premultiplied soft edges, and a stage
+/// screen's keyer (its picture is always solid) is turned off. Gives a line for the log for each
+/// screen changed; run on the list as it is loaded, it finds nothing the next time.
+pub fn settle_keying(screens: &mut [Screen]) -> Vec<String> {
+    let mut said = Vec::new();
+    for screen in screens {
+        if screen.keyed() && screen.look.see_through.is_none() {
+            screen.look.see_through = Some(Alpha::Premultiplied);
+            said.push(format!(
+                "\"{}\" is keyed by its DeckLink card but was solid, so its key was all white: made see-through, with premultiplied soft edges",
+                screen.name
+            ));
+        } else if screen.kind == Kind::Stage
+            && let Output::DeckLink(out) = &mut screen.output
+            && out.keyer != Keyer::Off
+        {
+            out.keyer = Keyer::Off;
+            said.push(format!(
+                "\"{}\" is a stage screen, whose picture is always solid, so its key was all white: its DeckLink card's keyer is turned off",
+                screen.name
+            ));
+        }
+    }
+    said
 }
 
 /// The screens a fresh start has: one, placed automatically. `ndi` adds a second sent over
@@ -1153,9 +1216,8 @@ mod tests {
         assert!(text.contains("\"decklink\"") && text.contains("\"mode\": \"1080i59.94\""), "{text}");
         assert!(!text.contains("keyer"), "a keyer that is off is not written");
         assert_eq!(from_json(&text), Some(vec![screen.clone()]));
-        let keyed = Screen {
+        let mut keyed = Screen {
             output: Output::DeckLink(DeckLinkOut {
-                keyer: Keyer::External,
                 id: None,
                 ..match screen.output {
                     Output::DeckLink(out) => out,
@@ -1164,12 +1226,80 @@ mod tests {
             }),
             ..screen
         };
+        keyed.set_keyer(Keyer::External, None);
         let text = to_json(std::slice::from_ref(&keyed));
         let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
         let out = &saved["screens"][0]["output"]["decklink"];
         assert_eq!(out["keyer"], "external");
+        assert_eq!(saved["screens"][0]["look"]["see_through"], "premultiplied", "{text}");
         assert!(out.get("id").is_none(), "a device without an id is saved without one: {text}");
         assert_eq!(from_json(&text), Some(vec![keyed]));
+    }
+
+    #[test]
+    fn keying_a_decklink_screen_makes_it_see_through_and_premultiplied_and_off_makes_it_solid() {
+        let mut screen = Screen::new("Lyrics".to_owned(), decklink("DeckLink Duo (1)", Some(1)));
+        assert!(!screen.keyed());
+        for keyer in [Keyer::External, Keyer::Internal] {
+            screen.set_keyer(keyer, None);
+            assert!(screen.keyed());
+            assert_eq!(screen.look.see_through, Some(Alpha::Premultiplied), "{keyer:?}");
+        }
+        // An alpha given with the choice wins.
+        screen.set_keyer(Keyer::External, Some(Alpha::Straight));
+        assert_eq!(screen.look.see_through, Some(Alpha::Straight));
+        // Off: a full picture, solid.
+        screen.set_keyer(Keyer::Off, None);
+        assert!(!screen.keyed());
+        assert_eq!(screen.look.see_through, None);
+        assert!(matches!(&screen.output, Output::DeckLink(out) if out.keyer == Keyer::Off));
+        // A screen on anything else is left as it is.
+        let mut stream = Screen::new("Stream".to_owned(), Output::Ndi("Sanctuary".to_owned()));
+        stream.look.see_through = Some(Alpha::Straight);
+        stream.set_keyer(Keyer::Off, None);
+        assert_eq!(stream.look.see_through, Some(Alpha::Straight));
+        // A stage screen on a keying output isn't keyed: its picture is always solid.
+        let mut band = Screen::stage("Band".to_owned(), decklink("DeckLink Duo (1)", Some(1)));
+        if let Output::DeckLink(out) = &mut band.output {
+            out.keyer = Keyer::External;
+        }
+        assert!(!band.keyed());
+    }
+
+    #[test]
+    fn a_keyed_screen_saved_solid_opens_see_through_and_premultiplied_once() {
+        // The church's screen before keying and the background were one choice: fill and key,
+        // left solid, so its key was all white. Beside it, a solid screen not keyed, a keyed one
+        // already see-through with straight edges, and a stage screen on a keying output.
+        let old = r#"{"format":"softpresenter-screens","version":1,"screens":[
+            {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e01","name":"Lyrics",
+             "output":{"decklink":{"device":"DeckLink Duo (1)","mode":"1080p30","keyer":"external"}}},
+            {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e02","name":"Room",
+             "output":{"decklink":{"device":"DeckLink Duo (3)","mode":"1080p30"}}},
+            {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e03","name":"Bible",
+             "output":{"decklink":{"device":"DeckLink Duo (2)","mode":"1080p30","keyer":"internal"}},
+             "look":{"see_through":"straight"}},
+            {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e04","name":"Band","kind":"stage",
+             "output":{"decklink":{"device":"DeckLink Duo (4)","mode":"1080p30","keyer":"external"}}}]}"#;
+        let mut screens = from_json(old).expect("an old file opens");
+        let said = settle_keying(&mut screens);
+        assert_eq!(said.len(), 2, "{said:?}");
+        assert!(said[0].starts_with("\"Lyrics\" is keyed by its DeckLink card but was solid"), "{said:?}");
+        assert!(said[1].starts_with("\"Band\" is a stage screen") && said[1].contains("turned off"), "{said:?}");
+        let backgrounds: Vec<Option<Alpha>> = screens.iter().map(|screen| screen.look.see_through).collect();
+        assert_eq!(backgrounds, [Some(Alpha::Premultiplied), None, Some(Alpha::Straight), None]);
+        let keyers: Vec<Keyer> = screens
+            .iter()
+            .map(|screen| match &screen.output {
+                Output::DeckLink(out) => out.keyer,
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(keyers, [Keyer::External, Keyer::Off, Keyer::Internal, Keyer::Off], "the stage screen's is off");
+        // Saved so, it is never changed again.
+        let mut reopened = from_json(&to_json(&screens)).unwrap();
+        assert!(settle_keying(&mut reopened).is_empty());
+        assert_eq!(reopened, screens);
     }
 
     #[test]

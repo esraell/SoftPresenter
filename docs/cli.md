@@ -935,7 +935,7 @@ the usual ones.
 | Command | Does |
 |---|---|
 | `screen add audience\|stage NAME [on display NAME\|window\|ndi NAME\|decklink NAME\|automatic]` | A new screen (in a window unless told); a DeckLink output by its name or its number in `sp decklink` |
-| `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|decklink:NAME\|automatic\|off`, `mode=FORMAT` (a DeckLink screen's format: `1080i59.94`, `720p50`…), `keyer=off\|external\|internal` (a DeckLink card's keyer: fill and key on two connectors, or over the card's input), `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key); for a screen sent over NDI `sound=on\|off` (whether the sound the app plays goes out with its picture; on unless switched off) |
+| `screen set SCREEN key=value…` | `name=`, `output=display:NAME\|window\|ndi:NAME\|decklink:NAME\|automatic\|off`, `mode=FORMAT` (a DeckLink screen's format: `1080i59.94`, `720p50`…), `keyer=off\|external\|internal` (a DeckLink card's keyer: fill and key on two connectors, or over the card's input; keyed, the screen is see-through and premultiplied unless `alpha=` is given too, and `keyer=off` makes it solid), `kind=audience\|stage`, `layers=slides,media,props,messages,announcements` (or `all`), `color=#RRGGBB`, `edges=L,T,R,B` (0 to 540 each), `theme=THEME\|main`, `layout=STAGE-LAYOUT`; for an audience screen `background=solid\|see-through`, `alpha=straight\|premultiplied` (how a see-through screen sends its soft edges; straight unless told), `key=SCREEN\|none` (shows that screen's key); for a screen sent over NDI `sound=on\|off` (whether the sound the app plays goes out with its picture; on unless switched off) |
 | `screen delete SCREEN --yes` | Deletes a screen (there is always one) |
 | `settings set key=value…` | `transition=KIND[:SECONDS]`, `media_transition=…`, `copyright=never\|first\|last\|every`, `ccli_licence=DIGITS`, `continuous=on\|off`, `view=grid\|words\|table` (Words Only; `easy` too), `columns=1-12`, `language=auto\|en\|es\|ru\|uk` (the app's own words, as Settings › General › Language; `auto` follows the computer's; the replies stay in English) |
 
@@ -984,7 +984,7 @@ On such a test copy (a real card is listed by its own name, "DeckLink Duo (1)"):
       2. Pretend DeckLink (2): SDI, no keying; formats 720p50, …; a new output starts in 1080i59.94, the usual HD format: Desktop Video Setup has NTSC, which SoftPresenter doesn't offer
       3. Pretend DeckLink (3): SDI, no keying; formats 720p50, …; a new output starts in 1080i59.94, the usual HD format: Desktop Video Setup sets none
       …
-      5. Pretend DeckLink Keyer: SDI, external and internal keying; formats 720p50, …; a new output starts in 1080i59.94, the usual HD format: Desktop Video Setup sets none
+      5. Pretend DeckLink Keyer: SDI, external and internal keying; formats 720p50, …; a new output starts in 1080p29.97, as Desktop Video Setup has it
     $ sp screen add audience Switcher on decklink 1
     Added the audience screen Switcher, on Pretend DeckLink (1) at 1080p30, as Desktop Video Setup has it.
     $ sp screen set Switcher mode=1080p29.97
@@ -996,17 +996,33 @@ On such a test copy (a real card is listed by its own name, "DeckLink Duo (1)"):
     Pretend DeckLink (1) has no format 1080i47. Its formats: 720p50, 720p59.94, 720p60, 1080i50, 1080i59.94, 1080i60, 1080p23.98, 1080p24, 1080p25, 1080p29.97, 1080p30, 1080p50, 1080p59.94, 1080p60.
 
 Where the card can key (`sp decklink` says so; a DeckLink Duo 2 can once Desktop Video Setup
-pairs its connectors), the card itself can send a see-through screen's fill and key, in step:
+pairs its connectors), the card itself can send an audience screen's fill and key, in step.
+Keying and the background are one choice: `keyer=external` or `keyer=internal` also makes the
+screen see-through, so that only the words are keyed, with premultiplied soft edges (what a
+switcher's keyer usually expects, such as an ATEM with Pre Multiplied Key on), unless `alpha=` is
+given in the same command; `keyer=off` makes it solid again, unless `background=see-through` is
+given too. A keyed screen can't be made solid but by turning its keyer off:
 
     $ sp screen set Switcher keyer=external
     Pretend DeckLink (1) can't do external keying in its card's present profile (it can do no keying).
     $ sp screen set Switcher output=decklink:5
-    The screen Switcher: on Pretend DeckLink Keyer at 1080i59.94, the usual HD format: Desktop Video Setup sets none.
-    $ sp screen set Switcher background=see-through keyer=external
-    The screen Switcher: fill and key from the card's keyer, see-through, straight alpha.
+    The screen Switcher: on Pretend DeckLink Keyer at 1080p29.97, as Desktop Video Setup has it.
+    $ sp screen set Switcher keyer=external
+    The screen Switcher: fill and key from the card's keyer, see-through, premultiplied alpha.
     $ sp screens
       1. Screen 1: In a window
-      2. Switcher: Playing at 1080i59.94, fill and key; format 1080i59.94, the usual HD format: Desktop Video Setup sets none; see-through, straight alpha
+      2. Switcher: Playing at 1080p29.97, fill and key; format 1080p29.97, as Desktop Video Setup has it; see-through, premultiplied alpha
+    $ sp screen set Switcher background=solid
+    Switcher is keyed by its DeckLink card, so it is see-through; keyer=off makes it solid.
+    $ sp screen set Switcher keyer=internal alpha=straight
+    The screen Switcher: keyed by the card over its input, see-through, straight alpha.
+    $ sp screen set Switcher keyer=off
+    The screen Switcher: keyer off, solid.
+
+A stage screen is never keyed (its picture is always solid): `keyer=external` is refused for one,
+and `kind=stage` turns a keyed screen's keyer off. A keyed screen saved solid by an earlier
+version, whose key was all white, opens see-through with premultiplied soft edges, once, and the
+log says so; a stage screen saved keyed opens with its keyer off.
 
 In `--json`, `sp screens` gives a DeckLink screen's `format`, `format_from` (`card`, `usual` or
 `set`) and `format_words`, all `null` for other screens (while the card is away, `format` is
@@ -1014,8 +1030,8 @@ still given and the other two are `null`);
 `sp decklink` gives each output's `default_format` with `default_format_from` (`card` or
 `usual`) and `default_format_words`, and `card_format`, the format Desktop Video Setup has for
 it (`null` when none is set, the driver doesn't say, or the output doesn't list it). The
-pretend devices are set as a real card might be: (1) to 1080p30, (2) to NTSC, (3) to none, and
-(4) and the keyer don't say.
+pretend devices are set as a real card might be: (1) to 1080p30, (2) to NTSC, (3) to none, (4)
+doesn't say, and the keyer is set to 1080p29.97, as for a switcher.
 
 Without the driver, `sp decklink` says Desktop Video isn't installed (or is too old) and there
 are no DeckLink outputs to choose; a screen saved with one says the same in `sp screens`.
