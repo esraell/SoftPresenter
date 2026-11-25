@@ -7,7 +7,7 @@ finding their way around. For the command line itself see [cli.md](cli.md).
 ## The main window
 
 One window: a bar along the top, and under it three round panels, the left column, the middle
-and the right column, which is the same in every view. Three views are chosen in the bar (Service, Bible and Edit). The
+and the right column, the same in the Service and Bible views (in the Edit view, the inspector alone). Three views are chosen in the bar (Service, Bible and Edit). The
 operator's window never shows on the audience screens; the screens are separate windows (or NDI
 sources) drawn by their own thread.
 
@@ -71,8 +71,10 @@ sources) drawn by their own thread.
 
 ### Right column: what is on screen
 
-The same in every view. In the Edit view and the Theme Editor the inspector takes the place of
-the tabs. Nothing from the preview down to Clear All moves, whatever is on screen.
+This is the right column of the Service and Bible views. Nothing from the preview down to Clear
+All moves, whatever is on screen. In the Edit view (slides, themes, props, stage layouts) the right column is the inspector
+alone, from its top to its foot (`studio::edit_column`): no preview, layer keys or Clear All; the
+keyboard clears there (see Keys in the Edit view).
 
 | Part | Does | Command line |
 |---|---|---|
@@ -131,7 +133,7 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
 | Key | Does |
 |---|---|
 | F1, F2, F3, F4, F5, F6 (off a Mac) | Clear all, slide, media, props, audio, messages, as in the Service view; not while a text box has the keyboard |
-| Escape | First whatever it does in the editor: puts back the words being typed in a box, keeps the old name of one being retyped, lets go of the picked objects, closes a menu, a question or the sheet adding a theme version, stops a drag. With none of those (`HomeState::escape_edits`), it clears all |
+| Escape | First whatever it does in the editor: puts back the words being typed in a box, keeps the old name of one being retyped, lets go of the picked objects, closes a menu, a question or the sheet adding a theme version, stops a drag. With none of those (`HomeState::escape_edits`), it clears all. On a Mac it is the one key that clears from the Edit view (one layer alone is cleared from the Service view) |
 
 ## The Edit view (slides, themes, props, stage)
 
@@ -178,7 +180,7 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   slide is on screen), Web Page (a box showing a live web page; its address is typed in the
   Shape tab), NDI Source (a 16:9 box showing a live NDI source, chosen in the Shape tab's NDI Source section: Source menu, Look again, a line saying what is so, Fits, Quality, Sound; `ndi_in.rs`, `inspector::ndi_source`; the picture is received on a thread of its own and put where every drawing thread finds it, `sp_render::show_ndi`, and the screens only look for news in `Output::take_video_picture`); pictures and videos can be dropped on it from the Finder. Double-click a
   text box to type in it. The letter keys add objects (T for a text box, one key per shape).
-- **Inspector** (in the right column, under Clear All): Shape (place, fill, outline, shadow, flip), Text (words, font, size, colour,
+- **Inspector** (the whole right column): Shape (place, fill, outline, shadow, flip), Text (words, font, size, colour,
   alignment, spacing, outline, shadow, gradient, linked text such as a clock or a timer; its head says
   THE WHOLE BOX, or SELECTED WORDS and the words quoted while words are selected in a box being typed
   in, and font, size, B I U S and colour then change only those words, a half-lit key or "Mixed"

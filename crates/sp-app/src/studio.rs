@@ -5112,18 +5112,28 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     }
 }
 /// The least room kept for what is under Clear All (the tool tabs and the open one's
-/// contents, or the inspector). In a window too short for it the preview's picture gives up
-/// height, down to [`LEAST_PICTURE`], so the keys under it move up; this depends only on the
-/// window's height, never on what is on screen.
+/// contents). In a window too short for it the preview's picture gives up height, down to
+/// [`LEAST_PICTURE`], so the keys under it move up; this depends only on the window's height,
+/// never on what is on screen.
 const LEAST_BODY: f32 = 212.0;
 /// The least height of the preview's picture in a short window (it is 180 in a tall one).
 const LEAST_PICTURE: f32 = 112.0;
+/// How far in from the right column's panel what is in it stands, on every side.
+const RIGHT_INSET: f32 = 10.0;
 
-/// The right column, the same in every view: the preview block (what the screens show, the
-/// slide's number and name, and one row for whatever is playing), the six layer keys, Clear
-/// All, and under them `body`: the tool tabs in the Show and Bible views, the inspector in the
-/// Edit view. Nothing from the top of the column down to Clear All moves, whatever is on
-/// screen.
+/// The right column's panel, as wide and as round in every view.
+fn right_panel() -> egui::Panel {
+    egui::Panel::right("live")
+        .resizable(false)
+        .show_separator_line(false)
+        .exact_size(column_outer(RIGHT_WIDTH))
+        .frame(column_frame(Column::Right))
+}
+
+/// The right column of the Service and Bible views: the preview block (what the screens show,
+/// the slide's number and name, and one row for whatever is playing), the six layer keys, Clear
+/// All, and under them `body`, the tool tabs. Nothing from the top of the column down to Clear
+/// All moves, whatever is on screen. The Edit view's right column is [`edit_column`] instead.
 pub fn right_column(
     ui: &mut egui::Ui,
     show: &Show,
@@ -5132,15 +5142,10 @@ pub fn right_column(
     commands: &mut Vec<Command>,
     body: impl FnOnce(&mut egui::Ui, &mut HomeState),
 ) {
-    let panel = egui::Panel::right("live")
-        .resizable(false)
-        .show_separator_line(false)
-        .exact_size(column_outer(RIGHT_WIDTH))
-        .frame(column_frame(Column::Right));
-    let shown = panel.show(ui, |ui| {
+    let shown = right_panel().show(ui, |ui| {
         let column = ui.max_rect();
         ui.allocate_rect(column, Sense::hover());
-        const SIDE: f32 = 10.0;
+        const SIDE: f32 = RIGHT_INSET;
         let left = column.min.x + SIDE;
         let width = column.width() - 2.0 * SIDE;
         // Everything down to Clear All has its own fixed place. In a short window the picture
@@ -5237,13 +5242,32 @@ pub fn right_column(
             commands.push(Command::ClearAll);
         }
 
-        // Under Clear All: the tabs and the open one's contents, or the inspector.
+        // Under Clear All: the tabs and the open one's contents.
         let under = Rect::from_min_max(pos2(left, rect.max.y + 14.0), pos2(left + width, column.max.y - SIDE));
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(under).layout(Layout::top_down(Align::Min)));
-        child.set_clip_rect(under.intersect(ui.clip_rect()));
-        body(&mut child, state);
+        column_body(ui, under, state, body);
     });
     round_corners(ui, column_panel(shown.response.rect, Column::Right));
+}
+
+/// The Edit view's right column, in each of its kinds (slides, themes, props, stage layouts):
+/// `body`, the inspector, alone, from the top of the column to its foot. It has no preview,
+/// layer keys or Clear All; there the keyboard clears the screens (Escape once nothing is
+/// picked, typed or open, and off a Mac F1 to F6: `home_key_command` in `main.rs`).
+pub fn edit_column(ui: &mut egui::Ui, state: &mut HomeState, body: impl FnOnce(&mut egui::Ui, &mut HomeState)) {
+    let shown = right_panel().show(ui, |ui| {
+        let column = ui.max_rect();
+        ui.allocate_rect(column, Sense::hover());
+        column_body(ui, column.shrink(RIGHT_INSET), state, body);
+    });
+    round_corners(ui, column_panel(shown.response.rect, Column::Right));
+}
+
+/// What a right column holds under its fixed part, or in all of it: `body`, drawn top down in
+/// `room` and kept inside it.
+fn column_body(ui: &mut egui::Ui, room: Rect, state: &mut HomeState, body: impl FnOnce(&mut egui::Ui, &mut HomeState)) {
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(room).layout(Layout::top_down(Align::Min)));
+    child.set_clip_rect(room.intersect(ui.clip_rect()));
+    body(&mut child, state);
 }
 
 /// The preview block, in `block` (`anything_shows` says whether any layer the screens show has

@@ -722,7 +722,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - A slide can carry the same actions as a macro, done when it goes on screen (its menu's
   Actions › Add Action offers them in the same groups as a macro's + Add a step).
 - **The window** is three round panels on a dark window: the left column, the middle, and a
-  right column that is the same in every view. Along the top: the views (Service, Bible, Edit), a
+  right column (the same in the Service and Bible views; in the Edit view the inspector alone).
+  Along the top: the views (Service, Bible, Edit), a
   find box (press `/`, or Command-F: it finds songs by title and then each slide whose words
   have what is typed, tagged with its group ("Song · Chorus"), a slide picked being brought into view and
   ringed in ink for a moment, a Bible passage when a reference is typed (named and quoted in the language it was
@@ -779,7 +780,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   on the canvas (Escape lets go of it), no menu, question or sheet open (Escape closes it) and
   no drag going on (Escape stops it). So a first Escape lets go of the picked object and a
   second clears the screens. Space, the arrows, Home, End, Enter and the letters never run the
-  show from the Edit view.
+  show from the Edit view. The Edit view has no preview or clear keys of its own (see the
+  right column), so on a Mac Escape is the one way to clear from it, and it clears everything;
+  to clear one layer, go to the Service view (Command-1) and use its key there.
 - **The Edit view** edits four kinds of thing, chosen by a switch at the top of its left
   column: a song's Slides, the Themes and their templates, the Props, and the Stage screens'
   layouts. View › Themes, Control-T and `sp view themes` open
@@ -807,12 +810,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Audience or Stage goes back. The screens' thread draws the same one preview picture as
   before, for the screen chosen, so nothing it does costs more. The readout no longer names
   the video playing (the row under it has the video's keys).
-- **The right column**: the preview block, six layer keys (Slide, Media, Props, Messages, Audio,
-  Announce: each is lit while its layer shows, and pressing it clears that layer alone), Clear
-  All (orange while anything shows, grey when nothing does), and under it the tool tabs, or in
-  the Edit view and the Theme Editor the inspector. Nothing from the preview down to Clear All
-  moves, whatever is on screen. In a window too short to leave room under Clear All, the
-  preview's picture is less tall.
+- **The right column**, in the Service and Bible views: the preview block, six layer keys
+  (Media, Slide, Announce, Props, Messages, Audio: each is lit while its layer shows, and
+  pressing it clears that layer alone), Clear All (orange while anything shows, grey when
+  nothing does), and under it the tool tabs. Nothing from the preview down to Clear All moves,
+  whatever is on screen. In a window too short to leave room under Clear All, the preview's
+  picture is less tall. In the Edit view (slides, themes, props and stage layouts) the right
+  column is the inspector alone, from the top of the column to its foot, with no preview,
+  layer keys or Clear All, so the inspector has their room as well; there the keyboard clears
+  (see Clearing from the keyboard). With no props yet, Edit › Props leaves the column empty.
 - The preview shows what the audience sees, drawn by the screens' own renderer, so a
   playing video, a fade or a build moves in it as on the screens; or (from the switch at its
   head) what the stage screens show, with the time kept up to date. Under the picture: the

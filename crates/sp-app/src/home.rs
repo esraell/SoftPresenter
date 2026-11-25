@@ -2561,11 +2561,11 @@ fn home_view(
     // Edit › Stage edits the open layout as a draft, as the other kinds do.
     crate::stage_editor::prepare(state);
     if state.editing.is_some() {
-        edit_view(ui, show, state, theme, thumb, canvas, preview, &mut commands);
+        edit_view(ui, show, state, theme, thumb, canvas);
         return commands;
     }
     if state.props_editor_open && state.theme_edit.is_none() {
-        empty_props_view(ui, show, state, preview, &mut commands);
+        empty_props_view(ui, show, state);
         return commands;
     }
     // In the Bible view the left column holds the books and the history instead (none when
@@ -2616,15 +2616,9 @@ fn release_focus(ctx: &egui::Context) {
 }
 
 /// Edit › Props with no props yet: the props' list, empty, with its Add key, which makes the
-/// first and opens it; the right column with nothing to inspect under Clear All, and a word in
-/// the middle on what a prop is.
-fn empty_props_view(
-    ui: &mut egui::Ui,
-    show: &Show,
-    state: &mut HomeState,
-    preview: Preview,
-    commands: &mut Vec<Command>,
-) {
+/// first and opens it; the right column, where the inspector stands, empty; and a word in the
+/// middle on what a prop is.
+fn empty_props_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     use crate::studio::Column;
     let left = egui::Panel::left("edit slides")
         .resizable(false)
@@ -2642,8 +2636,9 @@ fn empty_props_view(
         });
     });
     crate::studio::round_corners(ui, crate::studio::column_panel(left.response.rect, Column::Left));
-    // Nothing to inspect yet: the column ends at Clear All.
-    crate::studio::right_column(ui, show, state, preview, commands, |_, _| {});
+    // Nothing to inspect yet: the inspector's column stands empty, so nothing moves when the first
+    // prop is made.
+    crate::studio::edit_column(ui, state, |_, _| {});
     let middle = crate::studio::column_panel(ui.available_rect_before_wrap(), Column::Middle);
     let surround = panel_frame(EDIT_SURROUND, 0).outer_margin(crate::studio::column_margin(Column::Middle));
     egui::CentralPanel::default().frame(surround).show(ui, |ui| {
@@ -2672,9 +2667,8 @@ const HANDLE_REACH: f32 = 10.0;
 
 /// The Edit view. It takes the place of the left and middle columns: the song's slides down the
 /// left with the chosen slide's objects under them, and a canvas in the middle where objects
-/// are selected, dragged and resized. The right column stays, with the inspector for the
-/// selected object under Clear All, where the tool tabs are in the other views.
-#[allow(clippy::too_many_arguments)]
+/// are selected, dragged and resized. The right column is the inspector alone, top to bottom:
+/// no preview or clear keys (the keyboard clears there; see `home_key_command` in `main.rs`).
 fn edit_view(
     ui: &mut egui::Ui,
     show: &Show,
@@ -2682,8 +2676,6 @@ fn edit_view(
     theme: &Theme,
     thumb: &mut dyn FnMut(ThumbOf) -> Option<(TextureId, bool)>,
     canvas: Option<TextureId>,
-    preview: Preview,
-    commands: &mut Vec<Command>,
 ) {
     let Some(at) = state.editing.as_ref().map(|draft| draft.at) else { return };
     // The draft is a song's slide, or one of a theme's layouts when the Theme Editor is open.
@@ -3352,9 +3344,9 @@ fn edit_view(
 
     crate::studio::round_corners(ui, crate::studio::column_panel(left.response.rect, Column::Left));
 
-    // Right: the column every view has, with the inspector where the tool tabs are in the others.
+    // Right: the inspector, the whole height of the column.
     let mut leave = false;
-    crate::studio::right_column(ui, show, state, preview, commands, |ui, state| {
+    crate::studio::edit_column(ui, state, |ui, state| {
         leave = crate::inspector::inspector(ui, state, theme);
     });
 
@@ -11207,8 +11199,9 @@ mod tests {
     }
 
     #[test]
-    fn a_layer_key_and_clear_all_clear_in_the_show_view_and_in_the_edit_view() {
+    fn a_layer_key_and_clear_all_clear_in_the_show_view_and_the_keyboard_clears_in_the_edit_view() {
         use sp_engine::Layer;
+        use winit::keyboard::{Key as Pressed, NamedKey};
         let show = three_songs();
         let press = |at: egui::Pos2, pressed: bool| Event::PointerButton {
             pos: at,
@@ -11237,22 +11230,127 @@ mod tests {
             }
             asked
         };
-        for editing in [false, true] {
-            let mut state = HomeState::default();
-            if editing {
-                state.editing = EditDraft::of(&show, SlideRef { presentation: 0, slide: 0 });
-                assert!(state.editing.is_some());
-            }
-            assert_eq!(click(&mut state, pos2(960.0, 412.0)), vec![Command::Clear(Layer::Media)], "editing: {editing}");
-            assert_eq!(
-                click(&mut state, pos2(1080.0, 412.0)),
-                vec![Command::Clear(Layer::Slides)],
-                "editing: {editing}"
-            );
-            assert_eq!(click(&mut state, pos2(960.0, 466.0)), vec![Command::Clear(Layer::Props)], "editing: {editing}");
-            assert_eq!(click(&mut state, pos2(1090.0, 526.0)), vec![Command::ClearAll], "editing: {editing}");
-            assert_eq!(state.editing.is_some(), editing, "clearing leaves the view as it was");
+        let mut state = HomeState::default();
+        assert_eq!(click(&mut state, pos2(960.0, 412.0)), vec![Command::Clear(Layer::Media)]);
+        assert_eq!(click(&mut state, pos2(1080.0, 412.0)), vec![Command::Clear(Layer::Slides)]);
+        assert_eq!(click(&mut state, pos2(960.0, 466.0)), vec![Command::Clear(Layer::Props)]);
+        assert_eq!(click(&mut state, pos2(1090.0, 526.0)), vec![Command::ClearAll]);
+        // The Edit view has no keys to click there (the inspector stands in that place)...
+        let editing = EditDraft::of(&show, SlideRef { presentation: 0, slide: 0 });
+        let mut state = HomeState { editing, ..HomeState::default() };
+        assert!(state.editing.is_some());
+        for at in [pos2(960.0, 412.0), pos2(1080.0, 412.0), pos2(960.0, 466.0), pos2(1090.0, 526.0)] {
+            let asked = click(&mut state, at);
+            assert!(!asked.iter().any(|command| matches!(command, Command::Clear(_) | Command::ClearAll)), "{at:?}");
         }
+        assert!(state.editing.is_some(), "still editing");
+        // ...and the keyboard clears there instead: off a Mac F1 to F6, and Escape with nothing
+        // picked or typed (`home_key_command` in main.rs, read before the window draws).
+        let ctx = egui::Context::default();
+        let key = |state: &HomeState, key: NamedKey, f_keys| {
+            crate::home_key_command(state, &ctx, &Pressed::Named(key), &show, f_keys)
+        };
+        assert_eq!(key(&state, NamedKey::F1, true), Some(Command::ClearAll));
+        assert_eq!(key(&state, NamedKey::F2, true), Some(Command::Clear(Layer::Slides)));
+        assert_eq!(key(&state, NamedKey::F3, true), Some(Command::Clear(Layer::Media)));
+        assert_eq!(key(&state, NamedKey::F4, true), Some(Command::Clear(Layer::Props)));
+        assert_eq!(key(&state, NamedKey::F5, true), Some(Command::Clear(Layer::Audio)));
+        assert_eq!(key(&state, NamedKey::F6, true), Some(Command::Clear(Layer::Messages)));
+        assert_eq!(key(&state, NamedKey::Escape, false), Some(Command::ClearAll), "Escape, on a Mac too");
+        // With an object picked, Escape lets go of it first: it clears only the next time.
+        let first = state.editing.as_ref().and_then(|draft| draft.slide.objects.first().map(|object| object.id));
+        if let Some(draft) = state.editing.as_mut() {
+            draft.selected = first;
+        }
+        assert_eq!(key(&state, NamedKey::Escape, false), None, "Escape is the editor's while something is picked");
+        frame_events(
+            &ctx,
+            &show,
+            &mut state,
+            vec![Event::Key {
+                key: Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            }],
+            0.1,
+        );
+        assert!(state.editing.as_ref().is_some_and(|draft| draft.selected.is_none()), "let go of");
+        assert_eq!(key(&state, NamedKey::Escape, false), Some(Command::ClearAll), "the next Escape clears");
+    }
+
+    #[test]
+    fn the_edit_views_right_column_is_the_inspector_from_the_top_in_every_kind() {
+        let show = three_songs();
+        let drawn = |state: &mut HomeState| {
+            let ctx = crate::studio::tests::styled();
+            let mut output = None;
+            for n in 0..3 {
+                let raw = RawInput {
+                    screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+                    time: Some(f64::from(n) * 0.1),
+                    ..RawInput::default()
+                };
+                let frame = ctx.run_ui(raw, |ui| {
+                    home_ui(ui, &show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+                });
+                if let Some(old) = output.replace(frame) {
+                    old.drop_without_applying_deltas();
+                }
+            }
+            output.expect("drawn")
+        };
+        // The right column starts 52 down (under the top bar) and 1280 - 380 across; the
+        // inspector's first line stands at its top, where the preview used to be.
+        let at_the_top = |output: &egui::FullOutput, words: &str| {
+            let place = crate::studio::tests::place_of(output, words).unwrap_or_else(|| panic!("{words} drawn"));
+            assert!(place.x > 1280.0 - 380.0, "{words} is in the right column: {place:?}");
+            assert!(place.y < 130.0, "{words} is at the column's top: {place:?}");
+            for gone in ["Clear All", "ON SCREEN", "CLEAR"] {
+                assert!(crate::studio::tests::place_of(output, gone).is_none(), "no {gone} beside {words}");
+            }
+        };
+        // The Service view keeps its preview and clear keys.
+        let mut state = HomeState::default();
+        let output = drawn(&mut state);
+        assert!(crate::studio::tests::place_of(&output, "Clear All").is_some());
+        output.drop_without_applying_deltas();
+        // A song's slides: the inspector's tabs.
+        let editing = EditDraft::of(&show, SlideRef { presentation: 0, slide: 0 });
+        let mut state = HomeState { editing, ..HomeState::default() };
+        let output = drawn(&mut state);
+        assert_eq!(state.edit_kind(), Some(EditKind::Slides));
+        at_the_top(&output, "Build");
+        output.drop_without_applying_deltas();
+        // A theme, nothing picked: its own heading.
+        let theme = Theme::builtin();
+        let editing = Some(EditDraft::of_slide(theme.templates[0].as_slide(crate::editor::sample_words()), 0));
+        let mut state = HomeState { editing, theme_edit: Some(ThemeEdit::of(0, theme)), ..HomeState::default() };
+        let output = drawn(&mut state);
+        assert_eq!(state.edit_kind(), Some(EditKind::Themes));
+        at_the_top(&output, t("inspector.heading.theme_slide", "THEME SLIDE"));
+        output.drop_without_applying_deltas();
+        // A prop.
+        let mut state = HomeState::default();
+        state.props.push(crate::props::Prop::new("Logo".to_owned()));
+        state.edit_kind_request = Some(EditKind::Props);
+        let output = drawn(&mut state);
+        assert_eq!(state.edit_kind(), Some(EditKind::Props));
+        at_the_top(&output, "Build");
+        output.drop_without_applying_deltas();
+        // A stage layout, nothing picked: LAYOUT.
+        let mut state = HomeState { edit_kind_request: Some(EditKind::Stage), ..HomeState::default() };
+        let output = drawn(&mut state);
+        assert_eq!(state.edit_kind(), Some(EditKind::Stage));
+        at_the_top(&output, t("inspector.heading.layout", "LAYOUT"));
+        output.drop_without_applying_deltas();
+        // No props yet: the column is there, empty, with no clear keys either.
+        let mut state = HomeState { edit_kind_request: Some(EditKind::Props), ..HomeState::default() };
+        let output = drawn(&mut state);
+        assert_eq!((state.edit_kind(), state.editing.is_none()), (Some(EditKind::Props), true));
+        assert!(crate::studio::tests::place_of(&output, "Clear All").is_none());
+        output.drop_without_applying_deltas();
     }
 
     #[test]
