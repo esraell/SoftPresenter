@@ -292,6 +292,22 @@ pub fn named_in(kept: &str, from: Numbering, language: &str, bibles: &[&Bible], 
     }
 }
 
+/// A Bible slide's name, as the first Bible names its verses ("Псалом 22:1", with the Bible's
+/// short name after it in brackets when Options asks: "Псалом 22:1 (SYN)"), named again for the
+/// operator in `language`, so the bar under each slide reads as the Аа button says ("Psalm 23:1
+/// (SYN)"). See [`name_for_operator`].
+pub fn slide_name_for_operator(name: &str, bibles: &[&Bible], language: &str) -> String {
+    let (verses, short) = match name.strip_suffix(')').and_then(|name| name.rsplit_once(" (")) {
+        Some((verses, short)) => (verses, Some(short)),
+        None => (name, None),
+    };
+    let renamed = name_for_operator(verses, bibles, language);
+    match short {
+        Some(short) => format!("{renamed} ({short})"),
+        None => renamed,
+    }
+}
+
 /// A passage named as the first translation names and numbers it (as `build_passage` titles
 /// its slides), named again for the operator in `language` (`en`, `ru`, `uk`) with that
 /// language's numbering, as people read it, so the name reads back as the same passage. See
@@ -1409,6 +1425,10 @@ mod tests {
         assert_eq!(name_for_operator("Псалтирь 22:1-6", &both, "en"), "Psalm 23:1-6");
         assert_eq!(name_for_operator("Псалтирь 22:1-6", &both, "ru"), "Псалом 22:1-6");
         assert_eq!(named_in("Псалтирь 50:3-21", Synodal, "en", &both, false), "Psalms 51:1-19");
+        // A slide's bar reads in the language the operator reads in, its Bible's short name kept.
+        assert_eq!(slide_name_for_operator("Псалтирь 22:1", &both, "en"), "Psalm 23:1");
+        assert_eq!(slide_name_for_operator("Псалтирь 22:1 (SYN)", &both, "en"), "Psalm 23:1 (SYN)");
+        assert_eq!(slide_name_for_operator("Псалтирь 22:1", &both, "ru"), "Псалом 22:1");
     }
 
     #[test]

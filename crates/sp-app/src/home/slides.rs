@@ -1227,6 +1227,9 @@ fn draw_slides(
     let list = view != SlideView::Grid;
     let mut last_group = None;
     let mut was_out = false;
+    // A Bible passage's slides are named as its first Bible names verses; the bar under each
+    // reads in the language the operator reads in (the Аа button), as the keypad and lists do.
+    let bible_names = deck.bible.then(|| (state.bible.bibles_in_use(), state.bible.names_language()));
     for (at, entry) in order.iter().enumerate() {
         let index = entry.slide;
         let Some((group, slide)) = song.slide(index) else { continue };
@@ -1360,6 +1363,13 @@ fn draw_slides(
         // Numbered in the order sung, under an arrangement.
         let number = format!("{:02}", entry.step.unwrap_or(index) + 1);
         let name = strip_name(group, slide);
+        let name = match &bible_names {
+            Some((bibles, language)) => {
+                let in_use: Vec<&sp_bible::Bible> = bibles.iter().map(|bible| bible.as_ref()).collect();
+                crate::bible::slide_name_for_operator(&name, &in_use, language)
+            }
+            None => name,
+        };
         // Slides the app makes (Bible passages, live captions) have an ink dot, as the Bible's
         // mark in the find box is ink; a group's colour is the church's own.
         let dot = if is_live {
