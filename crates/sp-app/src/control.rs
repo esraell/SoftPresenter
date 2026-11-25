@@ -4378,9 +4378,16 @@ mod tests {
     /// /trustlevel:0x20000` (a basic user: the administrators' group and the privileges taken
     /// away), which prints nothing itself, so the program writes to a file that is read once it
     /// says it has finished. (`runas` opens a console window for the program, which is why this
-    /// is done only from a full administrator's token, over ssh, where there is no screen.)
+    /// is done only from a full administrator's token: over ssh, where there is no screen, and
+    /// in the automatic checks on GitHub's Windows, whose tests have that token too.) Each run
+    /// has a folder of its own for its script and what the program wrote, never used again:
+    /// the tests run side by side, and while they shared one, each could read the other's
+    /// helper (the low-rights helper's words were taken for the refused user's, and the other
+    /// way round), or what the last run wrote, when a helper still running kept the folder
+    /// from being emptied.
     #[cfg(windows)]
     fn run_ordinary(program: &Path, args: &[&str], set: &[(&str, &Path)]) -> Result<String, String> {
+        static RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         if !runs_elevated() {
             let mut run = std::process::Command::new(program);
             run.args(args);
@@ -4390,7 +4397,8 @@ mod tests {
             let ran = run.output().map_err(|e| e.to_string())?;
             return Ok(format!("{}\n{}", String::from_utf8_lossy(&ran.stdout), String::from_utf8_lossy(&ran.stderr)));
         }
-        let scratch = socket_folder("ordinary");
+        let this_run = RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let scratch = socket_folder(&format!("ordinary{this_run}"));
         std::fs::create_dir_all(&scratch).map_err(|e| e.to_string())?;
         let (script, out) = (scratch.join("run.cmd"), scratch.join("out.txt"));
         let mut text = String::from("@echo off\r\n");
@@ -4522,7 +4530,15 @@ mod tests {
         // an administrator's full token would let in whatever the list says.
         let this = std::env::current_exe().expect("this test program");
         let helper = ["control::tests::windows_connect_helper", "--exact", "--nocapture", "--test-threads=1"];
-        let asks = |path: &Path| run_ordinary(&this, &helper, &[("SP_TEST_CONNECT", path)]).expect("the helper ran");
+        let asks = |path: &Path| {
+            let said = run_ordinary(&this, &helper, &[("SP_TEST_CONNECT", path)]).expect("the helper ran");
+            assert!(
+                said.contains("helper connect: "),
+                "NOTHING LEARNT: what was read back is not the connect helper's, so it says nothing about the \
+                 socket. It said:\n{said}"
+            );
+            said
+        };
         let first = asks(&path);
         assert!(first.contains("helper connect: connected"), "let in at first: {first}");
         let user = sp_winapi::current_user().expect("which user this is");
