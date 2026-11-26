@@ -260,14 +260,21 @@ pub fn laying_out() {
 /// toolkit asked for, the places it names as having asked for the soonest drawing (in the pass
 /// before) stand in for "a time the toolkit asked for".
 pub fn laid_out(ctx: &egui::Context, layout: Duration) {
-    if !on() {
-        return;
+    if on() {
+        note_layout(ctx, layout);
     }
+}
+
+fn note_layout(ctx: &egui::Context, layout: Duration) {
+    // The toolkit's causes are read before the book is taken, never while it is held: the
+    // toolkit calls the observer, which takes the book, with its own context locked, so taking
+    // the two the other way round here could leave this thread and the asking one waiting on
+    // each other for good.
+    let causes = ctx.repaint_causes();
     let mut book = book();
     book.times.layout += layout;
     let Some(at) = book.pending.iter().position(|why| *why == Why::Timer(Timer::Toolkit)) else { return };
     book.pending.remove(at);
-    let causes = ctx.repaint_causes();
     let places: Vec<String> = soonest(&causes, &book.delays_before)
         .into_iter()
         .map(|cause| {
@@ -434,6 +441,43 @@ impl Minute {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The toolkit calls the observer (which notes into the book) while its context is locked,
+    /// from whichever thread asked for the drawing; noting the layout reads the toolkit's causes.
+    /// A thread asking for drawings over and over while the window's thread notes its layouts
+    /// must never leave the two waiting on each other.
+    #[test]
+    fn a_drawing_asked_from_another_thread_never_stops_the_window() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let ctx = egui::Context::default();
+        ctx.set_repaint_observer(|info| book().delays.push(info.delay));
+        let stop = Arc::new(AtomicBool::new(false));
+        let asker = {
+            let (ctx, stop) = (ctx.clone(), stop.clone());
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    ctx.request_repaint_after(Duration::from_millis(5));
+                }
+            })
+        };
+        let (done, finished) = std::sync::mpsc::channel();
+        let noter = {
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                for _ in 0..20_000 {
+                    asked(Why::Timer(Timer::Toolkit));
+                    note_layout(&ctx, Duration::from_micros(1));
+                    book().delays.clear();
+                }
+                let _ = done.send(());
+            })
+        };
+        let finished = finished.recv_timeout(Duration::from_secs(30)).is_ok();
+        stop.store(true, Ordering::Relaxed);
+        assert!(finished, "the window's thread and the asking thread were left waiting on each other");
+        noter.join().unwrap();
+        asker.join().unwrap();
+    }
 
     #[test]
     fn places_are_said_from_the_crates_folder_on() {
