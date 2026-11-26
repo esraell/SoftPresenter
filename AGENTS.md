@@ -165,7 +165,7 @@ a minute on a Mac. One test alone:
   and says where.
 - **What a quit is checked for:** exit code 0, no `[crash]`, `panicked` or `Graphics error` in
   the log or on the standard error, and the socket gone.
-- **Skipped, out loud:** `SOFTPRESENTER_E2E=off` skips them all, as does a Linux computer with
+- **Skipped, out loud:** `SOFTPRESENTER_E2E=off` (or `off (why)`) skips them all, as does a Linux computer with
   no display; a part a computer can't do (sound, with no sound output) is skipped with the
   reason printed, and as a notice on a GitHub run.
 - **Switches it uses:** `SOFTPRESENTER_SLOW_WRITES` (the import), `SOFTPRESENTER_RELEASES_URL`

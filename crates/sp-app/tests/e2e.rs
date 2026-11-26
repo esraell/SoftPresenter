@@ -52,7 +52,7 @@ const SOCKET_PATH_MOST: usize = 100;
 /// Why every end-to-end test is skipped on this computer, if they are.
 fn skipped_here() -> Option<String> {
     if let Ok(said) = std::env::var("SOFTPRESENTER_E2E")
-        && matches!(said.trim().to_ascii_lowercase().as_str(), "off" | "0" | "no" | "false")
+        && switched_off(&said)
     {
         return Some(format!("SOFTPRESENTER_E2E={said}"));
     }
@@ -63,6 +63,24 @@ fn skipped_here() -> Option<String> {
         return Some("no display here (DISPLAY and WAYLAND_DISPLAY are unset); run them under xvfb-run".to_owned());
     }
     None
+}
+
+/// Whether `SOFTPRESENTER_E2E` says the tests are off: `off`, `0`, `no` or `false`, with the
+/// reason after it if one is given (`off (why)`), which is printed with the skip. A workflow
+/// once gave a reason, and as the whole value was compared the tests ran after all.
+fn switched_off(said: &str) -> bool {
+    let first = said.split(|c: char| c.is_whitespace() || c == '(' || c == ':').find(|word| !word.is_empty());
+    first.is_some_and(|word| matches!(word.to_ascii_lowercase().as_str(), "off" | "0" | "no" | "false"))
+}
+
+#[test]
+fn the_switch_that_turns_these_tests_off_may_carry_its_reason() {
+    for off in ["off", " OFF ", "0", "no", "false", "off (the app crashes on WARP)", "off: being fixed", "off(why)"] {
+        assert!(switched_off(off), "{off:?}");
+    }
+    for on in ["", "on", "1", "yes", "offline", "official (for now)"] {
+        assert!(!switched_off(on), "{on:?}");
+    }
 }
 
 /// Says that something was skipped and why, where it is seen: written straight to the process's
