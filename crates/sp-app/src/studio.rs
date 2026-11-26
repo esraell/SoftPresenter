@@ -1201,10 +1201,10 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         let clock = Rect::from_min_size(pos2(left - 10.0 - wide, middle - 14.5), vec2(wide, 29.0));
         ui.painter().rect_filled(clock, RADIUS, Color32::BLACK);
         ui.painter().rect_stroke(clock, RADIUS, Stroke::new(1.0, LINE), StrokeKind::Inside);
-        // The figures end at one place, so the seconds stay where they are when the hour gains
-        // or loses a figure.
-        let figures_end = clock.max.x - 12.0;
-        let at = pos2(figures_end - figures.size().x, middle - figures.size().y / 2.0);
+        // The figures are in the middle of the box (the owner: "for the clock that shows, can
+        // you center it to the box its in"); the box keeps its width, so nothing around it moves,
+        // and the time moves half a figure only when the hour gains or loses one.
+        let at = pos2(clock.center().x - figures.size().x / 2.0, middle - figures.size().y / 2.0);
         ui.painter().galley(at, figures, TEXT);
         let into_second = u64::from(chrono::Timelike::nanosecond(&now) % 1_000_000_000);
         ui.ctx().request_repaint_after(std::time::Duration::from_nanos(1_000_000_000 - into_second));
