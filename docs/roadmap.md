@@ -173,6 +173,7 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Messages styled by a theme, with their own transition, and taken off when a timer ends.** (started: five built-in styles; taken off by hand or after a number of seconds) · S–M · Low
 - **Timers from a playlist header.** Reaching a header starts, stops or resets a timer. (started: headers have a name only) · S · Low
 - **Prop collections and prop transitions.** Collections are S, transitions M. (started: one flat list, with a time for each prop to clear itself) · S–M · Low
+- **A polished, dependable macro editor.** Editing a macro's steps should be clear and quick, and a macro should be able to do and trigger whatever a service needs. · M · High
 - **Macro collections, icons, a filter and a list view.** (started: name, colour, actions, and running when the app starts) · S · Low
 - **Calendar.** Scheduled events that start a playlist, song, macro or recording, with repeats. · M · Low
 - **Action tiles to drag.** Drag an action onto a slide or macro from a panel of tiles. (started: Add Action menus) · S · Low
