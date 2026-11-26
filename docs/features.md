@@ -520,7 +520,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   by the arrows. With something on screen, Space, → and ← go on with that (a song can be run to
   its end with the reading picked), and Enter takes the pick. A click on a slide takes over from the pick, and the pick goes once a slide of its
   passage or song goes on screen, or another song, passage or view is opened. In the Bible
-  view, Enter with nothing picked does nothing.
+  view, Enter with nothing picked does nothing. However slowly the window draws (an Intel Mac's
+  takes some 60 ms a frame while a song's slide pictures are made), keys act in the order they
+  were pressed, each on what the keys before it left: Return in the find box and a quick Enter
+  after it put the slide picked on screen, ↓ and a quick Enter in the playlist start the item ↓
+  opened, and letters typed straight after `/` go into the find box, never to the show.
 - A playlist also holds **pictures and videos** from the media bin (the countdown video),
   **media playlists** (the announcement loop) and **placeholders** (a place kept for the sermon
   slides). A picture or video goes in from its right-click menu (Add to Playlist "Sunday"), by

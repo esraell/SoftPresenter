@@ -1009,8 +1009,11 @@ fn show_key_command_on(key: &Key, show: &Show, f_keys: bool) -> Option<Command> 
 /// view a letter or a number starts the next reference in Scripture Lookup (see `bible_area` in
 /// `home.rs`), never a jump to a group of the song on screen: after Return has picked a verse and
 /// given the keyboard back, typing "ps 23" must not put the song's second verse up with its "s".
+/// While the find box is open every key is the box's, before the box has drawn with the keyboard
+/// too: a letter typed straight after `/` is typed in it, never a slide's hot key or a group's
+/// letter, and Escape closes it, clearing nothing.
 fn show_key_held_back(state: &home::HomeState, ctx: &egui::Context, key: &Key) -> bool {
-    if state.key_sheet {
+    if state.key_sheet || state.library_search.is_some() {
         return true;
     }
     if state.bible_open && matches!(key, Key::Character(_)) && !opens_find(key) {
@@ -1085,6 +1088,117 @@ fn enter_key_is_free(state: &home::HomeState, ctx: &egui::Context) -> bool {
         && !popup_takes_show_keys(ctx)
         && state.new_song_sheet.is_none()
         && !state.alert_open()
+}
+
+/// Where a key pressed in the home window goes (see `window_event`), judged from the window as
+/// it was last drawn.
+#[derive(Clone, Debug, PartialEq)]
+enum KeyGoes {
+    /// `/`: the find box opens, empty (`find_key_is_free`).
+    Find,
+    /// A key that runs the show, acted on at once (`home_key_command`): Space, the arrows, a hot
+    /// key, Escape.
+    Show(Command),
+    /// Enter: the slide picked goes on screen, or the open item of the playlist
+    /// (`enter_key_is_free`).
+    Enter,
+    /// The window's: passed to the interface, which acts on it as it next draws.
+    Window,
+}
+
+/// Where a key pressed in the home window goes, with `held` the modifiers held: `/` opens the
+/// find box, from wherever the keyboard runs the show; the keys that run the show act at once
+/// and are not passed on, so Space can never also press whatever control happens to have the
+/// keyboard; Enter puts the slide picked on screen, or the open item, when no control has the
+/// keyboard and nothing is open over the window, and not when held down, so a Return held in
+/// the find box can't go on to put what it opened on screen. Anything else is the window's.
+fn home_key_goes(
+    state: &home::HomeState,
+    ctx: &egui::Context,
+    show: &Show,
+    key: &Key,
+    repeat: bool,
+    held: winit::keyboard::ModifiersState,
+    f_keys: bool,
+) -> KeyGoes {
+    let (command, control, alt) = (held.super_key(), held.control_key(), held.alt_key());
+    if opens_find(key) && find_key_is_free(state, ctx) && !command && !control && !alt {
+        return KeyGoes::Find;
+    }
+    if !command
+        && !control
+        && let Some(asked) = home_key_command(state, ctx, key, repeat, show, f_keys)
+    {
+        return KeyGoes::Show(asked);
+    }
+    if matches!(key, Key::Named(NamedKey::Enter))
+        && !repeat
+        && enter_key_is_free(state, ctx)
+        && !command
+        && !control
+        && !alt
+    {
+        return KeyGoes::Enter;
+    }
+    KeyGoes::Window
+}
+
+/// Whether a key pressed in the home window waits for the window to draw what it was given before
+/// it (`waiting`, not drawn yet): when that may change where keys go or what they act on (a key
+/// that isn't typing: Return, Escape, Tab, an arrow, Delete, one held with Command, Control or
+/// Option; a mouse button), and the key is one `home_key_goes` may keep from the window (Enter,
+/// `/`, a key that runs the show). Keys then act in the order they were pressed, each on the
+/// window as the ones before it left it, however slowly the window draws (an Intel Mac's takes some
+/// 60 ms a frame while the slides' pictures are made): Return in the find box and a quick
+/// Enter after it put the slide picked on screen, as they do with a frame between them, and ↓
+/// and a quick Enter start the item ↓ opened, not the one open before. A key held down goes on
+/// at once.
+fn key_waits_for_drawing(waiting: &[egui::Event], key: &Key, repeat: bool, show: &Show, f_keys: bool) -> bool {
+    use egui::Key as K;
+    let changes_keys = |event: &egui::Event| match event {
+        egui::Event::Key { pressed: true, key, modifiers, .. } => {
+            modifiers.command
+                || modifiers.ctrl
+                || modifiers.alt
+                || modifiers.mac_cmd
+                || matches!(
+                    key,
+                    K::Enter
+                        | K::Escape
+                        | K::Tab
+                        | K::ArrowUp
+                        | K::ArrowDown
+                        | K::ArrowLeft
+                        | K::ArrowRight
+                        | K::Backspace
+                        | K::Delete
+                        | K::Insert
+                        | K::Home
+                        | K::End
+                        | K::PageUp
+                        | K::PageDown
+                )
+        }
+        egui::Event::PointerButton { .. } | egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) => true,
+        _ => false,
+    };
+    let kept = matches!(key, Key::Named(NamedKey::Enter))
+        || opens_find(key)
+        || show_key_command_on(key, show, f_keys).is_some();
+    !repeat && kept && waiting.iter().any(changes_keys)
+}
+
+/// Testing aid: SOFTPRESENTER_LOG_KEYS=1, in a copy with its own data folder
+/// (SOFTPRESENTER_DATA), says in the log ("keys") where each key pressed in the home window went
+/// and what was picked and on screen after it (`App::log_key`), and each drawing of the window
+/// that took 40 ms or more: to see on a slow computer, with a person at the keyboard, that keys
+/// pressed quickly one after another act in turn. A letter is said as "a letter", never which.
+fn log_keys() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var_os("SOFTPRESENTER_DATA").is_some()
+            && std::env::var("SOFTPRESENTER_LOG_KEYS").is_ok_and(|on| on == "1")
+    })
 }
 
 /// True for the key that opens the find box in the bar along the top: `/`.
@@ -4033,6 +4147,45 @@ impl App {
             Some(running::Do::Start { item, last }) => self.start_item(item, last),
             Some(running::Do::Say(_) | running::Do::Stay(_)) | None => {}
         }
+    }
+
+    /// Says in the log where a key pressed in the home window went (see `log_keys`): whether it
+    /// waited for the window to draw what came before it, and how long that took; where it went;
+    /// and, after it, the slide picked, the song chosen, the slide on screen (as song and slide,
+    /// from 1), the find box and who has the keyboard. A letter is said as "a letter".
+    fn log_key(&self, key: &winit::event::KeyEvent, waited: Option<Duration>, goes: &KeyGoes) {
+        let Some(running) = self.running.as_ref() else { return };
+        let state = &running.home_state;
+        let name = match &key.logical_key {
+            Key::Named(named) => format!("{named:?}"),
+            key if opens_find(key) => "/".to_owned(),
+            Key::Character(_) => "a letter".to_owned(),
+            _ => "another key".to_owned(),
+        };
+        let held = if key.repeat { " (held down)" } else { "" };
+        let waited = waited.map_or(String::new(), |took| {
+            format!("waited {} ms for the window to draw what came before it, then ", took.as_millis())
+        });
+        let at = |at: Option<sp_engine::SlideRef>| {
+            at.map_or_else(|| "nothing".to_owned(), |at| format!("song {} slide {}", at.presentation + 1, at.slide + 1))
+        };
+        let keyboard = if running.egui_ctx.text_edit_focused() {
+            "a text box"
+        } else if running.egui_ctx.memory(|memory| memory.focused().is_some()) {
+            "a control"
+        } else {
+            "the show"
+        };
+        applog::event(
+            "keys",
+            &format!(
+                "{name}{held}: {waited}went to {goes:?}; picked {}, chosen song {}, on screen {}, find box {}, keyboard with {keyboard}",
+                at(state.pick(&self.show)),
+                self.show.selected() + 1,
+                at(self.show.live()),
+                if state.library_search.is_some() { "open" } else { "closed" },
+            ),
+        );
     }
 
     /// Carries out a command from `sp` or from a remote page (`from` names the page's device)
@@ -11178,57 +11331,64 @@ impl ApplicationHandler<AppEvent> for App {
         if id != running.home_window.id() {
             return;
         }
-        // `/` opens the find box, from wherever the keyboard runs the show: not while something is
-        // being typed, not in the Edit view (its keyboard is the editor's), not over a sheet, a
-        // question or a menu. It is not passed on, so the box opens empty.
+        // A key pressed while what the window was given before it may change where it goes, and
+        // is still waiting to be drawn: the window draws it first, here, within the event (as a
+        // resize does), so the key goes where the keys before it left the keyboard
+        // (`key_waits_for_drawing`).
+        let mut waited = None;
         if let WindowEvent::KeyboardInput { event: key, .. } = &event
             && key.state == ElementState::Pressed
-            && opens_find(&key.logical_key)
-            && find_key_is_free(&running.home_state, &running.egui_ctx)
-            && !self.held.super_key()
-            && !self.held.control_key()
-            && !self.held.alt_key()
-        {
-            running.home_state.library_search = Some((String::new(), 0));
-            running.home_window.request_redraw();
-            return;
-        }
-        // Show keys act at once and are not passed on, so Space can never also press whatever
-        // control happens to have the keyboard. Typing in a text box is left alone.
-        if let WindowEvent::KeyboardInput { event: key, .. } = &event
-            && key.state == ElementState::Pressed
-            && !self.held.super_key()
-            && !self.held.control_key()
-            && let Some(command) = home_key_command(
-                &running.home_state,
-                &running.egui_ctx,
+            && key_waits_for_drawing(
+                &running.egui_state.egui_input().events,
                 &key.logical_key,
                 key.repeat,
                 &self.show,
                 keys::f_keys(),
             )
         {
-            let logical = key.logical_key.clone();
-            if !self.pick_key(&logical) {
-                self.show_key(command);
-            }
-            return;
+            let drawing = Instant::now();
+            self.window_event(el, id, WindowEvent::RedrawRequested);
+            waited = Some(drawing.elapsed());
         }
-        // Enter puts the slide picked on screen, or the open item of the playlist from its first
-        // slide, when no control has the keyboard and nothing is open over the window. Not when
-        // held down, so a Return held in the find box can't go on to put what it opened on screen.
+        // A key pressed: `/` opens the find box (not passed on, so the box opens empty), a key
+        // that runs the show acts at once, Enter puts the slide picked on screen; anything else
+        // is the window's (`home_key_goes`).
         if let WindowEvent::KeyboardInput { event: key, .. } = &event
             && key.state == ElementState::Pressed
-            && matches!(key.logical_key, Key::Named(NamedKey::Enter))
-            && !key.repeat
-            && enter_key_is_free(&running.home_state, &running.egui_ctx)
-            && !self.held.super_key()
-            && !self.held.control_key()
-            && !self.held.alt_key()
+            && let Some(running) = self.running.as_mut()
         {
-            self.enter_key();
-            return;
+            let goes = home_key_goes(
+                &running.home_state,
+                &running.egui_ctx,
+                &self.show,
+                &key.logical_key,
+                key.repeat,
+                self.held,
+                keys::f_keys(),
+            );
+            match &goes {
+                KeyGoes::Find => {
+                    running.home_state.library_search = Some((String::new(), 0));
+                    running.home_window.request_redraw();
+                }
+                KeyGoes::Show(command) => {
+                    if !self.pick_key(&key.logical_key) {
+                        self.show_key(*command);
+                    }
+                }
+                KeyGoes::Enter => self.enter_key(),
+                KeyGoes::Window => {}
+            }
+            if log_keys() {
+                self.log_key(key, waited, &goes);
+            }
+            if goes != KeyGoes::Window {
+                return;
+            }
         }
+        let Some(running) = self.running.as_mut() else {
+            return;
+        };
         // The interface toolkit answers "repaint" to a redraw request itself. Asking for a redraw
         // in reply to a redraw never ends: the window then redraws as fast as it can for ever,
         // which is what filled the computer's memory. A redraw request is not passed to it.
@@ -11276,6 +11436,9 @@ impl ApplicationHandler<AppEvent> for App {
                 let drawing = Instant::now();
                 let commands = self.draw_home();
                 self.home_timing.add(drawing.elapsed());
+                if log_keys() && drawing.elapsed() >= Duration::from_millis(40) {
+                    applog::event("keys", &format!("the window took {} ms to draw", drawing.elapsed().as_millis()));
+                }
                 reports::stats::ui_frame(drawing.elapsed());
                 reports::stats::phase(reports::stats::Who::Ui, reports::stats::UI_DRAWN);
                 self.resize_testing_aid();
@@ -12806,5 +12969,254 @@ mod tests {
         assert_eq!(names(0), ["Welcome", "Anchor Song", "Evening Lantern", "Dawn Road", "Sermon"]);
         assert_eq!(names(1), ["Anchor Song", "Evening Lantern", "Dawn Road"]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The home window as `window_event` runs it, with no GPU or window: a key pressed waits for
+    /// the window to draw first when `key_waits_for_drawing` says so, then goes where
+    /// `home_key_goes` sends it, judged from the window as it was last drawn; a key passed on
+    /// waits in the interface's input for the next frame, after which the frame's commands are
+    /// carried out, as the app does. Enter is carried out as `enter_key` does with a library or
+    /// the playlist listed (`entered` keeps the open item it saw).
+    struct Keyboard {
+        ctx: egui::Context,
+        show: Show,
+        state: home::HomeState,
+        waiting: Vec<egui::Event>,
+        time: f64,
+        entered: Vec<Option<usize>>,
+    }
+
+    impl Keyboard {
+        /// Alpha and Beta, three slides each, then the Bible view's two places, with Alpha's first
+        /// slide on screen, as during a service; the window drawn once.
+        fn new(state: home::HomeState) -> Keyboard {
+            let words =
+                |first: &str| format!("[Verse 1]\n{first}\n\n[Verse 2]\nSecond lines\n\n[Chorus]\nThird lines\n");
+            let mut all = vec![
+                Arc::new(parse_song_text("Alpha", &words("Morning lines"))),
+                Arc::new(parse_song_text("Beta", &words("Evening lines"))),
+            ];
+            for _ in 0..2 {
+                all.push(Arc::new(sp_model::Presentation {
+                    id: Uuid::new_v4(),
+                    title: "Bible".to_owned(),
+                    groups: Vec::new(),
+                    ..(*all[0]).clone()
+                }));
+            }
+            let mut show = Show::new(all);
+            show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+            let mut state = state;
+            state.bible.slots = Some([2, 3]);
+            state.song_keys = vec!["title:Alpha".to_owned(), "title:Beta".to_owned()];
+            let mut keyboard = Keyboard {
+                ctx: egui::Context::default(),
+                show,
+                state,
+                waiting: Vec::new(),
+                time: 0.0,
+                entered: Vec::new(),
+            };
+            keyboard.draw();
+            keyboard
+        }
+
+        /// One frame of the window, with the input waiting, then its commands carried out.
+        fn draw(&mut self) {
+            self.time += 0.1;
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))),
+                time: Some(self.time),
+                events: std::mem::take(&mut self.waiting),
+                ..egui::RawInput::default()
+            };
+            let (show, state) = (&self.show, &mut self.state);
+            let mut commands = Vec::new();
+            self.ctx
+                .run_ui(raw, |ui| {
+                    commands.extend(home_ui(
+                        ui,
+                        show,
+                        state,
+                        &Theme::builtin(),
+                        &mut |_| None,
+                        home::Preview::default(),
+                        None,
+                    ));
+                })
+                .drop_without_applying_deltas();
+            for command in commands {
+                self.show.apply(command);
+            }
+            // A passage just looked up goes into its place.
+            if let Some((slot, passage)) = self.state.bible.pending.take() {
+                self.show.replace_presentation(slot, Arc::new(passage));
+            }
+        }
+
+        /// A key pressed, as the window gets it: drawn first if it waits for what is waiting.
+        fn press(&mut self, key: Key) {
+            if key_waits_for_drawing(&self.waiting, &key, false, &self.show, false) {
+                self.draw();
+            }
+            match home_key_goes(&self.state, &self.ctx, &self.show, &key, false, Default::default(), false) {
+                KeyGoes::Find => self.state.library_search = Some((String::new(), 0)),
+                KeyGoes::Show(command) => {
+                    self.show.apply(command);
+                }
+                KeyGoes::Enter => {
+                    let picked = self.state.pick(&self.show);
+                    let listed = if self.state.playlist_open {
+                        running::Listed::Playlist(self.state.services.chosen)
+                    } else {
+                        running::Listed::Library
+                    };
+                    self.entered.push(self.state.services.chosen);
+                    if let Some(running::Do::Show(command)) = running::enter(&[], listed, picked) {
+                        self.show.apply(command);
+                    }
+                }
+                // As egui-winit passes it on: the key, and the letter it types.
+                KeyGoes::Window => {
+                    let (named, typed) = match &key {
+                        Key::Named(NamedKey::Enter) => (egui::Key::Enter, None),
+                        Key::Named(NamedKey::Escape) => (egui::Key::Escape, None),
+                        Key::Named(NamedKey::ArrowDown) => (egui::Key::ArrowDown, None),
+                        Key::Named(NamedKey::ArrowUp) => (egui::Key::ArrowUp, None),
+                        Key::Named(NamedKey::Space) => (egui::Key::Space, Some(" ".to_owned())),
+                        Key::Character(letter) => {
+                            (egui::Key::from_name(&letter.to_uppercase()).expect("a letter"), Some(letter.to_string()))
+                        }
+                        other => panic!("not passed on in these tests: {other:?}"),
+                    };
+                    self.waiting.push(egui::Event::Key {
+                        key: named,
+                        physical_key: Some(named),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    });
+                    self.waiting.extend(typed.map(egui::Event::Text));
+                }
+            }
+        }
+
+        fn live(&self) -> Option<(usize, usize)> {
+            self.show.live().map(|at| (at.presentation, at.slide))
+        }
+    }
+
+    /// The find box open with these words typed, and drawn with the keyboard.
+    fn found(words: &str) -> Keyboard {
+        let state = home::HomeState { library_search: Some((words.to_owned(), 0)), ..home::HomeState::default() };
+        let mut keyboard = Keyboard::new(state);
+        keyboard.draw();
+        assert!(keyboard.ctx.text_edit_focused(), "the find box has the keyboard");
+        keyboard
+    }
+
+    #[test]
+    fn return_then_enter_with_a_frame_between_picks_the_song_then_puts_it_on_screen() {
+        let mut keyboard = found("beta");
+        keyboard.press(Key::Named(NamedKey::Enter));
+        keyboard.draw();
+        assert_eq!(keyboard.show.selected(), 1, "Beta is open");
+        assert_eq!(keyboard.state.pick(&keyboard.show), Some(sp_engine::SlideRef { presentation: 1, slide: 0 }));
+        assert_eq!(keyboard.live(), Some((0, 0)), "Alpha stays on screen");
+        keyboard.press(Key::Named(NamedKey::Enter));
+        assert_eq!(keyboard.live(), Some((1, 0)), "Enter puts Beta's first slide on screen");
+    }
+
+    #[test]
+    fn return_then_enter_pressed_before_the_window_draws_still_puts_the_picked_slide_on_screen() {
+        // On a computer that draws the window slowly (an Intel Mac, whose painters work slides
+        // out on the processor) the second press can come before the frame that acts on the
+        // first: it must still be Enter on what the first opened, not a second Return in the find
+        // box, which only opens it again.
+        let mut keyboard = found("beta");
+        keyboard.press(Key::Named(NamedKey::Enter));
+        keyboard.press(Key::Named(NamedKey::Enter));
+        keyboard.draw();
+        keyboard.draw();
+        assert_eq!(keyboard.show.selected(), 1, "Beta is open");
+        assert_eq!(keyboard.live(), Some((1, 0)), "Beta's first slide on screen");
+        assert_eq!(keyboard.state.pick(&keyboard.show), None, "the pick has gone on screen");
+        // By a line of its words: that slide.
+        let mut keyboard = found("third lines");
+        keyboard.press(Key::Named(NamedKey::ArrowDown));
+        keyboard.press(Key::Named(NamedKey::Enter));
+        keyboard.press(Key::Named(NamedKey::Enter));
+        keyboard.draw();
+        assert_eq!(keyboard.live(), Some((1, 2)), "Beta's chorus on screen");
+    }
+
+    #[test]
+    fn return_then_a_quick_enter_works_with_the_playlist_listed_with_nothing_on_screen_and_for_a_passage() {
+        let enter = Key::Named(NamedKey::Enter);
+        for (playlist, cleared) in [(true, false), (false, true), (true, true)] {
+            let mut state = home::HomeState {
+                library_search: Some(("beta".to_owned(), 0)),
+                playlist_open: playlist,
+                ..home::HomeState::default()
+            };
+            if playlist {
+                state.services.add(crate::service::Item::song("title:Alpha".to_owned(), "Alpha".to_owned()));
+                state.services.chosen = Some(0);
+            }
+            let mut keyboard = Keyboard::new(state);
+            if cleared {
+                keyboard.show.apply(Command::ClearAll);
+            }
+            keyboard.draw();
+            keyboard.press(enter.clone());
+            keyboard.press(enter.clone());
+            keyboard.draw();
+            let case = format!("playlist listed {playlist}, cleared {cleared}");
+            assert_eq!(keyboard.live(), Some((1, 0)), "{case}: the slide picked, not the open item");
+        }
+        // A passage found by its reference: its first verse, among its chapter's slides.
+        let mut keyboard = found("jn 3:16-18");
+        keyboard.press(enter.clone());
+        keyboard.press(enter);
+        keyboard.draw();
+        let slot = keyboard.state.bible.slots.map(|slots| slots[keyboard.state.bible.showing]);
+        assert_eq!(keyboard.live(), slot.map(|slot| (slot, 15)), "John 3:16 on screen");
+    }
+
+    #[test]
+    fn down_then_enter_in_the_playlist_before_the_window_draws_starts_the_item_moved_to() {
+        let mut state = home::HomeState { playlist_open: true, ..home::HomeState::default() };
+        for title in ["Alpha", "Beta"] {
+            state.services.add(crate::service::Item::song(format!("title:{title}"), title.to_owned()));
+        }
+        state.services.chosen = Some(0);
+        let mut keyboard = Keyboard::new(state);
+        keyboard.draw();
+        keyboard.press(Key::Named(NamedKey::ArrowDown));
+        keyboard.press(Key::Named(NamedKey::Enter));
+        keyboard.draw();
+        assert_eq!(keyboard.state.services.chosen, Some(1), "\u{2193} opened Beta");
+        assert_eq!(keyboard.entered, vec![Some(1)], "and Enter started Beta, the item \u{2193} opened");
+    }
+
+    #[test]
+    fn letters_and_escape_typed_right_after_slash_are_the_find_boxs_never_the_shows() {
+        // "c" is the chorus's letter: typed straight after `/`, before the box has drawn with
+        // the keyboard, it must go into the box, not put Alpha's chorus on screen.
+        let mut keyboard = Keyboard::new(home::HomeState::default());
+        keyboard.press(Key::Character("/".into()));
+        keyboard.press(Key::Character("c".into()));
+        keyboard.draw();
+        keyboard.draw();
+        assert_eq!(keyboard.live(), Some((0, 0)), "Alpha's first slide stays on screen");
+        assert_eq!(keyboard.state.library_search.as_ref().map(|(typed, _)| typed.as_str()), Some("c"));
+        // Escape straight after `/` closes the box, and clears nothing (as before: kept so).
+        let mut keyboard = Keyboard::new(home::HomeState::default());
+        keyboard.press(Key::Character("/".into()));
+        keyboard.press(Key::Named(NamedKey::Escape));
+        keyboard.draw();
+        keyboard.draw();
+        assert_eq!(keyboard.live(), Some((0, 0)), "nothing cleared");
+        assert!(keyboard.state.library_search.is_none(), "the find box closed");
     }
 }

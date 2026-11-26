@@ -1789,6 +1789,14 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
     // While a search is open the box holds its words; otherwise it is empty.
     let mut none = String::new();
     let open = state.library_search.is_some();
+    // A search opened from the menu, by its shortcut, by `/` or by a click types here: the box
+    // takes the keyboard before it reads the keys, so what was typed straight after `/`, before
+    // the box had drawn with the keyboard, goes into it (the app keeps those keys from the show,
+    // `show_key_held_back` in `main.rs`). Asked only when it hasn't the keyboard, as asking
+    // interrupts a composition being typed.
+    if open && !focused {
+        ui.memory_mut(|memory| memory.request_focus(id));
+    }
     let text = state.library_search.as_mut().map_or(&mut none, |(words, _)| words);
     let inner =
         Rect::from_min_max(pos2(find.min.x + 16.0, find.min.y + 2.0), pos2(find.max.x - 44.0, find.max.y - 2.0));
@@ -1813,10 +1821,7 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
         .align(Align2::LEFT_CENTER)
         .desired_width(inner.width());
     let response = ui.put(inner, field);
-    if open {
-        // A search opened from the menu, by its shortcut or by a click types here.
-        response.request_focus();
-    } else if response.has_focus() {
+    if !open && response.has_focus() {
         state.library_search = Some((none, 0));
     }
     // The key that finds, at the right end, until the box has the keyboard.
