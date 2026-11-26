@@ -206,11 +206,22 @@ impl Lasting {
     }
 }
 
-/// How the app's own resident memory stands, in megabytes, as the system reports it.
-pub fn memory_mb() -> Option<u64> {
-    let out =
-        std::process::Command::new("ps").args(["-o", "rss=", "-p", &std::process::id().to_string()]).output().ok()?;
-    String::from_utf8_lossy(&out.stdout).trim().parse::<u64>().ok().map(|kb| kb / 1024)
+/// How much memory the app holds, in megabytes, for the log, as the system reports it
+/// ("480 MB resident"; on Windows "480 MB private"), or `None` when it can't be asked.
+pub fn memory_line() -> Option<String> {
+    #[cfg(windows)]
+    {
+        // Windows has no `ps`: its private bytes, the figure Task Manager's Memory column shows.
+        sp_winapi::process_stats().map(|stats| format!("{} MB private", stats.app_private_bytes >> 20))
+    }
+    #[cfg(not(windows))]
+    {
+        let out = std::process::Command::new("ps")
+            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&out.stdout).trim().parse::<u64>().ok().map(|kb| format!("{} MB resident", kb / 1024))
+    }
 }
 
 /// Counts and times something done again and again, such as drawing a window, and says how it

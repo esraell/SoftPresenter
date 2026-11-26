@@ -11967,10 +11967,10 @@ impl ApplicationHandler<AppEvent> for App {
                 }
                 let thumbnails = self.running.as_ref().map(|running| running.thumbs.spare_bytes() >> 20);
                 self.home_timing.report_each_minute("window", || {
-                    let resident = applog::memory_mb().map_or_else(String::new, |mb| format!("{mb} MB resident"));
-                    // What the painter of the thumbnails keeps ready between pictures.
-                    thumbnails
-                        .map_or(resident.clone(), |held| format!("{resident}, thumbnails painter holds {held} MB"))
+                    // What the app holds, and what the painter of the thumbnails keeps ready
+                    // between pictures; either may be missing, and then leaves no gap.
+                    let held = thumbnails.map(|held| format!("thumbnails painter holds {held} MB"));
+                    [applog::memory_line(), held].into_iter().flatten().collect::<Vec<_>>().join(", ")
                 });
                 self.apply(commands);
                 // Testing aid: drag files over the window (SOFTPRESENTER_HOVER, kept there, for a
