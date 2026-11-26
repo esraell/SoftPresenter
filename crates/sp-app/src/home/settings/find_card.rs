@@ -85,17 +85,19 @@ fn searching(ui: &mut egui::Ui, state: &mut Card) {
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
 }
 
-/// Found nothing: the places it looked in, Search Another Folder… and Find Again.
+/// Found nothing: the places it looked in (or that it stopped before it had looked
+/// everywhere), Search Another Folder… and Find Again.
 fn nothing_found(ui: &mut egui::Ui, state: &mut Card) {
     let places: Vec<String> = state.looked.iter().map(|place| place.words()).collect();
-    note(
-        ui,
-        &tf(
+    let words = match state.ended.words() {
+        Some(cut) => format!("{cut} {}", t("settings.find.none_so_far", "Nothing was found until then.")),
+        None => tf(
             "settings.find.none",
             "No songbooks, libraries or song files were found in {places}.",
             &[("places", &places.join(", "))],
         ),
-    );
+    };
+    note(ui, &words);
     match keys_line(ui, "find none", "", &[Key::plain(another_folder()), Key::plain(find_again())]) {
         Some(0) => state.asks.push(Ask::AnotherFolder),
         Some(_) => state.asks.push(Ask::Find),
@@ -103,9 +105,13 @@ fn nothing_found(ui: &mut egui::Ui, state: &mut Card) {
     }
 }
 
-/// What was found: a row for each, ticked to import (one with nothing new, or that couldn't be
-/// read, dimmed and unticked), what comes in of them, Find Again and Import.
+/// What was found: that the search stopped before it had looked everywhere, when it did; a row
+/// for each, ticked to import (one with nothing new, or that couldn't be read, dimmed and
+/// unticked), what comes in of them, Find Again and Import.
 fn found(ui: &mut egui::Ui, state: &mut Card) {
+    if let Some(cut) = state.ended.words() {
+        note(ui, &format!("{cut} {}", t("settings.find.so_far", "These are what it found until then.")));
+    }
     for at in 0..state.sources.len() {
         let ticked = state.ticked.get(at).copied().unwrap_or(false);
         if source_row(ui, &state.sources[at], ticked, true)
@@ -294,7 +300,7 @@ fn source_row(ui: &mut egui::Ui, source: &Source, ticked: bool, can_tick: bool) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::find_songs::{Brought, PlaceName, Read, Usual, Where};
+    use crate::find_songs::{Brought, Ended, PlaceName, Read, Usual, Where};
     use crate::home::HomeState;
     use crate::home::settings::{Pane, settings_ui};
     use sp_engine::Show;
@@ -455,6 +461,21 @@ mod tests {
         let none = "No songbooks, libraries or song files were found in Documents, Downloads, Desktop, SoftProjector\u{2019}s folder.";
         assert!(crate::studio::tests::place_of(&drawn, none).is_some());
         drawn.drop_without_applying_deltas();
+        // A search cut short says so, over what it found, or that it found nothing until then.
+        let mut state = state_in(Phase::Found);
+        state.find_songs.ended = Ended::TooLong;
+        let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
+        let cut = "It stopped after 90 seconds, the longest it looks, before it had looked everywhere. These are what it found until then.";
+        assert!(crate::studio::tests::place_of(&drawn, cut).is_some());
+        drawn.drop_without_applying_deltas();
+        state.find_songs.ended = Ended::Stopped;
+        state.find_songs.sources.clear();
+        state.find_songs.ticked.clear();
+        let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
+        let cut = "It was stopped before it had looked everywhere. Nothing was found until then.";
+        assert!(crate::studio::tests::place_of(&drawn, cut).is_some());
+        assert!(crate::studio::tests::place_of(&drawn, none).is_none(), "it doesn't say it looked everywhere");
+        drawn.drop_without_applying_deltas();
         // Done says what came in, the count in bold.
         let words = brought_words(state_in(Phase::Done).find_songs.brought.as_ref().unwrap()).concat();
         assert_eq!(
@@ -472,6 +493,8 @@ mod tests {
                 for phase in [Phase::Before, Phase::Searching, Phase::Found, Phase::Importing, Phase::Done] {
                     let mut state = state_in(phase);
                     state.find_songs.added.push(std::path::PathBuf::from("/Volumes/Old laptop/Worship songs 2019"));
+                    // The longest words a search cut short says.
+                    state.find_songs.ended = Ended::TooMany;
                     let ctx = crate::studio::tests::styled();
                     let show = Show::new(Vec::new());
                     let mut drawn = Vec::new();

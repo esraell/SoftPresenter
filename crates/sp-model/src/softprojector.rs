@@ -14,7 +14,7 @@
 //! `chorus_after.rs`, which songs made as text follow too.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 
 use crate::chorus_after::{CHORUS_AFTER_EACH_VERSE, Part, sung_order};
@@ -440,6 +440,10 @@ pub fn from_softprojector(number: Option<i64>, title: &str, words: &str, music: 
     let mut chorus: Option<usize> = None;
     let mut last_verse: Option<usize> = None;
     let mut choruses = 0;
+    // Every group's name so far, to tell at once whether a chorus's name is taken (looking
+    // through the groups each time grew with the square of a song's choruses: 250,000 of them
+    // took 39 seconds).
+    let mut names: HashSet<String> = HashSet::new();
     for (kind, name, words) in blocks {
         let words = words.join("\n").trim().to_owned();
         if words.is_empty() {
@@ -456,22 +460,25 @@ pub fn from_softprojector(number: Option<i64>, title: &str, words: &str, music: 
             }
             Some((Kind::Chorus, _)) => {
                 choruses += 1;
-                let name = if name.is_empty() || (choruses > 1 && groups.iter().any(|g| g.name == name)) {
+                let name = if name.is_empty() || (choruses > 1 && names.contains(&name)) {
                     format!("{name} {choruses}").trim().to_owned()
                 } else {
                     name
                 };
                 groups.push(new_group(&name, slide));
+                names.insert(name);
                 parts.push(Part::Chorus);
                 chorus = Some(groups.len() - 1);
             }
             Some((Kind::Verse, _)) => {
                 groups.push(new_group(&name, slide));
+                names.insert(name);
                 parts.push(Part::Verse);
                 last_verse = Some(groups.len() - 1);
             }
             _ => {
                 groups.push(new_group(&name, slide));
+                names.insert(name);
                 parts.push(Part::Other);
             }
         }
@@ -588,6 +595,21 @@ mod tests {
                 "Припев 3"
             ]
         );
+    }
+
+    #[test]
+    fn a_chorus_named_as_any_part_before_it_is_numbered() {
+        // A second chorus is numbered when its name is any part's before it, a verse's or
+        // another kind's too; a first chorus never is. Thousands of choruses take no longer each.
+        let text = "Chorus\nOne\n\nVerse 1\nTwo\n\nChorus\nThree\n\nBridge\nFour\n\nChorus\nFive\n\n\
+            Verse 1\nSix\n\nVerse 1\nSeven\n\nBridge\nEight\n";
+        let song = from_softprojector(None, "Names", "", "", text);
+        let names: Vec<&str> = song.groups.iter().map(|group| group.name.as_str()).collect();
+        assert_eq!(names, ["Chorus", "Verse 1", "Chorus 2", "Bridge", "Chorus 3", "Verse 1", "Verse 1", "Bridge"]);
+        let many: String = (0..20_000).map(|at| format!("Chorus {at}\nx\n\nChorus\ny\n")).collect();
+        let song = from_softprojector(None, "Many", "", "", &many);
+        assert_eq!(song.groups.len(), 40_000);
+        assert_eq!(song.groups[3].name, "Chorus 4", "a name taken is numbered by the choruses so far");
     }
 
     #[test]

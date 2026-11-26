@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use sp_model::{Presentation, Uuid};
 
 use crate::control::Reply;
-use crate::find_songs::{self, Ask, Brought, Found, Phase, Source};
+use crate::find_songs::{self, Ask, Brought, Ended, Found, Phase, Source};
 use crate::i18n::{t, tf};
 
 /// How long each turn of taking songs in may take on the main thread, before the window and
@@ -30,6 +30,9 @@ const BATCH: usize = 50;
 #[derive(Default)]
 pub struct Finding {
     search: Option<find_songs::Search>,
+    /// The thread of the search last stopped, which the next search waits for: two never look at
+    /// once.
+    stopping: Option<std::thread::JoinHandle<()>>,
     /// The last search's number.
     searches: u64,
     importing: Option<Importing>,
@@ -90,8 +93,8 @@ struct Importing {
 }
 
 /// The sources as `sp` lists them, in English: a line for each, numbered, as the window shows
-/// them.
-fn listing(card: &find_songs::Card, stopped: bool) -> (String, serde_json::Value) {
+/// them, and how the search ended when it was before it had looked everywhere.
+fn listing(card: &find_songs::Card, ended: Ended) -> (String, serde_json::Value) {
     crate::i18n::with_language(crate::i18n::Language::English, || {
         let places: Vec<String> = card.looked.iter().map(|place| place.words()).collect();
         let found = card.sources.len();
@@ -99,16 +102,19 @@ fn listing(card: &find_songs::Card, stopped: bool) -> (String, serde_json::Value
             format!("No songbooks, libraries or song files were found in {}.", places.join(", "))
         } else {
             format!(
-                "{} in {}{}:",
+                "{} in {}:",
                 if found == 1 {
                     "1 songbook or library found".to_owned()
                 } else {
                     format!("{found} songbooks and libraries found")
                 },
                 places.join(", "),
-                if stopped { " (stopped before the end)" } else { "" }
             )
         };
+        // Nothing found where it looked, or what it found until then.
+        if let Some(cut) = ended.words() {
+            text = if found == 0 { format!("{cut} Nothing was found until then.") } else { format!("{cut}\n{text}") };
+        }
         let mut rows = Vec::new();
         for (at, source) in card.sources.iter().enumerate() {
             let (name, line, count) = find_songs::row_words(source);
@@ -135,7 +141,13 @@ fn listing(card: &find_songs::Card, stopped: bool) -> (String, serde_json::Value
         } else if found > 0 {
             text.push_str("\nNothing here is new to your library.");
         }
-        let data = serde_json::json!({ "places": places, "sources": rows, "new": new, "stopped": stopped });
+        let data = serde_json::json!({
+            "places": places,
+            "sources": rows,
+            "new": new,
+            "stopped": ended != Ended::Everywhere,
+            "ended": ended.english(),
+        });
         (text, data)
     })
 }
@@ -166,7 +178,7 @@ impl crate::App {
         if self.finding.importing.is_some() {
             return Err(t("settings.find.busy", "Songs are being brought in; find again once they are in.").to_owned());
         }
-        self.end_search(true);
+        self.end_search(Ended::Stopped);
         let Some(running) = self.running.as_ref() else { return Err("The window isn't open yet.".to_owned()) };
         let card = &running.home_state.find_songs;
         let places = find_songs::places(&card.added);
@@ -183,7 +195,8 @@ impl crate::App {
             }
         };
         let looked: Vec<find_songs::PlaceName> = places.iter().map(|place| place.name.clone()).collect();
-        let search = find_songs::start(id, places, library, find_songs::never_listed(), wake)
+        let after = self.finding.stopping.take();
+        let search = find_songs::start(id, places, library, find_songs::never_listed(), after, wake)
             .map_err(|e| tf("settings.find.not_started", "Couldn\u{2019}t start looking: {error}", &[("error", &e)]))?;
         crate::applog::event("find", &format!("looking for songs in {} places", looked.len()));
         self.finding.search = Some(search);
@@ -193,6 +206,7 @@ impl crate::App {
             card.phase = Phase::Searching;
             card.looking = looked.first().cloned();
             card.looked = looked;
+            card.ended = Ended::Everywhere;
             card.sources.clear();
             card.ticked.clear();
             card.brought = None;
@@ -201,16 +215,18 @@ impl crate::App {
         Ok(())
     }
 
-    /// Ends the search under way, keeping what it found: the card lists it, and an `sp`
-    /// waiting for it is told. `stopped`: before it had looked everywhere.
-    fn end_search(&mut self, stopped: bool) {
+    /// Ends the search under way, keeping what it found: the card lists it, says how it ended
+    /// when it was before it had looked everywhere, and an `sp` waiting for it is told.
+    fn end_search(&mut self, ended: Ended) {
         let Some(search) = self.finding.search.take() else { return };
-        search.stop();
+        // Its thread stops at once; the next search waits for it to end.
+        self.finding.stopping = search.into_thread();
         let Some(running) = self.running.as_mut() else { return };
         let card = &mut running.home_state.find_songs;
         card.phase = Phase::Found;
         card.looking = None;
-        let (text, data) = listing(card, stopped);
+        card.ended = ended;
+        let (text, data) = listing(card, ended);
         let chosen = card.chosen();
         if let Some(job) = self.finding.find_job.take() {
             self.finding.job_data = Some((job, data));
@@ -220,7 +236,7 @@ impl crate::App {
         // Testing aid: SOFTPRESENTER_CAPTURE_PREFERENCES=find-songs-import presses Import, with
         // what is ticked, once the search Find started has ended, so a picture can catch the
         // card bringing songs in, and done.
-        if !stopped
+        if ended == Ended::Everywhere
             && !std::mem::replace(&mut self.finding.capture_imported, true)
             && std::env::var("SOFTPRESENTER_CAPTURE_PREFERENCES").as_deref() == Ok("find-songs-import")
             && let Err(problem) = self.start_import(chosen, None)
@@ -318,7 +334,7 @@ impl crate::App {
     pub(crate) fn tick_find_songs(&mut self) -> Option<Instant> {
         if let Some(search) = self.finding.search.as_ref() {
             let said = search.said();
-            let mut ended = false;
+            let mut ended = None;
             if let Some(running) = self.running.as_mut()
                 && !said.is_empty()
             {
@@ -327,13 +343,13 @@ impl crate::App {
                     match found {
                         Found::Looking(place) => card.looking = Some(place),
                         Found::Source(source) => card.add(*source),
-                        Found::Done => ended = true,
+                        Found::Done(how) => ended = Some(how),
                     }
                 }
                 self.redraw_settings();
             }
-            if ended {
-                self.end_search(false);
+            if let Some(ended) = ended {
+                self.end_search(ended);
             }
         }
         let mut importing = self.finding.importing.take()?;
@@ -465,7 +481,7 @@ impl crate::App {
             let result = match ask {
                 Ask::Find => self.start_find(None),
                 Ask::Stop => {
-                    self.end_search(true);
+                    self.end_search(Ended::Stopped);
                     Ok(())
                 }
                 Ask::AnotherFolder => {

@@ -37,6 +37,79 @@ pub const MOST_DEPTH: usize = 8;
 pub const MOST_ENTRIES: usize = 200_000;
 /// How long a search looks, at most.
 pub const MOST_TIME: Duration = Duration::from_secs(90);
+
+/// How far a search goes: how many files and folders it looks at, and for how long, at most.
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    pub entries: usize,
+    pub time: Duration,
+}
+
+impl Limits {
+    pub const NORMAL: Limits = Limits { entries: MOST_ENTRIES, time: MOST_TIME };
+}
+
+/// How a search ended.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Ended {
+    /// It looked everywhere it was to look.
+    #[default]
+    Everywhere,
+    /// It was stopped: Stop, or another search started.
+    Stopped,
+    /// It had looked at as many files and folders as a search looks at.
+    TooMany,
+    /// It had looked for as long as a search looks.
+    TooLong,
+    /// Something went wrong on its thread (the log says what).
+    Failed,
+}
+
+impl Ended {
+    /// What the card says of a search that ended before it had looked everywhere.
+    pub fn words(self) -> Option<String> {
+        Some(match self {
+            Ended::Everywhere => return None,
+            Ended::Stopped => {
+                t("settings.find.ended.stopped", "It was stopped before it had looked everywhere.").to_owned()
+            }
+            Ended::TooMany => tn(
+                "settings.find.ended.files",
+                MOST_ENTRIES as u64,
+                "It stopped after looking at {n} file or folder, the most it looks at, before it had looked everywhere.",
+                "It stopped after looking at {n} files and folders, the most it looks at, before it had looked everywhere.",
+                &[],
+            ),
+            Ended::TooLong => tn(
+                "settings.find.ended.time",
+                MOST_TIME.as_secs(),
+                "It stopped after {n} second, the longest it looks, before it had looked everywhere.",
+                "It stopped after {n} seconds, the longest it looks, before it had looked everywhere.",
+                &[],
+            ),
+            Ended::Failed => t(
+                "settings.find.ended.failed",
+                "Something went wrong, so it stopped before it had looked everywhere (the log says what).",
+            )
+            .to_owned(),
+        })
+    }
+
+    /// The word `sp songs find --json` gives it.
+    pub fn english(self) -> &'static str {
+        match self {
+            Ended::Everywhere => "everywhere",
+            Ended::Stopped => "stopped",
+            Ended::TooMany => "files",
+            Ended::TooLong => "time",
+            Ended::Failed => "failed",
+        }
+    }
+}
+
+/// A search or a dry run stopped part way: what it was reading is not listed in part.
+#[derive(Debug, PartialEq)]
+pub struct Cut;
 /// The largest `.txt` whose words are read to tell whether it is a song.
 const LARGEST_TEXT: u64 = 256 * 1024;
 
@@ -264,11 +337,18 @@ impl Known {
 
 /// Counts songs read for an import (each with the file it came from) against the library, and
 /// against one another (a song twice in a source comes in once): how many, how many are here
-/// already, and the new ones' hashes.
-fn dry_run<'p>(songs: impl IntoIterator<Item = (Presentation, &'p Path)>, known: &Known) -> (usize, usize, Vec<u64>) {
+/// already, and the new ones' hashes. `Cut` once `until` says to stop.
+fn dry_run<'p>(
+    songs: impl IntoIterator<Item = (Presentation, &'p Path)>,
+    known: &Known,
+    until: &dyn Fn() -> bool,
+) -> Result<(usize, usize, Vec<u64>), Cut> {
     let mut seen = HashSet::new();
     let (mut all, mut here, mut new) = (0, 0, Vec::new());
     for (song, path) in songs {
+        if until() {
+            return Err(Cut);
+        }
         let song = load::as_imported(song, path);
         let hash = key_hash(&load::import_key(&song));
         all += 1;
@@ -278,7 +358,7 @@ fn dry_run<'p>(songs: impl IntoIterator<Item = (Presentation, &'p Path)>, known:
             new.push(hash);
         }
     }
-    (all, here, new)
+    Ok((all, here, new))
 }
 
 /// What a search's thread says, as it goes.
@@ -287,26 +367,35 @@ pub enum Found {
     /// It is looking in this place now.
     Looking(PlaceName),
     Source(Box<Source>),
-    /// It has looked everywhere (or stopped).
-    Done,
+    /// It has ended, and how.
+    Done(Ended),
 }
 
-/// A search under way: its messages, and its stop.
+/// A search under way: its messages, its stop, and its thread.
 pub struct Search {
     /// Its number, so the messages of one stopped are never taken for a later one's.
     pub id: u64,
     stop: Arc<AtomicBool>,
     rx: Receiver<(u64, Found)>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Search {
-    /// Stops it at once: its thread stops at the next file it looks at.
+    /// Stops it at once: its thread stops at the next file it looks at, or the next song of the
+    /// file it is reading.
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
     }
 
-    /// What it has said since the last look. A thread that ended without saying so has
-    /// looked as far as it will: that is its end.
+    /// Stops it, and gives its thread, for the next search to wait for: two searches never look
+    /// at once.
+    pub fn into_thread(mut self) -> Option<std::thread::JoinHandle<()>> {
+        self.stop();
+        self.thread.take()
+    }
+
+    /// What it has said since the last look. A thread that ended without saying how went
+    /// wrong: the search ended as failed.
     pub fn said(&self) -> Vec<Found> {
         let mut said = Vec::new();
         loop {
@@ -315,8 +404,8 @@ impl Search {
                 Ok(_) => {}
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    if !matches!(said.last(), Some(Found::Done)) {
-                        said.push(Found::Done);
+                    if !matches!(said.last(), Some(Found::Done(_))) {
+                        said.push(Found::Done(Ended::Failed));
                     }
                     break;
                 }
@@ -508,51 +597,64 @@ pub fn never_listed() -> Vec<PathBuf> {
     folders.into_iter().map(|folder| folder.canonicalize().unwrap_or(folder)).collect()
 }
 
-/// Starts a search on a thread of its own. `wake` is called after each thing it says, so the
-/// app looks at once.
+/// Starts a search on a thread of its own, once the thread of the search before (`after`, if
+/// it is still stopping) has ended. `wake` is called after each thing it says, so the app looks
+/// at once.
 pub fn start(
     id: u64,
     places: Vec<Looked>,
     library: Library,
     skip: Vec<PathBuf>,
+    after: Option<std::thread::JoinHandle<()>>,
     wake: impl Fn() + Send + 'static,
 ) -> Result<Search, String> {
-    start_with(Arc::new(AtomicBool::new(false)), id, places, library, skip, wake)
+    let search = Begin { id, places, library, skip, limits: Limits::NORMAL, after };
+    start_with(Arc::new(AtomicBool::new(false)), search, wake)
 }
 
-/// [`start`], with the stop given.
-fn start_with(
-    stop: Arc<AtomicBool>,
+/// What a search is to do.
+struct Begin {
     id: u64,
     places: Vec<Looked>,
     library: Library,
     skip: Vec<PathBuf>,
-    wake: impl Fn() + Send + 'static,
-) -> Result<Search, String> {
+    limits: Limits,
+    after: Option<std::thread::JoinHandle<()>>,
+}
+
+/// [`start`], with the stop given.
+fn start_with(stop: Arc<AtomicBool>, begin: Begin, wake: impl Fn() + Send + 'static) -> Result<Search, String> {
     let (tx, rx) = channel();
     let stopped = stop.clone();
-    std::thread::Builder::new()
+    let id = begin.id;
+    let thread = std::thread::Builder::new()
         .name("find songs".to_owned())
         .spawn(move || {
+            let Begin { id, places, library, skip, limits, after } = begin;
+            // The search before has stopped looking, and its thread ends at once.
+            if let Some(before) = after {
+                let _ = before.join();
+            }
             let known = Known::of(&library);
-            let mut walk = Walk::new(&stopped, &known, &skip, &tx, id, &wake);
+            let mut walk = Walk::new(&stopped, &known, &skip, &tx, id, limits, &wake);
             for place in &places {
                 walk.place(place);
             }
-            let ended = walk.ended_why();
-            let _ = tx.send((id, Found::Done));
+            let ended = walk.ended();
+            let _ = tx.send((id, Found::Done(ended)));
             wake();
             crate::applog::event(
                 "find",
                 &format!(
-                    "looked at {} files and folders in {} ms{ended}",
+                    "looked at {} files and folders in {} ms{}",
                     walk.entries,
-                    walk.began.elapsed().as_millis()
+                    walk.began.elapsed().as_millis(),
+                    if ended == Ended::Everywhere { String::new() } else { format!(" (ended: {})", ended.english()) }
                 ),
             );
         })
         .map_err(|e| e.to_string())?;
-    Ok(Search { id, stop, rx })
+    Ok(Search { id, stop, rx, thread: Some(thread) })
 }
 
 /// One search's walk through its places.
@@ -564,6 +666,7 @@ struct Walk<'a> {
     id: u64,
     wake: &'a dyn Fn(),
     began: Instant,
+    limits: Limits,
     entries: usize,
     /// The folders looked in already (a folder added inside Documents is looked in once).
     walked: HashSet<PathBuf>,
@@ -592,6 +695,7 @@ impl<'a> Walk<'a> {
         skip: &'a [PathBuf],
         tx: &'a Sender<(u64, Found)>,
         id: u64,
+        limits: Limits,
         wake: &'a dyn Fn(),
     ) -> Walk<'a> {
         Walk {
@@ -602,27 +706,29 @@ impl<'a> Walk<'a> {
             id,
             wake,
             began: Instant::now(),
+            limits,
             entries: 0,
             walked: HashSet::new(),
             slow: slow(),
         }
     }
 
-    /// Whether to look no further: stopped, or past a limit.
-    fn ended(&self) -> bool {
-        self.stop.load(Ordering::Relaxed) || self.entries >= MOST_ENTRIES || self.began.elapsed() >= MOST_TIME
+    /// Whether to look no further: stopped, or past a limit. Asked between files, and between
+    /// the songs of a file being read.
+    fn cut(&self) -> bool {
+        self.ended() != Ended::Everywhere
     }
 
-    /// Why it ended early, for the log ("" when it didn't).
-    fn ended_why(&self) -> String {
+    /// How it has ended so far: `Everywhere` while it may go on.
+    fn ended(&self) -> Ended {
         if self.stop.load(Ordering::Relaxed) {
-            " (stopped)".to_owned()
-        } else if self.entries >= MOST_ENTRIES {
-            format!(" (stopped at {MOST_ENTRIES} files and folders)")
-        } else if self.began.elapsed() >= MOST_TIME {
-            format!(" (stopped after {} s)", MOST_TIME.as_secs())
+            Ended::Stopped
+        } else if self.entries >= self.limits.entries {
+            Ended::TooMany
+        } else if self.began.elapsed() >= self.limits.time {
+            Ended::TooLong
         } else {
-            String::new()
+            Ended::Everywhere
         }
     }
 
@@ -632,7 +738,7 @@ impl<'a> Walk<'a> {
     }
 
     fn place(&mut self, place: &Looked) {
-        if self.ended() {
+        if self.cut() {
             return;
         }
         self.say(Found::Looking(place.name.clone()));
@@ -662,7 +768,7 @@ impl<'a> Walk<'a> {
     /// then the folders in it. `at` is where it is; `shallow` looks for songbooks only, in it
     /// alone. An error only for a folder that couldn't be read.
     fn folder(&mut self, dir: &Path, at: &Where, depth: usize, shallow: bool) -> std::io::Result<()> {
-        if self.ended() || !self.walked.insert(dir.to_path_buf()) {
+        if self.cut() || !self.walked.insert(dir.to_path_buf()) {
             return Ok(());
         }
         if self.skip.iter().any(|skip| skip == dir) {
@@ -682,7 +788,7 @@ impl<'a> Walk<'a> {
             (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for entry in &entries {
             self.entries += 1;
-            if self.ended() {
+            if self.cut() {
                 return Ok(());
             }
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -708,17 +814,17 @@ impl<'a> Walk<'a> {
                 }
             }
         }
+        // A file being read when the search is stopped (or runs out of time) is left part way,
+        // and nothing of it is listed.
+        let until = || self.cut();
         for book in books {
-            if self.ended() {
-                return Ok(());
-            }
-            for source in songbook_sources(&book, at, self.known) {
+            let Ok(sources) = songbook_sources(&book, at, self.known, &until) else { return Ok(()) };
+            for source in sources {
                 self.say(Found::Source(Box::new(source)));
             }
         }
-        if !self.ended()
-            && let Some(source) = folder_source(dir, at, documents, lyrics, texts, self.known)
-        {
+        let Ok(found) = folder_source(dir, at, documents, lyrics, texts, self.known, &until) else { return Ok(()) };
+        if let Some(source) = found {
             self.say(Found::Source(Box::new(source)));
         }
         if depth < MOST_DEPTH {
@@ -775,8 +881,9 @@ fn listed_unread(path: &Path) -> bool {
 }
 
 /// The sources in a songbook file, read through the import's own reader: one for each songbook
-/// in it (a database holds several), or one saying why it couldn't be read.
-fn songbook_sources(path: &Path, place: &Where, known: &Known) -> Vec<Source> {
+/// in it (a database holds several), or one saying why it couldn't be read. `Cut` when `until`
+/// said to stop part way.
+fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() -> bool) -> Result<Vec<Source>, Cut> {
     let file_name = path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
     // Songs naming no songbook are named after the file: SoftProjector's own database's are its
     // songs, so they are SoftProjector's.
@@ -796,35 +903,45 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known) -> Vec<Source> {
         why: None,
         new: Vec::new(),
     };
-    match load::read_songbook_file(path) {
+    let read = load::read_songbook_file_until(path, until);
+    if until() {
+        return Err(Cut);
+    }
+    match read {
         Ok(book) => {
-            // Each songbook in it, in the order its songs come.
+            // Each songbook in it, in the order its songs come (looked up by name: a database
+            // may name thousands).
             let mut books: Vec<(Option<String>, Vec<Presentation>)> = Vec::new();
+            let mut by_name: std::collections::HashMap<Option<String>, usize> = std::collections::HashMap::new();
             for (song, name) in book.songs {
-                match books.iter_mut().find(|(have, _)| *have == name) {
-                    Some((_, songs)) => songs.push(song),
-                    None => books.push((name, vec![song])),
+                match by_name.get(&name) {
+                    Some(at) => books[*at].1.push(song),
+                    None => {
+                        by_name.insert(name.clone(), books.len());
+                        books.push((name, vec![song]));
+                    }
                 }
             }
             books
                 .into_iter()
                 .map(|(name, songs)| {
-                    let (all, here, new) = dry_run(songs.into_iter().map(|song| (song, path)), known);
-                    Source { songs: all, here, new, ..base(name.clone().unwrap_or_else(|| stem.clone()), name) }
+                    let (all, here, new) = dry_run(songs.into_iter().map(|song| (song, path)), known, until)?;
+                    Ok(Source { songs: all, here, new, ..base(name.clone().unwrap_or_else(|| stem.clone()), name) })
                 })
                 .collect()
         }
         Err(refused) if listed_unread(path) => {
-            vec![Source { why: Some(refused.why), read: Read::Nothing, ..base(file_name, None) }]
+            Ok(vec![Source { why: Some(refused.why), read: Read::Nothing, ..base(file_name, None) }])
         }
-        Err(_) => Vec::new(),
+        Err(_) => Ok(Vec::new()),
     }
 }
 
 /// A folder as a source, when it holds songs: song documents make it a library; ChordPro and
 /// lyric files, SoftPresenter's own song files and text that reads as a song make it a folder of
 /// song files (two at least, unless one is of a kind only songs are kept in). Each file is read
-/// as the import reads it; one that can't be read isn't counted.
+/// as the import reads it; one that can't be read isn't counted. `Cut` when `until` said to stop
+/// part way.
 fn folder_source(
     dir: &Path,
     at: &Where,
@@ -832,27 +949,40 @@ fn folder_source(
     lyrics: Vec<PathBuf>,
     texts: Vec<PathBuf>,
     known: &Known,
-) -> Option<Source> {
-    let texts: Vec<PathBuf> = texts.into_iter().filter(|path| text_reads_as_song(path)).collect();
+    until: &dyn Fn() -> bool,
+) -> Result<Option<Source>, Cut> {
+    let mut songs_in_texts = Vec::new();
+    for text in texts {
+        if until() {
+            return Err(Cut);
+        }
+        if text_reads_as_song(&text) {
+            songs_in_texts.push(text);
+        }
+    }
+    let texts = songs_in_texts;
     let library = !documents.is_empty();
     let distinctive = documents.len() + lyrics.len();
     if distinctive == 0 && texts.len() < 2 {
-        return None;
+        return Ok(None);
     }
     let mut files: Vec<PathBuf> = documents.into_iter().chain(lyrics).chain(texts).collect();
     files.sort();
     let mut read = Vec::new();
     for file in files {
+        if until() {
+            return Err(Cut);
+        }
         let song = if load::is_song_file(&file) { load::read_song_file(&file) } else { load::import_file(&file) };
         if let Ok(song) = song {
             read.push((song, file));
         }
     }
     if read.is_empty() {
-        return None;
+        return Ok(None);
     }
     // Every file is counted against the same songs seen, as one import takes them in.
-    let (songs, here, new) = dry_run(read.iter().map(|(song, file)| (song.clone(), file.as_path())), known);
+    let (songs, here, new) = dry_run(read.iter().map(|(song, file)| (song.clone(), file.as_path())), known, until)?;
     let readable: Vec<PathBuf> = read.into_iter().map(|(_, file)| file).collect();
     // A folder inside a place is named by itself, and is in the place's folders above it; a
     // place's own folder is named by the place and is in it.
@@ -860,7 +990,7 @@ fn folder_source(
         Some((name, above)) => (name.clone(), Where { place: at.place.clone(), parts: above.to_vec() }),
         None => (at.place.words(), at.clone()),
     };
-    Some(Source {
+    Ok(Some(Source {
         name,
         kind: if library { Kind::Library } else { Kind::SongFiles },
         place,
@@ -870,7 +1000,7 @@ fn folder_source(
         here,
         why: None,
         new,
-    })
+    }))
 }
 
 /// Whether a `.txt` holds a song: small, and its words read as one (`load::reads_as_song`).
@@ -1031,6 +1161,8 @@ pub struct Card {
     pub added: Vec<PathBuf>,
     /// The places the last search looked in.
     pub looked: Vec<PlaceName>,
+    /// How the last search ended.
+    pub ended: Ended,
     /// The place being looked in.
     pub looking: Option<PlaceName>,
     pub sources: Vec<Source>,
@@ -1132,7 +1264,14 @@ pub(crate) mod tests {
 
     /// Runs a search through these places to its end and gives what it found.
     pub(crate) fn search(places: Vec<Looked>, library: Library, skip: Vec<PathBuf>) -> Vec<Source> {
-        let search = start(1, places, library, skip, || {}).unwrap();
+        let search = start(1, places, library, skip, None, || {}).unwrap();
+        let (found, ended) = listen(&search);
+        assert_eq!(ended, Ended::Everywhere);
+        found
+    }
+
+    /// What a search says until it ends, and how it ended.
+    fn listen(search: &Search) -> (Vec<Source>, Ended) {
         let mut found = Vec::new();
         let began = Instant::now();
         loop {
@@ -1140,12 +1279,23 @@ pub(crate) mod tests {
                 match said {
                     Found::Source(source) => found.push(*source),
                     Found::Looking(_) => {}
-                    Found::Done => return found,
+                    Found::Done(ended) => return (found, ended),
                 }
             }
             assert!(began.elapsed() < Duration::from_secs(30), "the search ended");
             std::thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    /// A search of these places within these limits, with this stop.
+    fn search_within(
+        stop: Arc<AtomicBool>,
+        places: Vec<Looked>,
+        limits: Limits,
+        wake: impl Fn() + Send + 'static,
+    ) -> Search {
+        let begin = Begin { id: 7, places, library: Library::default(), skip: Vec::new(), limits, after: None };
+        start_with(stop, begin, wake).unwrap()
     }
 
     fn at(tree: &Tree, names: &[&str]) -> Vec<Looked> {
@@ -1271,30 +1421,107 @@ pub(crate) mod tests {
                 pressed.store(true, Ordering::Relaxed);
             }
         };
-        let search =
-            start_with(stop, 7, at(&tree, &["Downloads", "Documents"]), Library::default(), Vec::new(), wake).unwrap();
-        let mut found = Vec::new();
-        let began = Instant::now();
-        'listening: loop {
-            for said in search.said() {
-                match said {
-                    Found::Source(source) => found.push(*source),
-                    Found::Done => break 'listening,
-                    Found::Looking(_) => {}
-                }
-            }
-            assert!(began.elapsed() < Duration::from_secs(30), "the search ended");
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        let search = search_within(stop, at(&tree, &["Downloads", "Documents"]), Limits::NORMAL, wake);
+        let (found, ended) = listen(&search);
+        assert_eq!(ended, Ended::Stopped, "it says it was stopped");
         // Downloads' first songbook (the damaged one, by name) is kept; nothing after it.
         assert_eq!(found.len(), 1, "{found:#?}");
         assert_eq!(found[0].name, "Broken.sps");
         // A stopped search's late messages are never taken for another's.
         let (tx, rx) = channel();
-        tx.send((6, Found::Done)).unwrap();
+        tx.send((6, Found::Done(Ended::Everywhere))).unwrap();
         tx.send((7, Found::Looking(PlaceName::Folder("Here".to_owned())))).unwrap();
-        let other = Search { id: 7, stop: Arc::new(AtomicBool::new(false)), rx };
+        let other = Search { id: 7, stop: Arc::new(AtomicBool::new(false)), rx, thread: None };
         assert!(matches!(other.said().as_slice(), [Found::Looking(_)]));
+        // A thread that ended without saying how went wrong: the search failed, never finished.
+        drop(tx);
+        assert!(matches!(other.said().as_slice(), [Found::Done(Ended::Failed)]));
+    }
+
+    #[test]
+    fn a_search_cut_short_by_its_limits_says_which() {
+        let tree = tree("limits");
+        let places = || at(&tree, &["Downloads", "Documents", "Desktop"]);
+        let no_stop = || Arc::new(AtomicBool::new(false));
+        let (all, ended) = listen(&search_within(no_stop(), places(), Limits::NORMAL, || {}));
+        assert_eq!(ended, Ended::Everywhere);
+        let (few, ended) = listen(&search_within(no_stop(), places(), Limits { entries: 3, ..Limits::NORMAL }, || {}));
+        assert_eq!(ended, Ended::TooMany, "it says it looked at as many files as it looks at");
+        assert!(few.len() < all.len(), "{} of {}", few.len(), all.len());
+        let (none, ended) =
+            listen(&search_within(no_stop(), places(), Limits { time: Duration::ZERO, ..Limits::NORMAL }, || {}));
+        assert_eq!(ended, Ended::TooLong, "it says it ran out of time");
+        assert!(none.is_empty());
+        // Each says so in words; one that looked everywhere says nothing more.
+        assert_eq!(Ended::Everywhere.words(), None);
+        assert_eq!(
+            Ended::TooLong.words().unwrap(),
+            "It stopped after 90 seconds, the longest it looks, before it had looked everywhere."
+        );
+        assert_eq!(
+            Ended::TooMany.words().unwrap(),
+            "It stopped after looking at 200,000 files and folders, the most it looks at, before it had looked everywhere."
+        );
+    }
+
+    #[test]
+    fn stop_reaches_into_the_file_being_read_and_lists_nothing_of_it() {
+        // A songbook of 2,000 songs and a folder of 40 song files, each stopped part way: the
+        // reading ends within a few songs or files, and no row is made of what was read.
+        let tree = Tree::new("stop-inside");
+        let mut text = String::from("##1\nBig\n##\n");
+        for n in 1..=2000 {
+            text.push_str(&format!("{n}#$#Song {n}#$#0#$##$##$##$#Verse 1@%Line {n} for the test\n"));
+        }
+        let book = tree.write("Big.sps", text.as_bytes());
+        for n in 0..40 {
+            tree.write(&format!("Folder/Song {n}.cho"), song_text(&format!("Song {n}")).as_bytes());
+        }
+        let place = Where { place: PlaceName::Folder("Here".to_owned()), parts: Vec::new() };
+        let known = Known::of(&Library::default());
+        let asked = std::cell::Cell::new(0);
+        let until = || {
+            asked.set(asked.get() + 1);
+            asked.get() > 10
+        };
+        assert_eq!(songbook_sources(&book, &place, &known, &until), Err(Cut));
+        assert!(asked.get() < 20, "it stopped within a few songs, not after {} of them", asked.get());
+        asked.set(0);
+        let files: Vec<PathBuf> = (0..40).map(|n| tree.0.join(format!("Folder/Song {n}.cho"))).collect();
+        let cut = folder_source(&tree.0.join("Folder"), &place, Vec::new(), files.clone(), Vec::new(), &known, &until);
+        assert_eq!(cut, Err(Cut));
+        assert!(asked.get() < 20, "{}", asked.get());
+        // Unstopped, both are read whole.
+        let whole = songbook_sources(&book, &place, &known, &|| false).unwrap();
+        assert_eq!(whole[0].songs, 2000);
+        let whole = folder_source(&tree.0.join("Folder"), &place, Vec::new(), files, Vec::new(), &known, &|| false);
+        assert_eq!(whole.unwrap().unwrap().songs, 40);
+    }
+
+    #[test]
+    fn find_again_waits_for_the_search_before_to_end() {
+        // The search before is still stopping (its thread is held here): the next one doesn't
+        // look anywhere until it has ended, so two searches never look at once.
+        let tree = tree("one-at-a-time");
+        let (hold, held) = channel::<()>();
+        let before = std::thread::spawn(move || {
+            let _ = held.recv();
+        });
+        let begin = Begin {
+            id: 8,
+            places: at(&tree, &["Downloads"]),
+            library: Library::default(),
+            skip: Vec::new(),
+            limits: Limits::NORMAL,
+            after: Some(before),
+        };
+        let search = start_with(Arc::new(AtomicBool::new(false)), begin, || {}).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(search.said().is_empty(), "it waits for the search before");
+        hold.send(()).unwrap();
+        let (found, ended) = listen(&search);
+        assert_eq!(ended, Ended::Everywhere);
+        assert!(!found.is_empty());
     }
 
     #[test]

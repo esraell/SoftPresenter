@@ -127,7 +127,7 @@ fn songbooks_in_zip(path: &Path) -> Option<(ZipFile, Vec<(usize, String)>)> {
 /// The songs of every songbook in a zip (the songbooks SoftProjector offers for download come
 /// zipped). The zip is read with limits and nothing is unpacked to disk; a songbook in it that
 /// can't be read is said, and the others still come in.
-fn import_zipped_songbooks(path: &Path, name: &str) -> Result<Songbook, Refused> {
+fn import_zipped_songbooks(path: &Path, name: &str, until: &dyn Fn() -> bool) -> Result<Songbook, Refused> {
     let not_songbook = || Refused {
         said: tf(
             "notices.import.zip_no_songbook",
@@ -146,12 +146,15 @@ fn import_zipped_songbooks(path: &Path, name: &str) -> Result<Songbook, Refused>
     let mut first_why = None;
     let mut room = SONGBOOK_ZIP.unpacked;
     for (at, entry) in books {
+        if until() {
+            break;
+        }
         let file = entry.rsplit(['/', '\\']).next().unwrap_or(&entry);
         let inside = tf("notices.import.inside_zip", "{file} in {name}", &[("file", file), ("name", name)]);
         let read = match sp_model::bounded_zip::read_entry(&mut zip, at, room.min(SONGBOOK_ZIP.entry)) {
             Ok(bytes) => {
                 room -= bytes.len() as u64;
-                songbook_songs(std::io::Cursor::new(bytes), &inside)
+                songbook_songs(std::io::Cursor::new(bytes), &inside, until)
             }
             Err(ZipRefusal::UnpacksTooMuch) => Err(Refused {
                 said: tf(
@@ -215,9 +218,15 @@ pub fn import_songbook(path: &Path) -> Result<Songbook, String> {
 
 /// The same, with the reason alone when it gives no songs (see [`Refused`]).
 pub fn read_songbook_file(path: &Path) -> Result<Songbook, Refused> {
+    read_songbook_file_until(path, &|| false)
+}
+
+/// The same, stopping part way once `until` says so (Settings › Song files' Find, stopped): what
+/// it gives then is only part of the file, for the caller to set aside.
+pub fn read_songbook_file_until(path: &Path, until: &dyn Fn() -> bool) -> Result<Songbook, Refused> {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     if has_extension(path, SONGBOOK_ZIP_ENDING) {
-        return import_zipped_songbooks(path, &name);
+        return import_zipped_songbooks(path, &name, until);
     }
     let file = std::fs::File::open(path).map_err(|e| Refused {
         said: tf(
@@ -227,14 +236,16 @@ pub fn read_songbook_file(path: &Path) -> Result<Songbook, Refused> {
         ),
         why: e.to_string(),
     })?;
-    let songs = songbook_songs(file, &name)?;
+    let songs = songbook_songs(file, &name, until)?;
     Ok(Songbook { songs, cautions: unsaved_changes(path, &name).into_iter().collect() })
 }
 
 /// The songs of one songbook, as presentations; `name` is the file's, for what is said of it.
+/// Each song is made into a presentation only while `until` says to go on.
 fn songbook_songs<R: std::io::Read + std::io::Seek>(
     source: R,
     name: &str,
+    until: &dyn Fn() -> bool,
 ) -> Result<Vec<(Presentation, Option<String>)>, Refused> {
     use sp_model::SongbookProblem;
     let songs = sp_model::read_songbook(source).map_err(|problem| match problem {
@@ -262,6 +273,7 @@ fn songbook_songs<R: std::io::Read + std::io::Seek>(
     })?;
     Ok(songs
         .into_iter()
+        .take_while(|_| !until())
         .map(|song| {
             let mut made = sp_model::from_softprojector(song.number, &song.title, &song.words, &song.music, &song.text);
             made.name_chorus_after(&crate::home::chorus_after_name());

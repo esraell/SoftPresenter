@@ -251,5 +251,11 @@
   "settings.find.importing_already": "Ya se están trayendo canciones.",
   "settings.find.none_ticked": "Nada de lo marcado tiene canciones nuevas para tu biblioteca.",
   "settings.find.from_softprojector": "de SoftProjector",
-  "settings.find.from_softprojector_at": "de SoftProjector · {where}"
+  "settings.find.from_softprojector_at": "de SoftProjector · {where}",
+  "settings.find.ended.stopped": "Se detuvo antes de haber buscado en todas partes.",
+  "settings.find.ended.files": ["Se detuvo tras mirar {n} archivo o carpeta, lo máximo que mira, antes de haber buscado en todas partes.", "Se detuvo tras mirar {n} archivos y carpetas, lo máximo que mira, antes de haber buscado en todas partes."],
+  "settings.find.ended.time": ["Se detuvo tras {n} segundo, lo máximo que busca, antes de haber buscado en todas partes.", "Se detuvo tras {n} segundos, lo máximo que busca, antes de haber buscado en todas partes."],
+  "settings.find.ended.failed": "Algo salió mal, así que se detuvo antes de haber buscado en todas partes (el registro dice qué).",
+  "settings.find.so_far": "Esto es lo que encontró hasta entonces.",
+  "settings.find.none_so_far": "Hasta entonces no encontró nada."
 }

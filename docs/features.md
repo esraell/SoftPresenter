@@ -319,7 +319,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   then as a dry run and listed as it comes: its name, what and where it is ("Library · from
   SoftProjector · Downloads", the owner's word for what SoftProjector keeps), how many songs, and
   how many are new and already here, by the import's own rule (word for word under the same
-  title, after the tidy an import gives). Stop keeps what was found. A source with nothing new is
+  title, after the tidy an import gives). Stop keeps what was found, and reaches into the file
+  being read (between its songs), which is then not listed in part; Find Again waits for the
+  stopped search's thread to end, so two never look at once. A search that ended before it had
+  looked everywhere (stopped, out of time, past its files, or gone wrong) says which over what it
+  found, and `sp` says so too. A source with nothing new is
   dimmed and unticked, so is one that can't be read, with the importer's reason in amber, and a
   place the computer won't let it look in is a row saying so. Nothing comes in until Import:
   each ticked source then comes in through the import's own path, as a library of its name with
