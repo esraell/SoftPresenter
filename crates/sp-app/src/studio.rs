@@ -5611,8 +5611,10 @@ fn looked_at(state: &HomeState) -> Option<&crate::screens::Screen> {
 /// connected.
 fn screen_not_showing(state: &HomeState, screen: &crate::screens::Screen) -> Option<String> {
     use crate::screens::Output;
+    if screen.is_off() {
+        return Some(tf("right.screen.off", "{screen} is switched off", &[("screen", &screen.name)]));
+    }
     match &screen.output {
-        Output::Off => Some(tf("right.screen.off", "{screen} is switched off", &[("screen", &screen.name)])),
         Output::Display(name) if !state.displays.iter().any(|display| &display.name == name) => {
             Some(tf("right.screen.gone", "{screen} is not connected", &[("screen", &screen.name)]))
         }
@@ -5641,7 +5643,7 @@ fn look_at_menu(ui: &mut egui::Ui, state: &mut HomeState) {
         }
         for screen in state.screens.iter().filter(|screen| (screen.kind == Kind::Stage) == stage) {
             let words = match screen_not_showing(state, screen) {
-                Some(_) if screen.output == crate::screens::Output::Off => {
+                Some(_) if screen.is_off() => {
                     tf("right.look_at.off", "{screen} \u{b7} off", &[("screen", &screen.name)])
                 }
                 Some(_) => tf("right.look_at.gone", "{screen} \u{b7} not connected", &[("screen", &screen.name)]),

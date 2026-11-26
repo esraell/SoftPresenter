@@ -185,7 +185,7 @@ fn shows_already(on: Option<(Announce, Option<Uuid>, bool)>, what: Announce, fro
 pub fn lobby_screen(screens: &[crate::screens::Screen]) -> bool {
     screens.iter().any(|screen| {
         screen.kind == crate::screens::Kind::Audience
-            && screen.output != crate::screens::Output::Off
+            && !screen.is_off()
             && screen.look.announcements
             && !screen.look.slides
             && screen.look.key_of.is_none()

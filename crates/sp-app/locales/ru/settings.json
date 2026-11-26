@@ -152,7 +152,6 @@
   "settings.screens.use_window": "Пока вывести в окно",
   "settings.screens.open": "Настроить «{name}» в окне экранов",
   "settings.screens.open.key": "Настроить «{name}» в окне экранов ({key})",
-  "settings.screens.on.hint": "Выкл.: экран никуда не выводится, как «Выключен» в окне экранов",
   "settings.screens.off.hint": "Выберите, куда он выводится, в окне экранов",
   "settings.screens.add": "Добавить экран",
   "settings.screens.add.about": "Выберите, куда он выводится и как выглядит",

@@ -37,8 +37,10 @@ const FIX_HEIGHT: f32 = 24.0;
 enum CardAsked {
     /// Open the screen where it is set up.
     Open,
-    /// Its On key: off, as Output's Off in the Screens window.
+    /// Its On key: off, keeping where it goes, as Output's Off in the Screens window.
     SwitchOff,
+    /// Its On key: on again, as it was.
+    SwitchOn,
     /// Its fix: a window, for now.
     UseWindow,
 }
@@ -54,13 +56,13 @@ pub(super) enum Tone {
 }
 
 /// How a screen stands: going out when it is shown somewhere and its kind is switched on; off
-/// when its kind is off or it is set to go nowhere; otherwise in trouble.
-pub(super) fn tone(output: &Output, shown: bool, kind_on: bool) -> Tone {
-    match (kind_on, shown, output) {
-        (false, _, _) => Tone::Off,
-        (true, true, _) => Tone::Going,
-        (true, false, Output::Off) => Tone::Off,
-        (true, false, _) => Tone::Trouble,
+/// when its kind is off, or it is switched off or set to go nowhere; otherwise in trouble.
+pub(super) fn tone(screen: &Screen, shown: bool, kind_on: bool) -> Tone {
+    match (kind_on, shown) {
+        (false, _) => Tone::Off,
+        _ if screen.is_off() => Tone::Off,
+        (true, true) => Tone::Going,
+        (true, false) => Tone::Trouble,
     }
 }
 
@@ -79,7 +81,7 @@ fn in_order(state: &HomeState, show: &Show) -> Vec<(usize, Tone)> {
     for kind in [Kind::Audience, Kind::Stage] {
         for (index, screen) in state.screens.iter().enumerate().filter(|(_, screen)| screen.kind == kind) {
             let shown = state.screen_status.get(index).is_some_and(|(_, shown)| *shown);
-            order.push((index, tone(&screen.output, shown, kind_on(kind, state, show))));
+            order.push((index, tone(screen, shown, kind_on(kind, state, show))));
         }
     }
     order
@@ -338,8 +340,10 @@ fn card_view(ui: &egui::Ui, state: &HomeState, show: &Show, index: usize, tone: 
     };
     let main = screen.kind == Kind::Audience
         && state.screens.iter().position(|first| first.kind == Kind::Audience) == Some(index);
-    let unplugged = matches!(&screen.output, Output::Display(name)
-        if !state.displays.iter().any(|display| display.is_named(name)));
+    // Switched off, it says Off over its picture, whatever its display is doing.
+    let unplugged = !screen.is_off()
+        && matches!(&screen.output, Output::Display(name)
+            if !state.displays.iter().any(|display| display.is_named(name)));
     let fix = (unplugged && tone == Tone::Trouble).then(|| t("settings.screens.use_window", "Use a window for now"));
     let key = parts::on_off_size(ui).x;
     CardView {
@@ -347,7 +351,7 @@ fn card_view(ui: &egui::Ui, state: &HomeState, show: &Show, index: usize, tone: 
         tone,
         main,
         unplugged,
-        on: screen.output != Output::Off,
+        on: !screen.is_off(),
         fix,
         name: parts::one_line(ui, &screen.name, semibold(14.0), TEXT, inner - 18.0 - 8.0 - key),
         status: parts::lines(ui, &status_words, FontId::proportional(12.0), status_ink, inner - 14.0, 16.0),
@@ -493,14 +497,19 @@ fn grid(ui: &mut egui::Ui, state: &mut HomeState, show: &Show, order: &[(usize, 
     ui.add_space(22.0);
     match asked {
         Some((index, CardAsked::Open)) => opened = Some(index),
-        // On to Off is the Screens window's Off: the screen stays in the list, going nowhere.
+        // The screen's own switch, as Off under Output in the Screens window: off, it keeps
+        // where it goes (an NDI or DeckLink screen sends black); on, it is back as it was.
         Some((index, CardAsked::SwitchOff)) => {
-            state.screens[index].output = Output::Off;
+            state.screens[index].on = false;
             state.ndi_draft = None;
             state.screens_changed = true;
         }
+        Some((index, CardAsked::SwitchOn)) => {
+            state.screens[index].on = true;
+            state.screens_changed = true;
+        }
         Some((index, CardAsked::UseWindow)) => {
-            state.screens[index].output = Output::Window;
+            state.screens[index].go_to(Output::Window);
             state.ndi_draft = None;
             state.screens_changed = true;
         }
@@ -550,16 +559,19 @@ fn draw_card(ui: &egui::Ui, rect: Rect, card: &CardView, screen: &Screen, identi
     let key = parts::on_off_size(ui);
     let key_rect = Rect::from_min_size(pos2(picture.max.x - key.x, y + (NAME_ROW - key.y) / 2.0), key);
     let switch = parts::on_off(ui, key_rect, ui.scope_id().with(("screen on", screen.id)), card.on);
-    let switch = if card.on {
-        switch.on_hover_text(t(
-            "settings.screens.on.hint",
-            "Off sends it nowhere, as Off under Output in the Screens window",
-        ))
-    } else {
+    // A screen with nowhere to go yet (a new one) is set up in the Screens window first.
+    let nowhere = screen.output == Output::Off;
+    let switch = if nowhere {
         switch.on_hover_text(t("settings.screens.off.hint", "Choose where it goes, in the Screens window"))
+    } else {
+        switch
     };
     if switch.clicked() {
-        asked = Some(if card.on { CardAsked::SwitchOff } else { CardAsked::Open });
+        asked = Some(match (card.on, nowhere) {
+            (true, _) => CardAsked::SwitchOff,
+            (false, false) => CardAsked::SwitchOn,
+            (false, true) => CardAsked::Open,
+        });
     }
     y += NAME_ROW + 4.0;
     // How it stands: its light, and the words.
@@ -719,11 +731,15 @@ mod tests {
 
     #[test]
     fn a_screen_is_going_out_off_or_in_trouble() {
-        assert_eq!(tone(&Output::Window, true, true), Tone::Going);
-        assert_eq!(tone(&Output::Window, true, false), Tone::Off, "its kind's switch is off");
-        assert_eq!(tone(&Output::Off, false, true), Tone::Off, "set to go nowhere");
-        assert_eq!(tone(&Output::Display("3DTV".to_owned()), false, true), Tone::Trouble);
-        assert_eq!(tone(&Output::Ndi("Stream".to_owned()), false, true), Tone::Trouble, "amber, never Off's grey");
+        let screen = |output: Output| Screen::new("A".to_owned(), output);
+        assert_eq!(tone(&screen(Output::Window), true, true), Tone::Going);
+        assert_eq!(tone(&screen(Output::Window), true, false), Tone::Off, "its kind's switch is off");
+        assert_eq!(tone(&screen(Output::Off), false, true), Tone::Off, "set to go nowhere");
+        let off = Screen { on: false, ..screen(Output::Ndi("Stream".to_owned())) };
+        assert_eq!(tone(&off, false, true), Tone::Off, "switched off, sending black");
+        assert_eq!(tone(&screen(Output::Display("3DTV".to_owned())), false, true), Tone::Trouble);
+        let ndi = screen(Output::Ndi("Stream".to_owned()));
+        assert_eq!(tone(&ndi, false, true), Tone::Trouble, "amber, never Off's grey");
     }
 
     /// Settings at Screens, with a screen going to a window (the main one), one set to go
@@ -849,12 +865,18 @@ mod tests {
     fn a_cards_keys_do_what_the_screens_window_does() {
         let show = Show::new(Vec::new());
         let mut state = state();
-        // On to Off: the screen goes nowhere, as Off under Output.
+        // On to Off: switched off, as Off under Output, keeping where it goes; and on again.
         let words = drawn(&mut state, &show, 1100.0, vec![]);
         click(&mut state, &show, key_beside(&words, "Main projector"));
-        assert_eq!(state.screens[0].output, Output::Off);
+        assert!(!state.screens[0].on && state.screens[0].output == Output::Window);
         assert!(std::mem::take(&mut state.screens_changed));
-        // Off asks where it goes, in the Screens window.
+        state.screen_status[0] = ("Switched off".to_owned(), false);
+        let words = drawn(&mut state, &show, 1100.0, vec![]);
+        click(&mut state, &show, key_beside(&words, "Main projector"));
+        assert!(state.screens[0].on && state.screens[0].output == Output::Window, "back as it was");
+        assert!(!state.settings_open, "nothing to choose");
+        state.screen_status[0] = ("In a window".to_owned(), true);
+        // Going nowhere yet, On asks where it goes, in the Screens window.
         let words = drawn(&mut state, &show, 1100.0, vec![]);
         click(&mut state, &show, key_beside(&words, "Spare"));
         assert_eq!(state.screens[1].output, Output::Off, "nothing is guessed");

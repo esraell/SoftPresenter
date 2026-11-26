@@ -2708,7 +2708,7 @@ fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, t
     let shown = layout_of(targets[0]);
     let same = targets.iter().all(|&at| layout_of(at) == shown);
     // Said when what is chosen does not show now, so a change is not expected on the stage.
-    let off = !state.stage_on || targets.iter().all(|&at| state.screens[at].output == crate::screens::Output::Off);
+    let off = !state.stage_on || targets.iter().all(|&at| state.screens[at].is_off());
     if off {
         let words = if state.stage_on {
             t(

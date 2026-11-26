@@ -1,6 +1,6 @@
 {
   "_note": "Español de España; see topbar.json. The Screens window and Settings › Screens: the list of screens, each screen's output, look, background and key, DeckLink formats and keyer, what each screen is doing, NDI download and sound, the X on a screen's window. A screen is a pantalla (del público, del escenario); a physical display is a monitor where both meet in one sentence, and the main display is la pantalla principal, as setup says. Key (a switcher's key) is clave.",
-  "screens.closed_from_display": "{screen} se apagó desde su propia pantalla. Vuelve a elegir su pantalla en Ajustes › Pantallas.",
+  "screens.closed_from_display": "{screen} se apagó desde su propia pantalla. Vuelve a encenderla en Ajustes › Pantallas.",
 
   "screens.list.audience": "Público",
   "screens.list.stage": "Escenario",
@@ -41,6 +41,9 @@
   "screens.about.ndi": "Otros ordenadores de la red pueden mostrar esta pantalla, a 1920 × 1080. NDI® es una marca registrada de Vizrt NDI AB.",
   "screens.about.decklink": "Sale por una tarjeta DeckLink de Blackmagic Design, por su conector, en el formato elegido aquí. Una diapositiva nueva entra con un fundido, como en las demás pantallas.",
   "screens.about.off": "Esta pantalla se queda en la lista y no se ve en ningún sitio.",
+  "screens.about.switched_off": "Apagada. Guarda adónde va, lista para cuando se encienda.",
+  "screens.about.switched_off.sending": "Apagada. Sigue enviando negro, para que una retransmisión o un mezclador la conserve como fuente, y guarda adónde va, lista para cuando se encienda.",
+  "screens.status.off_black": "Apagada · enviando negro",
 
   "screens.look": "Aspecto",
   "screens.look.theme": "Tema",

@@ -2382,6 +2382,8 @@ impl crate::App {
                     "kind": if audience { "audience" } else { "stage" },
                     "doing": doing,
                     "shown": shown_now,
+                    // The screen's own switch: off, it keeps where it goes.
+                    "on": screen.on,
                     "format": match &screen.output {
                         crate::screens::Output::DeckLink(out) => Some(out.mode.clone()),
                         _ => None,

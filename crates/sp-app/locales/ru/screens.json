@@ -1,6 +1,6 @@
 {
   "_note": "Russian; see topbar.json. The Screens window and Settings › Screens: the list of screens, each screen's output, look, background and key, DeckLink formats and keyer, what each screen is doing, NDI download and sound, the X on a screen's window. A screen the app draws is экран (для зала, для сцены); a physical display is монитор, the main display главный монитор, as setup says. Key (a switcher's key) is ключ, its fill заливка; straight and premultiplied edges are прямые and предумноженные. Format codes (1080i59.94) stay as written.",
-  "screens.closed_from_display": "Экран {screen} выключили на его собственном мониторе. Снова выберите для него монитор в Настройках › Экраны.",
+  "screens.closed_from_display": "Экран {screen} выключили на его собственном мониторе. Снова включите его в Настройках › Экраны.",
   "screens.list.audience": "Зал",
   "screens.list.stage": "Сцена",
   "screens.list.audience.on": "Экраны для зала включены",
@@ -36,6 +36,9 @@
   "screens.about.ndi": "Другие компьютеры в сети могут показывать этот экран, 1920 × 1080. NDI® — зарегистрированный товарный знак Vizrt NDI AB.",
   "screens.about.decklink": "Выводится через карту DeckLink от Blackmagic Design, на её разъём, в выбранном здесь формате. Новый слайд появляется плавно, как на других экранах.",
   "screens.about.off": "Этот экран остаётся в списке и нигде не показывается.",
+  "screens.about.switched_off": "Выключен. Он помнит, куда выводится, и будет готов, когда его включат.",
+  "screens.about.switched_off.sending": "Выключен. Он продолжает отправлять чёрный, чтобы трансляция или видеомикшер сохранили его как источник, и помнит, куда выводится, — будет готов, когда его включат.",
+  "screens.status.off_black": "Выключен · отправляет чёрный",
   "screens.look": "Вид",
   "screens.look.theme": "Тема",
   "screens.look.theme.hover": "Те же слова, расположенные этой темой на этом экране",

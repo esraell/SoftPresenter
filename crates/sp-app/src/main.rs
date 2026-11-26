@@ -1273,13 +1273,13 @@ fn screen_name(state: &HomeState, id: Uuid) -> &str {
 fn switch_off_by_its_x(running: &mut Running, screen: Uuid) {
     let name = screen_name(&running.home_state, screen).to_owned();
     if let Some(closed) = running.home_state.screens.iter_mut().find(|have| have.id == screen) {
-        closed.output = screens::Output::Off;
+        closed.on = false;
     }
     running.home_state.screens_changed = true;
     applog::event("screens", &format!("{name}: switched off with the close button on its own window"));
     running.home_state.notices.info(i18n::tf(
         "screens.closed_from_display",
-        "{screen} was turned off from its own display. Choose its display again in Settings \u{203a} Screens.",
+        "{screen} was turned off from its own display. Switch it on again in Settings \u{203a} Screens.",
         &[("screen", &i18n::quoted(&name))],
     ));
     running.home_window.request_redraw();
@@ -1819,6 +1819,9 @@ struct Running {
     ndi_sent: Vec<(Uuid, String, screens::NdiRate)>,
     /// The screens the output thread was last told send no sound over NDI.
     ndi_silent_sent: Vec<Uuid>,
+    /// The screens switched off that still send (on NDI or a DeckLink output) the output thread
+    /// was last told to draw black.
+    dark_sent: Vec<Uuid>,
     /// The DeckLink devices, found on a thread of their own (none on a quiet run's own data,
     /// see `sync_screens`); the outputs the output thread was last told to play out of, by
     /// screen; and the screens whose output was playing when last looked at.
@@ -2416,6 +2419,7 @@ impl App {
             retired: Vec::new(),
             ndi_sent: Vec::new(),
             ndi_silent_sent: Vec::new(),
+            dark_sent: Vec::new(),
             // Looking for DeckLink devices may take a moment: on a thread of its own, which
             // wakes the window with what it found.
             decklink: Some(sp_decklink::Discovery::start({
@@ -8605,12 +8609,17 @@ impl App {
             }
         }
         // A kind of screen switched off closes its windows, so the display shows what is behind
-        // them rather than black. NDI goes on sending (black), so a stream keeps its source.
+        // them rather than black. NDI goes on sending (black), so a stream keeps its source. A
+        // screen switched off by its own switch is treated the same way (its window kept hidden
+        // to show again, and no notice when its display is away).
         let on_flags: Vec<bool> = list
             .iter()
-            .map(|screen| match screen.kind {
-                screens::Kind::Audience => audience_on,
-                screens::Kind::Stage => running.home_state.stage_on,
+            .map(|screen| {
+                screen.on
+                    && match screen.kind {
+                        screens::Kind::Audience => audience_on,
+                        screens::Kind::Stage => running.home_state.stage_on,
+                    }
             })
             .collect();
         for ((_, place), on) in list.iter().zip(placed.iter_mut()).zip(&on_flags) {
@@ -8893,6 +8902,7 @@ impl App {
             output,
             ndi_sent,
             ndi_silent_sent,
+            dark_sent,
             identify_sent,
             home_state,
             looks_sent,
@@ -8966,11 +8976,21 @@ impl App {
         sp_video::sound::expect(
             list.iter().zip(&placed).any(|(screen, place)| screen.sound && matches!(place, Placed::Ndi(_))),
         );
-        // Which NDI sources send the app's sound: all but those switched off.
-        let silent: Vec<Uuid> = list.iter().filter(|screen| !screen.sound).map(|screen| screen.id).collect();
+        // Which NDI sources send the app's sound: all but those whose sound is switched off,
+        // and those of screens switched off, which send black and silence.
+        let silent: Vec<Uuid> =
+            list.iter().filter(|screen| !screen.sound || !screen.on).map(|screen| screen.id).collect();
         if silent != *ndi_silent_sent {
             output.send(OutputMsg::NdiSilent(silent.clone()));
             *ndi_silent_sent = silent;
+        }
+        // Screens switched off that still send (NDI, DeckLink) are drawn black: what they send
+        // while their kind is switched off.
+        let dark: Vec<Uuid> = list.iter().filter(|screen| screen.sends_while_off()).map(|screen| screen.id).collect();
+        if dark != *dark_sent {
+            output.send(OutputMsg::Dark(dark.clone()));
+            output.send(OutputMsg::Redraw);
+            *dark_sent = dark;
         }
         // DeckLink: start, change and stop outputs.
         let wanted: Vec<(Uuid, screens::DeckLinkOut)> = list
@@ -9086,6 +9106,15 @@ impl App {
             }
         }
         *decklink_playing = playing;
+        // A screen switched off on NDI or a DeckLink output sends black: it isn't going out.
+        // (Said after the DeckLink outputs playing are noted, so switching one off is never
+        // taken for an output that stopped.)
+        for (screen, (doing, shown)) in list.iter().zip(home_state.screen_status.iter_mut()) {
+            if screen.sends_while_off() && *shown {
+                *doing = i18n::t("screens.status.off_black", "Off \u{b7} sending black").to_owned();
+                *shown = false;
+            }
+        }
         if home_state.screen_status != status_before {
             for panel in running.panels.iter().filter(|panel| panel.kind == Panel::Screens) {
                 panel.window.request_redraw();
@@ -10779,7 +10808,7 @@ impl App {
                     running.screen_windows.iter().find(|have| Some(have.window.id()) == self.focused).map(|w| w.screen)
                     && let Some(closed) = state.screens.iter_mut().find(|have| have.id == screen)
                 {
-                    closed.output = screens::Output::Off;
+                    closed.on = false;
                     state.screens_changed = true;
                 }
             }
@@ -11149,7 +11178,7 @@ impl ApplicationHandler<AppEvent> for App {
                         .find(|d| d.index == index)
                     && let Some(first) = running.home_state.screens.first_mut()
                 {
-                    first.output = screens::Output::Display(display.name);
+                    first.go_to(screens::Output::Display(display.name));
                 }
                 // Testing aid: also send over NDI under this name, this run only.
                 if let Ok(name) = std::env::var("SOFTPRESENTER_NDI") {
@@ -11444,7 +11473,7 @@ impl ApplicationHandler<AppEvent> for App {
                 // Closing a screen's window switches that screen off; it stays in the list.
                 WindowEvent::CloseRequested => {
                     if let Some(closed) = running.home_state.screens.iter_mut().find(|have| have.id == screen) {
-                        closed.output = screens::Output::Off;
+                        closed.on = false;
                     }
                     running.home_state.screens_changed = true;
                     running.home_window.request_redraw();

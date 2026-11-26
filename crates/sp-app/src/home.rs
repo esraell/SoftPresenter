@@ -6233,8 +6233,11 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                 ui.end_row();
 
                 ui.label(egui::RichText::new(t("screens.row.output", "Output")).color(TEXT_DIM));
+                // Off is the screen's own switch (as its card's On key in Settings › Screens):
+                // it keeps where the screen goes, and choosing where it goes switches it on.
+                let shown_output = if screen.on { screen.output.clone() } else { Output::Off };
                 egui::ComboBox::from_id_salt("screen output")
-                    .selected_text(output_label(&screen.output, &state.displays))
+                    .selected_text(output_label(&shown_output, &state.displays))
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
                         for choice in output_choices(
@@ -6246,11 +6249,11 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                         ) {
                             let is_ndi = matches!(choice, Output::Ndi(_));
                             let label = output_label(&choice, &state.displays);
-                            let on = match (&choice, &screen.output) {
+                            let on = match (&choice, &shown_output) {
                                 (Output::DeckLink(one), Output::DeckLink(two)) => one.same_device(two),
                                 _ => {
-                                    std::mem::discriminant(&choice) == std::mem::discriminant(&screen.output)
-                                        && (is_ndi || choice == screen.output)
+                                    std::mem::discriminant(&choice) == std::mem::discriminant(&shown_output)
+                                        && (is_ndi || choice == shown_output)
                                 }
                             };
                             let mut entry = ui.add(egui::Button::selectable(on, label));
@@ -6258,7 +6261,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                                 entry = entry.on_hover_text(crate::screens::ndi_not_installed());
                             }
                             if entry.clicked() && !on {
-                                state.screens[index].output = choice;
+                                state.screens[index].choose_output(choice);
                                 state.ndi_draft = None;
                                 changed = true;
                             }
@@ -6351,6 +6354,18 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                 "Played out of a Blackmagic Design DeckLink card, on its connector, in the format chosen here. A new slide fades in as it does on the other screens.",
             ),
             Output::Off => t("screens.about.off", "This screen is kept in the list and shows nowhere."),
+        };
+        // Switched off, it says so, over what its output does.
+        let about = match (screen.on, &screen.output) {
+            (true, _) | (false, Output::Off) => about,
+            (false, Output::Ndi(_) | Output::DeckLink(_)) => t(
+                "screens.about.switched_off.sending",
+                "Switched off. It keeps sending black, so a stream or switcher keeps it as a source, and keeps where it goes, ready for when it is switched on.",
+            ),
+            (false, _) => t(
+                "screens.about.switched_off",
+                "Switched off. It keeps where it goes, ready for when it is switched on.",
+            ),
         };
         // A DeckLink output's format, under its output.
         if matches!(screen.output, Output::DeckLink(_)) {

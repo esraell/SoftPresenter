@@ -34,6 +34,18 @@ fn parse_output(words: &[String], found: &sp_decklink::Found, current: Option<&O
     }
 }
 
+/// `output=`: where the screen goes, switched on; or `off`, the screen's own switch, which keeps
+/// where it goes for when it is on again. What was done, in words.
+fn set_output(screen: &mut Screen, words: &[String], found: &sp_decklink::Found) -> Result<String, String> {
+    let output = parse_output(words, found, Some(&screen.output))?;
+    if output == Output::Off && screen.output != Output::Off {
+        screen.on = false;
+        return Ok(format!("switched off, keeping {} for when it is on again", output_words(&screen.output, found)));
+    }
+    screen.go_to(output);
+    Ok(format!("on {}", output_words(&screen.output, found)))
+}
+
 /// Where a screen goes, in words; a DeckLink output's format with where it comes from ("at
 /// 1080p30, as Desktop Video Setup has it").
 fn output_words(output: &Output, found: &sp_decklink::Found) -> String {
@@ -306,10 +318,10 @@ impl crate::App {
                         Some((kind, name)) => vec![kind.to_owned(), name.to_owned()],
                         None => vec![value.to_owned()],
                     };
-                    screen.output = parse_output(&words, &found, Some(&screen.output))?;
-                    said.push(format!("on {}", output_words(&screen.output, &found)));
+                    said.push(set_output(&mut screen, &words, &found)?);
                     // A display not connected now is kept (the screen waits for it), and said.
-                    if let Output::Display(name) = &screen.output
+                    if screen.on
+                        && let Output::Display(name) = &screen.output
                         && !connected.iter().any(|display| display.is_named(name))
                     {
                         let connected: Vec<&str> = connected.iter().map(|d| d.name.as_str()).collect();
@@ -770,6 +782,27 @@ mod tests {
         }
         screen.look.see_through = see_through;
         screen
+    }
+
+    #[test]
+    fn output_off_switches_a_screen_off_and_naming_its_output_brings_it_back() {
+        let found = sp_decklink::Found { driver: sp_decklink::Driver::Looking, devices: Vec::new() };
+        let words = |typed: &str| typed.split(' ').map(str::to_owned).collect::<Vec<_>>();
+        let mut stream = Screen::new("Stream".to_owned(), Output::Ndi("Church Stream".to_owned()));
+        let said = set_output(&mut stream, &words("off"), &found).unwrap();
+        assert_eq!(said, "switched off, keeping NDI as Church Stream for when it is on again");
+        assert!(!stream.on && stream.output == Output::Ndi("Church Stream".to_owned()));
+        assert_eq!(set_output(&mut stream, &words("ndi Church Stream"), &found).unwrap(), "on NDI as Church Stream");
+        assert!(stream.on);
+        // A DeckLink screen keeps its format and keyer while off.
+        let mut switcher = on_card(Keyer::External, Some(Alpha::Premultiplied));
+        let before = switcher.output.clone();
+        set_output(&mut switcher, &words("off"), &found).unwrap();
+        assert!(!switcher.on && switcher.output == before);
+        // One going nowhere stays so.
+        let mut spare = Screen::new("Spare".to_owned(), Output::Off);
+        set_output(&mut spare, &words("off"), &found).unwrap();
+        assert!(spare.is_off() && spare.output == Output::Off);
     }
 
     #[test]

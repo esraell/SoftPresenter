@@ -1,6 +1,6 @@
 {
   "_note": "Ukrainian; see topbar.json and docs/translating.md. The Screens window and Settings › Screens: the list of screens, each screen's output, look, background and key, DeckLink formats and keyer, what each screen is doing, NDI download and sound, the X on a screen's window. A screen (what the app sends) is екран (для залу, для сцени); a physical display is монітор where both meet in one sentence, and the main display is основний монітор. A switcher's key and fill are ключ and заповнення, keying is кеїнг; a video switcher is відеомікшер. The menu bar and the taskbar are Apple's and Microsoft's own Ukrainian names (смуга меню, панель завдань).",
-  "screens.closed_from_display": "{screen} вимкнено з його власного монітора. Виберіть його монітор знову в Налаштування › Екрани.",
+  "screens.closed_from_display": "{screen} вимкнено з його власного монітора. Увімкніть його знову в Налаштування › Екрани.",
   "screens.list.audience": "Зал",
   "screens.list.stage": "Сцена",
   "screens.list.audience.on": "Екрани для залу увімкнено",
@@ -36,6 +36,9 @@
   "screens.about.ndi": "Інші компʼютери в мережі можуть показувати цей екран, у 1920 × 1080. NDI® — зареєстрована торговельна марка Vizrt NDI AB.",
   "screens.about.decklink": "Виводиться через карту Blackmagic Design DeckLink, на її розʼєм, у вибраному тут форматі. Новий слайд зʼявляється плавно, як на інших екранах.",
   "screens.about.off": "Цей екран лишається в списку, але ніде не показується.",
+  "screens.about.switched_off": "Вимкнено. Він памʼятає, куди виводиться, і буде готовий, коли його увімкнуть.",
+  "screens.about.switched_off.sending": "Вимкнено. Він і далі надсилає чорне, щоб трансляція чи відеомікшер зберегли його як джерело, і памʼятає, куди виводиться, — буде готовий, коли його увімкнуть.",
+  "screens.status.off_black": "Вимкнено · надсилає чорне",
   "screens.look": "Вигляд",
   "screens.look.theme": "Тема",
   "screens.look.theme.hover": "Ті самі слова, розміщені цією темою на цьому екрані",

@@ -167,7 +167,6 @@
   "settings.screens.use_window": "Usar una ventana por ahora",
   "settings.screens.open": "Configurar “{name}” en la ventana de las pantallas",
   "settings.screens.open.key": "Configurar “{name}” en la ventana de las pantallas ({key})",
-  "settings.screens.on.hint": "Apagada no va a ninguna parte, como al elegir Apagada en la ventana de las pantallas",
   "settings.screens.off.hint": "Elige adónde va, en la ventana de las pantallas",
   "settings.screens.add": "Añadir una pantalla",
   "settings.screens.add.about": "Elige adónde va y cómo se ve",

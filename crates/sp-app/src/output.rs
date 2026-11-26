@@ -145,6 +145,10 @@ pub enum OutputMsg {
     /// Show each screen's own name on it, so the operator can tell them apart; an empty list
     /// goes back to the show.
     Identify(Vec<(Uuid, String, sp_model::Rgba)>),
+    /// The screens switched off that go on sending (on NDI or a DeckLink output): each is drawn
+    /// as every screen of its kind is while that kind is switched off, black (clear, for a
+    /// see-through one), with no sound, so a stream or switcher keeps it as a source.
+    Dark(Vec<Uuid>),
     /// The operator's live preview looks at one audience screen, drawn as that screen draws it
     /// (its own theme and layers), or with `None` at what the room sees. Only the preview is
     /// drawn again: it is the same one picture, drawn for another screen.
@@ -1377,6 +1381,8 @@ struct Output {
     identify: Vec<(Uuid, Arc<Slide>, sp_model::Rgba)>,
     identify_since: Instant,
     identify_theme: Arc<Theme>,
+    /// The screens switched off that go on sending: drawn black (see `OutputMsg::Dark`).
+    dark: Vec<Uuid>,
     /// The audience screens with a look of their own.
     looks: Vec<(Uuid, crate::screens::Look)>,
     themes: Vec<(Uuid, Arc<Theme>)>,
@@ -1536,6 +1542,7 @@ fn run(
         identify: Vec::new(),
         identify_since: Instant::now(),
         identify_theme: Arc::new(Theme::builtin()),
+        dark: Vec::new(),
         stage: Vec::new(),
         stage_on: true,
         looks: Vec::new(),
@@ -1923,6 +1930,16 @@ fn run(
                     output.ndi_fades.clear();
                     output.ndi_shown.clear();
                 }
+                OutputMsg::Dark(dark) => {
+                    // What each screen last sent is forgotten, so the change goes out at once.
+                    if output.dark != dark {
+                        output.dark = dark;
+                        for target in &mut output.targets {
+                            target.shown = None;
+                        }
+                        output.ndi_shown.clear();
+                    }
+                }
                 OutputMsg::PreviewScreen(screen) => {
                     if output.preview_screen != screen {
                         output.preview_screen = screen;
@@ -2300,6 +2317,11 @@ impl Output {
 
     /// What a screen shows now. Cheap copies: the picture, the slide and the theme are shared.
     fn content_for(&self, id: Uuid, frame: &Frame) -> Content {
+        // Switched off, it shows what a screen of its kind shows while the kind is off.
+        if self.dark.contains(&id) {
+            let stage = self.stage.iter().find(|(have, _)| *have == id).map(|(_, layout)| layout);
+            return switched_off(stage, &frame.theme);
+        }
         if let Some((_, layout)) = self.stage.iter().find(|(have, _)| *have == id) {
             let words = self.stage_on.then(|| layout.templates.first()).flatten().map(|template| {
                 let (now, next) = (frame.slide.as_deref(), frame.next.as_deref());
@@ -2311,7 +2333,7 @@ impl Output {
             return (None, Some(Arc::new(pattern.slide())), None, self.identify_theme.clone(), None);
         }
         if !frame.enabled {
-            return (None, None, None, frame.theme.clone(), None);
+            return switched_off(None, &frame.theme);
         }
         // A screen's look can leave layers out, and its own theme lays the words out its way.
         let look = self.look_of(id);
@@ -2358,6 +2380,9 @@ impl Output {
     /// screen) in a screen's picture it shows. When unsure, true: a picture drawn that did not
     /// change costs time, one not drawn that did is wrong on the screen.
     fn shows_video(&self, id: Uuid) -> bool {
+        if self.dark.contains(&id) {
+            return false;
+        }
         if let Some((_, layout)) = self.stage.iter().find(|(have, _)| *have == id) {
             // A stage layout's own videos are among the slide's (see `sync_slide_video`).
             return self.stage_on
@@ -2410,7 +2435,9 @@ impl Output {
     fn fill_of(&self, key: Uuid) -> Option<Uuid> {
         let fill = self.key_of(key)?;
         let identified = self.identify.iter().any(|(have, ..)| *have == key);
-        (fill != key && !self.is_stage(fill) && self.key_of(fill).is_none() && !identified).then_some(fill)
+        // A key switched off, or of a fill switched off, follows nothing: it is black.
+        let dark = self.dark.contains(&key) || self.dark.contains(&fill);
+        (fill != key && !self.is_stage(fill) && self.key_of(fill).is_none() && !identified && !dark).then_some(fill)
     }
 
     /// For a key in a window, the window of its fill, whose picture it is made from: a key goes
@@ -2461,9 +2488,13 @@ impl Output {
     }
 
     fn build_scene_for(&mut self, id: Uuid, frame: &Frame, w: u32, h: u32) -> vello::Scene {
-        // While screens are identified, each is marked over what it shows.
-        let identified =
-            self.identify.iter().find(|(have, ..)| *have == id).map(|(_, name, color)| (name.clone(), *color));
+        // While screens are identified, each is marked over what it shows; one switched off
+        // shows nothing.
+        let identified = self
+            .identify
+            .iter()
+            .find(|(have, ..)| *have == id && !self.dark.contains(&id))
+            .map(|(_, name, color)| (name.clone(), *color));
         // A key shows nothing of its own: its picture is made from its fill's, where that is
         // painted (`present_keys_of`, `send_ndi`). One with no fill to follow is black, which
         // keys nothing in, so a switcher shows its camera untouched.
@@ -2538,6 +2569,7 @@ impl Output {
             && self.announcement.as_ref().is_none_or(|shown| shown.video.is_none())
             && self.overlay.test_pattern.is_none()
             && self.identify.is_empty()
+            && !self.dark.contains(&id)
             && !self.is_stage(id)
             && self.key_of(id).is_none()
             && self.see_through(id).is_none()
@@ -3633,7 +3665,7 @@ impl Output {
         else {
             return Vec::new();
         };
-        if !self.stage_on {
+        if !self.stage_on || self.dark.contains(&id) {
             return Vec::new();
         }
         let mut pictures = Vec::new();
@@ -4230,6 +4262,13 @@ fn identify_marks(scene: &mut vello::Scene, color: sp_model::Rgba, strength: f32
 /// Nothing: a see-through screen's colour where nothing is drawn.
 const CLEAR: sp_model::Rgba = sp_model::Rgba { r: 0, g: 0, b: 0, a: 0 };
 
+/// What a screen shows while it is switched off, or while its kind is: no media, no slide,
+/// nothing over it and no announcement; its own background only (black, or clear for a
+/// see-through screen), with a stage screen's layout, or the main theme.
+fn switched_off(stage_layout: Option<&Arc<Theme>>, theme: &Arc<Theme>) -> Content {
+    (None, None, None, stage_layout.unwrap_or(theme).clone(), None)
+}
+
 /// Black, filling a target of this size.
 fn black(w: u32, h: u32) -> vello::Scene {
     use vello::kurbo::{Affine, Rect};
@@ -4476,6 +4515,19 @@ fn capture_wanted() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_screen_switched_off_sends_its_background_only() {
+        // What a screen switched off on NDI or a DeckLink output is drawn with: what every
+        // screen shows while its kind is switched off, so black (clear, for a see-through one).
+        let theme = Arc::new(Theme::builtin());
+        let (media, slide, over, drawn_with, announcement) = switched_off(None, &theme);
+        assert!(media.is_none() && slide.is_none() && over.is_none() && announcement.is_none());
+        assert!(Arc::ptr_eq(&drawn_with, &theme));
+        let layout = Arc::new(Theme::builtin());
+        let (.., stage_with, _) = switched_off(Some(&layout), &theme);
+        assert!(Arc::ptr_eq(&stage_with, &layout), "a stage screen keeps its layout, with no words");
+    }
 
     fn slow() -> Result<(), sp_render::PaintError> {
         Err(sp_render::PaintError::NotNow("too slow".to_owned()))

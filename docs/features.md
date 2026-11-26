@@ -1515,7 +1515,19 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 ## Screens
 - Any number of audience screens, each sent to a display, a window, the network over NDI, or
   a Blackmagic Design DeckLink card's output (SDI or HDMI), all showing the same picture, set up in the
-  Screens window (**Option-Command-1**). Its − asks before a screen goes ("Remove the screen
+  Screens window (**Option-Command-1**).
+- **A screen switched off keeps where it goes.** Its card's On key in Settings › Screens, Off
+  under Output in the Screens window, the X on a screen that fills a display, closing a
+  screen's window and `sp screen set SCREEN output=off` all do the same: the screen stops going
+  out but keeps its display or window, its NDI name, sound and rate, and its DeckLink output,
+  format and keyer, and On brings it back exactly as it was (in the Screens window, choosing
+  where it went does too; choosing somewhere else sends it there, switched on). A display or
+  window screen switched off shows nothing and closes its window; one on NDI or a DeckLink
+  output goes on sending, black (clear for a see-through screen, with no sound), as every
+  screen of its kind does while the kind is switched off, so a stream or switcher keeps it as
+  a source. Its status says "Switched off", or "Off · sending black". A screen with nowhere to
+  go yet (a new one, or one saved going nowhere) is set up in the Screens window first; its
+  card's On key opens it there. Its − asks before a screen goes ("Remove the screen
   “Lobby”? Nothing more is sent to it, and its settings go. This can't be undone."), as Undo
   can't bring a screen back.
 - **A PC with no graphics driver.** Where Windows has only its own software graphics to
@@ -1720,9 +1732,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   translucent dark round plate, 72 points across and 24 from the edges, with a faint light ring
   and a light X, brighter under the pointer, and the pointer shows over the window while it
   does. It fades out 3 seconds after the pointer stops (1 second after it leaves the window),
-  and stays while the pointer rests on it. Clicking it, once it has been up for 0.4 s, sets that
-  screen's Output to Off, saves the screens and closes the window, and the notices say "“Screen
-  1” was turned off from its own display. Choose its display again in Settings › Screens." So a
+  and stays while the pointer rests on it. Clicking it, once it has been up for 0.4 s, switches
+  that screen off (keeping its display, as every switch does), saves the screens and closes the
+  window, and the notices say "“Screen 1” was turned off from its own display. Switch it on
+  again in Settings › Screens." So a
   screen put on the operator's own display (chosen by mistake, or where the system doesn't say
   which display the operator works on) never leaves the operator stuck. The X is drawn only
   into that window's own picture: never on NDI, DeckLink, a key, a stage screen's picture of
@@ -1912,9 +1925,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   goes out, dimmed with Off or Not plugged in while it doesn't, MAIN on the first audience
   screen, and, while the screens are identified, its colour and name as the screen shows them),
   its colour, its name and an On key, what it is doing (green going out, grey off, amber for
-  trouble: never Off's grey), and its kind and where it goes. On sends the screen nowhere, as Off
-  under Output in the Screens window does (the screen and its settings stay in the list); while
-  it goes nowhere, the key opens it in the Screens window to choose where. A screen on a display
+  trouble: never Off's grey), and its kind and where it goes. The On key is the screen's own
+  switch, as Off under Output in the Screens window is: off, it keeps where it goes, and on, it
+  is back as it was (see Screens); a screen with nowhere to go yet has the key open it in the
+  Screens window to choose where. A screen on a display
   that isn't plugged in has **Use a window for now**. A click on a card opens that screen in the
   Screens window (bringing the window in front), where everything about it is set, and the
   dashed **Add a screen** card adds an audience screen that goes nowhere until it is told where,

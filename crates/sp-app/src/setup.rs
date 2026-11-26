@@ -522,7 +522,7 @@ fn screens(ui: &mut egui::Ui, state: &mut HomeState) {
         ui.add_space(10.0);
         let lit = one_display_choice(&state.screens[audience].output, state.ndi_available);
         let set = |output: Output, state: &mut HomeState| {
-            state.screens[audience].output = output;
+            state.screens[audience].go_to(output);
             state.screens_changed = true;
         };
         if choice(
@@ -588,7 +588,7 @@ fn screens(ui: &mut egui::Ui, state: &mut HomeState) {
     };
     for (name, size) in &others {
         if choice(ui, current.as_deref() == Some(name), name, size).clicked() {
-            state.screens[audience].output = Output::Display(name.clone());
+            state.screens[audience].go_to(Output::Display(name.clone()));
             state.screens_changed = true;
         }
         ui.add_space(6.0);
@@ -622,7 +622,7 @@ fn screens(ui: &mut egui::Ui, state: &mut HomeState) {
         for (name, size) in free {
             if choice(ui, stage_on.as_deref() == Some(name), name, size).clicked() {
                 match stage {
-                    Some(at) => state.screens[at].output = Output::Display(name.clone()),
+                    Some(at) => state.screens[at].go_to(Output::Display(name.clone())),
                     None => state.screens.push(Screen::stage(
                         t("setup.screens.stage.name", "Stage").to_owned(),
                         Output::Display(name.clone()),

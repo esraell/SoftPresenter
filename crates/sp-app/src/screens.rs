@@ -208,6 +208,14 @@ pub struct Screen {
     /// chosen, so only another is written.
     #[serde(default, skip_serializing_if = "NdiRate::is_default")]
     pub rate: NdiRate,
+    /// The screen's own switch. Off, it stops going out but keeps where it goes (its display or
+    /// window, its NDI name, its DeckLink output, format and keyer), so On brings it back
+    /// exactly as it was: a display or window screen shows nothing, and one on NDI or a
+    /// DeckLink output goes on sending, black, so a stream or switcher keeps it as a source. On
+    /// unless switched off, so only "off" is written; a screen saved before it had a switch is
+    /// on, and one saved going nowhere (`Output::Off`) still goes nowhere.
+    #[serde(default = "sound_on", skip_serializing_if = "is_on")]
+    pub on: bool,
 }
 
 /// How many pictures a second a screen sent over NDI sends: the rate the equipment that shows it
@@ -466,6 +474,46 @@ impl Screen {
             theme: None,
             sound: true,
             rate: NdiRate::default(),
+            on: true,
+        }
+    }
+
+    /// True when the screen goes nowhere: switched off, or with nowhere to go.
+    pub fn is_off(&self) -> bool {
+        !self.on || self.output == Output::Off
+    }
+
+    /// True when a screen switched off still sends (black): it is on NDI or a DeckLink output,
+    /// whose receivers or switcher keep it as a source.
+    pub fn sends_while_off(&self) -> bool {
+        !self.on && matches!(&self.output, Output::Ndi(_) | Output::DeckLink(_))
+    }
+
+    /// Sends the screen to `output` and switches it on: choosing where a screen goes is what
+    /// switching it on with nowhere kept to go asks for.
+    pub fn go_to(&mut self, output: Output) {
+        self.output = output;
+        self.on = true;
+    }
+
+    /// What a choice in the Screens window's Output menu does: Off switches the screen off,
+    /// keeping where it goes; where it went (the same display, NDI, the same DeckLink output)
+    /// switches it on again as it was, its NDI name and DeckLink format and keyer too; anywhere
+    /// else sends it there, switched on.
+    pub fn choose_output(&mut self, choice: Output) {
+        if choice == Output::Off {
+            self.on = false;
+            return;
+        }
+        let same = match (&choice, &self.output) {
+            (Output::DeckLink(one), Output::DeckLink(two)) => one.same_device(two),
+            (Output::Ndi(_), Output::Ndi(_)) => true,
+            _ => choice == self.output,
+        };
+        if same {
+            self.on = true;
+        } else {
+            self.go_to(choice);
         }
     }
 
@@ -628,6 +676,12 @@ fn kept_in_words(kept: Kept, display: &str) -> String {
 pub fn place_all(screens: &[Screen], displays: &[DisplayInfo], operator: &[usize]) -> Vec<Placed> {
     let mut placed: Vec<Placed> = Vec::with_capacity(screens.len());
     for screen in screens {
+        // Switched off, a display or window screen shows nowhere (and takes no display from a
+        // screen after it); one on NDI or a DeckLink output is placed as usual, and sends black.
+        if !screen.on && !matches!(&screen.output, Output::Ndi(_) | Output::DeckLink(_) | Output::Off) {
+            placed.push(Placed::Nothing(t("screens.status.switched_off", "Switched off").to_owned()));
+            continue;
+        }
         let wanted = match &screen.output {
             Output::Automatic => match choose_output(displays, operator, None) {
                 Ok(Placement::Fullscreen(index)) => Placed::Fullscreen(index),
@@ -711,6 +765,7 @@ pub fn status_in_english(doing: &str) -> String {
     for (key, english) in [
         crate::i18n::tk("screens.status.off", "Off"),
         crate::i18n::tk("screens.status.switched_off", "Switched off"),
+        crate::i18n::tk("screens.status.off_black", "Off \u{b7} sending black"),
         crate::i18n::tk("screens.status.window", "In a window"),
     ] {
         if doing == t(key, english) {
@@ -1289,6 +1344,81 @@ mod tests {
             mode: "1080i59.94".to_owned(),
             keyer: Keyer::Off,
         })
+    }
+
+    #[test]
+    fn a_screen_switched_off_keeps_where_it_goes_and_comes_back_as_it_was() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let keyed = Output::DeckLink(DeckLinkOut {
+                device: "DeckLink Duo (1)".to_owned(),
+                id: Some(7),
+                mode: "1080p29.97".to_owned(),
+                keyer: Keyer::External,
+            });
+            let mut screens = vec![
+                screen("Projector", Output::Display("Projector".to_owned())),
+                screen("Stream", Output::Ndi("Church Stream".to_owned())),
+                screen("Switcher", keyed.clone()),
+            ];
+            let all = displays(&["Built-in", "Projector"]);
+            let before = place_all(&screens, &all, &[0]);
+            assert_eq!(before[0], Placed::Fullscreen(1));
+            for screen in &mut screens {
+                screen.choose_output(Output::Off);
+            }
+            assert!(screens.iter().all(|screen| !screen.on && screen.is_off()));
+            assert_eq!(screens[0].output, Output::Display("Projector".to_owned()), "kept");
+            assert_eq!(screens[1].output, Output::Ndi("Church Stream".to_owned()), "kept");
+            assert_eq!(screens[2].output, keyed, "its format and keyer kept");
+            let off = place_all(&screens, &all, &[0]);
+            // The display shows nothing; NDI and DeckLink go on, drawn black, so receivers and
+            // switchers keep them as sources.
+            assert_eq!(off[0], Placed::Nothing("Switched off".to_owned()));
+            assert_eq!(off[1], Placed::Ndi("Church Stream".to_owned()));
+            assert!(
+                matches!(&off[2], Placed::DeckLink(out) if out.mode == "1080p29.97" && out.keyer == Keyer::External)
+            );
+            assert_eq!(screens.iter().map(Screen::sends_while_off).collect::<Vec<_>>(), [false, true, true]);
+            // On again, by choosing where it went (the Screens window), or by its switch (the card).
+            screens[0].choose_output(Output::Display("Projector".to_owned()));
+            screens[1].choose_output(Output::Ndi("SoftPresenter Stream".to_owned()));
+            screens[2].on = true;
+            assert_eq!(place_all(&screens, &all, &[0]), before, "back exactly as it was");
+            assert_eq!(screens[1].output, Output::Ndi("Church Stream".to_owned()), "its own NDI name");
+            // Choosing somewhere else sends it there, switched on.
+            screens[0].on = false;
+            screens[0].choose_output(Output::Window);
+            assert!(screens[0].on && screens[0].output == Output::Window);
+            // A switched-off display screen takes no display from a screen after it.
+            let mut two = vec![
+                screen("A", Output::Display("Projector".to_owned())),
+                screen("B", Output::Display("Projector".to_owned())),
+            ];
+            two[0].on = false;
+            assert_eq!(place_all(&two, &all, &[0])[1], Placed::Fullscreen(1));
+        });
+    }
+
+    #[test]
+    fn a_screens_switch_is_saved_only_when_off_and_older_files_open_as_before() {
+        // Saved before a screen had a switch: on. Saved going nowhere: still nowhere.
+        let old: Vec<Screen> = from_json(
+            r#"{"format":"softpresenter-screens","version":1,"screens":[
+                {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e01","name":"Main","output":{"display":"HP 27f"}},
+                {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e02","name":"Spare","output":"off"}]}"#,
+        )
+        .expect("an older file");
+        assert!(old[0].on && !old[0].is_off());
+        assert!(old[1].on && old[1].is_off() && old[1].output == Output::Off);
+        assert_eq!(place_all(&old[1..], &[], &[]), [Placed::Nothing(String::new())], "goes nowhere, as before");
+        // On is not written; off is, and comes back.
+        let mut stream = screen("Stream", Output::Ndi("Church Stream".to_owned()));
+        assert!(!serde_json::to_string(&stream).unwrap().contains("\"on\""));
+        stream.on = false;
+        let saved = to_json(std::slice::from_ref(&stream));
+        assert!(saved.contains("\"on\": false") || saved.contains("\"on\":false"), "{saved}");
+        let back = from_json(&saved).expect("its own file");
+        assert_eq!(back[0], stream);
     }
 
     #[test]

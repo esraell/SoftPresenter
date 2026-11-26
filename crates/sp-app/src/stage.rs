@@ -425,10 +425,7 @@ pub fn shown_objects(state: &crate::home::HomeState) -> Vec<Object> {
     }
     let mut seen = Vec::new();
     let mut shown = Vec::new();
-    let stages = state
-        .screens
-        .iter()
-        .filter(|screen| screen.kind == crate::screens::Kind::Stage && screen.output != crate::screens::Output::Off);
+    let stages = state.screens.iter().filter(|screen| screen.kind == crate::screens::Kind::Stage && !screen.is_off());
     for screen in stages {
         let layout = layout_for(&state.stage_layouts, screen.stage_layout);
         if !seen.contains(&layout.id) {
