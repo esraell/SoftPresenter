@@ -30,6 +30,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   show while the list is open. `sp notices` lists it, `sp notices answer N ANSWER` answers a
   question as its button does, and `sp notices seen` and `sp notices clear` do what closing the
   list and Clear All do; a Remote Control page mirrors the button with the same commands.
+- **The system's windows for choosing files** (Add in the media bin and the Audio tab, the
+  Import and Export choices, Install from File…, a folder for a media playlist to follow, a song
+  pack's question about songs that are here already) never stop the app while they are open:
+  the window goes on drawing and taking clicks, `sp` and Remote Control are answered, and a
+  picture or video dragged from that window onto the media bin comes in at once. On a Mac they
+  open as a sheet on the window; on Windows and Linux as a window of their own (on Windows,
+  clicking Add again while one is open brings it back in front). One is open at a time; what is chosen
+  goes to the slide, theme or playlist it was asked for, if that is still open.
 - **Resizing the window** redraws the operator's window at its new size as it is dragged, so the
   layout reflows live and nothing is stretched. If setting the window up for a new size ever
   holds the graphics card long enough to risk the audience screens' pictures, the rest of that

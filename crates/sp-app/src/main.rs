@@ -24,6 +24,7 @@ mod close_button;
 mod control;
 mod convert;
 mod deck;
+mod dialogs;
 mod displays;
 mod editor;
 mod ffmpeg_fetch;
@@ -751,6 +752,11 @@ enum AppEvent {
     /// changed, a size or the arrangement changed). Only macOS sends it.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     DisplaysChanged,
+    /// A file window or question the app showed was answered (see `dialogs`).
+    Dialog(dialogs::Answered),
+    /// Files were dropped on the window: sent with the first, so it comes once the system has
+    /// handed over all of that drop's files, one after another (see [`App::file_dropped`]).
+    FilesDropped,
 }
 
 impl AppEvent {
@@ -777,6 +783,8 @@ impl AppEvent {
             AppEvent::UpdateChecked => "UpdateChecked",
             AppEvent::FfmpegFetch => "FfmpegFetch",
             AppEvent::DisplaysChanged => "DisplaysChanged",
+            AppEvent::Dialog(_) => "Dialog",
+            AppEvent::FilesDropped => "FilesDropped",
         }
     }
 }
@@ -2141,6 +2149,10 @@ struct App {
     /// pointer was at the drop (see `finish_drop`).
     dropped: Vec<PathBuf>,
     drop_pointer: Option<egui::Pos2>,
+    /// When the first file of the drop waiting came, and the time of day then (for the log).
+    drop_came: Option<(Instant, chrono::DateTime<chrono::Local>)>,
+    /// The file window or question open, if any, and what it is for (see `dialogs`).
+    dialogs: dialogs::Dialogs<dialogs::For>,
     /// Bible downloads started from the command line: each job's number, the Bible's id and name.
     bible_jobs: Vec<(u64, String, String)>,
     /// `sp update check`s waiting for the check that is running: their job numbers.
@@ -3907,18 +3919,15 @@ impl App {
         let state = &mut running.home_state;
         match state.audio_request.take() {
             Some(AudioRequest::Add) => {
-                let chosen = rfd::FileDialog::new()
-                    .set_title(crate::i18n::t("notices.dialog.add_audio", "Add Audio"))
-                    .add_filter(crate::i18n::t("notices.dialog.filter.audio", "Audio"), &audio::AUDIO_ENDINGS)
-                    .pick_files()
-                    .unwrap_or_default();
-                let tracks = &mut state.audio.shown_mut().tracks;
-                for path in chosen {
-                    if !tracks.iter().any(|track| track.path == path) {
-                        tracks.push(audio::Track::of(path));
-                        state.audio_changed = true;
-                    }
-                }
+                // The tracks chosen join the playlist shown now (`dialogs`).
+                let playlist = state.audio.shown().id;
+                let window = dialogs::Files::new(
+                    dialogs::Choose::Files,
+                    crate::i18n::t("notices.dialog.add_audio", "Add Audio"),
+                )
+                .filter(crate::i18n::t("notices.dialog.filter.audio", "Audio"), &audio::AUDIO_ENDINGS);
+                self.ask(dialogs::For::AddAudio { playlist }, dialogs::Window::Files(window));
+                return;
             }
             Some(AudioRequest::Play(id)) => {
                 // A track chosen while another plays crossfades from it, if a crossfade is set.
@@ -4791,10 +4800,20 @@ impl App {
     /// Notes a file dropped on the window from the Finder. The system hands over several
     /// dropped together one after another; they are taken in together once all have come (see
     /// [`App::finish_drop`]), each to the place the pointer was over at the drop.
+    ///
+    /// The first sends `AppEvent::FilesDropped`, which the loop hands back after the rest of
+    /// that drop's files (they all come within the one call from the system), so the drop is
+    /// taken in at once. Waiting for the loop to be about to sleep instead could wait for
+    /// something else to happen on Windows, where a drop comes from inside the system's own
+    /// handling of it; that is still looked at then, in case the event can't be sent.
     fn file_dropped(&mut self, path: PathBuf) {
         if self.dropped.is_empty() {
             self.drop_pointer =
                 self.running.as_ref().and_then(|running| file_drop_pointer(&running.home_window, &running.egui_ctx));
+            self.drop_came = Some((Instant::now(), chrono::Local::now()));
+            if let Some(waker) = &self.waker {
+                let _ = waker.send_event(AppEvent::FilesDropped);
+            }
         }
         self.dropped.push(path);
     }
@@ -4803,12 +4822,16 @@ impl App {
     /// playlist or library dropped on, if any, else the library shown), never into the media bin;
     /// pictures and videos into the media bin (and the playlist dropped on), or onto the slide in
     /// the editor; presentations and PDFs as slides; a Bible installed. See `file_drop.rs`.
-    fn finish_drop(&mut self) {
+    fn finish_drop(&mut self, how: &str) {
         if self.dropped.is_empty() {
             return;
         }
         let paths = std::mem::take(&mut self.dropped);
         let pointer = self.drop_pointer.take();
+        if let Some((came, at)) = self.drop_came.take() {
+            applog::event("drop", &format!("received {} files at {}", paths.len(), at.format("%H:%M:%S%.3f")));
+            applog::event("drop", &format!("taken in after {} ms ({how})", came.elapsed().as_millis()));
+        }
         // What each file is was found while it was held over the window; a file the system
         // didn't say was coming is looked at now.
         let seen: Vec<(PathBuf, file_drop::Kind)> =
@@ -5049,12 +5072,11 @@ impl App {
             return;
         }
         // Any file may be a Bible, whatever its ending: what it holds decides.
-        let chosen = rfd::FileDialog::new()
-            .set_title(crate::i18n::t("notices.dialog.bible_file", "Choose a Bible File"))
-            .pick_file();
-        if let Some(path) = chosen {
-            self.install_bible(&path);
-        }
+        let window = dialogs::Files::new(
+            dialogs::Choose::File,
+            crate::i18n::t("notices.dialog.bible_file", "Choose a Bible File"),
+        );
+        self.ask(dialogs::For::BibleFile, dialogs::Window::Files(window));
     }
 
     /// Puts a picture or video in the media bin (and in the media playlist shown, if any).
@@ -5697,39 +5719,41 @@ impl App {
     /// and copies it into the Images folder.
     fn handle_picture_request(&mut self) {
         let Some(running) = self.running.as_mut() else { return };
+        // What is chosen goes to the theme or slide open now, if it is still open then
+        // (`dialogs`).
         if std::mem::take(&mut running.home_state.theme_picture_request) {
-            let chosen = rfd::FileDialog::new()
-                .set_title(crate::i18n::t("notices.dialog.theme_picture", "Choose a Picture for the Theme"))
-                .add_filter(crate::i18n::t("notices.dialog.filter.pictures", "Pictures"), &media::PICTURES)
-                .pick_file();
-            let state = &mut running.home_state;
-            match chosen.map(|path| images::import(&path)) {
-                Some(Ok(picture)) => {
-                    if let Some(edit) = state.theme_edit.as_mut() {
-                        edit.theme.background_picture = Some(picture.file);
-                        edit.changed = true;
-                    }
-                }
-                Some(Err(problem)) => state.notices.trouble(problem),
-                None => {}
-            }
-            running.home_window.request_redraw();
+            let Some(theme) = running.home_state.theme_edit.as_ref().map(|edit| edit.index) else { return };
+            let window = dialogs::Files::new(
+                dialogs::Choose::File,
+                crate::i18n::t("notices.dialog.theme_picture", "Choose a Picture for the Theme"),
+            )
+            .filter(crate::i18n::t("notices.dialog.filter.pictures", "Pictures"), &media::PICTURES);
+            self.ask(dialogs::For::ThemePicture { theme }, dialogs::Window::Files(window));
             return;
         }
         if !std::mem::take(&mut running.home_state.picture_request) {
             return;
         }
-        let chosen = rfd::FileDialog::new()
-            .set_title(crate::i18n::t("notices.dialog.picture_or_video", "Choose a Picture or Video"))
-            .add_filter(crate::i18n::t("notices.dialog.filter.media", "Pictures and Videos"), &media::PICTURE_ENDINGS)
-            .pick_file();
-        let state = &mut running.home_state;
-        match chosen.map(|path| images::import(&path)) {
-            Some(Ok(picture)) => state.picture_to_add.push(picture),
-            Some(Err(problem)) => state.notices.trouble(problem),
-            None => {}
+        let draft = running.home_state.editing.as_ref().map(|editing| editing.serial);
+        let window = dialogs::Files::new(
+            dialogs::Choose::File,
+            crate::i18n::t("notices.dialog.picture_or_video", "Choose a Picture or Video"),
+        )
+        .filter(crate::i18n::t("notices.dialog.filter.media", "Pictures and Videos"), &media::PICTURE_ENDINGS);
+        self.ask(dialogs::For::SlidePicture { draft }, dialogs::Window::Files(window));
+    }
+
+    /// A media playlist follows a folder (or none): its files come and go with the folder's.
+    fn follow_folder(&mut self, id: Uuid, folder: Option<PathBuf>) {
+        if let Some(running) = self.running.as_mut()
+            && let Some(playlist) = running.home_state.media_playlists.iter_mut().find(|p| p.id == id)
+        {
+            applog::event("media", &format!("playlist {} follows {:?}", playlist.name, folder));
+            playlist.folder = folder;
         }
-        running.home_window.request_redraw();
+        self.folder_notes.seen.clear();
+        self.check_folders(true);
+        self.save_media_list();
     }
 
     fn handle_media_request(&mut self) {
@@ -5741,41 +5765,23 @@ impl App {
         match request {
             MediaRequest::PlayPlaylist(Some(id)) => self.play_media_playlist(id),
             MediaRequest::PlayPlaylist(None) => self.stop_media_playlist(),
-            MediaRequest::WatchFolder(id, follow) => {
-                let folder = if follow {
-                    let Some(folder) = rfd::FileDialog::new()
-                        .set_title(crate::i18n::t("notices.dialog.follow_folder", "Choose a Folder to Follow"))
-                        .pick_folder()
-                    else {
-                        return;
-                    };
-                    Some(folder)
-                } else {
-                    None
-                };
-                if let Some(running) = self.running.as_mut()
-                    && let Some(playlist) = running.home_state.media_playlists.iter_mut().find(|p| p.id == id)
-                {
-                    applog::event("media", &format!("playlist {} follows {:?}", playlist.name, folder));
-                    playlist.folder = folder;
-                }
-                self.folder_notes.seen.clear();
-                self.check_folders(true);
-                self.save_media_list();
+            MediaRequest::WatchFolder(id, true) => {
+                let window = dialogs::Files::new(
+                    dialogs::Choose::Folder,
+                    crate::i18n::t("notices.dialog.follow_folder", "Choose a Folder to Follow"),
+                );
+                self.ask(dialogs::For::FollowFolder { playlist: id }, dialogs::Window::Files(window));
             }
+            MediaRequest::WatchFolder(id, false) => self.follow_folder(id, None),
             MediaRequest::Choose => {
-                // The system's own window for choosing files, as any Mac app has.
-                let chosen = rfd::FileDialog::new()
-                    .set_title(crate::i18n::t("notices.dialog.add_media", "Add Pictures and Videos"))
-                    .add_filter(
-                        crate::i18n::t("notices.dialog.filter.media", "Pictures and Videos"),
-                        &media::PICTURE_ENDINGS,
-                    )
-                    .pick_files()
-                    .unwrap_or_default();
-                for path in chosen {
-                    self.add_dropped_file(&path);
-                }
+                // The system's own window for choosing files, as any Mac app has; the window
+                // goes on meanwhile, and what is chosen comes in as a drop does (`dialogs`).
+                let window = dialogs::Files::new(
+                    dialogs::Choose::Files,
+                    crate::i18n::t("notices.dialog.add_media", "Add Pictures and Videos"),
+                )
+                .filter(crate::i18n::t("notices.dialog.filter.media", "Pictures and Videos"), &media::PICTURE_ENDINGS);
+                self.ask(dialogs::For::AddMedia, dialogs::Window::Files(window));
             }
             MediaRequest::AddSamples => {
                 if let Err(problem) = self.add_sample_backgrounds()
@@ -6602,81 +6608,57 @@ impl App {
     }
 
     /// Makes a song pack from the window: asks whether to put the videos in (with their size)
-    /// and where to save it.
+    /// and where to save it, in windows that leave the app going meanwhile (`dialogs`).
     fn export_from_window(&mut self, indices: &[usize], playlist: Option<usize>) {
-        let said = match self.plan_pack(indices, playlist) {
-            Err(problem) => Err(problem),
-            Ok(mut export) => {
-                if !export.videos.is_empty() {
-                    let size = pack::size_words(export.video_bytes());
-                    let keep = rfd::MessageDialog::new()
-                        .set_title(crate::i18n::t("notices.export.title", "Export Songs"))
-                        .set_description(crate::i18n::tf(
-                            "notices.export.ask_videos",
-                            "The songs use {videos} ({size}). Put them in the song pack?",
-                            &[
-                                (
-                                    "videos",
-                                    &if export.videos.len() == 1 {
-                                        crate::i18n::t("notices.export.a_video", "a video").to_owned()
-                                    } else {
-                                        crate::i18n::tf(
-                                            "notices.export.videos",
-                                            "{n} videos",
-                                            &[("n", &crate::i18n::count(export.videos.len() as u64))],
-                                        )
-                                    },
-                                ),
-                                ("size", &size),
-                            ],
-                        ))
-                        .set_buttons(rfd::MessageButtons::YesNoCancelCustom(
-                            crate::i18n::tf("notices.export.include", "Include Videos ({size})", &[("size", &size)]),
-                            crate::i18n::t("notices.export.leave_out", "Leave Them Out").to_owned(),
-                            crate::i18n::t("notices.dialog.cancel", "Cancel").to_owned(),
-                        ))
-                        .show();
-                    let include =
-                        crate::i18n::tf("notices.export.include", "Include Videos ({size})", &[("size", &size)]);
-                    let leave_out = crate::i18n::t("notices.export.leave_out", "Leave Them Out");
-                    match pack::three_way(
-                        keep,
-                        [include.as_str(), leave_out, crate::i18n::t("notices.dialog.cancel", "Cancel")],
-                    ) {
-                        Some(0) => {}
-                        Some(1) => export.leave_out_videos(),
-                        _ => return,
-                    }
+        let export = match self.plan_pack(indices, playlist) {
+            Ok(export) => export,
+            Err(problem) => {
+                if let Some(running) = self.running.as_mut() {
+                    running.home_state.notices.outcome(Err(problem));
+                    running.home_window.request_redraw();
                 }
-                let name = match playlist {
-                    Some(at) => {
-                        self.running.as_ref().and_then(|r| r.home_state.services.list.get(at)).map(|l| l.name.clone())
-                    }
-                    None if export.songs.len() == 1 => export.songs.first().map(|song| song.title.clone()),
-                    None => Some(crate::i18n::t("notices.export.file_name", "Songs").to_owned()),
-                };
-                let file = format!(
-                    "{}.{}",
-                    pack::safe_file_name(
-                        &name.unwrap_or_else(|| crate::i18n::t("notices.export.file_name", "Songs").to_owned())
-                    ),
-                    pack::ENDING
-                );
-                let Some(to) = rfd::FileDialog::new()
-                    .set_title(crate::i18n::t("notices.export.title", "Export Songs"))
-                    .set_file_name(file)
-                    .add_filter(crate::i18n::t("notices.dialog.filter.pack", "Song pack"), &[pack::ENDING])
-                    .save_file()
-                else {
-                    return;
-                };
-                self.write_pack(export, to)
+                return;
             }
         };
-        if let Some(running) = self.running.as_mut() {
-            running.home_state.notices.outcome(said);
-            running.home_window.request_redraw();
+        let name = match playlist {
+            Some(at) => self.running.as_ref().and_then(|r| r.home_state.services.list.get(at)).map(|l| l.name.clone()),
+            None if export.songs.len() == 1 => export.songs.first().map(|song| song.title.clone()),
+            None => Some(crate::i18n::t("notices.export.file_name", "Songs").to_owned()),
+        };
+        let file = format!(
+            "{}.{}",
+            pack::safe_file_name(
+                &name.unwrap_or_else(|| crate::i18n::t("notices.export.file_name", "Songs").to_owned())
+            ),
+            pack::ENDING
+        );
+        if export.videos.is_empty() {
+            return self.ask_where_to_save(Box::new(export), file);
         }
+        let size = pack::size_words(export.video_bytes());
+        let videos = if export.videos.len() == 1 {
+            crate::i18n::t("notices.export.a_video", "a video").to_owned()
+        } else {
+            crate::i18n::tf(
+                "notices.export.videos",
+                "{n} videos",
+                &[("n", &crate::i18n::count(export.videos.len() as u64))],
+            )
+        };
+        let question = dialogs::Question {
+            title: crate::i18n::t("notices.export.title", "Export Songs").to_owned(),
+            words: crate::i18n::tf(
+                "notices.export.ask_videos",
+                "The songs use {videos} ({size}). Put them in the song pack?",
+                &[("videos", &videos), ("size", &size)],
+            ),
+            buttons: [
+                crate::i18n::tf("notices.export.include", "Include Videos ({size})", &[("size", &size)]),
+                crate::i18n::t("notices.export.leave_out", "Leave Them Out").to_owned(),
+                crate::i18n::t("notices.dialog.cancel", "Cancel").to_owned(),
+            ],
+        };
+        self.ask(dialogs::For::ExportVideos { export: Box::new(export), file }, dialogs::Window::Question(question));
     }
 
     /// Opens a song pack: at once when it is small (and returns what came in), else on a thread
@@ -6696,6 +6678,17 @@ impl App {
         let small = std::fs::metadata(&path).is_ok_and(|meta| meta.len() <= PACK_READ_AT_ONCE);
         if now || small || self.running.is_none() {
             return match pack::open(&path, &staging) {
+                // Some of its songs are here already: the window asks what to do with them, and
+                // the songs come in with the answer.
+                Ok(opened) if let Some(already) = self.pack_songs_to_ask(&opened, same) => {
+                    let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                    self.ask_pack_same(opened, library, None, already);
+                    Ok(crate::i18n::tf(
+                        "notices.pack.opening",
+                        "Opening {name}; the window says when its songs are in.",
+                        &[("name", &name)],
+                    ))
+                }
                 Ok(opened) => {
                     let said = self.apply_pack(opened, same, library);
                     applog::event("pack", said.as_ref().unwrap_or_else(|problem| problem));
@@ -6773,6 +6766,11 @@ impl App {
             let (job, result) = match done {
                 PackJob::Wrote { job, result } => (job, result),
                 PackJob::Opened { job, result, same, library } => match *result {
+                    // Some of its songs are here already: the job ends with the answer.
+                    Ok(opened) if let Some(already) = self.pack_songs_to_ask(&opened, same) => {
+                        self.ask_pack_same(opened, library, Some(job), already);
+                        continue;
+                    }
                     Ok(opened) => (job, self.apply_pack(opened, same, library)),
                     Err(problem) => (job, Err(problem)),
                 },
@@ -6787,17 +6785,44 @@ impl App {
                     Err(problem) => (job, Err(problem)),
                 },
             };
-            applog::event("pack", result.as_ref().unwrap_or_else(|problem| problem));
-            if let Some((_, kept)) = self.jobs.iter_mut().find(|(have, _)| *have == job) {
-                *kept = Some(result.clone());
-            }
-            if let Some(running) = self.running.as_mut() {
-                if !said_already {
-                    running.home_state.notices.outcome(result);
-                }
-                running.home_window.request_redraw();
-            }
+            self.pack_finished(Some(job), result, said_already);
         }
+    }
+
+    /// Says how a song pack's job went: in the log, to `job N`, and (unless it has been said)
+    /// in the window.
+    fn pack_finished(&mut self, job: Option<u64>, result: Result<String, String>, said_already: bool) {
+        applog::event("pack", result.as_ref().unwrap_or_else(|problem| problem));
+        if let Some((_, kept)) = job.and_then(|job| self.jobs.iter_mut().find(|(have, _)| *have == job)) {
+            *kept = Some(result.clone());
+        }
+        if let Some(running) = self.running.as_mut() {
+            if !said_already {
+                running.home_state.notices.outcome(result);
+            }
+            running.home_window.request_redraw();
+        }
+    }
+
+    /// How many of an opened pack's songs the library has already, when it isn't said what to
+    /// do with them and the window is there to ask; `None` when there is nothing to ask.
+    fn pack_songs_to_ask(&self, opened: &pack::Opened, same: Option<pack::Same>) -> Option<usize> {
+        let running = self.running.as_ref()?;
+        if same.is_some() {
+            return None;
+        }
+        let removed = &running.home_state.removed_songs;
+        let already =
+            opened
+                .songs
+                .iter()
+                .filter(|song| {
+                    self.show.presentations().iter().enumerate().any(|(at, have)| {
+                        have.id == song.id && !self.bible_slots.contains(&at) && !removed.contains(&at)
+                    })
+                })
+                .count();
+        (already > 0).then_some(already)
     }
 
     /// Brings an opened pack's songs into the library, with the themes, pictures and videos
@@ -6858,42 +6883,9 @@ impl App {
                 .enumerate()
                 .position(|(at, song)| song.id == id && !bible.contains(&at) && !removed.contains(&at))
         };
-        let already =
-            opened.songs.iter().filter(|song| existing(&self.show, song.id, &self.bible_slots).is_some()).count();
-        // Songs the library has already: as asked, else ask (once, for all of them).
-        let same = match same {
-            Some(same) => same,
-            None if already == 0 => pack::Same::Skip,
-            None => {
-                let answer = rfd::MessageDialog::new()
-                    .set_title(crate::i18n::t("notices.pack.import_title", "Import Song Pack"))
-                    .set_description(crate::i18n::tn(
-                        "notices.pack.ask_same",
-                        already as u64,
-                        "{n} song in the pack is already here. Replace them with the pack's, keep both, or skip them?",
-                        "{n} songs in the pack are already here. Replace them with the pack's, keep both, or skip them?",
-                        &[],
-                    ))
-                    .set_buttons(rfd::MessageButtons::YesNoCancelCustom(
-                        crate::i18n::t("notices.pack.replace", "Replace").to_owned(),
-                        crate::i18n::t("notices.pack.keep_both", "Keep Both").to_owned(),
-                        crate::i18n::t("notices.pack.skip", "Skip").to_owned(),
-                    ))
-                    .show();
-                match pack::three_way(
-                    answer,
-                    [
-                        crate::i18n::t("notices.pack.replace", "Replace"),
-                        crate::i18n::t("notices.pack.keep_both", "Keep Both"),
-                        crate::i18n::t("notices.pack.skip", "Skip"),
-                    ],
-                ) {
-                    Some(0) => pack::Same::Replace,
-                    Some(1) => pack::Same::KeepBoth,
-                    _ => pack::Same::Skip,
-                }
-            }
-        };
+        // Songs the library has already: as asked (the window asks first, `pack_songs_to_ask`),
+        // else skipped.
+        let same = same.unwrap_or(pack::Same::Skip);
         // Which songs are taken, and the new ids of copies kept beside songs already here.
         let mut renamed: HashMap<Uuid, Uuid> = HashMap::new();
         let mut taken = Vec::new();
@@ -7988,7 +7980,8 @@ impl App {
             setup::SetupRequest::ImportLibrary(folder) => {
                 self.import_songs(&[folder]);
             }
-            setup::SetupRequest::ChooseSongFiles => self.choose_songs_to_import(),
+            // The answer comes later: its page says how it went then (`import_songs_chosen`).
+            setup::SetupRequest::ChooseSongFiles => return self.choose_songs_to_import(true),
         }
         if let Some(running) = self.running.as_mut() {
             // The setup's own page says how bringing songs in went, as the notices do.
@@ -8159,18 +8152,12 @@ impl App {
 
     /// Asks for pictures to make slides of: the pictures chosen together become one presentation.
     fn choose_pictures_to_import(&mut self) {
-        let Some(chosen) = rfd::FileDialog::new()
-            .set_title(crate::i18n::t("notices.dialog.import_pictures", "Import Pictures as Slides"))
-            .add_filter(crate::i18n::t("notices.dialog.filter.pictures", "Pictures"), &media::PICTURES)
-            .pick_files()
-        else {
-            return;
-        };
-        let pictures: Vec<PathBuf> =
-            chosen.into_iter().filter(|path| media::is_media(path) && !media::is_video(path)).collect();
-        if !pictures.is_empty() {
-            self.start_deck(deck::chosen_pictures(pictures));
-        }
+        let window = dialogs::Files::new(
+            dialogs::Choose::Files,
+            crate::i18n::t("notices.dialog.import_pictures", "Import Pictures as Slides"),
+        )
+        .filter(crate::i18n::t("notices.dialog.filter.pictures", "Pictures"), &media::PICTURES);
+        self.ask(dialogs::For::ImportPictures, dialogs::Window::Files(window));
     }
 
     /// Asks for presentation files and PDFs: a PDF becomes a presentation at once, and each
@@ -8178,23 +8165,22 @@ impl App {
     fn choose_presentations_to_import(&mut self) {
         let mut endings = deck::DECK_ENDINGS.to_vec();
         endings.push(deck::PDF_ENDING);
-        let Some(files) = rfd::FileDialog::new()
-            .set_title(crate::i18n::t("notices.dialog.import_presentation", "Import a Presentation"))
-            .add_filter(crate::i18n::t("notices.dialog.filter.presentations", "Presentations and PDFs"), &endings)
-            .pick_files()
-        else {
-            return;
-        };
-        self.import_slides_asking(&files);
+        let window = dialogs::Files::new(
+            dialogs::Choose::Files,
+            crate::i18n::t("notices.dialog.import_presentation", "Import a Presentation"),
+        )
+        .filter(crate::i18n::t("notices.dialog.filter.presentations", "Presentations and PDFs"), &endings);
+        self.ask(dialogs::For::ImportPresentations, dialogs::Window::Files(window));
     }
 
     /// Import Songs › Song Files…: asks which song files to import (songs saved by SoftPresenter,
     /// song documents, ChordPro and lyric files, songbooks), and imports them.
-    fn choose_songs_to_import(&mut self) {
+    fn choose_songs_to_import(&mut self, setup: bool) {
         self.choose_to_import(
             crate::i18n::t("notices.dialog.import_song_files", "Import Song Files"),
             crate::i18n::t("notices.dialog.filter.song_files", "Song files"),
             &load::song_file_endings(),
+            setup,
         );
     }
 
@@ -8205,6 +8191,7 @@ impl App {
             crate::i18n::t("notices.dialog.import_bundle", "Import a Song Bundle"),
             crate::i18n::t("notices.dialog.filter.bundles", "Song bundles and song packs"),
             &load::bundle_endings(),
+            false,
         );
     }
 
@@ -8215,18 +8202,31 @@ impl App {
             crate::i18n::t("notices.dialog.import_words", "Import Words from Text"),
             crate::i18n::t("notices.dialog.filter.words", "Text, rich-text and Word files"),
             &load::words_endings(),
+            false,
         );
     }
 
     /// Asks for files with these endings, under a window title and the kind of file the filter
-    /// names (with the endings after it), and imports them.
-    fn choose_to_import(&mut self, title: &str, kind: &str, endings: &[&str]) {
-        let Some(paths) =
-            rfd::FileDialog::new().set_title(title).add_filter(load::filter_name(kind, endings), endings).pick_files()
-        else {
-            return;
-        };
-        self.import_songs(&paths);
+    /// names (with the endings after it), and imports them; `setup` when the first-start setup
+    /// asked.
+    fn choose_to_import(&mut self, title: &str, kind: &str, endings: &[&str], setup: bool) {
+        let window =
+            dialogs::Files::new(dialogs::Choose::Files, title).filter(&load::filter_name(kind, endings), endings);
+        self.ask(dialogs::For::ImportSongs { setup }, dialogs::Window::Files(window));
+    }
+
+    /// Imports the song files chosen; for the first-start setup, its page then says how it went,
+    /// as the notices do.
+    fn import_songs_chosen(&mut self, paths: &[PathBuf], setup: bool) {
+        let mark = self.running.as_ref().map_or(0, |r| r.home_state.notices.mark());
+        self.import_songs(paths);
+        if setup && let Some(running) = self.running.as_mut() {
+            let said = running.home_state.notices.said_since(mark).map(str::to_owned);
+            if let Some(setup) = running.home_state.setup.as_mut() {
+                setup.songs_said = said;
+            }
+            running.home_window.request_redraw();
+        }
     }
 
     /// Import Songs › A Library Folder…: asks for a library folder or the folder of libraries,
@@ -8236,62 +8236,43 @@ impl App {
     /// or the other, so first a question says which (as the song pack's question does).
     fn choose_library_folder_to_import(&mut self) {
         let documents = [load::PRO_ENDING, load::PRO_BUNDLE_ENDINGS[0], load::PRO_BUNDLE_ENDINGS[1]];
-        let mut dialog = rfd::FileDialog::new()
-            .set_title(crate::i18n::t("notices.dialog.import_folder", "Import a Library Folder"))
-            .add_filter(
-                load::filter_name(
-                    crate::i18n::t("notices.dialog.filter.documents", "Song documents and bundles"),
+        #[cfg(target_os = "macos")]
+        let choose = dialogs::Choose::FilesOrFolders;
+        #[cfg(not(target_os = "macos"))]
+        let choose = dialogs::Choose::Files;
+        let mut window =
+            dialogs::Files::new(choose, crate::i18n::t("notices.dialog.import_folder", "Import a Library Folder"))
+                .filter(
+                    &load::filter_name(
+                        crate::i18n::t("notices.dialog.filter.documents", "Song documents and bundles"),
+                        &documents,
+                    ),
                     &documents,
-                ),
-                &documents,
-            );
+                );
         if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
             let libraries = PathBuf::from(home).join("Documents").join("ProPresenter").join("Libraries");
             if libraries.is_dir() {
-                dialog = dialog.set_directory(libraries);
+                window = window.directory(libraries);
             }
         }
         #[cfg(target_os = "macos")]
-        let chosen = dialog.pick_files_or_folders();
+        self.ask(dialogs::For::ImportSongs { setup: false }, dialogs::Window::Files(window));
         #[cfg(not(target_os = "macos"))]
-        let chosen = match Self::ask_files_or_folder() {
-            Some(true) => dialog.pick_files(),
-            Some(false) => dialog.pick_folders(),
-            None => None,
-        };
-        if let Some(chosen) = chosen {
-            self.import_songs(&chosen);
-        }
-    }
-
-    /// Where a Mac's one file window offers song documents and folders together: a question,
-    /// in the words of the window's other questions. `Some(true)` for files, `Some(false)` for a
-    /// folder, `None` when it was cancelled.
-    #[cfg(not(target_os = "macos"))]
-    fn ask_files_or_folder() -> Option<bool> {
-        let answer = rfd::MessageDialog::new()
-            .set_title(crate::i18n::t("notices.dialog.import_folder", "Import a Library Folder"))
-            .set_description(crate::i18n::t(
-                "notices.dialog.folder_or_files",
-                "Import a folder of song documents (each folder in it becomes a library), or song documents and bundles themselves?",
-            ))
-            .set_buttons(rfd::MessageButtons::YesNoCancelCustom(
-                crate::i18n::t("notices.dialog.a_folder", "A Folder\u{2026}").to_owned(),
-                crate::i18n::t("notices.dialog.files", "Files\u{2026}").to_owned(),
-                crate::i18n::t("notices.dialog.cancel", "Cancel").to_owned(),
-            ))
-            .show();
-        match pack::three_way(
-            answer,
-            [
-                crate::i18n::t("notices.dialog.a_folder", "A Folder\u{2026}"),
-                crate::i18n::t("notices.dialog.files", "Files\u{2026}"),
-                crate::i18n::t("notices.dialog.cancel", "Cancel"),
-            ],
-        ) {
-            Some(0) => Some(false),
-            Some(1) => Some(true),
-            _ => None,
+        {
+            let question = dialogs::Question {
+                title: crate::i18n::t("notices.dialog.import_folder", "Import a Library Folder").to_owned(),
+                words: crate::i18n::t(
+                    "notices.dialog.folder_or_files",
+                    "Import a folder of song documents (each folder in it becomes a library), or song documents and bundles themselves?",
+                )
+                .to_owned(),
+                buttons: [
+                    crate::i18n::t("notices.dialog.a_folder", "A Folder\u{2026}").to_owned(),
+                    crate::i18n::t("notices.dialog.files", "Files\u{2026}").to_owned(),
+                    crate::i18n::t("notices.dialog.cancel", "Cancel").to_owned(),
+                ],
+            };
+            self.ask(dialogs::For::LibraryFilesOrFolder(window), dialogs::Window::Question(question));
         }
     }
 
@@ -9786,6 +9767,11 @@ impl App {
 
         // Testing aid: show a slide, let the thumbnails fill in, then save what was drawn.
         running.frames += 1;
+        // Testing aid: SOFTPRESENTER_OPEN_DIALOG=add-media opens the media bin's Add window a few
+        // frames in, as a click on Add does, to see that the app goes on while it is open.
+        if running.frames == 5 && std::env::var("SOFTPRESENTER_OPEN_DIALOG").is_ok_and(|which| which == "add-media") {
+            running.home_state.media_request = Some(home::MediaRequest::Choose);
+        }
         if let Some(path) = &self.options.capture_home {
             const GO_LIVE_AT: u32 = 3;
             const CAPTURE_AT: u32 = 30;
@@ -10839,7 +10825,7 @@ impl App {
             return self.quit(el);
         }
         if action == A::ImportSongs {
-            return self.choose_songs_to_import();
+            return self.choose_songs_to_import(false);
         }
         if action == A::ImportLibraryFolder {
             return self.choose_library_folder_to_import();
@@ -11575,6 +11561,15 @@ impl ApplicationHandler<AppEvent> for App {
                 self.finish_folder_look();
                 return;
             }
+            AppEvent::Dialog(answered) => {
+                self.dialog_answered(answered);
+                return;
+            }
+            // All of a drop's files have come: taken in now, not when the loop next waits.
+            AppEvent::FilesDropped => {
+                self.finish_drop("on the drop's own event");
+                return;
+            }
             // Taken in when the loop next waits (`tick_canva`).
             AppEvent::Canva => return,
             // Taken in when the loop next waits (`tick_mirror`, `tick_web`).
@@ -11985,7 +11980,6 @@ impl ApplicationHandler<AppEvent> for App {
                 }
                 if let Some(files) = std::env::var_os("SOFTPRESENTER_DROP").filter(|_| frame == 12) {
                     std::env::split_paths(&files).for_each(|path| self.file_dropped(path));
-                    self.finish_drop();
                 }
                 // Testing aid: choose menu bar items by their ids, one every few frames, the way
                 // a click on them reaches the app.
@@ -12167,8 +12161,9 @@ impl ApplicationHandler<AppEvent> for App {
         }
         // What the library's writer has written since (its stamps), and what it couldn't.
         self.finish_saves();
-        // Files dropped on the window, now that all of the drop have come.
-        self.finish_drop();
+        // Files dropped on the window, now that all of the drop have come (if the drop's own
+        // event hasn't taken them in already).
+        self.finish_drop("as the loop waited");
         // What runs by the clock is done here too, not only when the operator window draws:
         // macOS stops drawing a window that is minimised or covered, and a timed slide, a
         // slide's actions, or a message that leaves by itself must not wait for it.
@@ -12727,6 +12722,16 @@ fn main() -> ExitCode {
         canva::Client::new(canva::Places::for_app(), Some(wake))
     };
     start_steps::mark("canva client made");
+    // A file window's answer comes back through the event loop.
+    let dialogs = {
+        let proxy = std::sync::Mutex::new(event_loop.create_proxy());
+        let deliver: dialogs::Deliver = Arc::new(move |answered| {
+            if let Ok(proxy) = proxy.lock() {
+                let _ = proxy.send_event(AppEvent::Dialog(answered));
+            }
+        });
+        dialogs::Dialogs::new(Box::new(dialogs::System::default()), deliver)
+    };
     // A run that only saves a picture, or is asked to stay out of the way, never announces
     // itself to phones (the same test as `App::quiet`, made before `options` is given away).
     let quiet_run = options.capture_home.is_some() || std::env::var_os("SOFTPRESENTER_QUIET").is_some();
@@ -12743,6 +12748,8 @@ fn main() -> ExitCode {
         import_library_override: None,
         dropped: Vec::new(),
         drop_pointer: None,
+        drop_came: None,
+        dialogs,
         bible_jobs: Vec::new(),
         update_jobs: Vec::new(),
         ffmpeg_fetch: ffmpeg_fetch::Told::default(),

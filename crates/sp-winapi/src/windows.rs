@@ -14,7 +14,7 @@ use windows_sys::Win32::Devices::Display::{
 };
 use windows_sys::Win32::Foundation::{
     ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER, ERROR_MORE_DATA, ERROR_SUCCESS, GENERIC_READ, GENERIC_WRITE,
-    HANDLE, INVALID_HANDLE_VALUE, LUID, POINT, RECT,
+    HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, LUID, POINT, RECT,
 };
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
 use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
@@ -25,8 +25,10 @@ use windows_sys::Win32::System::Console::{
 use windows_sys::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_EXPAND_SZ, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW, RegSetKeyValueW,
 };
+use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    HWND_BROADCAST, SMTO_ABORTIFHUNG, SendMessageTimeoutW, WM_SETTINGCHANGE,
+    EnumThreadWindows, GW_OWNER, GetWindow, HWND_BROADCAST, IsIconic, IsWindowVisible, SMTO_ABORTIFHUNG, SW_RESTORE,
+    SendMessageTimeoutW, SetForegroundWindow, ShowWindow, WM_SETTINGCHANGE,
 };
 
 fn usable(handle: HANDLE) -> bool {
@@ -285,4 +287,43 @@ fn monitor_name(adapter: LUID, id: u32) -> Option<String> {
     // names this kind of request and gives its whole size.
     let answered = unsafe { DisplayConfigGetDeviceInfo((&raw mut request).cast()) } == 0;
     answered.then(|| from_wide(&request.monitorFriendlyDeviceName))
+}
+
+pub fn current_thread_id() -> u32 {
+    // SAFETY: GetCurrentThreadId takes nothing and only reads the calling thread's own number.
+    unsafe { GetCurrentThreadId() }
+}
+
+/// Called by EnumThreadWindows for each window of the thread: keeps the first that is shown and
+/// owned by no other (the file window itself, not a part of it), and stops there.
+unsafe extern "system" fn first_shown(window: HWND, found: LPARAM) -> windows_sys::core::BOOL {
+    // SAFETY: `window` is a window handle Windows hands over for this call; the two calls only
+    // ask about it.
+    let shown = unsafe { IsWindowVisible(window) != 0 && GetWindow(window, GW_OWNER).is_null() };
+    if !shown {
+        return 1;
+    }
+    // SAFETY: `found` is the address of the `HWND` that `bring_thread_window_forward` passes,
+    // which outlives the enumeration (EnumThreadWindows returns only once every call is done).
+    unsafe { *(found as *mut HWND) = window };
+    0
+}
+
+pub fn bring_thread_window_forward(thread: u32) -> bool {
+    let mut found: HWND = null_mut();
+    // SAFETY: `first_shown` matches WNDENUMPROC and writes only to `found`, whose address is
+    // passed as the LPARAM and stays valid for the whole call. A thread with no windows, or one
+    // that has ended, makes EnumThreadWindows return false having called nothing.
+    unsafe { EnumThreadWindows(thread, Some(first_shown), &raw mut found as LPARAM) };
+    if found.is_null() {
+        return false;
+    }
+    // SAFETY: `found` is a window handle Windows gave just now; if the window has closed since,
+    // these calls fail harmlessly (they only take the handle by value).
+    unsafe {
+        if IsIconic(found) != 0 {
+            ShowWindow(found, SW_RESTORE);
+        }
+        SetForegroundWindow(found) != 0
+    }
 }

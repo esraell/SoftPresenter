@@ -130,6 +130,14 @@ pub fn user_geo_name() -> Option<String> {
     }
 }
 
+/// The number Windows gives the thread this is called on, and, given that number for a thread
+/// that shows a window of the app's own (a file window, shown on a thread of its own so the
+/// app's window goes on meanwhile), puts that window back in front: restored if it was
+/// minimised, and made the one in use when Windows allows it (it does when the app is the one
+/// in use, as when the operator has just clicked in it); false when the thread shows none.
+#[cfg(windows)]
+pub use windows::{bring_thread_window_forward, current_thread_id};
+
 /// Who owns a file or folder and who may open it, read and set with Windows' own security
 /// calls, and the user this program runs as: what keeps the control socket's folder to one
 /// user. Access lists go in and out written down as Windows writes them (SDDL); what they mean

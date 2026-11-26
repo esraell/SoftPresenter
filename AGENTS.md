@@ -79,6 +79,8 @@ person:
 | `SOFTPRESENTER_DROP=<files>` | Drop files on the window (several separated as in PATH), as dragging from the Finder does |
 | `SOFTPRESENTER_DROP_AT=X,Y` | Where in the window (points) the dropped files land |
 | `SOFTPRESENTER_HOVER=<files>` | Files held over the window, so the place they would land lights up |
+| `SOFTPRESENTER_OPEN_DIALOG=add-media` | A few frames in, open the media bin's Add window (the system's file window) as a click on the empty bin does, to see that the window, `sp` and the screens go on while it is open. The log says `[dialog] Add Media opened`, and once it is closed how long it was open, how many files were chosen and how many times the window was drawn meanwhile |
+| `SOFTPRESENTER_DIALOG_OWNED=1` | On Windows, a file window or question has the app's window as its owner, as the system's usual way has it, to compare with the app's own way (none): Windows then switches the app's window off while it is open, so it takes no clicks and no drops |
 | `SOFTPRESENTER_MENU=<ids>` | Choose menu bar items by id, one every few frames |
 | `SOFTPRESENTER_WINDOW_SIZE=1100x700` | Open the window at another size |
 | `SOFTPRESENTER_CAPTURE_SIZE=2560x1440` | A capture run lays the home window out as if it were that big (points), whatever room the display has, at the size Interface size gives it, and saves the picture at that size at the display's scale (5120 × 2880 on a Retina display), drawn off the window: to see the window at sizes this computer's display can't hold |
@@ -185,7 +187,7 @@ a minute on a Mac. One test alone:
   asking Windows the names the monitors give themselves and the country the user's location is set to, reading how much processor time and
   memory the app, the programs it started and the computer use (its `stats` part, for the
   anonymous reports), putting a folder on the user's PATH and
-  taking it off again, in its `security` part, reading and setting who owns and may open the
+  taking it off again, bringing a file window the app opened back to the front, in its `security` part, reading and setting who owns and may open the
   control socket's folder and finding the user the app runs as, and, in its `credentials` part,
   reading, writing and removing the user's entries in Credential Manager, where keys are kept) and
   `sp-decklink`'s `ffi`
