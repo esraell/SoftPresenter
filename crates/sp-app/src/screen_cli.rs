@@ -570,7 +570,7 @@ impl crate::App {
     pub(crate) fn ctl_settings(&mut self, args: &[String]) -> Result<Reply, String> {
         let usage = "settings | settings set transition=KIND[:SECONDS] media_transition=… copyright=never|first|last|every \
                      ccli_licence=NUMBER continuous=on|off view=grid|words|table columns=1-12 \
-                     language=auto|en|es|ru|uk";
+                     language=auto|en|es|ru|uk interface_size=auto|100|125|150|175";
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
         if args.get(1).is_none() {
             let prefs = state.prefs();
@@ -593,6 +593,7 @@ impl crate::App {
                 format!("continuous: {}", if prefs.continuous { "on" } else { "off" }),
                 format!("slides: {}, {} across", view_words(&prefs.slide_view), prefs.columns),
                 format!("language: {}", prefs.language),
+                interface_size_words(state.interface_size, state.zoom_now),
             ];
             let data = serde_json::to_value(&prefs).unwrap_or_default();
             return Ok(Reply::with(lines.join("\n"), data));
@@ -687,6 +688,22 @@ impl crate::App {
                     said.push(format!("language {}", choice.code()));
                     changes.push(Box::new(move |_| crate::i18n::set_choice(choice)));
                 }
+                // As Settings › Slides › In your window: how large the windows draw everything.
+                "interface_size" | "size" => {
+                    use crate::interface_size::InterfaceSize;
+                    let typed = value.trim().trim_end_matches('%').to_lowercase();
+                    let size = InterfaceSize::ALL
+                        .into_iter()
+                        .find(|size| {
+                            size.code() == typed || (typed == "automatic" && *size == InterfaceSize::Automatic)
+                        })
+                        .ok_or_else(|| format!("interface_size is auto, 100, 125, 150 or 175, not {value}."))?;
+                    said.push(match size {
+                        InterfaceSize::Automatic => "interface size automatic".to_owned(),
+                        InterfaceSize::Percent(n) => format!("interface size {n}%"),
+                    });
+                    changes.push(Box::new(move |state| state.interface_size = size));
+                }
                 other => return Err(format!("{other} isn't a setting. {usage}")),
             }
         }
@@ -706,6 +723,19 @@ impl crate::App {
         let text = sp_model::to_song_text(&song);
         self.with_state(|state| state.reflow = Some((at, text)));
         Ok(Reply::done(format!("Editing the words of {}.", song.title)))
+    }
+}
+
+/// The Interface size setting as `sp settings` says it, with what the home window draws at now:
+/// "interface size: automatic (160% now)".
+fn interface_size_words(size: crate::interface_size::InterfaceSize, now: f32) -> String {
+    let now = (now * 100.0).round();
+    match size {
+        crate::interface_size::InterfaceSize::Automatic => format!("interface size: automatic ({now}% now)"),
+        crate::interface_size::InterfaceSize::Percent(n) if f32::from(n) > now => {
+            format!("interface size: {n}% ({now}% now, as large as the window has room for)")
+        }
+        crate::interface_size::InterfaceSize::Percent(n) => format!("interface size: {n}%"),
     }
 }
 

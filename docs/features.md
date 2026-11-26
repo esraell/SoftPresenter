@@ -1869,7 +1869,25 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   then Between slides, the transition for all slides as the bar under the slides has it (Cut,
   Dissolve and Fade as keys with a picture of each, and More… for every kind with its time and
   direction), and Carry on to the next item (Continuous) On or Off; then In your window, Grid,
-  Words only or Table, how a song's slides are laid out in the window.
+  Words only or Table, how a song's slides are laid out in the window, and Interface size.
+- **Interface size** (Settings › Slides › In your window, or `sp settings set interface_size=`):
+  how large the operator's windows draw everything. **Automatic**, the usual, draws a window
+  bigger than 1440 × 900 points (the size the layout was drawn for) larger in proportion, by the
+  side it has least of, in steps of 5% up to 175%: a full-screen window on a 27-inch iMac
+  (2560 × 1440) draws at 160%, a 1920 × 1080 one at 120%, so the library, the preview, the layer
+  keys and the tabs keep their share of the window instead of a huge middle between thin columns;
+  at 1440 × 900 or smaller nothing changes. Or a fixed **100%**, **125%**, **150%** or **175%**,
+  never more than keeps the window's layout at its least size (1100 × 700 points): the row says
+  what it draws at now ("Now 110%, as large as the main window has room for"). It is the
+  toolkit's own zoom: the words are drawn afresh at the new size, never stretched, and the
+  slides' thumbnails and both previews are drawn larger with it (up to twice their usual size,
+  only on a display that has the pixels for it), so they stay sharp. Settings and the Screens
+  window draw at the same size, opening that much larger within the display (as far as each has
+  room for its least size). A new window size takes effect once it has stayed the same for a
+  moment, not at every step of a drag. A choice shows at once and is kept with the settings. The
+  screens never change; the phone's remote page has its own size. The toolkit's own Command-plus,
+  minus and 0 no longer change the size (Command-plus and minus make a slide's words bigger and
+  smaller, as the Format menu says).
 - **A Settings window** (Cmd+,), its pages in four groups down the left, each row ending in how
   its page stands in the fixed-width face, with a green light when something is on: **The room**
   (Screens, "3 of 4 on"; Phone Screens, On or Off), **On screen** (Slides, with the transition

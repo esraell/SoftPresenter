@@ -8,7 +8,9 @@ use sp_render::{Fonts, Layers, Painter, Picture, build_layers, target_texture, w
 
 use crate::Gpu;
 
-/// Thumbnails are drawn at this size and scaled by the interface to whatever is displayed.
+/// Thumbnails are drawn at this size and scaled by the interface to whatever is displayed; the
+/// window's own, larger where it draws at more pixels to the point (see [`Thumbs::set_scale`]).
+/// Remote Control's are always this size.
 pub const THUMB_W: u32 = 480;
 pub const THUMB_H: u32 = 270;
 const PREVIEW_W: u32 = 640;
@@ -22,7 +24,8 @@ const PER_FRAME: usize = 12;
 /// second. The rest come in the next frames.
 const FRAME_BUDGET: Duration = Duration::from_millis(8);
 /// Thumbnails kept at once. Each is about half a megabyte of GPU memory, so this is about
-/// 80 MB; scrolling a long song drops the ones not looked at for longest.
+/// 80 MB; scrolling a long song drops the ones not looked at for longest. Larger thumbnails
+/// are fewer, so they take about the same.
 const MAX_CACHED: usize = 160;
 
 struct Thumb {
@@ -30,6 +33,9 @@ struct Thumb {
     /// The slide it was drawn from: its own key, or the slide a picture of it in a theme
     /// version was drawn from, so forgetting the slide forgets both.
     of: Uuid,
+    /// Its size in pixels: one of another size (the window draws at another scale now) is
+    /// shown until it has been drawn again at the new one.
+    size: (u32, u32),
     overflow: bool,
     /// The frame this thumbnail was last shown in.
     last_used: u64,
@@ -80,6 +86,14 @@ pub struct Thumbs {
     canvas: Option<(wgpu::Texture, egui::TextureId)>,
     /// A plain dark tile, shown for a media item whose picture is still being read.
     waiting: Option<(wgpu::Texture, egui::TextureId)>,
+    /// The size thumbnails and the preview are drawn at now, and how many thumbnails are kept
+    /// (see [`Thumbs::set_scale`]).
+    thumb_size: (u32, u32),
+    preview_size: (u32, u32),
+    max_cached: usize,
+    /// A thumbnail of the size before was shown in this frame: the window is drawn again, so
+    /// it is drawn at the new size soon.
+    stale_shown: bool,
 }
 
 impl Thumbs {
@@ -101,7 +115,26 @@ impl Thumbs {
             preview_front: 0,
             canvas: None,
             waiting: None,
+            thumb_size: (THUMB_W, THUMB_H),
+            preview_size: (PREVIEW_W, PREVIEW_H),
+            max_cached: MAX_CACHED,
+            stale_shown: false,
         })
+    }
+
+    /// Draws the window's thumbnails and preview `scale` times their usual size (1 to 2: see
+    /// `interface_size::picture_scale`), for a window that draws at more pixels to the point.
+    /// The thumbnails already drawn are shown until each is drawn again at the new size, a few
+    /// a frame, and as many fewer are kept as each is larger.
+    pub fn set_scale(&mut self, scale: f32) {
+        self.thumb_size = crate::interface_size::scaled((THUMB_W, THUMB_H), scale);
+        self.preview_size = crate::interface_size::scaled((PREVIEW_W, PREVIEW_H), scale);
+        self.max_cached = ((MAX_CACHED as f32 / (scale * scale)).round() as usize).max(PER_FRAME * 4);
+    }
+
+    /// True when a thumbnail of the size before was shown in this frame (see `set_scale`).
+    pub fn stale_shown(&self) -> bool {
+        self.stale_shown
     }
 
     /// The bytes of GPU memory the painter keeps ready between pictures.
@@ -114,6 +147,7 @@ impl Thumbs {
         self.drawn_this_frame = 0;
         self.spent_this_frame = Duration::ZERO;
         self.frame += 1;
+        self.stale_shown = false;
     }
 
     /// Call whenever the app is about to wait. A second after the last thumbnail, preview or
@@ -291,27 +325,31 @@ impl Thumbs {
         layers: &Layers,
         theme: &Theme,
     ) -> Option<(egui::TextureId, bool)> {
+        let may_draw = may_begin_another(self.drawn_this_frame, self.spent_this_frame);
         if let Some(thumb) = self.cache.get_mut(&key) {
             let retry = thumb.failed.is_some_and(|at| at.elapsed() >= RETRY_AFTER);
-            if !retry {
+            let stale = thumb.size != self.thumb_size;
+            if !retry && (!stale || !may_draw) {
                 thumb.last_used = self.frame;
+                self.stale_shown |= stale;
                 return Some((thumb.id, thumb.overflow));
             }
             if let Some(thumb) = self.cache.remove(&key) {
                 egui_renderer.free_texture(&thumb.id);
             }
         }
-        if !may_begin_another(self.drawn_this_frame, self.spent_this_frame) {
+        if !may_draw {
             return None;
         }
         self.drawn_this_frame += 1;
         let drawing = Instant::now();
-        let built = build_layers(&mut self.fonts, layers, theme, THUMB_W, THUMB_H);
-        let texture = target_texture(&gpu.device, THUMB_W, THUMB_H);
+        let (w, h) = self.thumb_size;
+        let built = build_layers(&mut self.fonts, layers, theme, w, h);
+        let texture = target_texture(&gpu.device, w, h);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         // One that can't be drawn is kept blank (a new texture is clear), so the window doesn't
         // try again, and ask to be drawn again, on every frame.
-        let drawn = self.painter.paint(&gpu.device, &gpu.queue, &built.scene, &view, THUMB_W, THUMB_H);
+        let drawn = self.painter.paint(&gpu.device, &gpu.queue, &built.scene, &view, w, h);
         self.spent_this_frame += drawing.elapsed();
         match &drawn {
             Ok(()) => drop(self.thumbnails_said.remove(&key)),
@@ -329,9 +367,10 @@ impl Thumbs {
         let overflow = built.overflow && failed.is_none();
         let id = egui_renderer.register_native_texture(&gpu.device, &view, wgpu::FilterMode::Linear);
         let pages = web_pages(layers.slide, theme);
-        self.cache.insert(key, Thumb { id, of, overflow, last_used: self.frame, pages, failed, _texture: texture });
+        let thumb = Thumb { id, of, size: (w, h), overflow, last_used: self.frame, pages, failed, _texture: texture };
+        self.cache.insert(key, thumb);
         let ages: Vec<(Uuid, u64)> = self.cache.iter().map(|(id, thumb)| (*id, thumb.last_used)).collect();
-        for old in to_evict(&ages, MAX_CACHED, self.frame) {
+        for old in to_evict(&ages, self.max_cached, self.frame) {
             if let Some(thumb) = self.cache.remove(&old) {
                 egui_renderer.free_texture(&thumb.id);
             }
@@ -430,9 +469,10 @@ impl Thumbs {
         let pictures: Vec<sp_render::ScreenPicture> = screen
             .map(|(id, shown, shown_theme)| {
                 sp_render::show_placeholders(false);
-                let scene = build_layers(&mut self.fonts, shown, shown_theme, PREVIEW_W, PREVIEW_H).scene;
+                let (w, h) = self.preview_size;
+                let scene = build_layers(&mut self.fonts, shown, shown_theme, w, h).scene;
                 sp_render::show_placeholders(true);
-                sp_render::ScreenPicture { screen: id, scene, width: PREVIEW_W, height: PREVIEW_H }
+                sp_render::ScreenPicture { screen: id, scene, width: w, height: h }
             })
             .into_iter()
             .collect();
@@ -448,13 +488,22 @@ impl Thumbs {
     ) -> (Option<egui::TextureId>, Option<egui::TextureId>) {
         // The preview is what the audience sees: no placeholder for a web page not drawn yet.
         sp_render::show_placeholders(false);
-        let built = build_layers(&mut self.fonts, layers, theme, PREVIEW_W, PREVIEW_H);
+        let (w, h) = self.preview_size;
+        let built = build_layers(&mut self.fonts, layers, theme, w, h);
         sp_render::show_placeholders(true);
         let before = self.previews[self.preview_front].as_ref().map(|(_, id)| *id);
-        // Draw into the picture that is not in front, then bring it to the front.
+        // Draw into the picture that is not in front, then bring it to the front. One of the
+        // size before (the window draws at another scale now) is made again at the new size;
+        // it is the one not shown, so letting it go hides nothing.
         let back = 1 - self.preview_front;
+        if let Some((texture, id)) = &self.previews[back]
+            && (texture.width(), texture.height()) != (w, h)
+        {
+            egui_renderer.free_texture(id);
+            self.previews[back] = None;
+        }
         if self.previews[back].is_none() {
-            let texture = target_texture(&gpu.device, PREVIEW_W, PREVIEW_H);
+            let texture = target_texture(&gpu.device, w, h);
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             let id = egui_renderer.register_native_texture(&gpu.device, &view, wgpu::FilterMode::Linear);
             self.previews[back] = Some((texture, id));
@@ -462,7 +511,7 @@ impl Thumbs {
         let Some((texture, id)) = self.previews[back].as_ref() else { return (before, None) };
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let id = *id;
-        let drawn = self.painter.paint(&gpu.device, &gpu.queue, &built.scene, &view, PREVIEW_W, PREVIEW_H);
+        let drawn = self.painter.paint(&gpu.device, &gpu.queue, &built.scene, &view, w, h);
         self.note_drawn(Kind::Preview, &drawn);
         self.preview_front = back;
         (Some(id), before)

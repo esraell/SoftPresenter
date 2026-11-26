@@ -898,6 +898,10 @@ pub struct Prefs {
     /// How each kind of presentation file was last brought in (`pptx`: `slides` or `pictures`).
     #[serde(default)]
     pub import_as: std::collections::BTreeMap<String, String>,
+    /// How large the operator's windows draw everything: `auto` (larger in a big window, the
+    /// default), or a percentage: `100`, `125`, `150` or `175`.
+    #[serde(default)]
+    pub interface_size: String,
 }
 
 /// When a song's copyright line is shown.
@@ -961,6 +965,7 @@ impl Default for Prefs {
             keys_on_buttons: false,
             language: String::new(),
             import_as: std::collections::BTreeMap::new(),
+            interface_size: String::new(),
         }
     }
 }

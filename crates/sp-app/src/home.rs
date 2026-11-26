@@ -356,6 +356,12 @@ pub struct HomeState {
     /// Keys on Buttons, or the switch in the list of keys; kept with the preferences), and
     /// whether a testing aid shows them for a picture without changing the setting.
     pub keys_on_buttons: bool,
+    /// How large the operator's windows draw everything (Settings › Slides › In your window),
+    /// and the factor the home window draws at now, for the setting to say.
+    pub interface_size: crate::interface_size::InterfaceSize,
+    pub zoom_now: f32,
+    /// Testing aid: Settings › Slides scrolled on to In your window, once.
+    pub show_interface_size: bool,
     /// The presentation file the sheet asks about: as slides or as pictures.
     pub ask_import: Option<AskImport>,
     /// The answer: the file, and how it is to come in. Taken by the app.
@@ -1960,6 +1966,9 @@ impl Default for HomeState {
             pick_scroll: 0,
             numbers: None,
             keys_on_buttons: false,
+            interface_size: crate::interface_size::InterfaceSize::Automatic,
+            zoom_now: 1.0,
+            show_interface_size: false,
             ask_import: None,
             import_answer: None,
             pages_waiting: std::collections::HashMap::new(),
@@ -2360,6 +2369,7 @@ impl HomeState {
             keys_on_buttons: self.keys_on_buttons,
             language: crate::i18n::choice().code().to_owned(),
             import_as: self.import_as.clone(),
+            interface_size: self.interface_size.code(),
             ..crate::service::Prefs::default()
         }
     }
@@ -2399,6 +2409,7 @@ impl HomeState {
         self.keys_on_buttons = prefs.keys_on_buttons;
         crate::i18n::set_choice(crate::i18n::Choice::from_code(&prefs.language));
         self.import_as = prefs.import_as.clone();
+        self.interface_size = crate::interface_size::InterfaceSize::from_code(&prefs.interface_size);
     }
 
     /// How long a new picture takes to fade in on the output; zero when slides cut.
@@ -10615,6 +10626,98 @@ mod tests {
         output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts));
         output.drop_without_applying_deltas();
         texts
+    }
+
+    /// The three columns' panels as a window of `window` points lays them out at the interface
+    /// size Automatic gives it, as the window's toolkit is given them (a Retina display): in the
+    /// window's own points, left to right, with the factor and the pixels to the point it drew at.
+    fn columns_in(show: &Show, window: egui::Vec2) -> (Vec<Rect>, f32, f32) {
+        use crate::interface_size::{InterfaceSize, home_zoom};
+        fn walk(shape: &egui::Shape, into: &mut Vec<Rect>) {
+            match shape {
+                egui::Shape::Rect(rect) if rect.fill == crate::studio::PANEL => into.push(rect.rect),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let zoom = home_zoom(InterfaceSize::Automatic, window);
+        let ctx = egui::Context::default();
+        crate::studio::apply_style(&ctx);
+        ctx.options_mut(|options| options.zoom_factor = zoom);
+        let mut state = HomeState::default();
+        let mut panels = Vec::new();
+        for frame in 0..3 {
+            let mut raw = RawInput {
+                // As egui-winit gives it: the window's size over the factor.
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), window / zoom)),
+                time: Some(f64::from(frame) * 0.1),
+                ..RawInput::default()
+            };
+            raw.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(2.0);
+            let output = ctx.run_ui(raw, |ui| {
+                home_ui(ui, show, &mut state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+            });
+            panels.clear();
+            output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut panels));
+            output.drop_without_applying_deltas();
+        }
+        // The columns run from under the top bar to the foot of the window.
+        let laid_out = window / zoom;
+        let mut columns: Vec<Rect> = panels
+            .into_iter()
+            .filter(|rect| rect.height() > laid_out.y * 0.6)
+            .map(|rect| {
+                Rect::from_min_max((rect.min.to_vec2() * zoom).to_pos2(), (rect.max.to_vec2() * zoom).to_pos2())
+            })
+            .collect();
+        columns.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
+        columns.dedup_by(|a, b| (a.min.x - b.min.x).abs() < 1.0);
+        (columns, zoom, ctx.pixels_per_point())
+    }
+
+    #[test]
+    fn a_big_window_shows_the_layout_of_the_base_size_larger_in_proportion() {
+        let show = three_songs();
+        let shares = |columns: &[Rect], window: egui::Vec2| -> Vec<f32> {
+            columns.iter().map(|column| column.width() / window.x).collect()
+        };
+        let base = egui::vec2(1440.0, 900.0);
+        let (at_base, zoom, pixels) = columns_in(&show, base);
+        assert_eq!(at_base.len(), 3, "the three columns: {at_base:?}");
+        assert_eq!((zoom, pixels), (1.0, 2.0), "the base size is drawn as it always was");
+        // A window 1.6 times the base each way: the same layout, every column 1.6 times as wide
+        // and tall, its share of the window the same, at 3.2 pixels to the point (the words drawn
+        // afresh at that size, not stretched).
+        let big = base * 1.6;
+        let (at_big, zoom, pixels) = columns_in(&show, big);
+        assert_eq!(at_big.len(), 3, "{at_big:?}");
+        assert!((zoom - 1.6).abs() < 0.001 && (pixels - 3.2).abs() < 0.001, "{zoom} {pixels}");
+        for (base, big) in at_base.iter().zip(&at_big) {
+            assert!((big.width() - base.width() * 1.6).abs() < 2.0, "{base:?} → {big:?}");
+            assert!((big.height() - base.height() * 1.6).abs() < 2.0, "{base:?} → {big:?}");
+        }
+        for (base, big) in shares(&at_base, base).iter().zip(shares(&at_big, big)) {
+            assert!((base - big).abs() < 0.002, "{base} vs {big}");
+        }
+        // The 5K iMac full screen, 2560 × 1440: the side columns take nearly their share of the
+        // base layout, not the thin strips they were at 100%.
+        let imac = egui::vec2(2560.0, 1440.0);
+        let (at_imac, zoom, _) = columns_in(&show, imac);
+        assert!((zoom - 1.6).abs() < 0.001, "{zoom}");
+        let (base_shares, imac_shares) = (shares(&at_base, base), shares(&at_imac, imac));
+        for side in [0, 2] {
+            let (before, now) = (at_base[side].width() / imac.x, imac_shares[side]);
+            assert!(now > before * 1.55, "side column {side}: {now} of the window, {before} at 100%");
+            assert!(
+                now > base_shares[side] * 0.85,
+                "side column {side}: {now}, {} at the base size",
+                base_shares[side]
+            );
+        }
+        // Small windows are laid out as they always were.
+        let (small, zoom, _) = columns_in(&show, egui::vec2(1100.0, 700.0));
+        assert_eq!(zoom, 1.0);
+        assert!((small[0].width() - at_base[0].width()).abs() < 0.5, "the left column keeps its width");
     }
 
     /// The middle of where `words` were drawn, or none.

@@ -678,6 +678,10 @@ pub fn apply_style(ctx: &egui::Context) {
     // The app is always dark, whatever the computer's light or dark setting: egui would otherwise
     // follow the system and draw menus and dropdowns in its own light look when the Mac is light.
     ctx.set_theme(egui::ThemePreference::Dark);
+    // How large everything is drawn is the Interface size setting's alone (`interface_size`):
+    // the toolkit's own Command-plus, minus and 0 would change it behind the setting (and
+    // Command-plus and minus make a slide's words bigger and smaller).
+    ctx.options_mut(|options| options.zoom_with_keyboard = false);
     ctx.set_visuals_of(egui::Theme::Dark, visuals.clone());
     ctx.set_visuals_of(egui::Theme::Light, visuals);
     ctx.all_styles_mut(|style| {

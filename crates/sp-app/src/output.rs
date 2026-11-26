@@ -828,14 +828,21 @@ impl LivePreview {
     }
 }
 
-/// The size of the live preview, and how often a playing video's pictures are drawn in it at
-/// most: about thirty a second, so a 24 or 30 fps video shows every picture and a 60 fps one
-/// every other (every change of slide or media is drawn at once, and fades as the screens do).
+/// The usual size of the live preview (larger where the operator's window draws at more pixels
+/// to the point: `interface_size::picture_scale`; the size is the targets' own), and how often a
+/// playing video's pictures are drawn in it at most: about thirty a second, so a 24 or 30 fps
+/// video shows every picture and a 60 fps one every other (every change of slide or media is
+/// drawn at once, and fades as the screens do).
 /// Measured in quiet runs (release build, a 30 fps 720p video, two window screens; ten-second
 /// averages, three runs each): about 23% CPU for the whole app at this cap, 21% at a 50 ms cap,
 /// which shows only every other picture of a 30 fps video.
 pub const LIVE_PREVIEW_SIZE: (u32, u32) = (640, 360);
 const LIVE_PREVIEW_EVERY: Duration = Duration::from_millis(30);
+
+/// The size of the live preview's textures (the two are made alike).
+fn preview_size_of(targets: &[wgpu::Texture]) -> Option<(u32, u32)> {
+    targets.first().map(|texture| (texture.width(), texture.height()))
+}
 
 pub struct OutputHandle {
     tx: Sender<OutputMsg>,
@@ -1760,8 +1767,18 @@ fn run(
         // were asked about at all, and whether a window's X is to look different.
         let (mut preview_again, mut ndi_or_preview, mut close_changed) = (false, false, false);
         while let Some(msg) = next {
-            nothing_else &=
-                matches!(msg, OutputMsg::NdiReceivers | OutputMsg::PreviewScreen(_) | OutputMsg::CloseButton { .. });
+            // The live preview's textures made again at another size (the operator's window
+            // draws at another scale) ask for the preview alone, as another screen to look at
+            // does.
+            let preview_resized = match &msg {
+                OutputMsg::PreviewTargets(targets) => {
+                    !output.preview_targets.is_empty()
+                        && preview_size_of(targets) != preview_size_of(&output.preview_targets)
+                }
+                _ => false,
+            };
+            nothing_else &= preview_resized
+                || matches!(msg, OutputMsg::NdiReceivers | OutputMsg::PreviewScreen(_) | OutputMsg::CloseButton { .. });
             ndi_or_preview |= matches!(msg, OutputMsg::NdiReceivers | OutputMsg::PreviewScreen(_));
             match msg {
                 OutputMsg::Show(frame) => {
@@ -1830,7 +1847,15 @@ fn run(
                     output.add_surface(id, name, surface, format, w, h);
                     output.held.since(Part::Setup, For::Window(id), setting_up);
                 }
-                OutputMsg::PreviewTargets(targets) => output.preview_targets = targets,
+                OutputMsg::PreviewTargets(targets) => {
+                    // What the preview showed, and any fade under way in it, were the old size's.
+                    if preview_resized {
+                        output.preview_fade = None;
+                        output.preview_shown = None;
+                        preview_again = true;
+                    }
+                    output.preview_targets = targets;
+                }
                 OutputMsg::Resized(id, w, h) => {
                     let setting_up = Instant::now();
                     output.resize(id, w, h);
@@ -3041,6 +3066,11 @@ impl Output {
         }
     }
 
+    /// The size of the live preview's textures.
+    fn preview_size(&self) -> (u32, u32) {
+        preview_size_of(&self.preview_targets).unwrap_or(LIVE_PREVIEW_SIZE)
+    }
+
     /// Draws the audience picture small for the operator's window, as the screens show it: a
     /// new picture fades in as theirs does; a playing video's pictures are drawn at most thirty
     /// times a second.
@@ -3051,7 +3081,7 @@ impl Output {
         if !new_picture && self.plays_video() && self.previewed_at.elapsed() < LIVE_PREVIEW_EVERY {
             return;
         }
-        let (w, h) = LIVE_PREVIEW_SIZE;
+        let (w, h) = self.preview_size();
         let scene = self.scene_for(self.preview_screen.unwrap_or(Uuid::nil()), frame, w, h);
         // A video's new picture during a fade: the fade goes on, towards the newer picture.
         if !new_picture && let Some(fade) = self.preview_fade.take() {
@@ -3088,7 +3118,7 @@ impl Output {
             self.preview_shown = Some(if painted { to } else { from });
             return;
         }
-        let (w, h) = LIVE_PREVIEW_SIZE;
+        let (w, h) = self.preview_size();
         let look = self.fading.map_or(sp_model::Transition::default(), |(_, look)| look);
         if let Some((from, to, weights)) = fade.blend(look, amount) {
             self.paint_live_preview(Draw::Blend(from, to, weights));
@@ -3110,7 +3140,7 @@ impl Output {
             self.preview_state.skipped();
             return false;
         }
-        let (w, h) = LIVE_PREVIEW_SIZE;
+        let (w, h) = self.preview_size();
         let back = 1 - self.live_preview.front.load(Acquire).min(1);
         let view = self.preview_targets[back].create_view(&wgpu::TextureViewDescriptor::default());
         let painted = match draw {

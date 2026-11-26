@@ -592,10 +592,13 @@ fn slides_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
             );
         },
     );
+    if std::mem::take(&mut state.show_interface_size) {
+        ui.scroll_to_cursor(Some(Align::TOP));
+    }
     card(
         ui,
         t("settings.window.title", "In your window"),
-        t("settings.window.about", "How a song\u{2019}s slides are laid out for you. The room never sees this"),
+        t("settings.window.about", "How your windows are laid out for you. The room never sees this"),
         None,
         |ui| {
             use crate::home::SlideView;
@@ -623,8 +626,55 @@ fn slides_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
                     state.slide_view = views[at];
                 }
             });
+            interface_size_row(ui, state, &look);
         },
     );
+}
+
+/// A percentage as the language writes it: "125%", "125 %".
+fn percent(n: u64) -> String {
+    tf("settings.size.percent", "{n}%", &[("n", &crate::i18n::count(n))])
+}
+
+/// The Interface size row: Automatic, 100%, 125%, 150% or 175%, and what the windows are drawn
+/// at now (which a fixed size the main window has no room for is not). The switch goes under
+/// the words when the page is too narrow for both.
+fn interface_size_row(ui: &mut egui::Ui, state: &mut HomeState, look: &crate::studio::SwitchLook) {
+    use crate::interface_size::InterfaceSize;
+    let labels: Vec<String> = InterfaceSize::ALL
+        .iter()
+        .map(|size| match size {
+            InterfaceSize::Automatic => t("settings.size.automatic", "Automatic").to_owned(),
+            InterfaceSize::Percent(n) => percent(u64::from(*n)),
+        })
+        .collect();
+    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let chosen = InterfaceSize::ALL.iter().position(|size| *size == state.interface_size);
+    let now = percent((state.zoom_now * 100.0).round() as u64);
+    let short = match state.interface_size {
+        InterfaceSize::Percent(n) => state.zoom_now * 100.0 + 0.5 < f32::from(n),
+        InterfaceSize::Automatic => false,
+    };
+    let note = if short {
+        tf("settings.size.no_room", "Now {size}, as large as the main window has room for", &[("size", &now)])
+    } else {
+        tf("settings.size.about", "How large the buttons and words are in your windows. Now {size}", &[("size", &now)])
+    };
+    let size = vec2(crate::studio::pill_switch_width(ui, &labels, look), look.height + 2.0 * look.inset);
+    let title = t("settings.size", "Interface size");
+    let mut clicked = None;
+    if ui.available_width() - size.x - 16.0 >= 220.0 {
+        row(ui, title, &note, size, |ui, place| {
+            clicked = crate::studio::pill_switch(ui, "interface size", place.min, &labels, &[], chosen, look).1;
+        });
+    } else {
+        row(ui, title, &note, egui::Vec2::ZERO, |_, _| {});
+        let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), size.y + 12.0), Sense::hover());
+        clicked = crate::studio::pill_switch(ui, "interface size", place.min, &labels, &[], chosen, look).1;
+    }
+    if let Some(at) = clicked {
+        state.interface_size = InterfaceSize::ALL[at];
+    }
 }
 
 /// The Copyright line card's insides: a slide with the line where it shows, beside the four keys

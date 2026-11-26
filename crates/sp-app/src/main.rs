@@ -37,6 +37,7 @@ mod icons;
 mod images;
 mod inspector;
 mod integrations;
+mod interface_size;
 mod kept;
 mod keys;
 mod libraries;
@@ -264,6 +265,15 @@ fn open_panel_window(
         Panel::Screens => ((780.0, 640.0), (640.0, 440.0)),
         Panel::Settings => ((1040.0, 720.0), (820.0, 560.0)),
     };
+    // It opens as much larger as the home window draws everything (its interface size), so it
+    // has the room its pages were drawn for at that size, within the display it opens on.
+    let zoom = f64::from(running.home_state.zoom_now);
+    let display = running.home_window.current_monitor().map(|monitor| {
+        let points = monitor.size().to_logical::<f64>(monitor.scale_factor());
+        (points.width * 0.9, points.height * 0.9)
+    });
+    let grown = |points: f64, room: Option<f64>| (points * zoom).min(room.unwrap_or(f64::MAX)).max(points);
+    let size = (grown(size.0, display.map(|d| d.0)), grown(size.1, display.map(|d| d.1)));
     // Testing aid: SOFTPRESENTER_SETTINGS_SIZE=1100x700 opens the Settings window at that size
     // (points), to see its pages at the sizes the design was drawn at.
     let size = match kind {
@@ -324,7 +334,38 @@ fn open_panel_window(
         Some(running.gpu.device.limits().max_texture_dimension_2d as usize),
     );
     let renderer = egui_wgpu::Renderer::new(&running.gpu.device, format, egui_wgpu::RendererOptions::default());
-    Ok(PanelWindow { kind, window, surface, config, ctx, state, renderer, next_repaint: None, frames: 0 })
+    Ok(PanelWindow {
+        kind,
+        window,
+        surface,
+        config,
+        ctx,
+        state,
+        renderer,
+        next_repaint: None,
+        frames: 0,
+        least: egui::vec2(least.0 as f32, least.1 as f32),
+        zoom_watch: interface_size::Watch::default(),
+    })
+}
+
+/// Sets a window of its own's interface size: the home window's, as far as it has room for its
+/// least size (see `interface_size::panel_zoom`), once a new size has settled. Returns how long
+/// to wait before looking again while it settles.
+fn follow_panel_zoom(panel: &mut PanelWindow, home: f32) -> Option<Duration> {
+    let (size, scale) = (panel.window.inner_size(), panel.window.scale_factor());
+    let seen = interface_size::Seen::panel((size.width, size.height), scale, home);
+    match panel.zoom_watch.due(seen, Instant::now()) {
+        interface_size::Due::Done => None,
+        interface_size::Due::After(wait) => Some(wait),
+        interface_size::Due::Now => {
+            panel.zoom_watch.applied(seen);
+            let points = size.to_logical::<f32>(scale);
+            let zoom = interface_size::panel_zoom(home, egui::vec2(points.width, points.height), panel.least);
+            panel.ctx.options_mut(|options| options.zoom_factor = zoom);
+            None
+        }
+    }
 }
 
 /// Where the show is, for timing a slide that goes on by itself: the slide on screen, how many
@@ -1624,6 +1665,9 @@ struct UiTarget<'a> {
     renderer: &'a mut egui_wgpu::Renderer,
     ctx: &'a egui::Context,
     label: &'static str,
+    /// Testing aid: the size in pixels a capture run lays the window out at, drawn off the
+    /// window (see `interface_size::capture_size`), instead of the window's own.
+    offscreen: Option<[u32; 2]>,
 }
 
 /// Draws one frame of the interface in a window and returns what was drawn, for a capture.
@@ -1632,7 +1676,7 @@ fn paint_ui(
     target: UiTarget<'_>,
     mut full: egui::FullOutput,
 ) -> (Vec<egui::ClippedPrimitive>, egui_wgpu::ScreenDescriptor) {
-    let UiTarget { window, surface, config, renderer, ctx, label } = target;
+    let UiTarget { window, surface, config, renderer, ctx, label, offscreen } = target;
     let jobs = ctx.tessellate(std::mem::take(&mut full.shapes), full.pixels_per_point);
     for (id, deltas) in &full.textures_delta.set {
         for delta in deltas {
@@ -1640,21 +1684,23 @@ fn paint_ui(
         }
     }
     let screen = egui_wgpu::ScreenDescriptor {
-        size_in_pixels: [config.width, config.height],
+        size_in_pixels: offscreen.unwrap_or([config.width, config.height]),
         pixels_per_point: full.pixels_per_point,
     };
     let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     let extra = renderer.update_buffers(&gpu.device, &gpu.queue, &mut encoder, &jobs, &screen);
-    let frame = match output::next_texture(surface) {
-        Some(wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame)) => {
+    let frame = match offscreen.is_none().then(|| output::next_texture(surface)) {
+        // Drawn off the window: only into the capture's own picture.
+        None => None,
+        Some(Some(wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame))) => {
             Some(frame)
         }
-        Some(wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost) | None => {
+        Some(Some(wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost) | None) => {
             output::configure(&gpu.device, surface, config);
             window.request_redraw();
             None
         }
-        _ => None,
+        Some(_) => None,
     };
     if let Some(frame) = frame {
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -1745,6 +1791,10 @@ struct PanelWindow {
     renderer: egui_wgpu::Renderer,
     next_repaint: Option<Instant>,
     frames: u32,
+    /// Its least size in points, which its interface size never lays it out under, and what
+    /// that size is worked out from (see `interface_size::panel_zoom`).
+    least: egui::Vec2,
+    zoom_watch: interface_size::Watch,
 }
 
 /// Everything that exists once the windows are open.
@@ -1813,6 +1863,13 @@ struct Running {
     /// The same two textures, for Remote Control to read the newest back from (never the
     /// output thread: it only draws into them).
     live_textures: Vec<wgpu::Texture>,
+    /// The live preview's textures before they were made again at another size, shown until
+    /// the output thread has drawn a picture since (it had drawn this many then), then let go.
+    live_preview_before: Option<(Vec<egui::TextureId>, u64)>,
+    /// What the home window's interface size is worked out from, and how much larger than
+    /// usual its pictures of slides are drawn (see `interface_size`).
+    zoom_watch: interface_size::Watch,
+    picture_scale: f32,
 
     /// The preview picture before the last change, and when that change was, so the preview
     /// fades as the output does.
@@ -2389,6 +2446,9 @@ impl App {
             preview,
             live_preview_ids,
             live_textures,
+            live_preview_before: None,
+            zoom_watch: interface_size::Watch::default(),
+            picture_scale: 1.0,
             ndi_checked: None,
             displays_seen: None,
             away: std::collections::BTreeMap::new(),
@@ -9137,8 +9197,90 @@ impl App {
         let _ = running.home_window.request_inner_size(size);
     }
 
+    /// Sets the home window's interface size from the setting and the window's size in points,
+    /// once a new size or display scale has settled (see `interface_size`), and has the window's
+    /// pictures of slides drawn at the size its pixels to the point then ask for. Returns how
+    /// long to wait before looking again while a new size settles.
+    fn follow_interface_size(&mut self) -> Option<Duration> {
+        let capturing = self.options.capture_home.is_some();
+        let running = self.running.as_mut()?;
+        let (size, scale) = (running.home_window.inner_size(), running.home_window.scale_factor());
+        // Testing aid: a capture run laid out as if the window were another size (see
+        // `interface_size::capture_size`).
+        let (points, pixels) = match capturing.then(interface_size::capture_size).flatten() {
+            Some(points) => (points, ((points.x * scale as f32) as u32, (points.y * scale as f32) as u32)),
+            None => {
+                let points = size.to_logical::<f32>(scale);
+                (egui::vec2(points.width, points.height), (size.width, size.height))
+            }
+        };
+        let setting = running.home_state.interface_size;
+        let seen = interface_size::Seen::home(pixels, scale, setting);
+        match running.zoom_watch.due(seen, Instant::now()) {
+            interface_size::Due::Done => return None,
+            interface_size::Due::After(wait) => return Some(wait),
+            interface_size::Due::Now => {}
+        }
+        running.zoom_watch.applied(seen);
+        let zoom = interface_size::home_zoom(setting, points);
+        if zoom != running.egui_ctx.zoom_factor() {
+            // Set before the frame's input is taken, so this frame is laid out at it (the
+            // toolkit's own way to set it takes effect a frame later).
+            running.egui_ctx.options_mut(|options| options.zoom_factor = zoom);
+            let (w, h) = (points.x, points.y);
+            applog::event("window", &format!("interface size {:.0}% for {w:.0}x{h:.0} points", zoom * 100.0));
+            // Settings and Screens follow it (and Settings says it).
+            for panel in &running.panels {
+                panel.window.request_redraw();
+            }
+        }
+        running.home_state.zoom_now = zoom;
+        let pictures = interface_size::picture_scale(scale as f32 * zoom);
+        if pictures != running.picture_scale {
+            self.scale_pictures(pictures);
+        }
+        None
+    }
+
+    /// Draws the window's thumbnails and both previews `scale` times their usual size (see
+    /// `interface_size::picture_scale`). The live preview's two textures are made again at the
+    /// new size and handed to the output thread, which draws the preview into them at once;
+    /// the old ones are shown until it has.
+    fn scale_pictures(&mut self, scale: f32) {
+        let Some(running) = self.running.as_mut() else { return };
+        running.picture_scale = scale;
+        running.thumbs.set_scale(scale);
+        let (w, h) = interface_size::scaled(output::LIVE_PREVIEW_SIZE, scale);
+        if running.live_textures.first().is_some_and(|texture| (texture.width(), texture.height()) == (w, h)) {
+            return;
+        }
+        let textures: Vec<wgpu::Texture> =
+            (0..2).map(|_| sp_render::target_texture(&running.gpu.device, w, h)).collect();
+        let ids: Vec<egui::TextureId> = textures
+            .iter()
+            .map(|texture| {
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                running.egui_renderer.register_native_texture(&running.gpu.device, &view, wgpu::FilterMode::Linear)
+            })
+            .collect();
+        let drawn = running.output.as_ref().map_or(0, |output| output.live_preview().1);
+        let before = std::mem::replace(&mut running.live_preview_ids, ids);
+        if let Some((older, _)) = running.live_preview_before.replace((before, drawn)) {
+            for id in older {
+                running.egui_renderer.free_texture(&id);
+            }
+        }
+        running.live_textures = textures.clone();
+        if let Some(output) = &running.output {
+            output.send(OutputMsg::PreviewTargets(textures));
+        }
+        // Remote Control reads the preview back from the new textures.
+        self.remote_preview_source();
+    }
+
     /// Draws one frame of the home window and returns what the operator asked for.
     fn draw_home(&mut self) -> Vec<Command> {
+        let settling = self.follow_interface_size();
         // Undo and Redo are drawn greyed when the history has nothing to take back.
         self.note_show_history(false);
         self.refresh_next_line();
@@ -9214,12 +9356,23 @@ impl App {
                 }
                 *home_resize = None;
             } else {
-                let points = home_window.scale_factor() as f32;
+                let points = home_window.scale_factor() as f32 * egui_ctx.zoom_factor();
                 let (w, h) = (home_config.width as f32 / points, home_config.height as f32 / points);
                 raw_input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w, h)));
                 home_window.request_redraw();
             }
         }
+        // Testing aid: a capture run laid out as if the window were another size, drawn off the
+        // window at that size (see `interface_size::capture_size`).
+        let offscreen = self.options.capture_home.is_some().then(interface_size::capture_size).flatten();
+        if let Some(points) = offscreen {
+            let laid_out = points / egui_ctx.zoom_factor();
+            raw_input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, laid_out));
+        }
+        let offscreen = offscreen.map(|points| {
+            let scale = home_window.scale_factor() as f32;
+            [(points.x * scale).round() as u32, (points.y * scale).round() as u32]
+        });
         thumbs.begin_frame();
         running.home_state.bible.keep_read_ahead();
         // The output gone (not taken away for quitting) is trouble, said once.
@@ -9238,9 +9391,20 @@ impl App {
         // The Program preview is what the screens show: the live preview the output thread draws,
         // once it has drawn one. (The stage picture, and the start, use the window's own.)
         let live = running.output.as_ref().map(OutputHandle::live_preview).filter(|(_, drawn)| *drawn > 0);
+        // Its textures of the size before (see `scale_pictures`) are shown until a picture has
+        // been drawn in the new ones, then let go.
+        if let (Some((_, at)), Some((_, drawn))) = (&running.live_preview_before, live)
+            && drawn > *at
+            && let Some((before, _)) = running.live_preview_before.take()
+        {
+            for id in before {
+                egui_renderer.free_texture(&id);
+            }
+        }
+        let live_ids = running.live_preview_before.as_ref().map_or(&running.live_preview_ids, |(before, _)| before);
         // A screen that could not draw what is live still shows the picture before it.
         let undrawn = running.output.as_ref().and_then(OutputHandle::undrawn);
-        let preview = match live.and_then(|(front, _)| running.live_preview_ids.get(front)) {
+        let preview = match live.and_then(|(front, _)| live_ids.get(front)) {
             Some(texture) if !running.home_state.preview_stage => {
                 home::Preview { now: Some(*texture), before: None, amount: 1.0, undrawn }
             }
@@ -9333,6 +9497,9 @@ impl App {
         egui_state.handle_platform_output(home_window, std::mem::take(&mut full.platform_output));
 
         let delay = full.viewport_output.get(&egui::ViewportId::ROOT).map_or(Duration::MAX, |v| v.repaint_delay);
+        // A new size settling, or thumbnails still of the size before: drawn again soon.
+        let delay = settling.map_or(delay, |wait| delay.min(wait));
+        let delay = if thumbs.stale_shown() { Duration::ZERO } else { delay };
         // An animation is drawn at most a frame a screen refresh apart. A window macOS isn't
         // showing does not wait for the screen, and would otherwise be drawn thousands of times
         // a second while the preview fades.
@@ -9352,6 +9519,7 @@ impl App {
             renderer: egui_renderer,
             ctx: egui_ctx,
             label: "home window",
+            offscreen,
         };
         let (jobs, screen) = paint_ui(gpu, target, full);
 
@@ -9411,6 +9579,11 @@ impl App {
                     "songbooks" => {
                         state.preferences_pane = home::Pane::Integrations;
                         state.songbooks.open = true;
+                    }
+                    // Slides scrolled on to In your window, with Interface size.
+                    "interface-size" => {
+                        state.preferences_pane = home::Pane::Slides;
+                        state.show_interface_size = true;
                     }
                     // TimelyChurch's page, where it is offered.
                     "timelychurch" => {
@@ -9921,6 +10094,7 @@ impl App {
         let Some(panel) = panels.iter_mut().find(|panel| panel.window.id() == id) else {
             return Vec::new();
         };
+        let settling = follow_panel_zoom(panel, home_state.zoom_now);
         let raw_input = panel.state.take_egui_input(&panel.window);
         let mut commands = Vec::new();
         let kind = panel.kind;
@@ -9930,6 +10104,7 @@ impl App {
         });
         panel.state.handle_platform_output(&panel.window, std::mem::take(&mut full.platform_output));
         let delay = full.viewport_output.get(&egui::ViewportId::ROOT).map_or(Duration::MAX, |v| v.repaint_delay);
+        let delay = settling.map_or(delay, |wait| delay.min(wait));
         panel.next_repaint = Instant::now().checked_add(delay.max(FRAME));
         let target = UiTarget {
             window: &panel.window,
@@ -9938,6 +10113,7 @@ impl App {
             renderer: &mut panel.renderer,
             ctx: &panel.ctx,
             label: "panel window",
+            offscreen: None,
         };
         let (jobs, screen) = paint_ui(gpu, target, full);
         panel.frames += 1;
@@ -11212,8 +11388,15 @@ impl ApplicationHandler<AppEvent> for App {
                     panel.window.request_redraw();
                 }
                 WindowEvent::RedrawRequested => {
+                    let size_before = self.running.as_ref().map(|running| running.home_state.interface_size);
                     let commands = self.draw_panel(id);
                     self.apply(commands);
+                    // Another Interface size chosen in Settings: the main window takes it at once.
+                    if let Some(running) = self.running.as_ref()
+                        && size_before != Some(running.home_state.interface_size)
+                    {
+                        running.home_window.request_redraw();
+                    }
                     // A key in Settings that does what a menu item does (Check for updates) is
                     // carried out as the main window draws, as its own menus' are.
                     if let Some(running) = self.running.as_ref()
