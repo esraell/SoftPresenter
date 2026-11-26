@@ -390,6 +390,8 @@ impl Quitted {
         // follow.
         let socket = std::fs::symlink_metadata(&run.socket);
         assert!(socket.is_err(), "the copy left its socket behind: {}", run.socket.display());
+        // The note that it was running, which says at the next start that it didn't quit.
+        assert!(!run.data.join("running").exists(), "the copy left its running note behind{}", run.context());
     }
 }
 
@@ -537,6 +539,69 @@ fn starts_answers_and_quits_cleanly() {
     say(&format!("the copy drew with {gpu}"));
     // With the copy gone, sp says so (exit code 1) and starts nothing.
     run.sp(&["status"]).ok.then(|| panic!("a copy still answers after quitting{}", run.context()));
+}
+
+#[test]
+fn a_run_that_was_closed_from_outside_is_said_once_at_the_next_start() {
+    let Some(run) = Run::new("a_run_that_was_closed_from_outside_is_said_once_at_the_next_start") else { return };
+    let mut copy = run.start(&[]);
+    // Killed, as Task Manager or a shutdown closes it: it leaves its note that it was running.
+    copy.kill();
+    assert!(run.data.join("running").exists(), "a copy that didn't quit leaves its note{}", run.context());
+    let copy = run.start(&[]);
+    let quitted = copy.quit();
+    quitted.assert_clean(&run);
+    let said: Vec<&str> = quitted.log.lines().filter(|line| line.contains("[start] the last run")).collect();
+    assert_eq!(said.len(), 1, "said once, by the second copy: {said:?}{}", run.context());
+    assert!(
+        said[0].contains(", started ")
+            && said[0].contains(") ended without quitting: it crashed, or was closed from outside ("),
+        "{}",
+        said[0]
+    );
+}
+
+#[test]
+fn a_file_an_import_refuses_is_logged_with_its_size_and_kind_but_not_its_words() {
+    let Some(run) = Run::new("a_file_an_import_refuses_is_logged_with_its_size_and_kind_but_not_its_words") else {
+        return;
+    };
+    // Words written for this test, which the log must never hold.
+    const WORDS: &str = "Plinth morrow quaver";
+    let bible = run.file("Made Up.bbl");
+    let mut sqlite = b"SQLite format 3\0".to_vec();
+    sqlite.extend(WORDS.as_bytes());
+    sqlite.resize(2048, 0);
+    std::fs::write(&bible, &sqlite).unwrap();
+    let song = run.file("Made Up.txt");
+    std::fs::write(&song, [WORDS.as_bytes(), &[0, 1, 2, 3, 0, 0, 7, 0, 0, 1, 0, 0]].concat()).unwrap();
+    let picture = run.file("Made Up.png");
+    std::fs::write(&picture, format!("{WORDS}\n")).unwrap();
+    let copy = run.start(&[]);
+    for (words, file) in [(["bible", "install"], &bible), (["song", "import"], &song), (["media", "add"], &picture)] {
+        let reply = copy.sp(&[words[0], words[1], &file.to_string_lossy()]);
+        assert!(!reply.ok, "sp {} took a file it can't read: {}", reply.words, reply.text);
+        assert!(
+            !reply.text.contains(" (2 KB") && !reply.text.contains("bytes, "),
+            "only the log says more: {}",
+            reply.text
+        );
+    }
+    let quitted = copy.quit();
+    quitted.assert_clean(&run);
+    let line = |area: &str, ending: &str| {
+        quitted.log.lines().find(|line| line.contains(area) && line.ends_with(ending)).map(str::to_owned)
+    };
+    let found = [
+        line("[bible] Made Up.bbl ", " (2 KB, SQLite)"),
+        line("[songs] not imported: Made Up.txt ", " (32 bytes, binary)"),
+        line("[songs] imported 0 songs from 1 file in ", " ms (1 file not imported)"),
+        line("[media] could not add ", " (21 bytes, UTF-8 text)"),
+    ];
+    for (found, what) in found.iter().zip(["the Bible", "the song", "the import", "the picture"]) {
+        assert!(found.is_some(), "the log says why {what} was refused{}", run.context());
+    }
+    assert!(!quitted.log.contains(WORDS), "the log holds a file's words{}", run.context());
 }
 
 /// The six layers `clear` takes, in the order of [`filled`].
@@ -1444,4 +1509,5 @@ fn capture_home_saves_a_picture_of_the_window_and_quits() {
     for bad in ["[crash]", "panicked", "Graphics error"] {
         assert!(!log.contains(bad) && !stderr.contains(bad), "the capture run said {bad:?}{}", run.context());
     }
+    assert!(!run.data.join("running").exists(), "the capture run left its running note behind{}", run.context());
 }

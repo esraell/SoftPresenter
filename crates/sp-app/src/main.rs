@@ -835,6 +835,8 @@ struct PackMedia {
 struct BibleWork {
     job: Option<u64>,
     result: Result<bible_store::Opened, String>,
+    /// A file refused: its size and what its first bytes look like, for the log alone.
+    kind: Option<String>,
 }
 
 /// A song pack written or read, or a song bundle read, on a thread of its own, for the app to
@@ -948,11 +950,46 @@ struct Imported {
     /// Pictures and videos brought into the media bin from bundles.
     pictures: usize,
     videos: usize,
+    /// How many files couldn't be read, and what the log says of each (its size and what its
+    /// first bytes look like), by the sentence said of it.
+    refused: usize,
+    kinds: HashMap<String, String>,
+}
+
+impl Imported {
+    /// Notes a file that couldn't be read, and what the log says of it.
+    fn refuse(&mut self, problem: &str, path: &std::path::Path) {
+        self.refused += 1;
+        if let Some(kind) = applog::file_kind::of(path) {
+            self.kinds.insert(problem.to_owned(), kind);
+        }
+    }
 }
 
 /// How the sentence saying a song imported is in the library already ends.
 fn already() -> &'static str {
     crate::i18n::t("notices.import.already", " is already in the library.")
+}
+
+/// The log's line for an import: the songs that came in, from how many files, how long it took
+/// and how many files couldn't be read; then any songs the library had already and files still
+/// being read.
+fn imported_line(songs: usize, files: usize, ms: u128, refused: usize, here: usize, reading: usize) -> String {
+    let n = |count: usize, one: &str, many: &str| format!("{count} {}", if count == 1 { one } else { many });
+    let mut line = format!(
+        "imported {} from {} in {ms} ms ({} not imported",
+        n(songs, "song", "songs"),
+        n(files, "file", "files"),
+        n(refused, "file", "files")
+    );
+    if here > 0 {
+        line.push_str(&format!(", {} already in the library", n(here, "song", "songs")));
+    }
+    if reading > 0 {
+        line.push_str(&format!(", {} still being read", n(reading, "file", "files")));
+    }
+    line.push(')');
+    line
 }
 
 /// Where the pointer is in the window, in its points, while files are dragged over it: asked of
@@ -4839,6 +4876,10 @@ impl App {
         let said = crate::i18n::tf("notices.bible.reading", "Reading {name}…", &[("name", &shown)]);
         let known = self.running.as_ref().map(|running| running.home_state.bible.shelf.known()).unwrap_or_default();
         let (tx, waker) = (self.bible_tx.clone(), self.waker.clone());
+        let file = match &work {
+            bible_store::Work::Open { path, .. } => Some(path.clone()),
+            bible_store::Work::Install { .. } => None,
+        };
         let started = std::thread::Builder::new().name("bible file".to_owned()).spawn(move || {
             // A panic in reading a file (ours, or a library's) ends this work, never the app.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bible_store::run(work, &known)))
@@ -4849,7 +4890,8 @@ impl App {
                         &[("name", &shown)],
                     ))
                 });
-            let _ = tx.send(BibleWork { job, result });
+            let kind = result.as_ref().err().and(file.as_deref()).and_then(applog::file_kind::of);
+            let _ = tx.send(BibleWork { job, result, kind });
             if let Some(waker) = waker {
                 let _ = waker.send_event(AppEvent::BibleRead);
             }
@@ -4871,7 +4913,7 @@ impl App {
     /// waits for the sheet to ask, and the notices (and the command line's job) say how it went:
     /// installed, or why not. The sheet asking is there to see, so the list says nothing of it.
     fn finish_bible_work(&mut self) {
-        while let Ok(BibleWork { job, result }) = self.bible_rx.try_recv() {
+        while let Ok(BibleWork { job, result, kind }) = self.bible_rx.try_recv() {
             let mut sheet = false;
             let said = match result {
                 Ok(bible_store::Opened::Installed(kept, info, said)) => {
@@ -4890,7 +4932,9 @@ impl App {
                 }
                 Err(problem) => Err(problem),
             };
-            applog::event("bible", said.as_ref().unwrap_or_else(|problem| problem));
+            let logged =
+                said.as_ref().map_or_else(|problem| applog::file_kind::noted(problem, kind.as_deref()), Clone::clone);
+            applog::event("bible", &logged);
             if let Some(running) = self.running.as_mut() {
                 if !sheet {
                     running.home_state.notices.outcome(said.clone());
@@ -5029,7 +5073,9 @@ impl App {
                 self.save_media_list();
             }
             Err(message) => {
-                applog::event("media", &format!("could not add {}: {message}", path.display()));
+                let kind = if no_ffmpeg { None } else { applog::file_kind::of(path) };
+                let logged = applog::file_kind::noted(&message, kind.as_deref());
+                applog::event("media", &format!("could not add {}: {logged}", path.display()));
                 if no_ffmpeg {
                     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
                     running.home_state.notices.trouble(format!("{name}: {message}"));
@@ -5063,8 +5109,8 @@ impl App {
                 Arrived::Full(_) | Arrived::Length(..) => None,
             };
             if let Some((id, (path, changed))) = from_folder {
-                if let Arrived::Refused(_, problem) = &arrived {
-                    applog::event("media", problem);
+                // (The reader logged why it was refused.)
+                if matches!(arrived, Arrived::Refused(..)) {
                     self.bin_pictures.forget(id);
                     self.folder_notes.refused.insert(path, changed);
                 } else {
@@ -5090,8 +5136,8 @@ impl App {
                 }
                 // A video's tile shows its length.
                 Arrived::Length(id, length) => self.note_media_length(id, length),
+                // (The reader logged why it was refused.)
                 Arrived::Refused(id, problem) => {
-                    applog::event("media", &problem);
                     // A video added by hand this run whose picture can't be read says so as it
                     // leaves the bin (one in the bin from before leaves quietly, as it did).
                     if self.added_by_hand.remove(&id)
@@ -7326,6 +7372,7 @@ impl App {
                         }));
                     }
                     Err(problem) => {
+                        done.refuse(&problem, path);
                         read.push(SongRead::Song { song: Err(problem), path: path.clone(), library: None });
                     }
                 }
@@ -7342,18 +7389,17 @@ impl App {
             } else {
                 load::import_file(path)
             };
+            if let Err(problem) = &song {
+                done.refuse(problem, path);
+            }
             read.push(SongRead::Song { song, path: path.clone(), library: library.clone() });
         }
         self.take_songs(read, to, &mut done);
+        let here = done.problems.iter().filter(|problem| problem.ends_with(already())).count();
+        let ms = started.elapsed().as_millis();
         applog::event(
             "songs",
-            &format!(
-                "imported {} of {} files in {} ms ({} not imported)",
-                done.titles.len(),
-                files.len(),
-                started.elapsed().as_millis(),
-                done.problems.len()
-            ),
+            &imported_line(done.titles.len(), files.len(), ms, done.refused, here, done.opening.len()),
         );
         self.say_imported(&done);
         done
@@ -7391,6 +7437,7 @@ impl App {
                 Ok(opened) => Some(SongRead::Bundle { opened, path: path.to_owned(), library }),
                 Err(problem) => {
                     let _ = std::fs::remove_dir_all(&staging);
+                    done.refuse(&problem, path);
                     done.problems.push(problem);
                     None
                 }
@@ -7683,7 +7730,8 @@ impl App {
     /// files read are out of sight), and returns the words.
     fn say_imported(&mut self, done: &Imported) -> String {
         for problem in &done.problems {
-            applog::event("songs", &format!("not imported: {problem}"));
+            let logged = applog::file_kind::noted(problem, done.kinds.get(problem).map(String::as_str));
+            applog::event("songs", &format!("not imported: {logged}"));
         }
         let into = match done.libraries_used.as_slice() {
             [] => done.library.as_ref().map_or_else(String::new, |name| {
@@ -9289,8 +9337,10 @@ impl App {
         }
         if aid.step == 40 {
             eprintln!("resize aid done");
-            // What the library's writer holds is written first: the exit skips its own wait.
+            // What the library's writer holds is written first: the exit skips its own wait (and
+            // the end of `main`, where the run is noted as quit).
             self.writer.drain();
+            applog::last_run::ended();
             std::process::exit(0);
         }
         aid.step += 1;
@@ -12279,6 +12329,9 @@ fn main() -> ExitCode {
     // id, once, in whichever library folder is in use.
     let settled = bible_store::data_dir().map(|dir| song_ids::settle(&dir, true)).unwrap_or_default();
     applog::start();
+    // Says in the log how the last run ended if it didn't quit, and notes this one until the app
+    // has quit (any return from here on).
+    let _last_run = applog::last_run::begin();
     start_steps::mark("log opened");
     reports::start(options.capture_home.is_some());
     // Whether this copy keeps the videos' FFmpeg in a folder of its own (Windows), worked out
@@ -12690,6 +12743,26 @@ mod tests {
         assert!(super::web_costs("https://voxlive.app/listen/grace/scr1"), "any page for listening, however laid out");
         assert!(!super::web_costs("https://voxlive.app.example.com/listen/grace/screen/abc"));
         assert_eq!(super::web_host("https://example.com:8443/a?b#c"), "example.com:8443");
+    }
+
+    #[test]
+    fn the_logs_line_for_an_import_counts_songs_and_files_each_in_its_own_words() {
+        assert_eq!(
+            super::imported_line(3095, 1, 170, 0, 0, 0),
+            "imported 3095 songs from 1 file in 170 ms (0 files not imported)"
+        );
+        assert_eq!(
+            super::imported_line(1, 3, 12, 1, 0, 0),
+            "imported 1 song from 3 files in 12 ms (1 file not imported)"
+        );
+        assert_eq!(
+            super::imported_line(0, 2, 40, 0, 3095, 1),
+            "imported 0 songs from 2 files in 40 ms (0 files not imported, 3095 songs already in the library, 1 file still being read)"
+        );
+        assert_eq!(
+            super::imported_line(4, 1, 9, 0, 1, 0),
+            "imported 4 songs from 1 file in 9 ms (0 files not imported, 1 song already in the library)"
+        );
     }
 
     use super::*;

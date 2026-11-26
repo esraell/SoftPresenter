@@ -391,7 +391,9 @@ moment is cleared the next time a copy is made.
 
 The log is `~/Library/Logs/SoftPresenter/SoftPresenter.log`: what went on screen, commands that
 change something (not those that only read, such as `sp status`), problems, and once a minute
-how long drawing took.
+how long drawing took. Beside it, `running` says which version started when, for as long as the
+app runs (`applog/last_run.rs`); quitting removes it, and a start that finds one left behind logs
+once that the last run ended without quitting (it crashed, or was closed from outside).
 
 When the screens are held up, the log says where the time went. The screens' thread
 (`output.rs`) times each pass of its loop (the work between two waits) step by step, with the

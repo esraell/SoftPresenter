@@ -4,6 +4,9 @@
 //! such as a test, logs there instead). Past 5 MB the file is moved to `SoftPresenter.1.log`
 //! and a new one begun, so it never grows without end. Nothing in it leaves the computer.
 
+pub mod file_kind;
+pub mod last_run;
+
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -65,6 +68,7 @@ pub fn start() {
     std::panic::set_hook(Box::new(move |info| {
         // Written at once, whatever thread it is: the app may be about to stop.
         write_line(&line("crash", &info.to_string()));
+        last_run::crashed();
         crate::reports::on_panic(info);
         before(info);
     }));

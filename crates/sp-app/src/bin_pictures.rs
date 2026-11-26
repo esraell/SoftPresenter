@@ -134,6 +134,14 @@ fn read_all(queue: &Mutex<(VecDeque<Job>, usize)>, done: &Sender<Read>, wake: &W
             Want::Length => Err(String::new()),
         }))
         .unwrap_or_else(|_| Err(format!("{}: the picture could not be read.", job.path.display())));
+        // A file whose small copy can't be read: the log says why, with the file's size and what
+        // its first bytes look like, looked at here, away from the window.
+        if job.want == Want::Small
+            && let Err(problem) = &result
+        {
+            let kind = crate::applog::file_kind::of(&job.path);
+            crate::applog::event("media", &crate::applog::file_kind::noted(problem, kind.as_deref()));
+        }
         // A video's length goes with its small copy, for its tile.
         let length = (job.want == Want::Length || job.want == Want::Small && result.is_ok())
             .then(|| std::panic::catch_unwind(|| crate::media::video_length(&job.path)).ok().flatten())
@@ -153,7 +161,8 @@ fn read_all(queue: &Mutex<(VecDeque<Job>, usize)>, done: &Sender<Read>, wake: &W
 pub enum Arrived {
     /// An item's small copy is there: its first, or a new one after its file changed.
     Small(Uuid),
-    /// An item's small copy couldn't be read; the words say why.
+    /// An item's small copy couldn't be read; the words say why (and the reader has logged
+    /// them, with what the file looks like).
     Refused(Uuid, String),
     /// An item's full-size picture is there.
     Full(Uuid),
