@@ -925,12 +925,20 @@ impl Sink for Pretend {
 
     fn send(&self, _width: u32, _height: u32, _rgba: &[u8], _alpha: bool) {
         let Ok(mut turn) = self.turn.lock() else { return };
-        let now = Instant::now();
-        std::thread::sleep(turn.saturating_duration_since(now));
-        *turn = (*turn).max(now) + self.frame;
+        let (wait, next) = pretend_turn(*turn, Instant::now(), self.frame);
+        std::thread::sleep(wait);
+        *turn = next;
     }
 
     fn sound(&self, _planar: &[f32], _heard: std::time::SystemTime) {}
+}
+
+/// How long a pretend source's picture sent at `now` waits for its turn (`turn`), and when the
+/// next one's turn comes: one picture's time after this one's turn, or after now for one that
+/// came after its turn, which goes at once. Worked out before the wait, from the turn, so a
+/// wait that ends a little late doesn't push back the turns after it.
+fn pretend_turn(turn: Instant, now: Instant, frame: Duration) -> (Duration, Instant) {
+    (turn.saturating_duration_since(now), turn.max(now) + frame)
 }
 
 /// How often a pretend source says how its pictures went, when the testing switch asks for
@@ -2872,6 +2880,41 @@ mod tests {
         assert_eq!(due(&mut gate, now + frame), Some((2, false)));
     }
 
+    /// Runs `work`, and gives with what it returns how late, at the most, a timed wait of
+    /// `wait` (on a channel, as a source's thread waits) woke on another thread meanwhile: how
+    /// late this computer wakes such a wait now. On a computer busy with other work it wakes
+    /// late, and so does every wait of a source's thread. On GitHub's virtual Macs a wait of
+    /// 33 ms woke up to 150 ms late, however little else ran; how late depends on how long
+    /// the wait is (a sleep of 5 ms was some 30 ms late there), so the wait is the source's.
+    fn with_latest_wake<T>(wait: Duration, work: impl FnOnce() -> T) -> (T, Duration) {
+        let done = Arc::new(AtomicBool::new(false));
+        let theirs = done.clone();
+        let waiting = std::thread::spawn(move || {
+            let (_keep, never) = channel::<()>();
+            let mut latest = Duration::ZERO;
+            while !theirs.load(Ordering::Relaxed) {
+                let began = Instant::now();
+                let _ = never.recv_timeout(wait);
+                latest = latest.max(began.elapsed().saturating_sub(wait));
+            }
+            latest
+        });
+        let done_with = work();
+        done.store(true, Ordering::Relaxed);
+        (done_with, waiting.join().unwrap_or_default())
+    }
+
+    /// Says that a part of a test was not judged here and why, where it is seen though the test
+    /// passes (straight to the standard error, which the test harness doesn't hold back), and
+    /// on GitHub as a notice on the run.
+    fn say_skipped(what: &str, why: &str) {
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr(), "sp-ndi: skipped {what}: {why}");
+        if std::env::var_os("GITHUB_ACTIONS").is_some() {
+            let _ = writeln!(std::io::stdout(), "::notice title=Timing not judged::{what}: {why}");
+        }
+    }
+
     #[test]
     fn a_slide_that_stays_reaches_whoever_watches_as_a_steady_run_of_pictures() {
         let source = standing(1, || {});
@@ -2880,18 +2923,44 @@ mod tests {
         // One handed over, and the same pixels sent again and again: at 29.97 a second, some
         // fifteen in half a second (the stand-in takes each at once; NDI itself paces them).
         let (_, first) = source.sent.recv_timeout(PATIENCE).unwrap();
-        let began = Instant::now();
-        let mut again = 0;
-        while began.elapsed() < Duration::from_millis(500) {
-            if let Ok((width, pixels)) = source.sent.recv_timeout(Duration::from_millis(100)) {
-                assert_eq!((width, pixels), (2, first), "the same picture, not copied");
-                again += 1;
+        let frame = Rate::default().frame();
+        let (again, late) = with_latest_wake(frame, || {
+            let began = Instant::now();
+            let mut again = 0;
+            while began.elapsed() < Duration::from_millis(500) {
+                if let Ok((width, pixels)) = source.sent.recv_timeout(Duration::from_millis(100)) {
+                    assert_eq!((width, pixels), (2, first), "the same picture, not copied");
+                    again += 1;
+                }
             }
+            again
+        });
+        // Never more than its turns: a thread that woke late doesn't send the turns it missed
+        // in a burst. And sent again, with nothing new handed over.
+        assert!((1..=17).contains(&again), "sent again {again} times in half a second");
+        // Each turn is a timed wait of up to a picture's time. One that wakes late by less than
+        // that keeps the turns after it in their places; later than that, the turns start again
+        // from then. Where a wait of a picture's time wakes over half of it late, then, the
+        // turns may be fewer (on GitHub's virtual Macs 3 to 7 in half a second): how many came
+        // isn't the source's doing there, and isn't judged.
+        if again < 8 && late > frame / 2 {
+            let why = format!(
+                "sent again {again} times in half a second, its turns timed by waits that wake late here (a wait of {frame:.0?} woke up to {late:.0?} late)"
+            );
+            say_skipped("a_slide_that_stays_reaches_whoever_watches_as_a_steady_run_of_pictures: how many", &why);
+        } else {
+            assert!(
+                again >= 8,
+                "sent again {again} times in half a second (a wait of {frame:.0?} woke up to {late:.0?} late here)"
+            );
         }
-        assert!((8..=17).contains(&again), "sent again {again} times in half a second");
-        // Nobody watching: it stops.
+        // Nobody watching: once the source has counted nobody, it sends nothing more.
         source.receivers.store(0, Ordering::Relaxed);
-        std::thread::sleep(COUNT_EVERY + Duration::from_millis(200));
+        let began = Instant::now();
+        while source.output.receivers() != Some(0) {
+            assert!(began.elapsed() < PATIENCE, "the source never counted nobody");
+            std::thread::sleep(Duration::from_millis(10));
+        }
         while source.sent.try_recv().is_ok() {}
         assert!(source.sent.recv_timeout(Duration::from_millis(300)).is_err(), "nothing sent to nobody");
     }
@@ -2906,17 +2975,23 @@ mod tests {
         let pretend = Pretend::new(Rate::R50);
         assert_eq!(pretend.receivers(), Some(1));
         // The first goes at once; each one after it waits for its turn, 20 ms after the last.
+        let (t, frame, ms) = (Instant::now(), Rate::R50.frame(), Duration::from_millis);
+        assert_eq!(pretend_turn(t, t, frame), (Duration::ZERO, t + frame));
+        assert_eq!(pretend_turn(t + frame, t + ms(1), frame), (frame - ms(1), t + 2 * frame));
+        // That wait ended 5 ms late (a busy computer's timers wake late), and the next is sent
+        // then: it waits the less, and the turn after it is still on time.
+        assert_eq!(pretend_turn(t + 2 * frame, t + frame + ms(5), frame), (frame - ms(5), t + 3 * frame));
+        // One that comes after its turn goes at once, and the turns go on from then.
+        let late = t + 3 * frame + ms(60);
+        assert_eq!(pretend_turn(t + 3 * frame, late, frame), (Duration::ZERO, late + frame));
+        // Sent for real, six take at least the five turns after the first: never faster than
+        // the rate. (How much longer they take is the computer's: a timed wait on GitHub's
+        // virtual Macs wakes up to 150 ms late.)
         let began = Instant::now();
         for _ in 0..6 {
             pretend.send(1, 1, &[0; 4], false);
         }
-        let took = began.elapsed();
-        assert!(took >= Duration::from_millis(100) && took < Duration::from_millis(400), "took {took:?}");
-        // One that comes late goes at once, and the turns go on from there.
-        std::thread::sleep(Duration::from_millis(60));
-        let began = Instant::now();
-        pretend.send(1, 1, &[0; 4], false);
-        assert!(began.elapsed() < Duration::from_millis(15));
+        assert!(began.elapsed() >= 5 * frame, "took {:?}", began.elapsed());
     }
 
     #[test]
