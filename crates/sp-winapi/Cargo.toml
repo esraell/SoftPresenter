@@ -8,8 +8,10 @@ license.workspace = true
 # The few Windows calls the app can't make safely: finding a parent console to print to, asking
 # a monitor for the part of it the taskbar leaves free, asking Windows the names the monitors give
 # themselves, putting a folder on the user's PATH, reading and setting who may open the
-# control socket's folder, and keeping keys in the user's Credential Manager. windows-sys is already in the build (winit and others use it); this
-# adds no crate.
+# control socket's folder, keeping keys in the user's Credential Manager, and, for the app's file
+# windows, setting up OLE on their thread, bringing one back in front and giving the operator's
+# window the front again when one closes. windows-sys is already in the build (winit and others
+# use it); this adds no crate.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Devices_Display",
@@ -22,6 +24,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Console",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Ole",
     "Win32_System_ProcessStatus",
     "Win32_System_Registry",
     "Win32_System_SystemInformation",

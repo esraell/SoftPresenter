@@ -22,13 +22,15 @@ use windows_sys::Win32::System::Console::{
     ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
     SetStdHandle,
 };
+use windows_sys::Win32::System::Ole::{OleInitialize, OleUninitialize};
 use windows_sys::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_EXPAND_SZ, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW, RegSetKeyValueW,
 };
-use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+use windows_sys::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumThreadWindows, GW_OWNER, GetWindow, HWND_BROADCAST, IsIconic, IsWindowVisible, SMTO_ABORTIFHUNG, SW_RESTORE,
-    SendMessageTimeoutW, SetForegroundWindow, ShowWindow, WM_SETTINGCHANGE,
+    EnumThreadWindows, GW_OWNER, GetForegroundWindow, GetWindow, GetWindowThreadProcessId, HWND_BROADCAST, IsIconic,
+    IsWindowVisible, SMTO_ABORTIFHUNG, SW_RESTORE, SendMessageTimeoutW, SetForegroundWindow, ShowWindow,
+    WM_SETTINGCHANGE,
 };
 
 fn usable(handle: HANDLE) -> bool {
@@ -326,4 +328,53 @@ pub fn bring_thread_window_forward(thread: u32) -> bool {
         }
         SetForegroundWindow(found) != 0
     }
+}
+
+/// OLE set up on the thread that made it, until it is dropped there (it can't leave the thread).
+pub struct OleOnThisThread {
+    /// Whether OleInitialize succeeded (it says so for a thread that had it already, too), so
+    /// it is to be balanced.
+    begun: bool,
+    _here: std::marker::PhantomData<*const ()>,
+}
+
+pub fn ole_on_this_thread() -> OleOnThisThread {
+    // SAFETY: OleInitialize's one argument is reserved and must be null. It sets up COM (as a
+    // single-threaded apartment) and OLE for the calling thread only, and fails harmlessly
+    // (returning an error, which is then not balanced) if the thread's COM is set up otherwise.
+    let begun = unsafe { OleInitialize(null()) } >= 0;
+    OleOnThisThread { begun, _here: std::marker::PhantomData }
+}
+
+impl Drop for OleOnThisThread {
+    fn drop(&mut self) {
+        if self.begun {
+            // SAFETY: balances the successful OleInitialize above, on the same thread (the value
+            // is neither Send nor Sync, so it is dropped where it was made).
+            unsafe { OleUninitialize() };
+        }
+    }
+}
+
+pub fn front_back_to(window: isize) -> bool {
+    let window = window as HWND;
+    // SAFETY: GetForegroundWindow takes nothing and only answers which window is in front.
+    let front = unsafe { GetForegroundWindow() };
+    if front == window {
+        return false;
+    }
+    if !front.is_null() {
+        let mut process = 0;
+        // SAFETY: `front` is a window handle Windows just gave; `process` is a local the call
+        // writes the owning process's number into. A window closed since makes it write nothing.
+        unsafe { GetWindowThreadProcessId(front, &mut process) };
+        // SAFETY: GetCurrentProcessId takes nothing and reads this process's own number.
+        if process != unsafe { GetCurrentProcessId() } {
+            return false;
+        }
+    }
+    // SAFETY: `window` is the app's own top-level window, handed over by the window library on
+    // the thread that made it; the window in front is this program's, or none, so Windows lets
+    // the program choose which of its windows is in front. A bad handle makes it fail harmlessly.
+    unsafe { SetForegroundWindow(window) != 0 }
 }

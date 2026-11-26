@@ -138,6 +138,22 @@ pub fn user_geo_name() -> Option<String> {
 #[cfg(windows)]
 pub use windows::{bring_thread_window_forward, current_thread_id};
 
+/// OLE (what dragging and dropping and the clipboard use) set up for the calling thread while
+/// the value is held, and taken down when it is dropped, on that thread. Windows asks for it on
+/// any thread that drags something: a file window shown on a thread of its own is one, as a file
+/// can be dragged out of it onto the app's window. Made where OLE is set up already, it is set
+/// up once more and taken down once (Windows counts them).
+#[cfg(windows)]
+pub use windows::{OleOnThisThread, ole_on_this_thread};
+
+/// Puts the app's window `window` (its handle as the window library gives it) in front and gives
+/// it the keyboard, but only when the window in front now is another of this program's own, or
+/// none: when a file window of the app's closes, Windows puts in front the next window in line,
+/// which may be one of the app's screens (on the projector), and keys pressed then would go to
+/// it. A window of another program in front is left alone. True when it was put in front.
+#[cfg(windows)]
+pub use windows::front_back_to;
+
 /// Who owns a file or folder and who may open it, read and set with Windows' own security
 /// calls, and the user this program runs as: what keeps the control socket's folder to one
 /// user. Access lists go in and out written down as Windows writes them (SDDL); what they mean

@@ -412,7 +412,15 @@ impl Drop for Answering {
 fn on_its_own_thread(answering: Answering, show: impl FnOnce() -> Answer + Send + 'static) {
     let started = std::thread::Builder::new().name("file window".to_owned()).spawn(move || {
         answering.begun();
-        let answer = show();
+        let answer = {
+            // Windows asks for OLE on a thread that drags, and a file can be dragged out of the
+            // file window onto the app's (the window's own thread had it, set up by the window
+            // library, when the file windows were shown there). Taken down before the answer
+            // goes, after rfd's own COM set-up within it has been.
+            #[cfg(windows)]
+            let _ole = sp_winapi::ole_on_this_thread();
+            show()
+        };
         answering.give(answer);
     });
     if let Err(problem) = started {
@@ -768,6 +776,20 @@ impl crate::App {
                 Some(1) => self.ask(For::ImportSongs { setup: false }, Window::Files(files.choosing(Choose::Files))),
                 _ => {}
             },
+        }
+        // On Windows, a file window of the app's own (none owns it) gives the front, as it
+        // closes, to the next window in line, which may be a screen's on the projector: the
+        // keys pressed next would go there. The operator's window takes it back, if it is
+        // still the app's (one of another program in front is left alone). Not in a test copy,
+        // which never takes the keyboard.
+        #[cfg(windows)]
+        if !self.quiet()
+            && let Some(running) = self.running.as_ref()
+            && let Ok(handle) = winit::raw_window_handle::HasWindowHandle::window_handle(&*running.home_window)
+            && let winit::raw_window_handle::RawWindowHandle::Win32(handle) = handle.as_raw()
+            && sp_winapi::front_back_to(handle.hwnd.get())
+        {
+            applog::event("dialog", "the operator's window took the front back from another of the app's windows");
         }
         // Then a question that waited its turn, unless what was done asked for a window of its
         // own (that one goes first; the question comes once it closes).

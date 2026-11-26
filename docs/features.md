@@ -36,7 +36,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the window goes on drawing and taking clicks, `sp` and Remote Control are answered, and a
   picture or video dragged from that window onto the media bin comes in at once. On a Mac they
   open as a sheet on the window; on Windows and Linux as a window of their own (on Windows,
-  clicking Add again while one is open brings it back in front). One is open at a time; a window
+  clicking Add again while one is open brings it back in front, and when one closes the
+  operator's window has the keyboard again, not a screen's). One is open at a time; a window
   that leads to another (Export's question about videos, then where to save) goes before a
   question that waits its turn. What is chosen goes to the slide, theme (by the theme itself,
   wherever it is in the list) or media playlist it was asked for, if that is still open. On
