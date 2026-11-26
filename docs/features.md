@@ -1335,7 +1335,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   colour. Every colour well opens a grid of swatches with the full colour picker under it.
 - Shapes (rectangle, rounded rectangle, ellipse, triangles, rhombus, polygon, star, arrows) from
   the Shapes menu or a single key; fill, stroke, shadow and flip for any object; spreading
-  objects out evenly.
+  objects out evenly. An object's Opacity slider says how solid it is beside it ("75%", "75 %"
+  in Spanish, Russian and Ukrainian), and a percentage can be typed there; the shadows' Opacity
+  is written the same way.
 - **Media** on slides (Media… above the slide, Insert > Media…, Shift-Command-I, or dropped on
   the editor from the Finder, several at once if you like): a picture,
   copied into the app's Images folder, or a video, which stays where it is and plays in its box,

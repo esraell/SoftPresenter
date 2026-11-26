@@ -11,6 +11,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 - With nothing changing, the operator's window is drawn once a second, for the clock; it was drawn twice a second, the second time only to look at the displays again, which is now done without drawing.
 - While a video plays behind the words, the Edit view is no longer drawn again for every picture of the video (it has no Program preview to show them in), so editing a slide during a video takes less of the computer.
 - In the theme editor, a shape, picture or video dragged above the text boxes in the Objects list (at the bottom left) went straight back under them. Dragged there now, or moved with Bring Forward or Bring to Front, it is drawn in front of the words, on every slide that uses the template and on the screens at once. It sits in front of all the text boxes or behind them all, and the line shown while dragging says which. A new one still starts behind the words, and Undo puts it back.
+- The Opacity slider in the editor now says how solid the object is, beside it (75%), and you can type a percentage there. The shadows' Opacity is written the same way, with a space before the % in Spanish, Russian and Ukrainian.
 
 ## 0.9.0-dev.23 — 26 November 2026 (development build)
 

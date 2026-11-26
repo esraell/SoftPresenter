@@ -500,11 +500,6 @@ fn slides_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     );
 }
 
-/// A percentage as the language writes it: "125%", "125 %".
-fn percent(n: u64) -> String {
-    tf("settings.size.percent", "{n}%", &[("n", &crate::i18n::count(n))])
-}
-
 /// The Interface size row: Automatic, 100%, 125%, 150% or 175%, and what the windows are drawn
 /// at now (which a fixed size the main window has no room for is not). The switch goes under
 /// the words when the page is too narrow for both.
@@ -514,12 +509,12 @@ fn interface_size_row(ui: &mut egui::Ui, state: &mut HomeState, look: &crate::st
         .iter()
         .map(|size| match size {
             InterfaceSize::Automatic => t("settings.size.automatic", "Automatic").to_owned(),
-            InterfaceSize::Percent(n) => percent(u64::from(*n)),
+            InterfaceSize::Percent(n) => crate::i18n::percent(u64::from(*n)),
         })
         .collect();
     let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
     let chosen = InterfaceSize::ALL.iter().position(|size| *size == state.interface_size);
-    let now = percent((state.zoom_now * 100.0).round() as u64);
+    let now = crate::i18n::percent((state.zoom_now * 100.0).round() as u64);
     let short = match state.interface_size {
         InterfaceSize::Percent(n) => state.zoom_now * 100.0 + 0.5 < f32::from(n),
         InterfaceSize::Automatic => false,

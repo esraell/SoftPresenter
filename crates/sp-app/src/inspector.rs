@@ -176,6 +176,34 @@ fn number(
     });
 }
 
+/// A percentage as the language writes it ("75%", "75 %"), for a number box or a slider's.
+fn percent_text(n: f64) -> String {
+    crate::i18n::percent(n.round().clamp(0.0, 100.0) as u64)
+}
+
+/// A percentage typed in a box: its digits (with a decimal point or comma), with or without
+/// the sign and its space.
+fn typed_percent(typed: &str) -> Option<f64> {
+    let number: String = typed
+        .chars()
+        .filter_map(|c| match c {
+            '0'..='9' | '.' => Some(c),
+            ',' => Some('.'),
+            _ => None,
+        })
+        .collect();
+    number.parse().ok()
+}
+
+/// A number box for a percentage from 0 to 100, written as the language writes it.
+fn percent_box(value: egui::DragValue<'_>) -> egui::DragValue<'_> {
+    value.range(0.0..=100.0).custom_formatter(|n, _| percent_text(n)).custom_parser(typed_percent)
+}
+
+/// How wide the box with a slider's percentage is: room for "100 %", so the slider stays as long
+/// whatever it says.
+const PERCENT_BOX: f32 = 59.0;
+
 /// A row of equal segments, like one wide button cut into parts. `draw` paints segment `i`.
 /// Returns the segment clicked, if any.
 fn segments(
@@ -1073,8 +1101,20 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
 
     ui.horizontal(|ui| {
         title(ui, opacity);
-        ui.spacing_mut().slider_width = INNER - column - 14.0;
-        ui.add(egui::Slider::new(&mut object.opacity, 0.0..=1.0).show_value(false));
+        // How solid the object is: the slider, and beside it the percentage, which can be typed.
+        let gap = ui.spacing().item_spacing.x;
+        ui.spacing_mut().slider_width = INNER - column - 14.0 - gap - PERCENT_BOX;
+        ui.spacing_mut().interact_size.x = PERCENT_BOX;
+        // It shows a whole percentage, and an opacity in between is kept until it is changed.
+        let shown = (object.opacity * 100.0).round();
+        let mut percent = shown;
+        let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
+            .step_by(1.0)
+            .custom_formatter(|n, _| percent_text(n))
+            .custom_parser(typed_percent);
+        if ui.add(slider).changed() && percent != shown {
+            object.opacity = (percent / 100.0).clamp(0.0, 1.0);
+        }
     });
     rule(ui);
 
@@ -1125,11 +1165,12 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
             });
         }
         if let Some(look) = object.shadow.as_mut() {
-            let mut percent = (look.opacity * 100.0).round();
-            number(ui, &mut percent, 78.0, t("inspector.shadow.opacity", "Opacity"), |d| {
-                d.range(0.0..=100.0).suffix("%")
-            });
-            look.opacity = percent / 100.0;
+            let shown = (look.opacity * 100.0).round();
+            let mut percent = shown;
+            number(ui, &mut percent, 78.0, t("inspector.shadow.opacity", "Opacity"), percent_box);
+            if percent != shown {
+                look.opacity = percent / 100.0;
+            }
             let hint = t("inspector.shadow.colour", "Shadow colour");
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| colour(ui, &mut look.color, hint));
         }
@@ -1750,11 +1791,12 @@ fn text_look(
             tick(ui, &mut wanted.shadow, t("inspector.shadow", "Shadow"));
         });
         if wanted.shadow {
-            let mut percent = (wanted.shadow_look.opacity * 100.0).round();
-            number(ui, &mut percent, 78.0, t("inspector.shadow.opacity", "Opacity"), |d| {
-                d.range(0.0..=100.0).suffix("%")
-            });
-            wanted.shadow_look.opacity = percent / 100.0;
+            let shown = (wanted.shadow_look.opacity * 100.0).round();
+            let mut percent = shown;
+            number(ui, &mut percent, 78.0, t("inspector.shadow.opacity", "Opacity"), percent_box);
+            if percent != shown {
+                wanted.shadow_look.opacity = percent / 100.0;
+            }
             ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                 colour(ui, &mut wanted.shadow_look.color, t("inspector.shadow.colour", "Shadow colour"))
             });
@@ -2077,6 +2119,79 @@ mod tests {
         state.editing = Some(draft);
         state.inspector.tab = tab;
         state
+    }
+
+    /// The words the inspector draws for `state`, in a column as wide as the window's.
+    fn words_drawn(state: &mut HomeState, theme: &Theme) -> Vec<String> {
+        fn walk(shape: &egui::Shape, into: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let ctx = crate::studio::tests::styled();
+        let mut words = Vec::new();
+        for _ in 0..2 {
+            let raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(PANEL_WIDTH, 900.0))),
+                ..RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().frame(Frame::NONE).show(ui, |ui| inspector(ui, state, theme));
+            });
+            words.clear();
+            output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut words));
+            output.drop_without_applying_deltas();
+        }
+        words
+    }
+
+    #[test]
+    fn opacity_says_its_percentage_as_each_language_writes_it_and_takes_one_typed() {
+        let theme = Theme::builtin();
+        for (language, solid, shadow) in [
+            (crate::i18n::Language::English, "75%", "40%"),
+            (crate::i18n::Language::Spanish, "75\u{a0}%", "40\u{a0}%"),
+            (crate::i18n::Language::Russian, "75\u{a0}%", "40\u{a0}%"),
+            (crate::i18n::Language::Ukrainian, "75\u{a0}%", "40\u{a0}%"),
+        ] {
+            crate::i18n::with_language(language, || {
+                // The Shape tab: the object's opacity beside its slider, its shadow's in a box.
+                let mut state = editing_text(InspectorTab::Shape, false, false);
+                if let Some(object) = state.editing.as_mut().and_then(|draft| draft.selected_object_mut()) {
+                    object.opacity = 0.75;
+                    let look =
+                        sp_model::Shadow { color: Rgba::BLACK, opacity: 0.4, angle: 315.0, offset: 5.0, blur: 5.0 };
+                    object.shadow = Some(look);
+                }
+                let words = words_drawn(&mut state, &theme);
+                assert!(words.iter().any(|w| w == solid), "{language:?}: {solid} in {words:?}");
+                assert!(words.iter().any(|w| w == shadow), "{language:?}: {shadow} in {words:?}");
+                // An opacity between two whole percentages is shown rounded, and left as it is.
+                if let Some(object) = state.editing.as_mut().and_then(|draft| draft.selected_object_mut()) {
+                    object.opacity = 0.455;
+                    object.shadow = object.shadow.map(|look| sp_model::Shadow { opacity: 0.333, ..look });
+                }
+                let words = words_drawn(&mut state, &theme);
+                assert!(words.contains(&crate::i18n::percent(46)), "{language:?}: {words:?}");
+                let object = state.editing.as_ref().and_then(|draft| draft.selected_object()).expect("picked");
+                assert_eq!(object.opacity, 0.455, "{language:?}: drawing changes nothing");
+                assert_eq!(object.shadow.map(|look| look.opacity), Some(0.333), "{language:?}");
+                // The Text tab: its shadow's opacity, the same way.
+                let mut state = editing_text(InspectorTab::Text, false, false);
+                let percent = (theme.templates[0].boxes[0].shadow_look.opacity * 100.0).round() as u64;
+                let words = words_drawn(&mut state, &theme);
+                let wanted = crate::i18n::percent(percent);
+                assert!(words.contains(&wanted), "{language:?}: {wanted} in {words:?}");
+            });
+        }
+        // Typed with the sign or without, its space, or a decimal comma.
+        for typed in ["75", "75%", "75 %", "75\u{a0}%", " 75 "] {
+            assert_eq!(typed_percent(typed), Some(75.0), "{typed:?}");
+        }
+        assert_eq!(typed_percent("12,5 %"), Some(12.5));
+        assert_eq!(typed_percent("%"), None);
     }
 
     #[test]

@@ -597,6 +597,13 @@ pub fn count(n: u64) -> String {
     group_digits(&n.to_string(), format_of(current()))
 }
 
+/// A percentage as the current language writes it: "75%" in English, "75 %" (a no-break space)
+/// in Spanish, Russian and Ukrainian. Its words are the Interface size setting's, which wrote
+/// percentages first.
+pub fn percent(n: u64) -> String {
+    tf("settings.size.percent", "{n}%", &[("n", &count(n))])
+}
+
 fn group_digits(digits: &str, format: &Format) -> String {
     if digits.len() < format.group_from {
         return digits.to_owned();
