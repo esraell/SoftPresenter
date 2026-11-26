@@ -115,22 +115,36 @@ fn found(ui: &mut egui::Ui, state: &mut Card) {
     {
         *tick = !*tick;
     }
+    // The key keeps its words, and so its width, whatever is ticked; the count is in the line
+    // beside it, which keeps the room of its longest wording so nothing moves as rows are ticked.
     let new = state.new_ticked();
-    let import = if new > 0 {
-        tn("settings.find.import", new as u64, "Import {n} New Song", "Import {n} New Songs", &[])
-    } else {
-        t("settings.find.import_none", "Import").to_owned()
-    };
-    let lead = t(
-        "settings.find.each",
-        "Each songbook or library comes in as a library of its own name, with only its new songs. Songs already here stay out.",
-    );
-    let keys = [Key::plain(find_again()), Key::main(&import).enabled(new > 0)];
-    match foot(ui, lead, &keys) {
+    let lead = coming_words(new);
+    // Room for the most it could say: every row ticked (a song in two rows counted twice here, so
+    // never short of the digits the count can have).
+    let most = coming_words(state.sources.iter().filter(|source| source.can_import()).map(Source::fresh).sum());
+    let none = coming_words(0);
+    let import = t("settings.find.import_new", "Import New Songs");
+    let keys = [Key::plain(find_again()), Key::main(import).enabled(new > 0)];
+    match foot(ui, &lead, &[&most, &none], &keys) {
         Some(0) => state.asks.push(Ask::Find),
         Some(_) => state.asks.push(Ask::Import),
         None => {}
     }
+}
+
+/// The line beside Import: how many new songs the rows ticked bring in, and how they come in;
+/// with nothing ticked, to tick them.
+fn coming_words(new: usize) -> String {
+    if new == 0 {
+        return t("settings.find.tick", "Tick what to bring in. Songs already here stay out.").to_owned();
+    }
+    tn(
+        "settings.find.coming",
+        new as u64,
+        "{n} new song comes in, each songbook or library as a library of its own name. Songs already here stay out.",
+        "{n} new songs come in, each songbook or library as a library of its own name. Songs already here stay out.",
+        &[],
+    )
 }
 
 /// Bringing them in: how many and how far, a thin bar, and the rows being brought in.
@@ -205,18 +219,25 @@ fn progress_line(ui: &mut egui::Ui, words: &str, key: Option<&str>) -> bool {
 }
 
 /// The line under the rows: what an import does, at the left, and the keys at the right (under
-/// it when both don't fit side by side). The key clicked, if any.
-fn foot(ui: &mut egui::Ui, lead: &str, keys: &[Key]) -> Option<usize> {
+/// it when both don't fit side by side). It keeps two lines' room, or the room of the longest of
+/// `also` (its other wordings) where that is more, so it doesn't change height as it changes.
+/// The key clicked, if any.
+fn foot(ui: &mut egui::Ui, lead: &str, also: &[&str], keys: &[Key]) -> Option<usize> {
     let width = ui.available_width();
     let top = ui.cursor().min;
     ui.painter().hline(top.x..=top.x + width, top.y + 0.5, Stroke::new(1.0, LINE));
     ui.add_space(12.0);
     let keys_wide = parts::keys_width(ui, keys);
     let room = width - keys_wide - 16.0;
-    if room >= 220.0 {
-        // The words wrap in the room the keys leave, as the design's note does.
-        let galley = parts::lines(ui, lead, FontId::proportional(12.0), TEXT_FAINT, room.min(360.0), 18.0);
-        let height = galley.size().y.max(30.0);
+    let beside = room >= 220.0;
+    // The words wrap in the room the keys leave, as the design's note does; under them, in the
+    // width a note takes.
+    let wrap = if beside { room.min(360.0) } else { width.min(600.0) };
+    let laid = |words: &str| parts::lines(ui, words, FontId::proportional(12.0), TEXT_FAINT, wrap, 18.0);
+    let galley = laid(lead);
+    let tallest = also.iter().map(|words| laid(words).size().y).fold(36.0_f32, f32::max);
+    let height = galley.size().y.max(tallest);
+    if beside {
         let (place, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
         ui.painter().galley(pos2(place.min.x, place.center().y - galley.size().y / 2.0), galley, TEXT_FAINT);
         let mut inside = ui.new_child(
@@ -227,7 +248,9 @@ fn foot(ui: &mut egui::Ui, lead: &str, keys: &[Key]) -> Option<usize> {
         ui.add_space(12.0);
         return clicked;
     }
-    note(ui, lead);
+    let (place, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    ui.painter().galley(place.min, galley, TEXT_FAINT);
+    ui.add_space(12.0);
     keys_line(ui, "find foot", "", keys)
 }
 
@@ -466,7 +489,7 @@ mod tests {
         let mut state = state_in(Phase::Found);
         let new = state.find_songs.new_ticked();
         assert_eq!(new, 3288 + 198 + 32, "the rows with something new start ticked");
-        assert!(click(&mut state, "Import 3,518 New Songs"));
+        assert!(click(&mut state, "Import New Songs"));
         assert!(click(&mut state, "Find Again"));
         assert_eq!(state.find_songs.asks, [Ask::Import, Ask::Find]);
         let mut state = state_in(Phase::Done);
@@ -488,8 +511,8 @@ mod tests {
             assert!(click(&mut state, name));
         }
         assert_eq!(state.find_songs.new_ticked(), 0);
-        // With nothing ticked, the key is a greyed Import that asks nothing.
-        assert!(click(&mut state, "Import"));
+        // With nothing ticked, the key is greyed and asks nothing.
+        assert!(click(&mut state, "Import New Songs"));
         assert!(state.find_songs.asks.is_empty());
     }
 
@@ -523,6 +546,7 @@ mod tests {
                     "Copied while it was open in SoftProjector: its latest changes may be missing",
                     "Library \u{b7} Documents \u{203a} Worship \u{b7} 214\u{a0}songs",
                     "Library \u{b7} from SoftProjector \u{b7} Downloads \u{203a} old laptop",
+                    "3,518 new songs come in, each songbook or library as a library of its own name. Songs already here stay out.",
                 ],
             ),
             (Phase::Importing, &["Bringing in 3,518 songs\u{2026} 40%", "BRINGING THEM IN\u{2026}"]),
@@ -564,6 +588,61 @@ mod tests {
             words,
             "3,518 songs came in: Zpěvník pro zkoušku (3,288), Youth Songs (198). 29 already in your library were left out. 4 found in more than one place came in once."
         );
+    }
+
+    #[test]
+    fn ticking_rows_moves_nothing_on_the_page() {
+        // What the line beside Import says follows the ticks; the key keeps its words, and
+        // nothing on the page moves or changes size, in the narrowest Settings window or a wide
+        // one, in any language.
+        use crate::i18n::Language;
+        for language in Language::ALL {
+            crate::i18n::with_language(language, || {
+                for width in [820.0, 1280.0] {
+                    let mut state = state_in(Phase::Found);
+                    let ctx = crate::studio::tests::styled();
+                    let show = Show::new(Vec::new());
+                    let frame = |state: &mut HomeState| {
+                        let mut drawn = Vec::new();
+                        for _ in 0..2 {
+                            let raw = egui::RawInput {
+                                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 4000.0))),
+                                ..egui::RawInput::default()
+                            };
+                            let output = ctx.run_ui(raw, |ui| settings_ui(ui, state, &show));
+                            drawn = crate::home::settings::tests::words_drawn(&output);
+                            output.drop_without_applying_deltas();
+                        }
+                        drawn
+                    };
+                    let all = frame(&mut state);
+                    let import = t("settings.find.import_new", "Import New Songs");
+                    assert!(all.iter().any(|(words, _)| words == import), "{language:?}: {import}");
+                    // Some ticked, then none.
+                    state.find_songs.ticked[0] = false;
+                    let some = frame(&mut state);
+                    state.find_songs.ticked.iter_mut().for_each(|tick| *tick = false);
+                    let none = frame(&mut state);
+                    let lines = [coming_words(3288 + 198 + 32), coming_words(198 + 32), coming_words(0)];
+                    // All but the line and the ticks themselves (drawn as a mark).
+                    let kept = |drawn: &Vec<(String, Rect)>| -> Vec<(String, Rect)> {
+                        drawn
+                            .iter()
+                            .filter(|(words, _)| !lines.contains(words) && words != "\u{2713}")
+                            .cloned()
+                            .collect()
+                    };
+                    for (drawn, line) in [(&all, &lines[0]), (&some, &lines[1]), (&none, &lines[2])] {
+                        let (shown, first) = (kept(drawn), kept(&all));
+                        assert_eq!(shown, first, "{language:?} at {width}: something moved for \u{201c}{line}\u{201d}");
+                        assert!(
+                            drawn.iter().any(|(words, _)| words == line),
+                            "{language:?} at {width}: \u{201c}{line}\u{201d} isn't shown"
+                        );
+                    }
+                }
+            });
+        }
     }
 
     #[test]

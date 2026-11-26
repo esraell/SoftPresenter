@@ -185,7 +185,7 @@ fn import_zipped_songbooks(
             Ok(given) => came += given,
             Err(refused) => {
                 first_why.get_or_insert(refused.why);
-                cautions.push(Caution { short: refused.said.clone(), said: refused.said });
+                cautions.push(Caution { short: refused.said.clone(), said: refused.said, whole_file: false });
             }
         }
     }
@@ -204,6 +204,9 @@ fn import_zipped_songbooks(
 pub struct Caution {
     pub said: String,
     pub short: String,
+    /// It is about the whole file, not one songbook in it (copied while SoftProjector had it
+    /// open): a row for each of the file's songbooks says it once, on the first.
+    pub whole_file: bool,
 }
 
 /// Where each song made of a file of many songs goes, with the name of its songbook.
@@ -316,6 +319,7 @@ fn songbook_songs<R: std::io::Read + std::io::Seek>(
                 "Cut short when it was copied or downloaded: its last songs are missing",
             )
             .to_owned(),
+            whole_file: false,
         });
     }
     let mut given = 0;
@@ -353,6 +357,7 @@ fn unsaved_changes(path: &Path, name: &str) -> Option<Caution> {
             "Copied while it was open in SoftProjector: its latest changes may be missing",
         )
         .to_owned(),
+        whole_file: true,
     })
 }
 

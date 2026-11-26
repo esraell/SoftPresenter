@@ -5,7 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-What's new opens a window with each version's changes, and in the Service view the find box keeps its search after a drag.
+A What's new window, a find box that keeps its search after a drag, and a Find songs that holds still as you tick.
 
 ### New
 
@@ -16,6 +16,7 @@ What's new opens a window with each version's changes, and in the Service view t
 - **Search stays after a drag.** After you drag a song or passage from the find box, its words and results stay, ready for the next one. This is so for a drop into the playlist, onto a placeholder, or onto a playlist or library in the left column. The box gives the keys back at once, so Space, the arrows and a clicker run the slides, and the list dims and says so; click the box or press / to type in it again. Escape, or a click anywhere else, closes the search.
 - **Dropped songs wait.** A song or passage dropped from the find box no longer opens or moves the slides; its row flashes orange instead. What you had open stays open, and the slides stay where they were, even when it goes in above them. The row is brought into view if it landed out of sight; click it when you want it.
 - **Last item reaches the top.** The last item of a playlist can now be scrolled to the top of the slides, like any other. Clicking it in the playlist takes it there, and a faint line under it marks the end of the playlist.
+- **Ticking rows in Find songs.** In Settings › Song files › Find songs on this computer, ticking or unticking a row no longer moves anything on the page. The key always reads Import New Songs, greyed with nothing new ticked, and how many new songs come in is said beside it; before, the key's words and width changed with every tick ("Import 3,518 New Songs"). A database copied while SoftProjector had it open now says so once, under the first of its libraries, instead of under each of them.
 
 ## 0.9.0-dev.26 — 26 November 2026 (development build)
 

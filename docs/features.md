@@ -348,9 +348,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   looked everywhere (stopped, out of time, past its files, or gone wrong) says which over what it
   found, and `sp` says so too. A source with nothing new is
   dimmed and unticked, so is one that can't be read, with the importer's reason in amber; one
-  copied while SoftProjector had it open, or cut short, says so under its line in amber and can
-  still be ticked; and a
-  place the computer won't let it look in is a row saying so. Nothing comes in until Import:
+  cut short says so under its line in amber and can still be ticked, and so does a database
+  copied while SoftProjector had it open, once, under the first of its libraries; and a
+  place the computer won't let it look in is a row saying so. Import New Songs keeps its words
+  and its size whatever is ticked: the line beside it says how many new songs come in, or to
+  tick what to bring in, in room for two lines, so nothing moves as rows are ticked. Nothing
+  comes in until Import:
   each ticked source then comes in through the import's own path, as a library of its name with
   only its new songs (a song already here stays where it is), read on a thread of its own and
   taken in a few milliseconds at a time, with a bar, so neither the window nor the screens wait

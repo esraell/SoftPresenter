@@ -1140,18 +1140,17 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
         return Err(Cut);
     }
     match read {
-        // Each of its songbooks' rows says what the operator should know of the file.
         Ok(cautions) => {
-            let shorts: Vec<String> = cautions.into_iter().map(|caution| caution.short).collect();
-            let caution = (!shorts.is_empty()).then(|| shorts.join(" "));
+            let said = rows_cautions(cautions, books.len());
             Ok(books
                 .into_iter()
-                .map(|(name, counted)| Source {
+                .zip(said)
+                .map(|((name, counted), caution)| Source {
                     songs: counted.all,
                     here: counted.here,
                     twice: counted.twice,
                     new: counted.new,
-                    caution: caution.clone(),
+                    caution,
                     ..base(name.clone().unwrap_or_else(|| stem.clone()), name)
                 })
                 .collect())
@@ -1161,6 +1160,36 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
         }
         Err(_) => Ok(Vec::new()),
     }
+}
+
+/// What the rows of a file of `count` songbooks say of it, first to last: what is about the
+/// whole file (copied while it was open) once, on the first row, worded for the file's
+/// libraries when it has more than one; the rest on each row.
+fn rows_cautions(cautions: Vec<load::Caution>, count: usize) -> Vec<Option<String>> {
+    let (whole, each): (Vec<_>, Vec<_>) = cautions.into_iter().partition(|caution| caution.whole_file);
+    let whole: Vec<String> = whole
+        .into_iter()
+        .map(|caution| {
+            if count > 1 {
+                tn(
+                    "settings.find.caution.unsaved_file",
+                    count as u64,
+                    "Copied while it was open in SoftProjector: the latest changes to this file\u{2019}s {n} library may be missing",
+                    "Copied while it was open in SoftProjector: the latest changes to this file\u{2019}s {n} libraries may be missing",
+                    &[],
+                )
+            } else {
+                caution.short
+            }
+        })
+        .collect();
+    let each: Vec<String> = each.into_iter().map(|caution| caution.short).collect();
+    (0..count)
+        .map(|at| {
+            let said: Vec<&str> = whole.iter().filter(|_| at == 0).chain(&each).map(String::as_str).collect();
+            (!said.is_empty()).then(|| said.join(" "))
+        })
+        .collect()
 }
 
 /// The files of a folder that may hold songs, by what they are, and how many song files (and
@@ -1789,17 +1818,35 @@ pub(crate) mod tests {
         let whole = format!("##4\n##Cut book\n##\n{}", lines.join("\n"));
         tree.write("Downloads/Cut.sps", &whole.as_bytes()[..whole.len() - 12]);
         let found = search(at(&tree, &["Old laptop", "Downloads"]), Library::default(), Vec::new());
+        // Copied while open is about the file: said once, on its first row, for all its libraries.
         let open: Vec<&Source> = found.iter().filter(|source| source.path.ends_with("spData.sqlite")).collect();
-        assert!(!open.is_empty());
-        for source in open {
-            let caution = source.caution.as_deref().unwrap_or_default();
-            assert_eq!(
-                caution, "Copied while it was open in SoftProjector: its latest changes may be missing",
-                "{}",
-                source.name
-            );
-            assert!(source.can_import(), "it can still be brought in");
+        assert!(open.len() > 1, "the database holds more than one songbook: {open:#?}");
+        let said = format!(
+            "Copied while it was open in SoftProjector: the latest changes to this file\u{2019}s {} libraries may be missing",
+            open.len()
+        );
+        assert_eq!(open[0].caution.as_deref(), Some(said.as_str()), "{}", open[0].name);
+        for source in &open[1..] {
+            assert_eq!(source.caution, None, "{} says it again", source.name);
         }
+        assert!(open.iter().all(|source| source.can_import()), "they can still be brought in");
+        // A file of one songbook keeps the row's own words; what is about one songbook is said
+        // on each row, after what is about the file.
+        let open = load::Caution { said: String::new(), short: "Open.".to_owned(), whole_file: true };
+        let cut = load::Caution { said: String::new(), short: "Cut.".to_owned(), whole_file: false };
+        assert_eq!(rows_cautions(vec![open.clone()], 1), [Some("Open.".to_owned())]);
+        assert_eq!(
+            rows_cautions(vec![cut, open], 3),
+            [
+                Some(
+                    "Copied while it was open in SoftProjector: the latest changes to this file\u{2019}s 3 libraries may be missing Cut."
+                        .to_owned()
+                ),
+                Some("Cut.".to_owned()),
+                Some("Cut.".to_owned()),
+            ]
+        );
+        assert_eq!(rows_cautions(Vec::new(), 2), [None, None]);
         let cut = found.iter().find(|source| source.name == "Cut book").unwrap();
         assert_eq!(cut.songs, 2, "the song it ends in is left out");
         assert_eq!(
