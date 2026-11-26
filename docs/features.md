@@ -2157,7 +2157,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Command line says how it stands ("sp is installed (~/.local/bin/sp)", not found by
   a terminal yet, or opening another copy) with Install, Use This Copy and Remove, and says what a
   click did under the buttons at once; `softpresenter install-cli` and `remove-cli` do the same from
-  a terminal.
+  a terminal. Installed from the Linux package, `sp` is the package's own, in `/usr/bin`: the card
+  says it came with the package and offers nothing, and the app adds no `sp` of its own.
 - `sp …` (full name `softpresenter`) controls the running app from a terminal, a script or an AI agent (`sp status`, `sp next`):
   what is on screen, the lists, going to slides, clearing, media, messages, props, timers,
   macros, announcements, audio, the Bible and songs, and every menu bar item. A quick fix

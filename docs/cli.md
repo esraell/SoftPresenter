@@ -56,6 +56,12 @@ once. `softpresenter install-cli` and `softpresenter remove-cli` do the same fro
   says to add the folder to your PATH yourself.
 - **On Windows**, `sp.cmd` and `softpresenter.cmd` in `%LOCALAPPDATA%\SoftPresenter\bin`, and
   that folder on your own PATH.
+- **Installed from the Linux package** (`.deb`), `sp` and `softpresenter` are already in
+  `/usr/bin`, put there by the package and taken away when it is removed. Settings › Command
+  line says "sp came with SoftPresenter's package (/usr/bin/sp)" and offers nothing to install
+  or remove; the app adds nothing to `~/.local/bin` or a startup file, and `install-cli` says
+  it is in `/usr/bin`. An `sp` of this copy's own in `~/.local/bin` (which a terminal looks in
+  first) is still the one the card speaks of, and Remove takes only that away.
 
 No administrator password is needed, and no system file is changed. **Remove** takes away the
 links (or batch files), SoftPresenter's line, and on Windows the folder on the PATH; a program of

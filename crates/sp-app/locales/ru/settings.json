@@ -55,6 +55,7 @@
   "settings.cli.state.not_found": "sp установлена ({path}), но терминал пока не ищет в её папке. «Установить» это настроит.",
   "settings.cli.state.elsewhere": "sp открывает другую копию SoftPresenter ({copy}). «Использовать эту копию» направит её сюда.",
   "settings.cli.state.gone": "sp открывает копию SoftPresenter, которую переместили или удалили. «Использовать эту копию» направит её сюда.",
+  "settings.cli.state.packaged": "sp установлена вместе с пакетом SoftPresenter ({path}). В терминале введите: sp status",
   "settings.cli.installed": "Установлено в {folder}. Откройте новое окно терминала и введите: sp status",
   "settings.cli.installed_file": "Установлено в {folder}, и SoftPresenter добавил для неё строку в {file}. Откройте новое окно терминала и введите: sp status",
   "settings.cli.installed_add_folder": "Установлено в {folder}, но терминал пока туда не заглядывает: добавьте {folder} в PATH, затем введите: sp status",

@@ -7,6 +7,10 @@
 //! the person's own shell startup file (`~/.zshrc` for zsh…). On Windows it is two small batch
 //! files in a folder of the user's own, put on the user's PATH. Remove takes away all of that.
 //! Nothing needs an administrator, and no system file is touched.
+//!
+//! Installed from the Linux package (`.deb`), the package itself puts `sp` and `softpresenter`
+//! in `/usr/bin`, and takes them away again when it is removed: the app then finds them there
+//! ([`Status::Packaged`]) and adds nothing of its own.
 
 use std::path::{Path, PathBuf};
 
@@ -43,6 +47,11 @@ pub enum Status {
     Elsewhere { link: PathBuf, program: PathBuf },
     /// Runs a copy of SoftPresenter that has moved or been deleted.
     Gone { link: PathBuf },
+    /// Put in a system folder by the package this program came in (`/usr/bin/sp` from the Linux
+    /// package), and runs this program: a terminal finds it, and the package removes it, so
+    /// there is nothing to install or remove. Never on Windows, which has no such package.
+    #[cfg_attr(windows, allow(dead_code))]
+    Packaged { link: PathBuf },
 }
 
 /// What Install did.
@@ -208,7 +217,7 @@ fn decide(
     match status() {
         // Another copy's: never taken from it.
         Status::Elsewhere { .. } => AtStart::Leave,
-        Status::Here { findable: true, .. } => AtStart::Remember,
+        Status::Here { findable: true, .. } | Status::Packaged { .. } => AtStart::Remember,
         Status::Here { findable: false, .. } | Status::Gone { .. } | Status::Missing => AtStart::Install,
     }
 }
@@ -342,6 +351,14 @@ pub fn status_words(status: &Status, windows: bool) -> (Tone, String) {
             )
             .to_owned(),
         ),
+        Status::Packaged { link } => (
+            Tone::Good,
+            tf(
+                "settings.cli.state.packaged",
+                "sp came with SoftPresenter\u{2019}s package ({path}). In a terminal, type: sp status",
+                &[("path", &shown(link))],
+            ),
+        ),
     }
 }
 
@@ -439,6 +456,9 @@ pub struct Place {
     /// Where sp is looked for, in order: `~/.local/bin`, where a new install goes, then
     /// Homebrew's folder and `/usr/local/bin`, which earlier versions used when they could.
     pub folders: Vec<PathBuf>,
+    /// Where a system package puts sp (`/usr/bin` on Linux, for the `.deb`): looked at after
+    /// [`Place::folders`], and never written to, since the package adds and removes it.
+    pub system: Vec<PathBuf>,
     /// This program's own PATH.
     pub path: Option<std::ffi::OsString>,
     /// The person's shell, as `$SHELL` names it.
@@ -463,6 +483,7 @@ impl Place {
         Ok(Place {
             program,
             folders: vec![home.join(".local/bin"), PathBuf::from("/opt/homebrew/bin"), PathBuf::from("/usr/local/bin")],
+            system: if cfg!(target_os = "macos") { Vec::new() } else { vec![PathBuf::from("/usr/bin")] },
             path: std::env::var_os("PATH"),
             shell: std::env::var("SHELL").unwrap_or_default(),
             mac: cfg!(target_os = "macos"),
@@ -524,6 +545,17 @@ fn status_in(place: &Place) -> Status {
             };
         }
     }
+    // The package's own sp, when it runs this program. One that runs another copy (the
+    // package's, seen from a build from source) is left to the package: this copy's goes in
+    // ~/.local/bin, which a terminal looks in first.
+    for folder in &place.system {
+        let link = folder.join(COMMAND_NAMES[0]);
+        if let Found::Ours { target, exists: true } = look(&link)
+            && std::fs::canonicalize(&target).is_ok_and(|program| program == place.program)
+        {
+            return Status::Packaged { link };
+        }
+    }
     Status::Missing
 }
 
@@ -534,6 +566,10 @@ fn status_in(place: &Place) -> Status {
 /// `~/.local/bin` and a new terminal wouldn't look there, a line in the shell's startup file.
 #[cfg(unix)]
 fn install_in(place: &Place) -> Result<Installed, String> {
+    // Installed by the package already: nothing to add beside it.
+    if let Status::Packaged { link } = status_in(place) {
+        return Ok(Installed { link, ..Installed::default() });
+    }
     let ours = |dir: &&PathBuf| matches!(look(&dir.join(COMMAND_NAMES[0])), Found::Ours { .. });
     let folder = match place.folders.iter().find(ours) {
         Some(dir) => dir.clone(),
@@ -598,7 +634,8 @@ fn install_in(place: &Place) -> Result<Installed, String> {
 }
 
 /// Takes away every link to a SoftPresenter program by those names in the folders, and the
-/// marked line from every shell startup file SoftPresenter may have written to.
+/// marked line from every shell startup file SoftPresenter may have written to. A package's
+/// links ([`Place::system`]) are the package's to remove.
 #[cfg(unix)]
 fn remove_in(place: &Place) -> Result<Removed, String> {
     let mut done = Removed::default();
@@ -1114,6 +1151,10 @@ mod tests {
         let other =
             || Status::Elsewhere { link: link.clone(), program: PathBuf::from("/Users/a/Old/SoftPresenter.app") };
         assert_eq!(decide(false, true, None, program, other), AtStart::Leave);
+        // Put in by the Linux package: remembered, and nothing added beside it.
+        let packaged = || Status::Packaged { link: PathBuf::from("/usr/bin/sp") };
+        let program = Path::new("/usr/lib/softpresenter/softpresenter");
+        assert_eq!(decide(false, true, None, program, packaged), AtStart::Remember);
     }
 
     #[test]
@@ -1200,6 +1241,7 @@ mod tests {
             program: base.join("app/softpresenter"),
             // Only the home folder's own: nothing outside the test's folder is looked at.
             folders: vec![home.join(".local/bin")],
+            system: Vec::new(),
             path: Some("/usr/bin:/bin".into()),
             shell: shell.to_owned(),
             mac,
@@ -1339,5 +1381,53 @@ mod tests {
         assert_eq!(remove_in(&place).expect("removed").commands, 0);
         assert_eq!(std::fs::read_to_string(bin.join("sp")).expect("still there"), "#!/bin/sh\n");
         let _ = std::fs::remove_dir_all(place.home.parent().expect("the test's folder"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_packages_sp_is_found_and_left_to_the_package() {
+        // A package's folder of programs, with sp and softpresenter linked to this program as
+        // the Linux package links them (relative, `../lib/softpresenter/softpresenter`).
+        let mut place = scratch("packaged", "/bin/bash", false);
+        let base = place.home.parent().expect("the test's folder").to_path_buf();
+        let system = base.join("usr-bin");
+        std::fs::create_dir_all(&system).expect("the package's folder");
+        for name in COMMAND_NAMES {
+            std::os::unix::fs::symlink("../app/softpresenter", system.join(name)).expect("the package's link");
+        }
+        place.system = vec![system.clone()];
+        let link = system.join("sp");
+        assert_eq!(status_in(&place), Status::Packaged { link: link.clone() });
+        let (tone, words) = status_words(&Status::Packaged { link: link.clone() }, false);
+        assert_eq!(tone, Tone::Good);
+        assert!(words.starts_with("sp came with SoftPresenter\u{2019}s package ("), "{words}");
+        // Install adds nothing beside it, in the home folder or a startup file.
+        assert_eq!(install_in(&place).expect("installed"), Installed { link: link.clone(), ..Installed::default() });
+        assert!(!place.home.join(".local").exists());
+        assert!(!place.home.join(".bashrc").exists());
+        // Remove leaves the package's links to the package.
+        assert_eq!(remove_in(&place).expect("removed"), Removed::default());
+        assert!(std::fs::symlink_metadata(&link).is_ok());
+        // An sp of this copy's own in ~/.local/bin, which a terminal looks in first, is the one
+        // the card speaks of.
+        let bin = place.home.join(".local/bin");
+        std::fs::create_dir_all(&bin).expect("the folder");
+        std::os::unix::fs::symlink(&place.program, bin.join("sp")).expect("a link");
+        assert_eq!(status_in(&place), Status::Here { link: bin.join("sp"), findable: false });
+        let _ = std::fs::remove_dir_all(&base);
+        // The package's sp running another copy (seen from a build from source): left alone,
+        // and this copy installs in ~/.local/bin as before.
+        let mut place = scratch("packaged-other", "/bin/bash", false);
+        let base = place.home.parent().expect("the test's folder").to_path_buf();
+        let system = base.join("usr-bin");
+        std::fs::create_dir_all(base.join("other")).expect("another copy's folder");
+        std::fs::write(base.join("other/softpresenter"), "").expect("another copy");
+        std::fs::create_dir_all(&system).expect("the package's folder");
+        std::os::unix::fs::symlink("../other/softpresenter", system.join("sp")).expect("the package's link");
+        place.system = vec![system.clone()];
+        assert_eq!(status_in(&place), Status::Missing);
+        assert_eq!(install_in(&place).expect("installed").link, place.home.join(".local/bin/sp"));
+        assert_eq!(std::fs::read_link(system.join("sp")).expect("still there"), Path::new("../other/softpresenter"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

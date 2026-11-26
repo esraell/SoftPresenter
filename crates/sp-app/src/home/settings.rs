@@ -896,8 +896,8 @@ fn keys_table(ui: &mut egui::Ui, rows: &[(&str, String, String)]) {
 /// Settings › Command line: the `sp` command, which controls the running app from a terminal or a
 /// script. Its row says where sp stands (read again each time the page comes into view, and after
 /// each click) and offers what fits: Install, Use This Copy when sp opens another copy, Remove
-/// once it is there (quiet while sp is where it should be); under the row, what the last click
-/// did.
+/// once it is there (quiet while sp is where it should be), and nothing when the Linux package
+/// put it in (the package removes it); under the row, what the last click did.
 fn command_line_page(ui: &mut egui::Ui, state: &mut HomeState) {
     use crate::cli_install::{Status, Tone};
     let card_state = &mut state.command_line;
@@ -915,6 +915,7 @@ fn command_line_page(ui: &mut egui::Ui, state: &mut HomeState) {
         Status::Here { findable: true, .. } => (None, true),
         Status::Here { findable: false, .. } => (Some(t("settings.cli.install", "Install")), true),
         Status::Elsewhere { .. } | Status::Gone { .. } => (Some(t("settings.cli.use_this", "Use This Copy")), true),
+        Status::Packaged { .. } => (None, false),
     };
     // Remove is quiet while sp is where it should be: there is nothing to put right.
     let quiet_remove = matches!(status, Status::Here { findable: true, .. });

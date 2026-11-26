@@ -44,6 +44,7 @@
   "settings.cli.sp": "Команда sp",
   "settings.cli.state.elsewhere": "sp відкриває іншу копію SoftPresenter ({copy}). «Використати цю копію» спрямує його сюди.",
   "settings.cli.state.gone": "sp відкриває копію SoftPresenter, яку перенесено або видалено. «Використати цю копію» спрямує його сюди.",
+  "settings.cli.state.packaged": "sp встановлено разом із пакетом SoftPresenter ({path}). У терміналі наберіть: sp status",
   "settings.cli.state.here": "sp встановлено ({path}). У терміналі наберіть: sp status",
   "settings.cli.state.here_windows": "sp встановлено ({path}). У командному рядку наберіть: sp status (у PowerShell: softpresenter status)",
   "settings.cli.state.missing": "sp ще не встановлено. «Встановити» покладе його туди, де його знайде термінал.",

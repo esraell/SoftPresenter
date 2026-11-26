@@ -55,6 +55,7 @@
   "settings.cli.state.not_found": "sp está instalado ({path}), pero un terminal aún no busca en su carpeta. Pulsa Instalar para prepararlo.",
   "settings.cli.state.elsewhere": "sp abre otra copia de SoftPresenter ({copy}). Pulsa Usar esta copia para que abra esta.",
   "settings.cli.state.gone": "sp abre una copia de SoftPresenter que se ha movido o borrado. Pulsa Usar esta copia para que abra esta.",
+  "settings.cli.state.packaged": "sp vino con el paquete de SoftPresenter ({path}). En un terminal, escribe: sp status",
   "settings.cli.installed": "Instalado en {folder}. Abre una ventana nueva del terminal y escribe: sp status",
   "settings.cli.installed_file": "Instalado en {folder}, y SoftPresenter ha añadido una línea para él en {file}. Abre una ventana nueva del terminal y escribe: sp status",
   "settings.cli.installed_add_folder": "Instalado en {folder}, pero un terminal aún no busca ahí: añade {folder} a tu PATH y escribe: sp status",

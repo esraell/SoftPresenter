@@ -45,12 +45,15 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 pub const GET_CLAUDE_CODE: &str = "https://claude.com/claude-code";
 
 /// The program an assistant is to start: on a Mac and Linux, the installed `sp` when it runs
-/// this copy (so an update needs nothing changed); else, and on Windows (where `sp` is a batch
-/// file an assistant can't start by itself), this program.
+/// this copy (so an update needs nothing changed; the Linux package's `/usr/bin/sp` too); else,
+/// and on Windows (where `sp` is a batch file an assistant can't start by itself), this program.
 pub fn program() -> Option<PathBuf> {
     #[cfg(unix)]
-    if let crate::cli_install::Status::Here { link, .. } = crate::cli_install::status() {
-        return Some(link);
+    {
+        use crate::cli_install::Status;
+        if let Status::Here { link, .. } | Status::Packaged { link } = crate::cli_install::status() {
+            return Some(link);
+        }
     }
     std::env::current_exe().ok()
 }
