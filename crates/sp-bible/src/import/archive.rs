@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use sp_model::bounded_zip::{ZipRefusal, is_zip};
 
-use super::{Document, kind_of_text};
+use super::{Document, kind_of_text, softprojector_ending};
 
 /// How much may be read for one Bible.
 #[derive(Clone, Copy, Debug)]
@@ -251,7 +251,9 @@ fn book_ending(name: &str) -> bool {
 }
 
 /// See [`super::looks_like_bible`]. Only a plain file or a folder is opened (never a pipe or a
-/// device, which could keep it waiting), and a zip only when it is small enough to be read.
+/// device, which could keep it waiting), and a zip only when it is small enough to be read. A
+/// file ending `.spb` is SoftProjector's Bible file whatever it holds, so that one of the kind
+/// it made before, without the line saying its version, is told why it can't be read.
 pub(super) fn looks_like_bible(path: &Path) -> bool {
     let Ok(meta) = std::fs::metadata(path) else { return false };
     if meta.is_dir() {
@@ -291,6 +293,9 @@ pub(super) fn looks_like_bible(path: &Path) -> bool {
     if !meta.is_file() {
         return false;
     }
+    if softprojector_ending(&path.to_string_lossy()) {
+        return true;
+    }
     let Ok(mut file) = std::fs::File::open(path) else { return false };
     let Some(head) = head_bytes(&mut file) else { return false };
     if !is_zip(&head) {
@@ -306,7 +311,7 @@ pub(super) fn looks_like_bible(path: &Path) -> bool {
     let names: Vec<String> = (0..zip.len())
         .filter_map(|at| zip.by_index_raw(at).ok().map(|entry| String::from_utf8_lossy(entry.name_raw()).into_owned()))
         .collect();
-    if names.iter().any(|name| book_ending(name) && worth_reading(name)) {
+    if names.iter().any(|name| (book_ending(name) || softprojector_ending(name)) && worth_reading(name)) {
         return true;
     }
     // Otherwise the start of the first few that could be a Bible.

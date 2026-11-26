@@ -288,7 +288,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   title from its second line, each song's number, title, lyricist, composer and words, in the
   order of their numbers, with the same words, to the letter, as the SQLite songbook of the same
   name gives (so importing both brings each song once). A songbook saved as XML
-  is not read yet, and says so.
+  is not read yet, and says so. SoftProjector's Bible files (`.spb`) install as other Bible
+  files do (see the Bible page).
 - **Bringing a library across from ProPresenter 7.** File › Import Songs › A Library Folder… opens
   its Libraries folder; choose song documents, one library, or the folder of all of them. Each folder becomes a
   library of the same name. Each song is named as its file is ("12 - Amazing Grace", hymn
@@ -1204,10 +1205,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   they were.
 - **A Bible file the church has installs too**, in the formats other programs keep Bibles in:
   Zefania XML, OSIS XML, Beblia XML, XML marking books, chapters and verses with `<b>`, `<c>`
-  and `<v>`, USFM (eBible.org's main format: a folder or zip of `.usfm`/`.SFM` books) and USX,
-  each as a file or zipped, as well as the app's own `.spbible`. Drop it on the window, choose
+  and `<v>`, USFM (eBible.org's main format: a folder or zip of `.usfm`/`.SFM` books), USX and
+  SoftProjector's Bible files (`.spb`), each as a file or zipped, as well as the app's own
+  `.spbible`. Drop it on the window, choose
   it with the Bibles window's Install from File…, or `sp bible install FILE`. What it is comes
-  from what it holds, not its ending. It becomes one of the app's own Bibles, kept offline: the
+  from what it holds, not its ending (only a file ending `.spb` is always taken for
+  SoftProjector's). It becomes one of the app's own Bibles, kept offline: the
   publisher's words without notes, cross references, Strong's numbers, headings or footnote
   markers, words of Jesus as plain words, a verse split over several parts joined, a psalm's
   title at the start of its first verse. Books are found by the format's codes (or by name, in
@@ -1218,7 +1221,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   name, short name, language and terms come from the file (or from eBible's `copr.htm`, a
   Door43 `manifest.yaml` or a Bible bundle's `metadata.xml` beside the books); where the file
   doesn't say, a small sheet asks for them, filled in from the file's name and the alphabet of
-  its words. A notice says what came in: "Installed King James (Authorized) Version (66 books,
+  its words. A SoftProjector Bible brings its title, abbreviation and information (shown as its
+  copyright) but doesn't say its language, which the sheet fills in from its words and its
+  books' names (Ukrainian or Russian by the letters only one of them has) for you to check;
+  its books are found by their numbers, 1 (Genesis) to 66 (Revelation), unless their names list
+  them in another order. A `.spb` of the older kind, without the line saying its version, which
+  SoftProjector itself no longer reads, is refused saying so, as is one of a newer version than 1, and a
+  broken line (a verse of a book the file doesn't list, a verse without its numbers) is refused
+  naming the line. A notice says what came in: "Installed King James (Authorized) Version (66 books,
   31,102 verses), numbered as English Bibles are, judged by its Psalms; 3 verses were empty."
   The file is read on a thread of its own, so the window never waits on it ("Reading
   bible.zip…" until it is in). The same Bible installed again replaces the copy installed

@@ -5,6 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- SoftProjector Bible files (.spb) can be imported: drop one on the window, or choose it with Install from File… in the Bibles window, and it becomes one of your Bibles with its name, abbreviation and description, its language filled in from its words for you to check. Before, SoftPresenter said such a file "isn't a Bible file SoftPresenter can read". One of the older kind, which SoftProjector itself no longer opens, is refused saying so.
 - On Windows, videos played only while FFmpeg (which plays them) was in the same folder as SoftPresenter.exe: run on its own from the Desktop, SoftPresenter said FFmpeg wasn't on this computer. SoftPresenter now keeps its own FFmpeg in your user folder and uses that one, wherever the program is: it copies it there from beside the program the first time, or, where it isn't there either, gets it by itself (23 MB, checked before it is used), saying "Getting FFmpeg for videos…" and then "FFmpeg is ready: videos play again". A video added meanwhile goes in the media bin when it is ready, and one on screen starts playing.
 
 ## 0.9.0-dev.23 — 26 November 2026 (development build)

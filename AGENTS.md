@@ -216,10 +216,10 @@ a minute on a Mac. One test alone:
   own bundles; it may name ProPresenter as a plain fact where it says what it reads, and
   never writes those formats
   ([docs/licences/song-documents.md](docs/licences/song-documents.md)). A second, the same way:
-  the song importer reads SoftProjector's song databases and songbooks, whose layout was
-  learnt from SoftProjector's GPL-3.0 source (table and column names, how a song's text is
-  split); none of its code is used, and SoftProjector may be named where the importer says
-  what it reads. Those are SQLite files, read by SoftPresenter's own reader
+  the song importer reads SoftProjector's song databases and songbooks, and the Bible importer
+  its Bible files (`.spb`), whose layout was learnt from SoftProjector's GPL-3.0 source (table
+  and column names, how a song's text is split, the lines of a Bible file); none of its code is
+  used, and SoftProjector may be named where the importer says what it reads. Those are SQLite files, read by SoftPresenter's own reader
   (`crates/sp-model/src/sqlite_read.rs`), written from SQLite's published description of the
   file: no SQLite library is linked and no SQLite tool is run, on any system. A third, agreed by the owner on 2026-11-24: `softpresenter-mirror`
   (`crates/sp-mirror`), the separate program that receives an iPhone, iPad or Mac screen,

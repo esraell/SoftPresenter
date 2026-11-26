@@ -1916,7 +1916,7 @@ pub fn manage_bibles(
                         .button(t("bibles.window.from_file", "Install from File…"))
                         .on_hover_text(t(
                             "bibles.window.from_file.hint",
-                            "A Bible file you have: Zefania, OSIS, Beblia or other XML, USFM or USX (zipped or not), or .spbible",
+                            "A Bible file you have: Zefania, OSIS, Beblia or other XML, USFM or USX (zipped or not), SoftProjector's .spb, or .spbible",
                         ))
                         .clicked()
                     {
@@ -2030,7 +2030,7 @@ pub fn manage_bibles(
             ui.label(
                 egui::RichText::new(t(
                     "bibles.window.footer",
-                    "Every Bible here may be shared freely: public domain, or an open licence. A Bible file you have (Zefania, OSIS, USFM and others, or .spbible) installs when dropped on the window or chosen with Install from File…",
+                    "Every Bible here may be shared freely: public domain, or an open licence. A Bible file you have (Zefania, OSIS, USFM, SoftProjector's .spb and others, or .spbible) installs when dropped on the window or chosen with Install from File…",
                 ))
                 .size(11.0)
                 .color(DIM),

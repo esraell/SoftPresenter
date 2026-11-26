@@ -233,7 +233,7 @@ impl Reader<'_> {
             Format::Beblia => self.beblia(name, element, &mut frame),
             Format::Tags => self.tags(name, element, &mut frame),
             Format::Usx => self.usx(name, element, &mut frame),
-            Format::Usfm => {}
+            Format::Usfm | Format::SoftProjector => {}
         }
         if frame.block {
             self.words(" ");

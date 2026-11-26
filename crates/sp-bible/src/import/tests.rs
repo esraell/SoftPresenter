@@ -259,6 +259,186 @@ fn a_folder_of_usx_books_reads_with_its_bundles_details() {
     let _ = std::fs::remove_dir_all(&folder);
 }
 
+/// A SoftProjector Bible file as its export writes one, with a byte order mark and Windows' line
+/// ends as an editor on Windows saves it, and blank lines after the last verse. The words are
+/// written for this test.
+const SOFTPROJECTOR: &str = "\u{feff}##spDataVersion:\t1\r\n\
+##Title:\tТестова Біблія для перевірки\r\n\
+##Abbreviation:\tТБП\r\n\
+##Information:\tНаписано для тестів.@%Другий рядок опису.\r\n\
+##RightToLeft:\t0\r\n\
+1\tБуття\t50\r\n\
+43\tВід Івана\t21\r\n\
+-----\r\n\
+B001C001V001\t1\t1\t1\tПерші слова цієї перевірки.\r\n\
+B001C001V002\t1\t1\t2\tЩе один рядок, і він теж для тесту.\r\n\
+B043C003V016\t43\t3\t16\tСлова, які є лише в цьому файлі.\r\n\
+\r\n\
+\r\n";
+
+#[test]
+fn a_softprojector_bible_reads_back_with_its_details() {
+    let imported = read(SOFTPROJECTOR, "test.spb");
+    assert_eq!(imported.format, Format::SoftProjector);
+    assert_eq!(
+        imported.about,
+        About {
+            name: "Тестова Біблія для перевірки".to_owned(),
+            short: "ТБП".to_owned(),
+            language: String::new(),
+            terms: "Написано для тестів. Другий рядок опису.".to_owned()
+        }
+    );
+    // The file doesn't say its language: it is offered, from the alphabet of its words.
+    assert!(!imported.complete());
+    assert_eq!(imported.missing_flags(&About::default()), "--language");
+    assert_eq!(imported.prefilled().language, "uk");
+    assert_eq!(imported.verse(at("GEN", 1, 1)), Some("Перші слова цієї перевірки."));
+    assert_eq!(imported.verse(at("GEN", 1, 2)), Some("Ще один рядок, і він теж для тесту."));
+    assert_eq!(imported.verse(at("JOH", 3, 16)), Some("Слова, які є лише в цьому файлі."));
+    assert_eq!((imported.book_count(), imported.verse_count(), imported.empty), (2, 3, 0));
+    assert!(imported.left_out.is_empty());
+    let bible = round_trip(&imported);
+    assert_eq!(
+        (bible.info.name.as_str(), bible.info.short.as_str(), bible.info.language.as_str()),
+        ("Тестова Біблія для перевірки", "ТБП", "uk")
+    );
+    assert_eq!(bible.info.terms, "Написано для тестів. Другий рядок опису.");
+    assert_eq!(bible.info.source, "test.spb (SoftProjector Bible)");
+    // Zipped, it reads the same.
+    let imported =
+        read_bytes(&zipped(&[("Біблія.spb", SOFTPROJECTOR.as_bytes())]), "bible.zip", &Limits::NORMAL).unwrap();
+    assert_eq!((imported.format, imported.verse_count()), (Format::SoftProjector, 3));
+}
+
+#[test]
+fn a_softprojector_bibles_information_comes_in_as_one_line() {
+    // As the export writes it: Unix line ends, nothing after the last verse, no abbreviation,
+    // the books in another order than their numbers, and lines of the information joined with
+    // `@%` (an empty one among them).
+    let file = "##spDataVersion:\t1\n##Title:\tA Test Bible\n##Abbreviation:\t\n\
+##Information:\tWritten for a test.@%@%Its second line.@%  And its third.  \n##RightToLeft:\t0\n\
+43\tJohn\t21\n1\tGenesis\t50\n-----\n\
+B043C003V016\t43\t3\t16\tThe words of the test, and the end of it.\n\
+B001C001V001\t1\t1\t1\tThe first words of the test.";
+    let imported = read(file, "A_Test_Bible.spb");
+    assert_eq!(imported.about.terms, "Written for a test. Its second line. And its third.");
+    assert_eq!(imported.about.short, "");
+    assert_eq!(imported.missing_flags(&About::default()), "--short and --language");
+    let offered = imported.prefilled();
+    assert_eq!((offered.short.as_str(), offered.language.as_str()), ("ATB", "en"));
+    assert_eq!(imported.verse(at("GEN", 1, 1)), Some("The first words of the test."));
+    assert_eq!(imported.verse(at("JOH", 3, 16)), Some("The words of the test, and the end of it."));
+    let bible = round_trip(&imported);
+    assert_eq!(bible.info.terms, "Written for a test. Its second line. And its third.");
+}
+
+#[test]
+fn a_softprojector_bible_of_another_version_is_refused_saying_which() {
+    // Without the first line saying the version: the kind SoftProjector made before, which
+    // it no longer reads itself.
+    let old = "1\t1\t1\tWords for a test.\n1\t1\t2\tMore words.\n";
+    let refused = read_bytes(old.as_bytes(), "old.spb", &Limits::NORMAL).unwrap_err();
+    assert_eq!(
+        refused,
+        "old.spb is a SoftProjector Bible file of an older kind, which SoftProjector itself no longer reads. \
+Export the Bible again from a recent SoftProjector and install that file."
+    );
+    let refused = read_bytes(&zipped(&[("old.SPB", old.as_bytes())]), "old.zip", &Limits::NORMAL).unwrap_err();
+    assert!(refused.starts_with("old.SPB is a SoftProjector Bible file of an older kind"), "{refused}");
+    // The same words under another name are just not a Bible.
+    let refused = read_bytes(old.as_bytes(), "old.txt", &Limits::NORMAL).unwrap_err();
+    assert_eq!(refused, "old.txt isn't a Bible file SoftPresenter can read.");
+    // A newer version than 1.
+    let newer =
+        "##spDataVersion:\t2\r\n##Title:\tA Test Bible\r\n1\tGenesis\t50\r\n-----\r\nB001C001V001\t1\t1\t1\tWords.\r\n";
+    let refused = read_bytes(newer.as_bytes(), "new.spb", &Limits::NORMAL).unwrap_err();
+    assert_eq!(refused, "new.spb is in a newer SoftProjector Bible format (version 2) than SoftPresenter can read.");
+    let refused = read_bytes(b"##spDataVersion:\tnext\n", "odd.spb", &Limits::NORMAL).unwrap_err();
+    assert_eq!(refused, "odd.spb is in a newer SoftProjector Bible format than SoftPresenter can read.");
+    let refused = read_bytes(b"##spDataVersion\n", "none.spb", &Limits::NORMAL).unwrap_err();
+    assert!(refused.contains("doesn't say which version"), "{refused}");
+}
+
+/// A SoftProjector Bible file with these books and verses (lines 6 on), the header taking the
+/// first five lines.
+fn softprojector_file(books: &str, verses: &str) -> String {
+    format!(
+        "##spDataVersion:\t1\n##Title:\tA Test Bible\n##Abbreviation:\tATB\n##Information:\t\n##RightToLeft:\t0\n{books}{verses}"
+    )
+}
+
+#[test]
+fn a_broken_softprojector_bible_is_refused_saying_which_line() {
+    let refused = |books: &str, verses: &str| {
+        read_bytes(softprojector_file(books, verses).as_bytes(), "broken.spb", &Limits::NORMAL).unwrap_err()
+    };
+    let genesis = "1\tGenesis\t50\n-----\n";
+    assert_eq!(
+        refused(genesis, "B001C001V001\t1\t1\t1\tWords.\nB001C001V002\t1\t1\n"),
+        "Line 9 of broken.spb isn't a verse as SoftProjector writes one (its number, book, chapter, verse and words, with tabs between)."
+    );
+    assert!(refused(genesis, "B001C001V001\t1\tone\t1\tWords.\n").starts_with("Line 8 of broken.spb isn't a verse"));
+    assert!(refused(genesis, "B001C001V001\t1\t1\tfirst\tWords.\n").starts_with("Line 8 of broken.spb isn't a verse"));
+    assert!(
+        refused(genesis, "B001C001V001\tGenesis\t1\t1\tWords.\n").starts_with("Line 8 of broken.spb isn't a verse")
+    );
+    assert_eq!(
+        refused(genesis, "B002C001V001\t2\t1\t1\tWords.\n"),
+        "Line 8 of broken.spb is a verse of book 2, which isn't in the file's list of books."
+    );
+    assert_eq!(
+        refused("Genesis\t50\n-----\n", ""),
+        "Line 6 of broken.spb isn't a book as SoftProjector lists one (its number, name and chapters, with tabs between)."
+    );
+    assert!(refused("1\n-----\n", "").starts_with("Line 6 of broken.spb isn't a book"));
+    assert_eq!(
+        refused("1\tGenesis\t50\n1\tGenesis\t50\n-----\n", ""),
+        "broken.spb lists book 1 twice, so it wasn't read."
+    );
+    assert!(refused("1\tGenesis\t50\n", "B001C001V001\t1\t1\t1\tWords.\n").contains("no line of dashes"));
+    assert!(refused("1\tGenesis\t50\n", "").contains("no line of dashes"));
+    let many: String = (1..=301).map(|n| format!("{n}\tBook {n}\t1\n")).collect();
+    assert!(refused(&many, "-----\n").contains("more books than any Bible"));
+    assert!(refused(genesis, "").contains("No verses"), "a file with no verses");
+    // Cut short anywhere, a file is read or refused, never more.
+    let whole = softprojector_file(
+        "1\tGenesis\t50\n43\tJohn\t21\n-----\n",
+        "B001C001V001\t1\t1\t1\tWords.\nB043C003V016\t43\t3\t16\tMore.",
+    );
+    for (end, _) in whole.char_indices() {
+        let _ = read_bytes(&whole.as_bytes()[..end], "cut.spb", &Limits::NORMAL);
+    }
+}
+
+#[test]
+fn a_softprojector_bible_finds_its_books_by_number_unless_their_names_say_another_order() {
+    // Numbered in the Synodal's order of the epistles (James after Acts), as the names say.
+    let synodal = softprojector_file(
+        "44\tДії\t28\n45\tЯкова\t5\n46\t1 Петра\t5\n-----\n",
+        "B044C002V001\t44\t2\t1\tСлова для перевірки.\nB045C001V001\t45\t1\t1\tІнші слова.\nB046C001V001\t46\t1\t1\tЩе інші.\n",
+    );
+    let imported = read(&synodal, "synodal.spb");
+    assert_eq!(imported.verse(at("ACT", 2, 1)), Some("Слова для перевірки."));
+    assert_eq!(imported.verse(at("JAM", 1, 1)), Some("Інші слова."));
+    assert_eq!(imported.verse(at("1PE", 1, 1)), Some("Ще інші."));
+    // One name taken for another book than its number moves nothing: the numbers decide.
+    let one_off = softprojector_file(
+        "1\tGenesis\t50\n43\tJohn\t21\n44\tRomans\t28\n-----\n",
+        "B044C001V001\t44\t1\t1\tWords of a test.\n",
+    );
+    assert_eq!(read(&one_off, "one.spb").verse(at("ACT", 1, 1)), Some("Words of a test."));
+    // A book the app doesn't have is left out and named; so are verse 0 and a chapter past any
+    // there is.
+    let tobit = softprojector_file(
+        "1\tGenesis\t50\n67\tTobit\t14\n-----\n",
+        "B067C001V001\t67\t1\t1\tLeft out.\nB001C001V000\t1\t1\t0\tNo verse.\nB001C300V001\t1\t300\t1\tNo chapter.\nB001C001V001\t1\t1\t1\tKept.\n",
+    );
+    let imported = read(&tobit, "tobit.spb");
+    assert_eq!((imported.verse_count(), imported.verse(at("GEN", 1, 1))), (1, Some("Kept.")));
+    assert_eq!(imported.left_out, ["Tobit"]);
+}
+
 #[test]
 fn a_zip_bomb_and_a_zip_of_too_many_files_are_refused() {
     let small = Limits { file: 1 << 20, entry: 1 << 20, unpacked: 1 << 20, entries: 10 };
@@ -388,6 +568,16 @@ fn files_are_told_apart_by_what_they_hold() {
     assert!(looks_like_bible(&write("odd.zip", &zipped(&[("Bible.module", tags.as_slice()), ("a.jpg", b"picture")]))));
     std::fs::write(folder.join("books/GEN.SFM"), GENESIS_USFM).unwrap();
     assert!(looks_like_bible(&folder.join("books")));
+    // A SoftProjector Bible by what it holds, and by its ending even when it is of the older
+    // kind (which is then told why it isn't read); a SoftProjector songbook kept as text is no
+    // Bible.
+    assert!(looks_like_bible(&write("bible.spb", SOFTPROJECTOR.as_bytes())));
+    assert!(looks_like_bible(&write("bible", SOFTPROJECTOR.as_bytes())));
+    assert!(looks_like_bible(&write("old.spb", b"1\t1\t1\tWords for a test.\n")));
+    assert!(looks_like_bible(&write("spb.zip", &zipped(&[("old.spb", b"1\t1\t1\tWords.\n")]))));
+    let songbook = "##7\n##Пісні для перевірки\n##\n1#$#Перша#$##$##$##$##$#Куплет 1@%Слова\n";
+    assert!(!looks_like_bible(&write("songs.sps", songbook.as_bytes())));
+    assert!(!looks_like_bible(&write("songs.zip", &zipped(&[("songs.sps", songbook.as_bytes())]))));
     assert!(!looks_like_bible(&write("song.txt", b"Words of a song\n\nThe next slide")));
     assert!(!looks_like_bible(&write("song.xml", b"<song><title>A song</title><lyrics/></song>")));
     assert!(!looks_like_bible(&write("other.zip", &zipped(&[("a.jpg", b"picture")]))));
@@ -521,6 +711,12 @@ fn the_same_verse_begun_over_and_over_costs_no_more_each_time() {
     });
     let imported = read(&long(200_000), "x.usfm");
     assert!(imported.verse(at("PSA", 2, 1)).unwrap().chars().count() <= LONGEST_VERSE);
+    // The same verse written over and over in a SoftProjector Bible file.
+    let spb = |count: usize| softprojector_file("19\tPsalms\t150\n-----\n", &"x\t19\t1\t1\tWords.\n".repeat(count));
+    costs_no_more_each_time("repeats in a SoftProjector Bible", 10_000, spb, |text| {
+        read(text, "x.spb");
+    });
+    assert!(read(&spb(100_000), "x.spb").verse(at("PSA", 1, 1)).unwrap().chars().count() <= LONGEST_VERSE);
 }
 
 /// A zip whose second entry is the first one again under another name: their packed bytes

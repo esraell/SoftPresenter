@@ -130,15 +130,16 @@ fn is_own_bible_file(path: &Path) -> bool {
 }
 
 /// True for a Bible the app can install: its own file, or a Bible in another program's format
-/// (a file, a zip or a folder of books), told by what it holds. Only files whose ending a Bible
-/// may have (or none) are looked into, and only their first few kilobytes.
+/// (a file, a zip or a folder of books), told by what it holds (a SoftProjector Bible, `.spb`,
+/// by its ending too). Only files whose ending a Bible may have (or none) are looked into, and
+/// only their first few kilobytes.
 pub fn is_bible_file(path: &Path) -> bool {
     if is_own_bible_file(path) {
         return true;
     }
     let ending = path.extension().map(|ext| ext.to_string_lossy().to_ascii_lowercase());
     match ending.as_deref() {
-        None | Some("xml" | "xmm" | "zip" | "usfm" | "sfm" | "usx" | "osis" | "zef" | "txt" | "bible") => {
+        None | Some("xml" | "xmm" | "zip" | "usfm" | "sfm" | "usx" | "osis" | "zef" | "txt" | "bible" | "spb") => {
             sp_bible::import::looks_like_bible(path)
         }
         _ => false,
@@ -581,6 +582,44 @@ mod tests {
     }
 
     #[test]
+    fn a_softprojector_bible_is_installed_as_one_of_the_apps_own() {
+        let folder = empty_folder("softprojector");
+        // As SoftProjector exports one (words written for this test), saved with Windows' line
+        // ends: it doesn't say its language.
+        let spb = "\u{feff}##spDataVersion:\t1\r\n##Title:\tТестова Біблія\r\n##Abbreviation:\tТБ\r\n\
+##Information:\tНаписано для тестів.\r\n##RightToLeft:\t0\r\n43\tВід Івана\t21\r\n-----\r\n\
+B043C003V016\t43\t3\t16\tСлова для перевірки, і ще її слова.\r\n";
+        let file = folder.with_extension("Тестова Біблія.spb");
+        std::fs::write(&file, spb).unwrap();
+        assert!(is_bible_file(&file));
+        let open = |given: sp_bible::import::About, ask: bool| Work::Open { path: file.clone(), given, ask };
+        // The window asks for the language, offering Ukrainian; the command line is told to give it.
+        let Ok(Opened::NeedsDetails(imported)) =
+            run_in(&folder, open(Default::default(), true), &Known::default(), false)
+        else {
+            panic!()
+        };
+        assert_eq!(imported.prefilled().language, "uk");
+        let refused = run_in(&folder, open(Default::default(), false), &Known::default(), false).unwrap_err();
+        assert!(refused.contains("--language"), "{refused}");
+        let given = sp_bible::import::About { language: "uk".to_owned(), ..Default::default() };
+        let Ok(Opened::Installed(path, info, said)) = run_in(&folder, open(given, false), &Known::default(), false)
+        else {
+            panic!()
+        };
+        assert_eq!(path, folder.join("tb.spbible"));
+        assert_eq!(
+            (info.name.as_str(), info.short.as_str(), info.language.as_str(), info.terms.as_str()),
+            ("Тестова Біблія", "ТБ", "uk", "Написано для тестів.")
+        );
+        assert!(said.starts_with("Installed Тестова Біблія (1 book, 1 verse)"), "{said}");
+        let bible = Bible::from_bytes(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(bible.info.source.ends_with("Тестова Біблія.spb (SoftProjector Bible)"), "{}", bible.info.source);
+        let _ = std::fs::remove_dir_all(&folder);
+        let _ = std::fs::remove_file(&file);
+    }
+
+    #[test]
     fn a_dropped_bible_file_never_stands_in_for_a_built_in_or_offered_one() {
         let folder = empty_folder("own");
         let shelf = Known {
@@ -660,6 +699,10 @@ mod tests {
         std::fs::write(&movie, "\\id GEN\n\\c 1\n\\v 1 Words.\n").unwrap();
         assert!(!is_bible_file(&movie));
         assert!(is_bible_file(Path::new("missing/KJV.spbible")));
+        // A SoftProjector Bible, of the kind read or the older one (which is told why not).
+        let spb = folder.join("Тестова.spb");
+        std::fs::write(&spb, "1\t1\t1\tWords.\n").unwrap();
+        assert!(is_bible_file(&spb));
         // A Bible module ending in .xmm is looked into too.
         let module = folder.join("KJV.xmm");
         std::fs::write(&module, r#"<bible><b n="John"><c n="3"><v n="16">Words.</v></c></b></bible>"#).unwrap();

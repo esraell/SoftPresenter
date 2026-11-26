@@ -1,7 +1,7 @@
 //! Makes a SoftPresenter Bible file from a Bible in another program's format, read exactly as
 //! the app reads a file dropped on its window (Zefania, OSIS, Beblia, `<b>`/`<c>`/`<v>` XML,
-//! USFM or USX; a file, a zip or a folder), with what the app's own list of Bibles needs set by
-//! hand:
+//! USFM, USX or SoftProjector's `.spb`; a file, a zip or a folder), with what the app's own list
+//! of Bibles needs set by hand:
 //!
 //! cargo run -p sp-bible --example import -- IN OUT.spbible id=npu "name=..." short=НПУ \
 //!     language=uk "terms=CC BY-SA 4.0" "credit=..." "source=eBible.org ukronpu" [numbering=synodal] [fit=loose]

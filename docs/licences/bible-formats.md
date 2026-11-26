@@ -4,8 +4,9 @@ A working note, not legal advice.
 
 SoftPresenter installs Bibles kept in the formats other programs use (`crates/sp-bible/src/import.rs`):
 Zefania XML, OSIS XML, Beblia XML, the XML that marks books, chapters and verses with `<b>`,
-`<c>` and `<v>`, USFM and USX, each as a file or zipped. They are read into SoftPresenter's own
-`.spbible` format when installed; the app never writes them.
+`<c>` and `<v>`, USFM, USX and SoftProjector's Bible files (`.spb`), each as a file or zipped.
+They are read into SoftPresenter's own `.spbible` format when installed; the app never writes
+them.
 
 ## The library
 
@@ -25,7 +26,8 @@ reads only the five entities every XML document has and character references.
 ## The formats
 
 Each was learnt from its own public description, and from Bible files the formats' and
-translations' own publishers give out; nothing comes from another program's code.
+translations' own publishers give out, but for SoftProjector's, whose layout was learnt from
+SoftProjector's own source; no code comes from another program.
 
 - **USFM** and **USX**: the Unified Standard Format Markers and its XML form, documented by the
   United Bible Societies (ubsicap.github.io/usfm and ubsicap.github.io/usx). Checked against the
@@ -43,5 +45,13 @@ translations' own publishers give out; nothing comes from another program's code
 - **Beblia XML**: the layout of the files Beblia publishes (github.com/Beblia/Holy-Bible-XML-Format).
 - **`<bible>`, `<b n>`, `<c n>`, `<v n>`**: a plain layout several programs share, read by its
   shape.
+- **SoftProjector's Bible files (`.spb`)**: learnt by reading SoftProjector's source code,
+  published under the GPL version 3 (github.com/SoftProjector/softprojector), the part that
+  exports and imports them: the first line giving the version, the lines about the Bible
+  (title, abbreviation, information with its lines joined by `@%`, right to left), the books'
+  lines (number, name, chapters), the line of dashes, and the verses' lines (an identifier,
+  book, chapter, verse and words, with tabs between). Those are facts about the format, as for
+  its songbooks ([song-documents.md](song-documents.md)); no code was copied, and SoftPresenter
+  only reads the files. No SoftProjector Bible is shipped, or used in the tests.
 - What a bundle says about its Bible: eBible.org's `copr.htm` (its title and language), a
   Door43 resource's `manifest.yaml`, and a Digital Bible Library bundle's `metadata.xml`.

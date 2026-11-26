@@ -1,6 +1,7 @@
 //! Bibles in the file formats other programs use, read into the app's own: Zefania XML, OSIS
 //! XML, Beblia XML, the XML that marks books, chapters and verses with `<b>`, `<c>` and `<v>`,
-//! USFM (a book to a file, in a folder or a zip) and USX. Any of them may come zipped.
+//! USFM (a book to a file, in a folder or a zip), USX, and SoftProjector's Bible files (`.spb`).
+//! Any of them may come zipped.
 //!
 //! The files are not trusted. What is read is bounded ([`Limits`]): the file, a zip's entries
 //! and what they unpack to; no XML entity a file declares is expanded and nothing a file names
@@ -14,6 +15,7 @@
 //! the way they are numbered is judged from the chapters' lengths ([`crate::fit`]).
 
 mod archive;
+mod softprojector;
 mod usfm;
 mod xml;
 
@@ -36,6 +38,8 @@ pub enum Format {
     Tags,
     Usfm,
     Usx,
+    /// SoftProjector's Bible files (`.spb`): text, a line for each book and each verse.
+    SoftProjector,
 }
 
 impl Format {
@@ -48,6 +52,7 @@ impl Format {
             Format::Tags => "Bible XML (b, c and v tags)",
             Format::Usfm => "USFM",
             Format::Usx => "USX",
+            Format::SoftProjector => "SoftProjector Bible",
         }
     }
 }
@@ -265,6 +270,9 @@ pub fn looks_like_bible(path: &Path) -> bool {
 /// What one file of a set holds, by its first part.
 fn kind_of_text(text: &str) -> Option<Format> {
     let start = text.trim_start_matches('\u{feff}').trim_start();
+    if softprojector::looks_like_softprojector(start) {
+        return Some(Format::SoftProjector);
+    }
     if start.starts_with('\\') {
         return usfm::looks_like_usfm(start).then_some(Format::Usfm);
     }
@@ -296,7 +304,15 @@ fn from_documents(documents: Vec<Document>, file_name: &str) -> Result<Imported,
         }
     }
     let mut out = Collector::default();
+    // The language the books' names are written in, where a file names them.
+    let mut names_language = String::new();
     let format = match (whole.as_slice(), books.as_slice()) {
+        ([(Format::SoftProjector, document)], []) => {
+            let said = softprojector::read(&document.text, &document.name, &mut out)?;
+            about = said.about.or(&about);
+            names_language = said.language;
+            Format::SoftProjector
+        }
         ([(format, document)], []) => {
             let said = xml::read(*format, &document.text, &mut out)?;
             about = said.or(&about);
@@ -313,14 +329,23 @@ fn from_documents(documents: Vec<Document>, file_name: &str) -> Result<Imported,
             }
             *first
         }
-        ([], []) => return Err(format!("{file_name} isn't a Bible file SoftPresenter can read.")),
+        ([], []) => {
+            // A SoftProjector Bible of the older kind, which it no longer reads itself, says so.
+            if let Some(old) = documents.iter().find(|document| softprojector_ending(&document.name)) {
+                return Err(softprojector::older_kind(&shown_name(&old.name)));
+            }
+            return Err(format!("{file_name} isn't a Bible file SoftPresenter can read."));
+        }
         _ => {
             return Err(format!("{file_name} holds more than one Bible. Take out the one to install and try that."));
         }
     };
     let (verses, empty) = out.finish()?;
     let about = about.tidied();
-    let suggested = suggest(file_name, &about, &verses);
+    let mut suggested = suggest(file_name, &about, &verses);
+    if suggested.language.is_empty() {
+        suggested.language = names_language;
+    }
     let fit = fit(&out.chapters);
     Ok(Imported {
         format,
@@ -332,6 +357,11 @@ fn from_documents(documents: Vec<Document>, file_name: &str) -> Result<Imported,
         left_out: out.left_out,
         fit,
     })
+}
+
+/// True for a name ending as SoftProjector's Bible files do (`.spb`, in any case).
+pub(crate) fn softprojector_ending(name: &str) -> bool {
+    name.rsplit(['/', '\\']).next().unwrap_or(name).to_ascii_lowercase().ends_with(".spb")
 }
 
 /// What a file beside the books says about the Bible: eBible's `copr.htm`, a Door43
@@ -455,16 +485,17 @@ fn suggest(file_name: &str, about: &About, verses: &BTreeMap<VerseRef, String>) 
     } else {
         initials(&name)
     };
-    About { name, short, language: guess_language(verses), terms: String::new() }
+    About { name, short, language: guess_language(verses.values().map(String::as_str)), terms: String::new() }
 }
 
-/// The language a Bible is most likely in, from the letters of its first verses: Ukrainian or
-/// Russian for Cyrillic (by the letters only one of them has), Greek, Hebrew, and English for
-/// Latin letters with English's commonest words. Empty when it can't be told.
-fn guess_language(verses: &BTreeMap<VerseRef, String>) -> String {
+/// The language a Bible is most likely in, from the letters of its first verses (or of other
+/// words it holds, such as its books' names): Ukrainian or Russian for Cyrillic (by the letters
+/// only one of them has), Greek, Hebrew, and English for Latin letters with English's commonest
+/// words. Empty when it can't be told.
+fn guess_language<'a>(texts: impl Iterator<Item = &'a str>) -> String {
     let (mut cyrillic, mut latin, mut greek, mut hebrew, mut ukrainian, mut russian) = (0, 0, 0, 0, 0, 0);
     let mut english_words = 0;
-    for words in verses.values().take(400) {
+    for words in texts.take(400) {
         for c in words.chars() {
             match c {
                 'і' | 'ї' | 'є' | 'ґ' | 'І' | 'Ї' | 'Є' | 'Ґ' => ukrainian += 1,
