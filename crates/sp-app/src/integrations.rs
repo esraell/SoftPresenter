@@ -1,21 +1,19 @@
 //! Settings › Integrations: the services SoftPresenter works with, each the same card (the
 //! owner, 2026-11-25: "the integration cards should be the same and that goes for voxlive"): its
 //! logo, name and one line, a light with how it stands, one key. A card opens that service's
-//! page in place, every page the same way: the way back, its logo and how it stands, what it
-//! brings, then the account. Worship Leader App's free songbooks (where the song catalog is
+//! page in place, every page the same way, in the cards and rows of the rest of Settings: the way
+//! back, its logo and how it stands, what it brings, then what the service shows first, then the
+//! presentation or the connection, then the account; every hint is a line on the page. Worship Leader App's free songbooks (where the song catalog is
 //! offered, `songbooks`), VoxLive, Canva Sync, and TimelyChurch (where it is offered,
 //! `timelychurch`); a service not offered yet is greyed as coming soon.
 
-use egui::{Align, Align2, Color32, FontId, Layout, Rect, Sense, Stroke, pos2, vec2};
+use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 
 use crate::home::settings::parts;
 use crate::i18n::{t, tf, tn};
 use crate::logos::{self, Logo, Mark};
-use crate::studio::{CARD, CARE, HOVER, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
+use crate::studio::{CARD, CARE, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 use crate::voxlive::{Status, View};
-
-/// VoxLive's own colour's lighter shade, for words on a dark ground.
-pub const VOXLIVE_LIGHT: Color32 = Color32::from_rgb(127, 169, 198);
 
 /// The green of something connected.
 const GOOD: Color32 = crate::studio::READY;
@@ -55,14 +53,26 @@ pub fn pane(
         look_page(ui, view);
     } else if view.open {
         voxlive_page(ui, view);
+        scrolled_to_end(ui);
     } else if canva.open {
         canva_page(ui, canva);
+        scrolled_to_end(ui);
     } else if timelychurch.offered && timelychurch.open {
         timelychurch_page(ui, timelychurch);
+        scrolled_to_end(ui);
     } else if let (true, Some(songbooks)) = (songbooks_open, songbooks.as_deref_mut()) {
         songbooks_page(ui, songbooks);
     } else {
         list(ui, view, canva, songbooks, timelychurch);
+    }
+}
+
+/// Testing aid: `SOFTPRESENTER_CAPTURE_PREFERENCES=voxlive-end` (`canva-end`,
+/// `timelychurch-end`) opens that service's page scrolled to its end, to see its last cards in a
+/// capture.
+fn scrolled_to_end(ui: &mut egui::Ui) {
+    if std::env::var("SOFTPRESENTER_CAPTURE_PREFERENCES").is_ok_and(|page| page.ends_with("-end")) {
+        ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
     }
 }
 
@@ -349,6 +359,25 @@ fn songbooks_page(ui: &mut egui::Ui, view: &mut crate::songbooks::View) {
     crate::songbooks::settings_page(ui, view);
 }
 
+/// The long line saying what a service does, under its page's head: dim words in paragraph
+/// width, as the design's lead.
+fn lead(ui: &mut egui::Ui, text: &str) {
+    let width = ui.available_width();
+    let galley = parts::lines(ui, text, FontId::proportional(13.5), TEXT_DIM, width.min(620.0), 20.0);
+    let (place, _) = ui.allocate_exact_size(vec2(width, galley.size().y), Sense::hover());
+    ui.painter().galley(place.min, galley, TEXT_DIM);
+    ui.add_space((14.0 - ui.spacing().item_spacing.y).max(0.0));
+}
+
+/// Something to take care of, in amber, at the top of a card: a key refused, a service out of
+/// reach, why something typed wasn't taken.
+fn warn(ui: &mut egui::Ui, text: &str) {
+    parts::coloured_note(ui, text, CARE);
+}
+
+/// Settings › Integrations › VoxLive: its screens, then the connection (the key kept, Find
+/// Screens Again and Disconnect); or, with no key, Connect. A key VoxLive refused shows Connect
+/// too, to paste another.
 fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
     let what = t("integrations.voxlive.about.short", "Live translation captions on a screen");
     if page_head(ui, Mark::Logo(Logo::VoxLive), "VoxLive", state_words(&view.status), what) {
@@ -356,47 +385,21 @@ fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
         view.typed.clear();
         view.problem = None;
     }
-    let width = ui.available_width().min(560.0);
-    ui.set_max_width(width);
-    ui.label(
-        egui::RichText::new(
-            t("integrations.voxlive.about", "VoxLive translates the sermon as it is preached, and shows it as captions on its screens. Connected, SoftPresenter shows your church's VoxLive screens as the slides of a VoxLive item (under LIBRARY, and in playlists) and in the VoxLive tab beside the screens: one click puts the captions on screen in place of a verse, and a click on the verse brings it back."),
-        )
-        .color(TEXT_DIM),
+    lead(
+        ui,
+        t(
+            "integrations.voxlive.about",
+            "VoxLive translates the sermon as it is preached, and shows it as captions on its screens. Connected, SoftPresenter shows your church's VoxLive screens as the slides of a VoxLive item (under LIBRARY, and in playlists) and in the VoxLive tab beside the screens: one click puts the captions on screen in place of a verse, and a click on the verse brings it back.",
+        ),
     );
-    ui.add_space(12.0);
-    match (&view.status, &view.key_hint) {
-        (Status::NoKey, _) | (_, None) => connect_form(ui, view),
+    match (view.status.clone(), view.key_hint.clone()) {
+        (Status::NoKey, _) | (_, None) => connect_card(ui, view),
         (status, Some(hint)) => {
-            if let Status::Refused(why) | Status::Trouble(why) = status {
-                ui.label(egui::RichText::new(why.as_str()).color(crate::studio::TALLY));
-                ui.add_space(6.0);
-            }
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(t("integrations.voxlive.key", "Key")).color(TEXT_DIM));
-                ui.label(egui::RichText::new(hint.as_str()).monospace().color(TEXT));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui
-                        .button(t("integrations.disconnect", "Disconnect"))
-                        .on_hover_text(t(
-                            "integrations.voxlive.disconnect.hint",
-                            "Forget the key on this computer (it stays in VoxLive until you revoke it there)",
-                        ))
-                        .clicked()
-                    {
-                        ask_to_disconnect(ui, "voxlive");
-                    }
-                    if ui.button(t("integrations.voxlive.refresh", "Find Screens Again")).clicked() {
-                        view.request = Some(Request::Refresh);
-                    }
-                });
-            });
+            screens_card(ui, view);
+            connection_card(ui, view, &status, &hint);
             if matches!(status, Status::Refused(_)) {
-                ui.add_space(8.0);
-                connect_form(ui, view);
+                connect_card(ui, view);
             }
-            ui.add_space(14.0);
-            screens(ui, view);
         }
     }
     let note = t(
@@ -408,8 +411,131 @@ fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
     }
 }
 
-/// A lighter shade of Canva's colour, for Canva Sync's words on a dark ground.
-pub const CANVA_LIGHT: Color32 = Color32::from_rgb(110, 214, 220);
+/// Your VoxLive screens, as last found: a row each, its kind and language, and Change Look ›
+/// where its look can be changed.
+fn screens_card(ui: &mut egui::Ui, view: &mut View) {
+    let count = view.screens.len() as u64;
+    let about = if count > 0 {
+        tn("integrations.voxlive.screens.count", count, "{n} screen", "{n} screens", &[])
+    } else {
+        String::new()
+    };
+    let mut open = None;
+    parts::card(ui, t("integrations.voxlive.screens.title", "Your VoxLive screens"), &about, None, |ui| {
+        if view.screens.is_empty() {
+            let words = match view.status {
+                Status::Connected => t(
+                    "integrations.voxlive.screens.none",
+                    "No screens yet. Make one in VoxLive (Screens), then Find Screens Again.",
+                ),
+                _ => t("integrations.voxlive.screens.not_yet", "Not found yet."),
+            };
+            parts::note(ui, words);
+        }
+        let change = t("integrations.voxlive.change_look", "Change Look ›");
+        let hint =
+            t("integrations.voxlive.change_look.hint", "Change how this screen looks, here; it is saved to VoxLive");
+        for screen in &view.screens {
+            // A screen with a page can have its look changed.
+            let can_open = !screen.url.is_empty() && !view.schema.is_empty();
+            let kind = match screen.kind() {
+                "captions" => t("integrations.voxlive.kind.captions", "Captions"),
+                "Scripture" => t("integrations.voxlive.kind.scripture", "Scripture"),
+                other => other,
+            };
+            let language = screen.language.to_uppercase();
+            let line: Vec<&str> = [kind, language.as_str(), if can_open { hint } else { "" }]
+                .into_iter()
+                .filter(|w| !w.is_empty())
+                .collect();
+            let keys = if can_open { vec![parts::Key::plain(change)] } else { Vec::new() };
+            if parts::keys_row(ui, &screen.id, screen.name(), &line.join(" · "), None, &keys).is_some() {
+                open = Some(screen.id.clone());
+            }
+        }
+        parts::note(
+            ui,
+            t(
+                "integrations.voxlive.screens.about",
+                "A screen's live display is opened only on your real screens, where it shows the captions (and can start that language's translation); previews use its free test pattern.",
+            ),
+        );
+    });
+    if let Some(screen) = open {
+        view.request = Some(Request::OpenLook(screen));
+    }
+}
+
+/// The connection: the key's start, Find Screens Again and Disconnect, and why VoxLive refused
+/// it or can't be reached.
+fn connection_card(ui: &mut egui::Ui, view: &mut View, status: &Status, hint: &str) {
+    let title = t("integrations.connection.title", "Connection");
+    parts::card(ui, title, t("integrations.voxlive.connection.about", "The key, kept on this computer"), None, |ui| {
+        if let Status::Refused(why) | Status::Trouble(why) = status {
+            warn(ui, why);
+        }
+        let line = t(
+            "integrations.voxlive.disconnect.line",
+            "Disconnect forgets the key on this computer (it stays in VoxLive until you revoke it there)",
+        );
+        let keys = [
+            parts::Key::plain(t("integrations.voxlive.refresh", "Find Screens Again")),
+            parts::Key::plain(t("integrations.disconnect", "Disconnect")),
+        ];
+        match parts::keys_row(ui, "voxlive key", t("integrations.voxlive.key", "Key"), line, Some(hint), &keys) {
+            Some(0) => view.request = Some(Request::Refresh),
+            Some(_) => ask_to_disconnect(ui, "voxlive"),
+            None => {}
+        }
+    });
+}
+
+/// How to make a VoxLive key, and where this computer keeps it.
+fn how_to_get_a_key() -> &'static str {
+    if cfg!(target_os = "macos") {
+        t(
+            "integrations.voxlive.connect.about",
+            "In VoxLive, open Settings › API keys and make a key with the screens permissions (read and write). Paste it here. It is kept in this Mac's Keychain and sent only to VoxLive.",
+        )
+    } else if cfg!(windows) {
+        t(
+            "integrations.voxlive.connect.about.windows",
+            "In VoxLive, open Settings › API keys and make a key with the screens permissions (read and write). Paste it here. It is kept in Windows' Credential Manager on this computer and sent only to VoxLive.",
+        )
+    } else {
+        t(
+            "integrations.voxlive.connect.about.linux",
+            "In VoxLive, open Settings › API keys and make a key with the screens permissions (read and write). Paste it here. It is kept in this computer's keyring and sent only to VoxLive.",
+        )
+    }
+}
+
+/// Connect: where the key is pasted, and how to get one; Return in the field connects too.
+fn connect_card(ui: &mut egui::Ui, view: &mut View) {
+    let about = t("integrations.voxlive.connect.with", "With a key made in VoxLive");
+    parts::card(ui, t("integrations.connect.title", "Connect"), about, None, |ui| {
+        if let Some(problem) = &view.problem {
+            warn(ui, problem);
+        }
+        let how = how_to_get_a_key();
+        let key = parts::Key::main(t("integrations.voxlive.connect", "Connect")).enabled(!view.typed.trim().is_empty());
+        let label = t("integrations.voxlive.key", "Key");
+        let (field, clicked) = parts::field_row(
+            ui,
+            "voxlive key field",
+            label,
+            how,
+            &mut view.typed,
+            (true, "vxk_live_…"),
+            190.0,
+            Some(key),
+        );
+        let entered = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        if (clicked || entered) && !view.typed.trim().is_empty() {
+            view.request = Some(Request::Connect(std::mem::take(&mut view.typed)));
+        }
+    });
+}
 
 /// A dot and a word or two for how Canva Sync stands.
 fn canva_state(view: &crate::canva::View) -> (Color32, String) {
@@ -431,8 +557,9 @@ fn canva_state(view: &crate::canva::View) -> (Color32, String) {
     }
 }
 
-/// Canva Sync's page: connect, choose the design and its divider page, where the video goes,
-/// and Sync Now.
+/// Canva Sync's page. Signed in: the old sync script to switch off (while it must be), the sync,
+/// the presentation and its divider page, where the video goes, and the account. Not signed in:
+/// Connect, and the old sync script's sign-in where this Mac has it.
 fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
     use crate::canva::{Request as R, Status as S};
     let what = t("integrations.canva.about.short", "The announcements video, fresh from your Canva presentation");
@@ -440,104 +567,46 @@ fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
         view.open = false;
         view.typed_secret.clear();
     }
-    let width = ui.available_width().min(560.0);
-    ui.set_max_width(width);
-    ui.label(
-        egui::RichText::new(
-            t("integrations.canva.about", "Keeps the announcements video fresh from your church's Canva presentation. The pages above a divider page are exported as a 1080p video into the library's Media › Canva Sync folder, which the media playlist Announcements follows, so the video joins the media bin by itself. Nothing happens while SoftPresenter is closed."),
-        )
-        .color(TEXT_DIM),
+    lead(
+        ui,
+        t(
+            "integrations.canva.about",
+            "Keeps the announcements video fresh from your church's Canva presentation. The pages above a divider page are exported as a 1080p video into the library's Media › Canva Sync folder, which the media playlist Announcements follows, so the video joins the media bin by itself. Nothing happens while SoftPresenter is closed.",
+        ),
     );
-    ui.add_space(8.0);
+    // What the last change did, or why it couldn't, above the cards.
     if let Some((said, good)) = &view.said {
-        let colour = if *good { CANVA_LIGHT } else { crate::studio::TALLY };
-        ui.label(egui::RichText::new(said.as_str()).size(12.0).color(colour));
-        ui.add_space(6.0);
+        let tone = if *good { crate::cli_install::Tone::Good } else { crate::cli_install::Tone::Trouble };
+        parts::said_line(ui, Some((tone, said)), "");
     }
     let mut request = None;
     match &view.status {
         S::Reading => {
-            ui.label(
-                egui::RichText::new(t("integrations.canva.reading", "Reading the sign-in kept on this computer…"))
-                    .color(TEXT_FAINT),
-            );
+            parts::note(ui, t("integrations.canva.reading", "Reading the sign-in kept on this computer…"));
         }
         S::NotConnected | S::Refused(_) => canva_connect(ui, view, &mut request),
         S::Connected | S::Doubtful(_) => {
-            if let S::Doubtful(why) = &view.status {
-                ui.label(egui::RichText::new(why.as_str()).color(Color32::from_rgb(230, 170, 60)));
-                ui.add_space(4.0);
-            }
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(t("integrations.canva.signed_in", "Signed in")).color(TEXT_DIM));
-                if let Some(hint) = &view.client_hint {
-                    ui.label(
-                        egui::RichText::new(tf("integrations.canva.client", "integration {hint}", &[("hint", hint)]))
-                            .monospace()
-                            .color(TEXT_FAINT),
-                    );
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui
-                        .button(t("integrations.disconnect", "Disconnect"))
-                        .on_hover_text(t(
-                            "integrations.canva.disconnect.hint",
-                            "Forget the sign-in on this computer (it stays in Canva until you take it back there)",
-                        ))
-                        .clicked()
-                    {
-                        ask_to_disconnect(ui, "canva");
-                    }
-                });
-            });
             if view.settings.old_script_warning {
-                ui.add_space(8.0);
                 old_script_warning(ui, view, &mut request);
             }
-            ui.add_space(12.0);
-            canva_design(ui, view, &mut request);
-            ui.add_space(12.0);
-            crate::studio::caption(ui, t("integrations.canva.sync.caption", "SYNC"));
-            ui.horizontal(|ui| {
-                let ready =
-                    view.settings.design.is_some() && view.settings.divider.is_some() && !view.settings.hold_syncs;
-                if ui
-                    .add_enabled(
-                        ready && !view.phase.busy(),
-                        egui::Button::new(t("integrations.canva.sync_now", "Sync Now")),
-                    )
-                    .clicked()
-                {
-                    request = Some(R::SyncNow);
-                }
-                if view.phase.busy() {
-                    ui.label(egui::RichText::new(view.phase.words()).color(CANVA_LIGHT));
-                    if ui
-                        .button(t("integrations.canva.stop", "Stop"))
-                        .on_hover_text(t("integrations.canva.stop.hint", "The video in the media bin stays as it was"))
-                        .clicked()
-                    {
-                        request = Some(R::Stop);
-                    }
-                }
-            });
-            if let (Some(at), Some(file)) = (&view.settings.updated_at, &view.settings.updated_file) {
-                let format = t("integrations.canva.updated.format", "%A %-d %B, %-I:%M %p");
-                let when = chrono::DateTime::parse_from_rfc3339(at)
-                    .map(|at| written(at.with_timezone(&chrono::Local).format(format)))
-                    .unwrap_or_default();
-                let said =
-                    tf("integrations.canva.updated", "Last updated {when}: {file}", &[("when", &when), ("file", file)]);
-                ui.label(egui::RichText::new(said).size(12.0).color(TEXT_DIM));
-            }
-            ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new(
-                    t("integrations.canva.macro", "To fetch a fresh video each time SoftPresenter opens, make a macro with the step Sync from Canva and tick Run When SoftPresenter Opens. A new video replaces the old one; one playing takes the new one over at the end of its pass, so the loop carries on."),
-                )
-                .size(11.5)
-                .color(TEXT_FAINT),
+            sync_card(ui, view, &mut request);
+            design_card(ui, view, &mut request);
+            parts::card(
+                ui,
+                t("integrations.canva.where.title", "Where it goes"),
+                t("integrations.canva.where.sub", "In the library and the media bin"),
+                None,
+                |ui| {
+                    parts::note(
+                        ui,
+                        t(
+                            "integrations.canva.where.about",
+                            "Media › Canva Sync in the library, followed by the media playlist Announcements (made when the divider is chosen). One video is kept there, named with its day and time so volunteers can read it.",
+                        ),
+                    );
+                },
             );
+            account_card(ui, view);
         }
     }
     let note = t(
@@ -552,8 +621,76 @@ fn canva_page(ui: &mut egui::Ui, view: &mut crate::canva::View) {
     }
 }
 
-/// A lighter shade of TimelyChurch's colour, for its words on a dark ground.
-pub const TIMELYCHURCH_LIGHT: Color32 = Color32::from_rgb(164, 162, 240);
+/// Sync: when the video was last updated and its file, with Sync Now (greyed until the divider is
+/// chosen, and while the old script must be switched off); while a job runs, what it is doing,
+/// with Stop. Then how to sync each time SoftPresenter opens.
+fn sync_card(ui: &mut egui::Ui, view: &crate::canva::View, request: &mut Option<crate::canva::Request>) {
+    use crate::canva::Request as R;
+    let chosen = view.settings.design.is_some() && view.settings.divider.is_some();
+    let about = if chosen {
+        t("integrations.canva.sync.about", "The announcements video")
+    } else {
+        t("integrations.canva.sync.choose", "Choose the design first")
+    };
+    parts::card(ui, t("integrations.canva.sync.title", "Sync"), about, None, |ui| {
+        if let crate::canva::Status::Doubtful(why) = &view.status {
+            warn(ui, why);
+        }
+        let (sync_now, stop) = (t("integrations.canva.sync_now", "Sync Now"), t("integrations.canva.stop", "Stop"));
+        let (both, other) = ([sync_now, stop], [stop]);
+        if view.phase.busy() {
+            let line = t("integrations.canva.stop.line", "Stop: the video in the media bin stays as it was");
+            let keys = [parts::Key::plain(stop).as_wide_as(&both)];
+            if parts::keys_row(ui, "canva sync", &view.phase.words(), line, None, &keys).is_some() {
+                *request = Some(R::Stop);
+            }
+        } else {
+            let (label, file) = match (&view.settings.updated_at, &view.settings.updated_file) {
+                (Some(at), Some(file)) => {
+                    let format = t("integrations.canva.updated.format", "%A %-d %B, %-I:%M %p");
+                    let when = chrono::DateTime::parse_from_rfc3339(at)
+                        .map(|at| written(at.with_timezone(&chrono::Local).format(format)))
+                        .unwrap_or_default();
+                    (tf("integrations.canva.updated.when", "Last updated {when}", &[("when", &when)]), file.as_str())
+                }
+                _ => (t("integrations.canva.not_synced", "Not synced yet").to_owned(), ""),
+            };
+            let ready = chosen && !view.settings.hold_syncs;
+            let keys = [parts::Key::main(sync_now).enabled(ready).as_wide_as(&other)];
+            if parts::keys_row(ui, "canva sync", &label, file, None, &keys).is_some() {
+                *request = Some(R::SyncNow);
+            }
+        }
+        parts::note(
+            ui,
+            t(
+                "integrations.canva.macro",
+                "To fetch a fresh video each time SoftPresenter opens, make a macro with the step Sync from Canva and tick Run When SoftPresenter Opens. A new video replaces the old one; one playing takes the new one over at the end of its pass, so the loop carries on.",
+            ),
+        );
+    });
+}
+
+/// The account: signed in, with the integration's ID, and Disconnect.
+fn account_card(ui: &mut egui::Ui, view: &crate::canva::View) {
+    let signed_in = t("integrations.canva.signed_in", "Signed in");
+    parts::card(ui, t("integrations.canva.account", "Account"), signed_in, None, |ui| {
+        let forget = t(
+            "integrations.canva.disconnect.line",
+            "Disconnect forgets the sign-in on this computer (it stays in Canva until you take it back there)",
+        );
+        let line = match &view.client_hint {
+            Some(hint) => {
+                format!("{} · {forget}", tf("integrations.canva.client", "integration {hint}", &[("hint", hint)]))
+            }
+            None => forget.to_owned(),
+        };
+        let keys = [parts::Key::plain(t("integrations.disconnect", "Disconnect"))];
+        if parts::keys_row(ui, "canva account", signed_in, &line, None, &keys).is_some() {
+            ask_to_disconnect(ui, "canva");
+        }
+    });
+}
 
 /// A dot and a word or two for how TimelyChurch stands.
 fn timelychurch_state(view: &crate::timelychurch::View) -> (Color32, String) {
@@ -594,8 +731,8 @@ fn service_date(date: &str) -> String {
 }
 
 /// Settings › Integrations › TimelyChurch: Connect to TimelyChurch (the church's address and a
-/// pairing code); once connected, the church, when it was last checked, Check Now, Disconnect,
-/// and the playlists made from its services.
+/// pairing code); once connected, the playlists made from its upcoming services, then the
+/// connection (the church, when it was last checked, Check Now and Disconnect).
 fn timelychurch_page(ui: &mut egui::Ui, view: &mut crate::timelychurch::View) {
     use crate::timelychurch::{Request as R, Status as S};
     let what = t("integrations.timelychurch.about.short", "Service plans and set lists from your church planner");
@@ -605,39 +742,20 @@ fn timelychurch_page(ui: &mut egui::Ui, view: &mut crate::timelychurch::View) {
         view.typed_code.clear();
         view.problem = None;
     }
-    let width = ui.available_width().min(560.0);
-    ui.set_max_width(width);
-    ui.label(
-        egui::RichText::new(
-            t("integrations.timelychurch.about", "Your church's upcoming setlists and service plans in TimelyChurch become playlists here, and their songs join the library with their translations, kept up to date during the week. A song or playlist you change here is never overwritten: TimelyChurch's newer version is only offered. SoftPresenter tells TimelyChurch which songs were shown in each service, for your church's song use report."),
-        )
-        .color(TEXT_DIM),
+    lead(
+        ui,
+        t(
+            "integrations.timelychurch.about",
+            "Your church's upcoming setlists and service plans in TimelyChurch become playlists here, and their songs join the library with their translations, kept up to date during the week. A song or playlist you change here is never overwritten: TimelyChurch's newer version is only offered. SoftPresenter tells TimelyChurch which songs were shown in each service, for your church's song use report.",
+        ),
     );
-    ui.add_space(12.0);
     let mut request = None;
     match &view.status {
         S::Off => {}
         S::Reading => {
-            ui.label(
-                egui::RichText::new(t(
-                    "integrations.timelychurch.reading",
-                    "Reading the connection kept on this computer…",
-                ))
-                .color(TEXT_FAINT),
-            );
+            parts::note(ui, t("integrations.timelychurch.reading", "Reading the connection kept on this computer…"));
         }
-        S::NotConnected | S::Pairing | S::Disconnected => {
-            // Disconnected in TimelyChurch: said as TimelyChurch asked, in the language set now.
-            let said = match &view.status {
-                S::Disconnected => Some(crate::timelychurch::disconnected_words()),
-                _ => view.trouble.clone(),
-            };
-            if let Some(said) = said {
-                ui.label(egui::RichText::new(said).color(crate::studio::TALLY));
-                ui.add_space(6.0);
-            }
-            timelychurch_connect(ui, view, &mut request);
-        }
+        S::NotConnected | S::Pairing | S::Disconnected => timelychurch_connect(ui, view, &mut request),
         S::Connected => timelychurch_connected(ui, view, &mut request),
     }
     let note = t(
@@ -654,152 +772,152 @@ fn timelychurch_page(ui: &mut egui::Ui, view: &mut crate::timelychurch::View) {
 }
 
 /// Connect to TimelyChurch: the church's address (unless TimelyChurch has one address for
-/// every church) and the pairing code an administrator made.
+/// every church) and the pairing code an administrator made; Return in the code connects too.
 fn timelychurch_connect(
     ui: &mut egui::Ui,
     view: &mut crate::timelychurch::View,
     request: &mut Option<crate::timelychurch::Request>,
 ) {
-    crate::studio::caption(ui, t("integrations.timelychurch.connect.caption", "CONNECT TO TIMELYCHURCH"));
-    ui.label(
-        egui::RichText::new(
-            t("integrations.timelychurch.connect.about", "In TimelyChurch, an administrator opens Setlists › Song Sync and makes a pairing code. Type your church's TimelyChurch address and the code here. The connection is kept in this computer's secure store and used only with your church's TimelyChurch."),
-        )
-        .size(12.0)
-        .color(TEXT_DIM),
-    );
-    ui.add_space(6.0);
-    let pairing = view.status == crate::timelychurch::Status::Pairing;
-    let mut connect = false;
-    egui::Grid::new("timelychurch connect").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+    let title = t("integrations.timelychurch.connect.title", "Connect to TimelyChurch");
+    parts::card(ui, title, t("integrations.timelychurch.connect.with", "With a pairing code"), None, |ui| {
+        // Disconnected in TimelyChurch: said as TimelyChurch asked, in the language set now.
+        let said = match &view.status {
+            crate::timelychurch::Status::Disconnected => Some(crate::timelychurch::disconnected_words()),
+            _ => view.trouble.clone(),
+        };
+        if let Some(said) = said {
+            warn(ui, &said);
+        }
+        parts::note(
+            ui,
+            t(
+                "integrations.timelychurch.connect.about",
+                "In TimelyChurch, an administrator opens Setlists › Song Sync and makes a pairing code. Type your church's TimelyChurch address and the code here. The connection is kept in this computer's secure store and used only with your church's TimelyChurch.",
+            ),
+        );
+        let pairing = view.status == crate::timelychurch::Status::Pairing;
         if view.asks_address {
-            ui.label(egui::RichText::new(t("integrations.timelychurch.address", "Address")).color(TEXT_DIM));
-            ui.add(
-                egui::TextEdit::singleline(&mut view.typed_address)
-                    .hint_text("yourchurch.timelychurch.com")
-                    .desired_width(300.0),
-            );
-            ui.end_row();
+            let address = t("integrations.timelychurch.address", "Address");
+            let hint = (false, "yourchurch.timelychurch.com");
+            parts::field_row(ui, "timelychurch address", address, "", &mut view.typed_address, hint, 240.0, None);
         }
-        ui.label(egui::RichText::new(t("integrations.timelychurch.code", "Pairing code")).color(TEXT_DIM));
-        let field = ui.add(egui::TextEdit::singleline(&mut view.typed_code).desired_width(300.0));
-        connect |= field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        ui.end_row();
-    });
-    ui.add_space(4.0);
-    let filled = !view.typed_code.trim().is_empty() && (!view.asks_address || !view.typed_address.trim().is_empty());
-    ui.horizontal(|ui| {
-        connect |= ui
-            .add_enabled(filled && !pairing, egui::Button::new(t("integrations.timelychurch.connect", "Connect")))
-            .clicked();
-        if pairing {
-            ui.label(egui::RichText::new(t("integrations.state.connecting", "Connecting…")).color(TIMELYCHURCH_LIGHT));
+        let code = t("integrations.timelychurch.code", "Pairing code");
+        let (field, _) =
+            parts::field_row(ui, "timelychurch code", code, "", &mut view.typed_code, (false, ""), 240.0, None);
+        let mut connect = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        let filled =
+            !view.typed_code.trim().is_empty() && (!view.asks_address || !view.typed_address.trim().is_empty());
+        let lead = if pairing { t("integrations.state.connecting", "Connecting…") } else { "" };
+        let key = parts::Key::main(t("integrations.timelychurch.connect", "Connect")).enabled(filled && !pairing);
+        connect |= parts::keys_line(ui, "timelychurch connect", lead, &[key]).is_some();
+        if connect && filled && !pairing {
+            *request = Some(crate::timelychurch::Request::Connect {
+                address: view.typed_address.trim().to_owned(),
+                code: std::mem::take(&mut view.typed_code),
+            });
+        }
+        if let Some(problem) = &view.problem {
+            warn(ui, problem);
         }
     });
-    if connect && filled && !pairing {
-        *request = Some(crate::timelychurch::Request::Connect {
-            address: view.typed_address.trim().to_owned(),
-            code: std::mem::take(&mut view.typed_code),
-        });
-    }
-    if let Some(problem) = &view.problem {
-        ui.label(egui::RichText::new(problem.as_str()).size(12.0).color(crate::studio::TALLY));
-    }
 }
 
-/// Connected: the church and when it was last checked, Check Now and Disconnect, and the
-/// playlists made from its services.
+/// Connected: the playlists made from TimelyChurch's upcoming services, each with how it stands
+/// against its service; then the church and when it was last checked, its address, Check Now and
+/// Disconnect, and the songs shown that are still to be told.
 fn timelychurch_connected(
     ui: &mut egui::Ui,
     view: &crate::timelychurch::View,
     request: &mut Option<crate::timelychurch::Request>,
 ) {
     use crate::timelychurch::RowState;
-    if let Some(trouble) = &view.trouble {
-        ui.label(egui::RichText::new(trouble.as_str()).color(Color32::from_rgb(230, 170, 60)));
-        ui.add_space(6.0);
-    }
-    let when = if view.checking {
-        t("integrations.timelychurch.checking", "checking now").to_owned()
+    let about = if view.services.is_empty() {
+        String::new()
     } else {
-        match view.last_checked {
-            Some(at) => tf("integrations.timelychurch.checked", "last checked {when}", &[("when", &checked_words(at))]),
-            None => t("integrations.timelychurch.not_checked", "not checked yet").to_owned(),
-        }
+        tf(
+            "integrations.timelychurch.services.count",
+            "{n} in TimelyChurch",
+            &[("n", &crate::i18n::count(view.services.len() as u64))],
+        )
     };
-    let said = tf(
-        "integrations.timelychurch.connected_to",
-        "Connected to {church} · {when}",
-        &[("church", &view.church), ("when", &when)],
-    );
-    // The church's name and the time can be long in any language: the buttons go under them.
-    ui.label(egui::RichText::new(said).color(TEXT));
-    ui.label(egui::RichText::new(view.address.as_str()).size(11.5).color(TEXT_FAINT));
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        if ui
-            .add_enabled(!view.checking, egui::Button::new(t("integrations.timelychurch.check_now", "Check Now")))
-            .on_hover_text(t(
-                "integrations.timelychurch.check_now.hint",
-                "Ask TimelyChurch for changes now (it is asked every few minutes anyway)",
-            ))
-            .clicked()
-        {
-            *request = Some(crate::timelychurch::Request::CheckNow);
+    parts::card(ui, t("integrations.timelychurch.services.title", "Upcoming services"), &about, None, |ui| {
+        if view.services.is_empty() {
+            let words = if view.checking || view.last_checked.is_none() {
+                t("integrations.timelychurch.services.coming", "The services come in at the first check.")
+            } else {
+                t("integrations.timelychurch.services.none", "No upcoming services in TimelyChurch.")
+            };
+            parts::note(ui, words);
         }
-        if ui
-            .button(t("integrations.disconnect", "Disconnect"))
-            .on_hover_text(t(
-                "integrations.timelychurch.disconnect.hint",
-                "Forget the connection on this computer; the songs and playlists it made stay",
-            ))
-            .clicked()
-        {
-            ask_to_disconnect(ui, "timelychurch");
-        }
-    });
-    if view.uses_waiting > 0 {
-        let waiting = tn(
-            "integrations.timelychurch.uses_waiting",
-            view.uses_waiting as u64,
-            "{n} song shown is waiting to be told to TimelyChurch.",
-            "{n} songs shown are waiting to be told to TimelyChurch.",
-            &[],
-        );
-        ui.label(egui::RichText::new(waiting).size(11.5).color(TEXT_FAINT));
-    }
-    ui.add_space(14.0);
-    crate::studio::caption(ui, t("integrations.timelychurch.services.caption", "UPCOMING SERVICES"));
-    if view.services.is_empty() {
-        let words = if view.checking || view.last_checked.is_none() {
-            t("integrations.timelychurch.services.coming", "The services come in at the first check.")
-        } else {
-            t("integrations.timelychurch.services.none", "No upcoming services in TimelyChurch.")
-        };
-        ui.label(egui::RichText::new(words).color(TEXT_FAINT));
-        return;
-    }
-    egui::Grid::new("timelychurch services").num_columns(4).spacing([14.0, 6.0]).show(ui, |ui| {
         for row in &view.services {
             let date = row.date.as_deref().map(service_date).unwrap_or_default();
-            ui.label(egui::RichText::new(date).size(12.0).color(TEXT_DIM));
-            ui.label(egui::RichText::new(row.name.as_str()).color(TEXT));
             let songs = tn("integrations.timelychurch.songs", row.songs as u64, "{n} song", "{n} songs", &[]);
-            ui.label(egui::RichText::new(songs).size(12.0).color(TEXT_DIM));
+            let line = if date.is_empty() { songs } else { format!("{date} · {songs}") };
             let (colour, state) = match row.state {
-                RowState::InStep => (TEXT_FAINT, t("integrations.timelychurch.row.in_step", "Up to date")),
-                RowState::ChangedHere => (TEXT_DIM, t("integrations.timelychurch.row.changed", "Changed here")),
-                RowState::NewerWaiting => (
-                    TIMELYCHURCH_LIGHT,
-                    t("integrations.timelychurch.row.newer", "Changed here; newer in TimelyChurch"),
-                ),
-                RowState::Removed => (
-                    Color32::from_rgb(230, 170, 60),
-                    t("integrations.timelychurch.row.removed", "Removed in TimelyChurch"),
-                ),
+                RowState::InStep => (GOOD, t("integrations.timelychurch.row.in_step", "Up to date")),
+                RowState::ChangedHere => (TEXT_FAINT, t("integrations.timelychurch.row.changed", "Changed here")),
+                RowState::NewerWaiting => {
+                    (CARE, t("integrations.timelychurch.row.newer", "Changed here; newer in TimelyChurch"))
+                }
+                RowState::Removed => (CARE, t("integrations.timelychurch.row.removed", "Removed in TimelyChurch")),
             };
-            ui.label(egui::RichText::new(state).size(12.0).color(colour));
-            ui.end_row();
+            // How it stands, at the right in the fixed-width face's capitals, wrapped where the
+            // row's words would otherwise have too little room.
+            let room = (ui.available_width() - 16.0 - parts::LABEL_ROOM).max(80.0);
+            let caps = crate::studio::fixed_semibold(11.0);
+            let state = parts::words(ui, &state.to_uppercase(), caps, colour, 0.66, room);
+            parts::row(ui, &row.name, &line, state.size(), |ui, place| {
+                ui.painter().galley(pos2(place.max.x - state.size().x, place.min.y), state.clone(), colour);
+            });
+        }
+    });
+    let about = if view.trouble.is_some() {
+        t("integrations.timelychurch.state.trouble", "Can't reach it")
+    } else {
+        t("integrations.state.connected", "Connected")
+    };
+    parts::card(ui, t("integrations.connection.title", "Connection"), about, None, |ui| {
+        if let Some(trouble) = &view.trouble {
+            warn(ui, trouble);
+        }
+        let when = if view.checking {
+            t("integrations.timelychurch.checking", "checking now").to_owned()
+        } else {
+            match view.last_checked {
+                Some(at) => {
+                    tf("integrations.timelychurch.checked", "last checked {when}", &[("when", &checked_words(at))])
+                }
+                None => t("integrations.timelychurch.not_checked", "not checked yet").to_owned(),
+            }
+        };
+        let said = tf(
+            "integrations.timelychurch.connected_to",
+            "Connected to {church} · {when}",
+            &[("church", &view.church), ("when", &when)],
+        );
+        let hints = t(
+            "integrations.timelychurch.connection.line",
+            "Check Now asks TimelyChurch for changes now (it is asked every few minutes anyway). Disconnect forgets the connection on this computer; the songs and playlists it made stay",
+        );
+        let keys = [
+            parts::Key::plain(t("integrations.timelychurch.check_now", "Check Now")).enabled(!view.checking),
+            parts::Key::plain(t("integrations.disconnect", "Disconnect")),
+        ];
+        let address = (!view.address.is_empty()).then_some(view.address.as_str());
+        match parts::keys_row(ui, "timelychurch connection", &said, hints, address, &keys) {
+            Some(0) => *request = Some(crate::timelychurch::Request::CheckNow),
+            Some(_) => ask_to_disconnect(ui, "timelychurch"),
+            None => {}
+        }
+        if view.uses_waiting > 0 {
+            let waiting = tn(
+                "integrations.timelychurch.uses_waiting",
+                view.uses_waiting as u64,
+                "{n} song shown is waiting to be told to TimelyChurch.",
+                "{n} songs shown are waiting to be told to TimelyChurch.",
+                &[],
+            );
+            parts::note(ui, &waiting);
         }
     });
 }
@@ -831,148 +949,262 @@ fn disconnect_answered(ui: &egui::Ui, service: &str, question: &str, note: &str)
     answer
 }
 
-/// How to connect: the integration's ID and secret and Sign In, or the old script's sign-in.
+/// Connect: how to make the church's own integration in Canva, the redirect URL to give it with
+/// Copy, its client ID and secret, and Sign In with Canva (or, while the browser is waited for,
+/// Stop). Then, where this Mac has the old sync script's sign-in, the way to take it over.
 fn canva_connect(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut Option<crate::canva::Request>) {
     use crate::canva::{Phase, Request as R};
-    if let crate::canva::Status::Refused(why) = &view.status {
-        ui.label(egui::RichText::new(why.as_str()).color(crate::studio::TALLY));
-        ui.add_space(6.0);
-    }
-    crate::studio::caption(ui, t("integrations.connect.caption", "CONNECT"));
-    ui.label(
-        egui::RichText::new(
+    let about = t("integrations.canva.connect.sub", "Canva Sync uses an integration your church makes in Canva");
+    parts::card(ui, t("integrations.connect.title", "Connect"), about, None, |ui| {
+        if let crate::canva::Status::Refused(why) = &view.status {
+            warn(ui, why);
+        }
+        parts::note(
+            ui,
             if cfg!(target_os = "macos") {
-                t("integrations.canva.connect.about", "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; then copy its client ID and make a secret. The secret and the sign-in are kept in this Mac's Keychain and sent only to Canva.")
+                t(
+                    "integrations.canva.connect.about",
+                    "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; then copy its client ID and make a secret. The secret and the sign-in are kept in this Mac's Keychain and sent only to Canva.",
+                )
             } else if cfg!(windows) {
-                t("integrations.canva.connect.about.windows", "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; then copy its client ID and make a secret. The secret and the sign-in are kept in Windows' Credential Manager on this computer and sent only to Canva.")
+                t(
+                    "integrations.canva.connect.about.windows",
+                    "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; then copy its client ID and make a secret. The secret and the sign-in are kept in Windows' Credential Manager on this computer and sent only to Canva.",
+                )
             } else {
-                t("integrations.canva.connect.about.linux", "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; then copy its client ID and make a secret. The secret and the sign-in are kept in this computer's keyring and sent only to Canva.")
+                t(
+                    "integrations.canva.connect.about.linux",
+                    "Make an integration of your church's own in Canva's developer portal (canva.com/developers, Your integrations). Under Scopes tick design:content:read; under Authentication add the redirect URL below; then copy its client ID and make a secret. The secret and the sign-in are kept in this computer's keyring and sent only to Canva.",
+                )
             },
-        )
-        .size(12.0)
-        .color(TEXT_DIM),
-    );
-    ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(view.redirect.as_str()).monospace().color(TEXT));
-        if ui.small_button(t("integrations.copy", "Copy")).clicked() {
+        );
+        let redirect = t("integrations.canva.redirect", "Redirect URL");
+        let copy = [parts::Key::plain(t("integrations.copy", "Copy"))];
+        if parts::keys_row(ui, "canva redirect", redirect, "", Some(view.redirect.as_str()), &copy).is_some() {
             ui.ctx().copy_text(view.redirect.clone());
         }
-    });
-    ui.add_space(6.0);
-    egui::Grid::new("canva connect").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-        ui.label(egui::RichText::new(t("integrations.canva.client_id", "Client ID")).color(TEXT_DIM));
-        ui.add(egui::TextEdit::singleline(&mut view.typed_id).desired_width(300.0));
-        ui.end_row();
-        ui.label(egui::RichText::new(t("integrations.canva.client_secret", "Client secret")).color(TEXT_DIM));
-        ui.add(egui::TextEdit::singleline(&mut view.typed_secret).password(true).desired_width(300.0));
-        ui.end_row();
-    });
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
+        let id = t("integrations.canva.client_id", "Client ID");
+        parts::field_row(ui, "canva client id", id, "", &mut view.typed_id, (false, ""), 190.0, None);
+        let secret = t("integrations.canva.client_secret", "Client secret");
+        parts::field_row(ui, "canva client secret", secret, "", &mut view.typed_secret, (true, ""), 190.0, None);
         if view.phase == Phase::SigningIn {
-            ui.label(egui::RichText::new(view.phase.words()).color(CANVA_LIGHT));
-            if ui.button(t("integrations.canva.stop", "Stop")).clicked() {
+            let stop = [parts::Key::plain(t("integrations.canva.stop", "Stop"))];
+            if parts::keys_line(ui, "canva sign in", &view.phase.words(), &stop).is_some() {
                 *request = Some(R::Stop);
             }
         } else {
             let filled = !view.typed_id.trim().is_empty() && !view.typed_secret.trim().is_empty();
-            if ui
-                .add_enabled(
-                    filled && !view.phase.busy(),
-                    egui::Button::new(t("integrations.canva.sign_in", "Sign In with Canva")),
-                )
-                .on_hover_text(t("integrations.canva.sign_in.hint", "Opens Canva's sign-in in your browser"))
-                .clicked()
-            {
+            let sign_in = parts::Key::main(t("integrations.canva.sign_in", "Sign In with Canva"))
+                .enabled(filled && !view.phase.busy());
+            let hint = t("integrations.canva.sign_in.hint", "Opens Canva's sign-in in your browser");
+            if parts::keys_line(ui, "canva sign in", hint, &[sign_in]).is_some() {
                 *request = Some(R::SignIn(view.typed_id.trim().to_owned(), std::mem::take(&mut view.typed_secret)));
             }
         }
     });
     if view.old_here {
-        ui.add_space(12.0);
-        crate::studio::caption(ui, t("integrations.canva.old.caption", "THE OLD SYNC SCRIPT"));
-        ui.label(
-            egui::RichText::new(
-                t("integrations.canva.old.about", "This Mac has the sign-in of the old Canva sync script. SoftPresenter can take it over: it reads it from there itself, keeps it in the Keychain, and takes the script's token file away. Then switch the old script off."),
-            )
-            .size(12.0)
-            .color(TEXT_DIM),
-        );
-        if ui
-            .add_enabled(
-                !view.phase.busy(),
-                egui::Button::new(t("integrations.canva.old.use", "Use the Sign-in from the Old Sync Script")),
-            )
-            .clicked()
-        {
-            *request = Some(R::Import);
-        }
-    }
-}
-
-/// The old script must go now that its sign-in is here: what to type to switch it off.
-fn old_script_warning(ui: &mut egui::Ui, view: &crate::canva::View, request: &mut Option<crate::canva::Request>) {
-    egui::Frame::new().fill(Color32::from_rgb(60, 32, 30)).corner_radius(8.0).inner_margin(10.0).show(ui, |ui| {
-        let words = if view.settings.hold_syncs {
-            t("integrations.canva.old.warning.held", "Switch the old sync script off now. It and SoftPresenter can't both use the sign-in: whichever refreshes it next breaks the other's. Its token file couldn't be taken away, so it could still refresh it: nothing is synced until you click It's Switched Off. In Terminal on this Mac:")
-        } else {
-            t("integrations.canva.old.warning", "Switch the old sync script off now. It and SoftPresenter can't both use the sign-in: whichever refreshes it next breaks the other's. Its token file is gone, so it can't refresh any more, but it should not be left running. In Terminal on this Mac:")
-        };
-        ui.label(egui::RichText::new(words).color(TEXT));
-        ui.add_space(4.0);
-        for step in &view.old_steps {
-            ui.label(egui::RichText::new(step.as_str()).monospace().size(12.0).color(TEXT));
-        }
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            if ui.button(t("integrations.canva.old.copy", "Copy the Steps")).clicked() {
-                ui.ctx().copy_text(view.old_steps.join("\n"));
-            }
-            if ui.button(t("integrations.canva.old.off", "It's Switched Off")).clicked() {
-                *request = Some(crate::canva::Request::OldScriptOff);
+        let title = t("integrations.canva.old.title", "The old sync script");
+        parts::card(ui, title, t("integrations.canva.old.found", "Found on this Mac"), None, |ui| {
+            parts::note(
+                ui,
+                t(
+                    "integrations.canva.old.about",
+                    "This Mac has the sign-in of the old Canva sync script. SoftPresenter can take it over: it reads it from there itself, keeps it in the Keychain, and takes the script's token file away. Then switch the old script off.",
+                ),
+            );
+            let key = parts::Key::plain(t("integrations.canva.old.use", "Use the Sign-in from the Old Sync Script"))
+                .enabled(!view.phase.busy());
+            if parts::keys_line(ui, "canva old use", "", &[key]).is_some() {
+                *request = Some(R::Import);
             }
         });
+    }
+}
+
+/// The old script must go now that its sign-in is here: what to type to switch it off, Copy the
+/// Steps, and It's Switched Off. First on the page, as nothing is synced until it is off when
+/// its token file couldn't be taken away.
+fn old_script_warning(ui: &mut egui::Ui, view: &crate::canva::View, request: &mut Option<crate::canva::Request>) {
+    let title = t("integrations.canva.old.title", "The old sync script");
+    parts::card(ui, title, t("integrations.canva.old.found", "Found on this Mac"), None, |ui| {
+        let words = if view.settings.hold_syncs {
+            t(
+                "integrations.canva.old.warning.held",
+                "Switch the old sync script off now. It and SoftPresenter can't both use the sign-in: whichever refreshes it next breaks the other's. Its token file couldn't be taken away, so it could still refresh it: nothing is synced until you click It's Switched Off. In Terminal on this Mac:",
+            )
+        } else {
+            t(
+                "integrations.canva.old.warning",
+                "Switch the old sync script off now. It and SoftPresenter can't both use the sign-in: whichever refreshes it next breaks the other's. Its token file is gone, so it can't refresh any more, but it should not be left running. In Terminal on this Mac:",
+            )
+        };
+        warn(ui, words);
+        parts::code(ui, &view.old_steps.join("\n"));
+        ui.add_space(12.0);
+        let keys = [
+            parts::Key::plain(t("integrations.canva.old.copy", "Copy the Steps")),
+            parts::Key::plain(t("integrations.canva.old.off", "It's Switched Off")),
+        ];
+        match parts::keys_line(ui, "canva old script", "", &keys) {
+            Some(0) => ui.ctx().copy_text(view.old_steps.join("\n")),
+            Some(_) => *request = Some(crate::canva::Request::OldScriptOff),
+            None => {}
+        }
     });
 }
 
-/// The design: its link, its pages to choose the divider from, and where the video goes.
-fn canva_design(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut Option<crate::canva::Request>) {
+/// The presentation: its link with Read Pages (Read Pages Again once there is a design, Return in
+/// the field too), its pages as a strip of numbered tiles to click the divider in, and what the
+/// divider leaves in the video.
+fn design_card(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut Option<crate::canva::Request>) {
     use crate::canva::{Phase, Request as R};
-    crate::studio::caption(ui, t("integrations.canva.design.caption", "THE PRESENTATION"));
-    ui.label(
-        egui::RichText::new(t(
+    let about = t("integrations.canva.design.sub", "Its link and its divider page");
+    parts::card(ui, t("integrations.canva.design.title", "The presentation"), about, None, |ui| {
+        let busy = view.phase.busy();
+        let (read, read_again) =
+            (t("integrations.canva.read", "Read Pages"), t("integrations.canva.read_again", "Read Pages Again"));
+        let wordings = [read, read_again];
+        // A link typed is read with Read Pages; with none typed, the design chosen is read again.
+        let reading_new = !view.typed_link.trim().is_empty();
+        let key = match (reading_new, view.settings.design.is_some()) {
+            (true, _) => parts::Key::plain(read).enabled(!busy),
+            (false, true) => parts::Key::plain(read_again).enabled(!busy),
+            (false, false) => parts::Key::plain(read).enabled(false),
+        };
+        let hint = view.settings.design.clone().unwrap_or_else(|| "https://www.canva.com/design/…".to_owned());
+        let how = t(
             "integrations.canva.design.about",
             "Paste the presentation's link (in Canva, Share › Copy link), then choose its divider page.",
-        ))
-        .size(12.0)
-        .color(TEXT_DIM),
-    );
-    ui.horizontal(|ui| {
-        let hint = view.settings.design.clone().unwrap_or_else(|| "https://www.canva.com/design/…".to_owned());
-        let field = ui.add(egui::TextEdit::singleline(&mut view.typed_link).hint_text(hint).desired_width(300.0));
+        );
+        let (field, clicked) = parts::field_row(
+            ui,
+            "canva link",
+            t("integrations.canva.link", "Link"),
+            how,
+            &mut view.typed_link,
+            (false, hint.as_str()),
+            230.0,
+            Some(key.as_wide_as(&wordings)),
+        );
         let entered = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        let busy = view.phase.busy();
-        if !view.typed_link.trim().is_empty()
-            && (entered
-                || ui.add_enabled(!busy, egui::Button::new(t("integrations.canva.read", "Read Pages"))).clicked())
-        {
+        let typed = !view.typed_link.trim().is_empty();
+        if typed && (entered || (clicked && reading_new)) {
             *request = Some(R::Design(std::mem::take(&mut view.typed_link)));
-        } else if view.typed_link.trim().is_empty()
-            && view.settings.design.is_some()
-            && ui
-                .add_enabled(!busy, egui::Button::new(t("integrations.canva.read_again", "Read Pages Again")))
-                .clicked()
-        {
+        } else if clicked && !reading_new && view.settings.design.is_some() {
             *request = Some(R::ReadPages);
         }
+        if view.phase == Phase::ReadingPages {
+            parts::coloured_note(ui, &view.phase.words(), TEXT_DIM);
+        }
+        if !view.pages.is_empty()
+            && let Some(id) = pages_strip(ui, view)
+        {
+            *request = Some(R::Divider(id));
+        }
+        divider_words(ui, view);
     });
-    if view.phase == Phase::ReadingPages {
-        ui.label(egui::RichText::new(view.phase.words()).size(12.0).color(CANVA_LIGHT));
+}
+
+/// The design's pages as a strip of numbered 16:9 tiles, wrapping: each its picture, the pages
+/// above the divider as they are and those under it dimmed, the divider ringed and named. A click
+/// makes a page the divider: its id.
+fn pages_strip(ui: &mut egui::Ui, view: &mut crate::canva::View) -> Option<String> {
+    const TILE: egui::Vec2 = egui::vec2(96.0, 54.0);
+    const BETWEEN: f32 = 8.0;
+    let crate::canva::View { pages, textures, settings, .. } = view;
+    let pages: Vec<&crate::canva::PageView> = pages.iter().filter(|page| page.id.is_some()).collect();
+    if pages.is_empty() {
+        return None;
     }
-    match (view.settings.divider_number, view.settings.divider.is_some()) {
+    let width = ui.available_width();
+    let across = (((width + BETWEEN) / (TILE.x + BETWEEN)).floor() as usize).max(1);
+    let caps = crate::studio::fixed_semibold(11.0);
+    let label_height = parts::words(ui, "0", caps.clone(), TEXT_DIM, 0.44, f32::INFINITY).size().y;
+    let slot = TILE.y + 5.0 + label_height;
+    let rows = pages.len().div_ceil(across);
+    ui.add_space(2.0);
+    let (place, _) =
+        ui.allocate_exact_size(vec2(width, rows as f32 * slot + (rows - 1) as f32 * BETWEEN), Sense::hover());
+    let mut chosen = None;
+    for (index, page) in pages.iter().enumerate() {
+        let Some(id) = page.id.clone() else { continue };
+        let corner =
+            place.min + vec2((index % across) as f32 * (TILE.x + BETWEEN), (index / across) as f32 * (slot + BETWEEN));
+        let picture = Rect::from_min_size(corner, TILE);
+        let response = ui.interact(
+            Rect::from_min_size(corner, vec2(TILE.x, slot)),
+            ui.scope_id().with(("canva page", &id)),
+            Sense::click(),
+        );
+        let number = page.number.to_string();
+        // Its name for a screen reader, which the pointer's tip used to say.
+        let named = tf("integrations.canva.page.hint", "Make page {number} the divider", &[("number", &number)]);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &named));
+        let divider = settings.divider.as_deref() == Some(id.as_str());
+        let above = settings.divider_number.is_some_and(|divider| page.number < divider);
+        let below = settings.divider_number.is_some_and(|divider| page.number > divider);
+        let ground = if divider {
+            Color32::from_gray(0x1a)
+        } else if above {
+            Color32::from_gray(0x2b)
+        } else {
+            CARD
+        };
+        ui.painter().rect_filled(picture, 6.0, ground);
+        if let Some(frame) = &page.picture {
+            let texture = match textures.iter().find(|(have, _)| *have == id) {
+                Some((_, texture)) => texture.clone(),
+                None => {
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                        [frame.width as usize, frame.height as usize],
+                        &frame.rgba,
+                    );
+                    let texture =
+                        ui.ctx().load_texture(format!("canva page {id}"), image, egui::TextureOptions::LINEAR);
+                    textures.push((id.clone(), texture.clone()));
+                    texture
+                }
+            };
+            let aspect = frame.width as f32 / frame.height.max(1) as f32;
+            let fitted =
+                if aspect > TILE.x / TILE.y { vec2(TILE.x, TILE.x / aspect) } else { vec2(TILE.y * aspect, TILE.y) };
+            egui::Image::new((texture.id(), fitted))
+                .corner_radius(6.0)
+                .paint_at(ui, Rect::from_center_size(picture.center(), fitted));
+        }
+        if below {
+            ui.painter().rect_filled(picture, 6.0, Color32::from_black_alpha(140));
+        }
+        if divider {
+            ui.painter().rect_stroke(picture, 6.0, Stroke::new(2.0, TEXT), egui::StrokeKind::Outside);
+        } else {
+            let ring = if response.hovered() { TEXT_FAINT } else { LINE };
+            ui.painter().rect_stroke(picture, 6.0, Stroke::new(1.0, ring), egui::StrokeKind::Inside);
+        }
+        let label = if divider {
+            tf("integrations.canva.page.divider", "{number} · divider", &[("number", &number)])
+        } else {
+            number
+        };
+        let ink = if divider { TEXT } else { TEXT_DIM };
+        let label = parts::words(ui, &label, caps.clone(), ink, 0.44, f32::INFINITY);
+        // Under its tile, kept inside the strip where it is wider than the tile.
+        let left = (picture.center().x - label.size().x / 2.0).clamp(place.min.x, place.max.x - label.size().x);
+        ui.painter().galley(pos2(left, picture.max.y + 5.0), label, ink);
+        if response.clicked() {
+            chosen = Some(id);
+        }
+    }
+    ui.add_space(10.0);
+    chosen
+}
+
+/// Which pages go in the video, in ink, then how the divider is chosen, dim, as one paragraph.
+fn divider_words(ui: &mut egui::Ui, view: &crate::canva::View) {
+    let said = match (view.settings.divider_number, view.settings.divider.is_some()) {
         (Some(number), true) if number > 1 => {
             let (page, last) = (number.to_string(), (number - 1).to_string());
-            let said = if number == 2 {
+            Some(if number == 2 {
                 tf(
                     "integrations.canva.divider.one",
                     "Divider: page {number}. Page 1 goes in the video; drag old slides below it in Canva.",
@@ -984,219 +1216,42 @@ fn canva_design(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut 
                     "Divider: page {number}. Pages 1–{last} go in the video; drag old slides below it in Canva.",
                     &[("number", &page), ("last", &last)],
                 )
-            };
-            ui.label(egui::RichText::new(said).color(TEXT));
+            })
         }
-        _ if view.settings.design.is_some() => {
-            ui.label(
-                egui::RichText::new(t(
-                    "integrations.canva.divider.none",
-                    "No divider page chosen yet: read the pages and click it.",
-                ))
-                .color(TEXT_FAINT),
-            );
-        }
-        _ => {}
-    }
-    if !view.pages.is_empty() {
-        ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new(t("integrations.canva.divider.about", "Click the divider page. Canva can't tell SoftPresenter which slides are hidden, so the divider says where the video stops."))
-                .size(11.5)
-                .color(TEXT_FAINT),
-        );
-        ui.add_space(4.0);
-        let mut chosen = None;
-        ui.horizontal_wrapped(|ui| {
-            for page in &view.pages {
-                let Some(id) = page.id.clone() else { continue };
-                let size = vec2(128.0, 72.0);
-                let (place, response) = ui.allocate_exact_size(size + vec2(0.0, 16.0), Sense::click());
-                let picture = Rect::from_min_size(place.min, size);
-                ui.painter().rect_filled(picture, 4.0, Color32::from_rgb(20, 22, 26));
-                if let Some(frame) = &page.picture {
-                    let texture = match view.textures.iter().find(|(have, _)| *have == id) {
-                        Some((_, texture)) => texture.clone(),
-                        None => {
-                            let image = egui::ColorImage::from_rgba_unmultiplied(
-                                [frame.width as usize, frame.height as usize],
-                                &frame.rgba,
-                            );
-                            let texture =
-                                ui.ctx().load_texture(format!("canva page {id}"), image, egui::TextureOptions::LINEAR);
-                            view.textures.push((id.clone(), texture.clone()));
-                            texture
-                        }
-                    };
-                    let aspect = frame.width as f32 / frame.height.max(1) as f32;
-                    let fitted = if aspect > size.x / size.y {
-                        vec2(size.x, size.x / aspect)
-                    } else {
-                        vec2(size.y * aspect, size.y)
-                    };
-                    egui::Image::new((texture.id(), fitted))
-                        .corner_radius(4.0)
-                        .paint_at(ui, Rect::from_center_size(picture.center(), fitted));
-                }
-                let divider = view.settings.divider.as_deref() == Some(id.as_str());
-                let below = view.settings.divider_number.is_some_and(|number| page.number > number);
-                let outline = if divider {
-                    Stroke::new(2.5, crate::studio::TALLY)
-                } else if response.hovered() {
-                    Stroke::new(1.5, TEXT_DIM)
-                } else {
-                    Stroke::new(1.0, LINE)
-                };
-                ui.painter().rect_stroke(picture, 4.0, outline, egui::StrokeKind::Outside);
-                if below {
-                    ui.painter().rect_filled(picture, 4.0, Color32::from_black_alpha(140));
-                }
-                let label = if divider {
-                    tf("integrations.canva.page.divider", "{number} · divider", &[("number", &page.number.to_string())])
-                } else {
-                    page.number.to_string()
-                };
-                ui.painter().text(
-                    pos2(picture.center().x, picture.max.y + 8.0),
-                    Align2::CENTER_CENTER,
-                    label,
-                    FontId::proportional(11.0),
-                    if divider { crate::studio::TALLY } else { TEXT_DIM },
-                );
-                if response
-                    .on_hover_text(tf(
-                        "integrations.canva.page.hint",
-                        "Make page {number} the divider",
-                        &[("number", &page.number.to_string())],
-                    ))
-                    .clicked()
-                {
-                    chosen = Some(id);
-                }
-            }
-        });
-        if let Some(id) = chosen {
-            *request = Some(R::Divider(id));
-        }
-    }
-    ui.add_space(12.0);
-    crate::studio::caption(ui, t("integrations.canva.where.caption", "WHERE IT GOES"));
-    ui.label(
-        egui::RichText::new(
-            t("integrations.canva.where.about", "Media › Canva Sync in the library, followed by the media playlist Announcements (made when the divider is chosen). One video is kept there, named with its day and time so volunteers can read it."),
+        _ if view.settings.design.is_some() => Some(
+            t("integrations.canva.divider.none", "No divider page chosen yet: read the pages and click it.").to_owned(),
+        ),
+        _ => None,
+    };
+    // How to choose it, once there are pages to click.
+    let how = (!view.pages.is_empty()).then(|| {
+        t(
+            "integrations.canva.divider.about",
+            "Click the divider page. Canva can't tell SoftPresenter which slides are hidden, so the divider says where the video stops.",
         )
-        .size(12.0)
-        .color(TEXT_DIM),
-    );
-}
-
-/// Where the key is pasted, and how to get one.
-fn connect_form(ui: &mut egui::Ui, view: &mut View) {
-    crate::studio::caption(ui, t("integrations.connect.caption", "CONNECT"));
-    ui.label(
-        egui::RichText::new(
-            if cfg!(target_os = "macos") {
-                t("integrations.voxlive.connect.about", "In VoxLive, open Settings › API keys and make a key with the screens permissions (read and write). Paste it here. It is kept in this Mac's Keychain and sent only to VoxLive.")
-            } else if cfg!(windows) {
-                t("integrations.voxlive.connect.about.windows", "In VoxLive, open Settings › API keys and make a key with the screens permissions (read and write). Paste it here. It is kept in Windows' Credential Manager on this computer and sent only to VoxLive.")
-            } else {
-                t("integrations.voxlive.connect.about.linux", "In VoxLive, open Settings › API keys and make a key with the screens permissions (read and write). Paste it here. It is kept in this computer's keyring and sent only to VoxLive.")
-            },
-        )
-        .size(12.0)
-        .color(TEXT_DIM),
-    );
-    ui.add_space(6.0);
-    let mut connect = false;
-    ui.horizontal(|ui| {
-        let field = ui.add(
-            egui::TextEdit::singleline(&mut view.typed)
-                .password(true)
-                .hint_text("vxk_live_…")
-                .desired_width(ui.available_width() - 100.0),
-        );
-        connect |= field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        connect |= ui
-            .add_enabled(!view.typed.trim().is_empty(), egui::Button::new(t("integrations.voxlive.connect", "Connect")))
-            .clicked();
     });
-    if connect && !view.typed.trim().is_empty() {
-        view.request = Some(Request::Connect(std::mem::take(&mut view.typed)));
-    }
-    if let Some(problem) = &view.problem {
-        ui.label(egui::RichText::new(problem.as_str()).size(12.0).color(crate::studio::TALLY));
-    }
-}
-
-/// The church's VoxLive screens, as last found.
-fn screens(ui: &mut egui::Ui, view: &mut View) {
-    crate::studio::caption(ui, t("integrations.voxlive.screens.caption", "YOUR VOXLIVE SCREENS"));
-    if view.screens.is_empty() {
-        let words = match view.status {
-            Status::Connected => t(
-                "integrations.voxlive.screens.none",
-                "No screens yet. Make one in VoxLive (Screens), then Find Screens Again.",
-            ),
-            _ => t("integrations.voxlive.screens.not_yet", "Not found yet."),
-        };
-        ui.label(egui::RichText::new(words).size(12.0).color(TEXT_FAINT));
+    if said.is_none() && how.is_none() {
         return;
     }
-    let mut open = None;
-    for screen in &view.screens {
-        // A screen with a page can have its look changed: a click opens it.
-        let can_open = !screen.url.is_empty() && !view.schema.is_empty();
-        let sense = if can_open { Sense::click() } else { Sense::hover() };
-        let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), sense);
-        if response.hovered() && can_open {
-            ui.painter().rect_filled(row, 5.0, HOVER);
-        }
-        ui.painter().text(
-            row.left_center() + vec2(4.0, 0.0),
-            Align2::LEFT_CENTER,
-            screen.label(),
-            FontId::proportional(13.0),
-            TEXT,
-        );
-        let kind = match screen.kind() {
-            "captions" => t("integrations.voxlive.kind.captions", "Captions"),
-            "Scripture" => t("integrations.voxlive.kind.scripture", "Scripture"),
-            other => other,
-        };
-        let kind = if can_open {
-            tf("integrations.voxlive.change_look", "{kind}   Change Look ›", &[("kind", kind)])
-        } else {
-            kind.to_owned()
-        };
-        ui.painter().text(
-            row.right_center() - vec2(4.0, 0.0),
-            Align2::RIGHT_CENTER,
-            kind,
-            FontId::proportional(11.5),
-            VOXLIVE_LIGHT,
-        );
-        ui.painter().hline(row.x_range(), row.max.y, Stroke::new(1.0, LINE));
-        if response
-            .on_hover_text(t(
-                "integrations.voxlive.change_look.hint",
-                "Change how this screen looks, here; it is saved to VoxLive",
-            ))
-            .clicked()
-        {
-            open = Some(screen.id.clone());
-        }
+    let width = ui.available_width();
+    let mut job = egui::text::LayoutJob::default();
+    let format = |font: FontId, color: Color32| egui::TextFormat {
+        font_id: font,
+        color,
+        line_height: Some(18.0),
+        ..Default::default()
+    };
+    if let Some(said) = &said {
+        job.append(said, 0.0, format(semibold(12.5), TEXT));
     }
-    if let Some(screen) = open {
-        view.request = Some(Request::OpenLook(screen));
+    if let Some(how) = how {
+        job.append(how, if said.is_some() { 4.0 } else { 0.0 }, format(FontId::proportional(12.5), TEXT_DIM));
     }
-    ui.add_space(6.0);
-    ui.label(
-        egui::RichText::new(
-            t("integrations.voxlive.screens.about", "A screen's live display is opened only on your real screens, where it shows the captions (and can start that language's translation); previews use its free test pattern."),
-        )
-        .size(11.5)
-        .color(TEXT_FAINT),
-    );
+    job.wrap.max_width = width.min(620.0);
+    let galley = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
+    let (place, _) = ui.allocate_exact_size(vec2(width, galley.size().y), Sense::hover());
+    ui.painter().galley(place.min, galley, TEXT);
+    ui.add_space(12.0);
 }
 
 /// A screen's look: a preview, a control for each setting of its mode, and Save to VoxLive.
@@ -1570,7 +1625,7 @@ mod tests {
             assert!(listed.iter().any(|w| w == "TimelyChurch") && listed.iter().any(|w| w == "Connect"), "{listed:?}");
             card.open = true;
             let page = words_drawn_with(None, Some(&mut card));
-            for words in ["CONNECT TO TIMELYCHURCH", "Address", "Pairing code", "Connect"] {
+            for words in ["Connect to TimelyChurch", "Address", "Pairing code", "Connect"] {
                 assert!(page.iter().any(|w| w == words), "{words}: {page:?}");
             }
             card.status = Status::Connected;
@@ -1583,11 +1638,576 @@ mod tests {
                 "Check Now",
                 "Disconnect",
                 "2 songs",
-                "Removed in TimelyChurch",
+                "REMOVED IN TIMELYCHURCH",
             ] {
                 assert!(connected.iter().any(|w| w == words), "{words}: {connected:?}");
             }
             assert!(!connected.iter().any(|w| w == "Pairing code"), "{connected:?}");
+        });
+    }
+
+    /// The three services' views a page is drawn from.
+    #[derive(Default)]
+    struct Services {
+        voxlive: View,
+        canva: crate::canva::View,
+        timelychurch: crate::timelychurch::View,
+    }
+
+    /// Draws the pane twice (the second with every size known) in a page `width` wide, with what
+    /// the pointer and keys did in `events` on the second, and gives the words drawn and where.
+    fn drawn(
+        ctx: &egui::Context,
+        services: &mut Services,
+        width: f32,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, Rect)> {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => into.push((text.galley.text().to_owned(), text.visual_bounding_rect())),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let mut words = Vec::new();
+        for round in 0..2 {
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 4000.0))),
+                events: if round == 1 { events.clone() } else { Vec::new() },
+                ..egui::RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+                    let Services { voxlive, canva, timelychurch } = services;
+                    pane(ui, voxlive, canva, None, timelychurch);
+                });
+            });
+            words.clear();
+            output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut words));
+            output.drop_without_applying_deltas();
+        }
+        words
+    }
+
+    fn has(words: &[(String, Rect)], wanted: &str) -> bool {
+        words.iter().any(|(said, _)| said == wanted)
+    }
+
+    /// Where the words `wanted` are drawn (the last place, when there are several).
+    fn at(words: &[(String, Rect)], wanted: &str) -> Rect {
+        words.iter().rev().find(|(said, _)| said == wanted).map(|(_, rect)| *rect).unwrap_or_else(|| {
+            panic!("{wanted} isn't drawn: {:?}", words.iter().map(|(said, _)| said).collect::<Vec<_>>())
+        })
+    }
+
+    /// Presses and lets go at `point`.
+    fn click_at(ctx: &egui::Context, services: &mut Services, point: egui::Pos2) {
+        let press = |pressed| egui::Event::PointerButton {
+            pos: point,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        drawn(ctx, services, 740.0, vec![egui::Event::PointerMoved(point), press(true)]);
+        drawn(ctx, services, 740.0, vec![press(false)]);
+    }
+
+    /// Clicks the words `name` where the page draws them.
+    fn click(ctx: &egui::Context, services: &mut Services, name: &str) {
+        let words = drawn(ctx, services, 740.0, vec![]);
+        click_at(ctx, services, at(&words, name).center());
+    }
+
+    /// Clicks into the field at the right end of the row named `label` (or, for a field with a
+    /// key after it, on the words `label` drawn in it while it is empty), and types `text`.
+    fn type_into(ctx: &egui::Context, services: &mut Services, label: &str, text: &str) {
+        let words = drawn(ctx, services, 740.0, vec![]);
+        let place = at(&words, label);
+        // A field alone is 190 wide at the row's right end, inside the card's margin.
+        let point =
+            if place.min.x > 300.0 { place.center() } else { egui::pos2(740.0 - 18.0 - 60.0, place.center().y) };
+        click_at(ctx, services, point);
+        drawn(ctx, services, 740.0, vec![egui::Event::Text(text.to_owned())]);
+    }
+
+    fn press_return(ctx: &egui::Context, services: &mut Services) {
+        let key = egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        drawn(ctx, services, 740.0, vec![key]);
+    }
+
+    /// Whether Disconnect asked its question; the question is closed again, so the page takes
+    /// clicks after it.
+    fn asked_to_disconnect(ctx: &egui::Context, service: &str) -> bool {
+        let asked = ctx.data(|data| data.get_temp::<bool>(disconnecting_id(service))).unwrap_or(false);
+        ctx.data_mut(|data| data.remove::<bool>(disconnecting_id(service)));
+        asked
+    }
+
+    fn screen(id: &str, name: &str, language: &str, mode: &str, url: &str) -> crate::voxlive::Screen {
+        crate::voxlive::Screen {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            language: language.to_owned(),
+            mode: mode.to_owned(),
+            url: url.to_owned(),
+            ..Default::default()
+        }
+    }
+
+    /// VoxLive connected, with a screen whose look can be changed and one whose can't.
+    fn voxlive_connected() -> Services {
+        let mut services = Services::default();
+        let voxlive = &mut services.voxlive;
+        voxlive.open = true;
+        voxlive.status = Status::Connected;
+        voxlive.key_hint = Some("vxk_live_abc…".to_owned());
+        voxlive.screens = vec![
+            screen("one", "Main captions", "ru", "captions", "https://voxlive.app/display/one"),
+            screen("two", "Scripture", "uk", "reference", ""),
+        ];
+        voxlive.schema = vec![("bg".to_owned(), serde_json::json!({"type": "color"}))];
+        services
+    }
+
+    /// Canva Sync signed in, its design read, page 3 of 5 the divider, and a video made.
+    fn canva_connected() -> Services {
+        let mut services = Services::default();
+        let canva = &mut services.canva;
+        canva.open = true;
+        canva.status = crate::canva::Status::Connected;
+        canva.client_hint = Some("OC-AZq3…".to_owned());
+        canva.redirect = "http://127.0.0.1:47812/canva".to_owned();
+        canva.settings.design = Some("DAtestDesign1".to_owned());
+        canva.settings.divider = Some("p3".to_owned());
+        canva.settings.divider_number = Some(3);
+        canva.settings.updated_at = Some("2026-11-29T08:12:00+00:00".to_owned());
+        canva.settings.updated_file = Some("Announcements 2026-11-29 0812.mp4".to_owned());
+        canva.pages = (1..=5)
+            .map(|number| crate::canva::PageView { number, id: Some(format!("p{number}")), picture: None })
+            .collect();
+        services
+    }
+
+    fn canva_signed_out() -> Services {
+        let mut services = Services::default();
+        let canva = &mut services.canva;
+        canva.open = true;
+        canva.status = crate::canva::Status::NotConnected;
+        canva.redirect = "http://127.0.0.1:47812/canva".to_owned();
+        canva.old_here = true;
+        services
+    }
+
+    /// TimelyChurch connected, with a service in each state.
+    fn timelychurch_connected() -> Services {
+        use crate::timelychurch::{RowState, ServiceRow};
+        let mut services = Services::default();
+        let card = &mut services.timelychurch;
+        card.offered = true;
+        card.open = true;
+        card.status = crate::timelychurch::Status::Connected;
+        card.church = "Demo Church".to_owned();
+        card.address = "https://demo.timelychurch.test".to_owned();
+        card.uses_waiting = 1;
+        let row = |name: &str, date: &str, songs, state| ServiceRow {
+            name: name.to_owned(),
+            date: Some(date.to_owned()),
+            songs,
+            state,
+        };
+        card.services = vec![
+            row("Sunday Morning", "2026-11-29", 5, RowState::InStep),
+            row("Prayer Meeting", "2026-12-02", 3, RowState::ChangedHere),
+            row("Sunday Evening", "2026-12-06", 6, RowState::NewerWaiting),
+            row("Youth Night", "2026-12-04", 2, RowState::Removed),
+        ];
+        services
+    }
+
+    fn timelychurch_signed_out() -> Services {
+        let mut services = Services::default();
+        let card = &mut services.timelychurch;
+        card.offered = true;
+        card.open = true;
+        card.status = crate::timelychurch::Status::NotConnected;
+        card.asks_address = true;
+        services
+    }
+
+    #[test]
+    fn voxlive_shows_its_screens_then_the_connection_and_every_hint_as_a_line() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let ctx = crate::studio::tests::styled();
+            let mut services = voxlive_connected();
+            let words = drawn(&ctx, &mut services, 740.0, vec![]);
+            for wanted in [
+                "Your VoxLive screens",
+                "2 SCREENS",
+                "Main captions",
+                "Captions · RU · Change how this screen looks, here; it is saved to VoxLive",
+                "Scripture · UK",
+                "Connection",
+                "THE KEY, KEPT ON THIS COMPUTER",
+                "Key",
+                "vxk_live_abc…",
+                "Find Screens Again",
+                "Disconnect",
+                "Disconnect forgets the key on this computer (it stays in VoxLive until you revoke it there)",
+            ] {
+                assert!(has(&words, wanted), "{wanted}");
+            }
+            assert_eq!(
+                words.iter().filter(|(said, _)| said == "Change Look ›").count(),
+                1,
+                "a screen without a page has none"
+            );
+            assert!(
+                at(&words, "Your VoxLive screens").max.y < at(&words, "Connection").min.y,
+                "the screens come first"
+            );
+            assert!(
+                !has(&words, "With a key made in VoxLive".to_uppercase().as_str()),
+                "no Connect while the key is good"
+            );
+            // A key VoxLive refused: why, in the connection, and Connect to paste another.
+            services.voxlive.status = Status::Refused("VoxLive doesn't know that key.".to_owned());
+            let words = drawn(&ctx, &mut services, 740.0, vec![]);
+            assert!(has(&words, "VoxLive doesn't know that key.") && has(&words, "WITH A KEY MADE IN VOXLIVE"));
+            // No key: only Connect.
+            services.voxlive.status = Status::NoKey;
+            services.voxlive.key_hint = None;
+            services.voxlive.problem = Some("That isn't a VoxLive API key.".to_owned());
+            let words = drawn(&ctx, &mut services, 740.0, vec![]);
+            assert!(has(&words, "Connect") && has(&words, "WITH A KEY MADE IN VOXLIVE") && has(&words, "vxk_live_…"));
+            assert!(has(&words, "That isn't a VoxLive API key."));
+            assert!(!has(&words, "Your VoxLive screens") && !has(&words, "Find Screens Again"));
+        });
+    }
+
+    #[test]
+    fn voxlives_keys_ask_the_app_what_they_asked_before() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let ctx = crate::studio::tests::styled();
+            let mut services = voxlive_connected();
+            click(&ctx, &mut services, "Change Look ›");
+            assert_eq!(services.voxlive.request.take(), Some(Request::OpenLook("one".to_owned())));
+            click(&ctx, &mut services, "Find Screens Again");
+            assert_eq!(services.voxlive.request.take(), Some(Request::Refresh));
+            click(&ctx, &mut services, "Disconnect");
+            assert_eq!(services.voxlive.request, None, "it asks first");
+            assert!(asked_to_disconnect(&ctx, "voxlive"));
+            // With no key: typing one and Connect, or Return in the field.
+            let mut services = Services::default();
+            services.voxlive.open = true;
+            click(&ctx, &mut services, "Connect");
+            assert_eq!(services.voxlive.request, None, "nothing typed, nothing asked");
+            type_into(&ctx, &mut services, "vxk_live_…", "vxk_test_key");
+            click(&ctx, &mut services, "Connect");
+            assert_eq!(services.voxlive.request.take(), Some(Request::Connect("vxk_test_key".to_owned())));
+            assert!(services.voxlive.typed.is_empty(), "the key isn't kept once asked");
+            type_into(&ctx, &mut services, "vxk_live_…", "vxk_other_key");
+            press_return(&ctx, &mut services);
+            assert_eq!(services.voxlive.request.take(), Some(Request::Connect("vxk_other_key".to_owned())));
+        });
+    }
+
+    #[test]
+    fn canva_sync_shows_the_sync_the_presentation_where_it_goes_and_the_account() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let ctx = crate::studio::tests::styled();
+            let mut services = canva_connected();
+            let words = drawn(&ctx, &mut services, 740.0, vec![]);
+            for wanted in [
+                "Sync",
+                "THE ANNOUNCEMENTS VIDEO",
+                "Announcements 2026-11-29 0812.mp4",
+                "Sync Now",
+                "The presentation",
+                "ITS LINK AND ITS DIVIDER PAGE",
+                "Link",
+                "Read Pages Again",
+                "1",
+                "2",
+                "3 · divider",
+                "4",
+                "5",
+                "Where it goes",
+                "Account",
+                "Signed in",
+                "integration OC-AZq3… · Disconnect forgets the sign-in on this computer (it stays in Canva until you take it back there)",
+            ] {
+                assert!(has(&words, wanted), "{wanted}");
+            }
+            assert!(words.iter().any(|(said, _)| said.starts_with("Last updated ")));
+            assert!(words.iter().any(|(said, _)| said.starts_with("Divider: page 3. Pages 1–2 go in the video")));
+            let order = ["Sync", "The presentation", "Where it goes", "Account"].map(|title| at(&words, title).min.y);
+            assert!(order.is_sorted(), "{order:?}");
+            assert!(!has(&words, "The old sync script"), "only while it must be switched off");
+            // Nothing chosen yet: Sync Now waits for the design.
+            services.canva.settings = crate::canva::Settings::default();
+            services.canva.pages.clear();
+            let words = drawn(&ctx, &mut services, 740.0, vec![]);
+            assert!(
+                has(&words, "CHOOSE THE DESIGN FIRST") && has(&words, "Not synced yet") && has(&words, "Read Pages")
+            );
+        });
+    }
+
+    #[test]
+    fn canva_syncs_keys_ask_the_app_what_they_asked_before() {
+        use crate::canva::{Phase, Request as R};
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let ctx = crate::studio::tests::styled();
+            let mut services = canva_connected();
+            click(&ctx, &mut services, "Sync Now");
+            assert!(matches!(services.canva.request.take(), Some(R::SyncNow)));
+            click(&ctx, &mut services, "Read Pages Again");
+            assert!(matches!(services.canva.request.take(), Some(R::ReadPages)));
+            click(&ctx, &mut services, "2");
+            assert!(matches!(services.canva.request.take(), Some(R::Divider(id)) if id == "p2"));
+            type_into(&ctx, &mut services, "DAtestDesign1", "https://www.canva.com/design/DAnew/view");
+            press_return(&ctx, &mut services);
+            assert!(
+                matches!(services.canva.request.take(), Some(R::Design(link)) if link == "https://www.canva.com/design/DAnew/view")
+            );
+            type_into(&ctx, &mut services, "DAtestDesign1", "https://www.canva.com/design/DAother/view");
+            click(&ctx, &mut services, "Read Pages");
+            assert!(
+                matches!(services.canva.request.take(), Some(R::Design(link)) if link == "https://www.canva.com/design/DAother/view")
+            );
+            assert!(services.canva.typed_link.is_empty(), "the link typed is taken once asked");
+            click(&ctx, &mut services, "Disconnect");
+            assert!(services.canva.request.is_none(), "it asks first");
+            assert!(asked_to_disconnect(&ctx, "canva"));
+            // Syncing: what it is doing, and Stop with its line.
+            services.canva.phase = Phase::Starting;
+            let words = drawn(&ctx, &mut services, 740.0, vec![]);
+            assert!(has(&words, "Starting…") && has(&words, "Stop: the video in the media bin stays as it was"));
+            click(&ctx, &mut services, "Stop");
+            assert!(matches!(services.canva.request.take(), Some(R::Stop)));
+            // The old script to switch off: first on the page, and nothing synced while it holds.
+            services.canva.phase = Phase::Idle;
+            services.canva.settings.old_script_warning = true;
+            services.canva.settings.hold_syncs = true;
+            services.canva.old_steps = vec!["launchctl unload old-script.plist".to_owned()];
+            let words = drawn(&ctx, &mut services, 740.0, vec![]);
+            assert!(at(&words, "The old sync script").max.y < at(&words, "Sync").min.y);
+            click(&ctx, &mut services, "Sync Now");
+            assert!(services.canva.request.take().is_none());
+            click(&ctx, &mut services, "It's Switched Off");
+            assert!(matches!(services.canva.request.take(), Some(R::OldScriptOff)));
+        });
+    }
+
+    #[test]
+    fn canva_signed_out_connects_with_the_churchs_own_integration() {
+        use crate::canva::Request as R;
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let ctx = crate::studio::tests::styled();
+            let mut services = canva_signed_out();
+            let words = drawn(&ctx, &mut services, 740.0, vec![]);
+            for wanted in [
+                "Connect",
+                "CANVA SYNC USES AN INTEGRATION YOUR CHURCH MAKES IN CANVA",
+                "Redirect URL",
+                "http://127.0.0.1:47812/canva",
+                "Copy",
+                "Client ID",
+                "Client secret",
+                "Opens Canva's sign-in in your browser",
+                "Sign In with Canva",
+                "The old sync script",
+                "Use the Sign-in from the Old Sync Script",
+            ] {
+                assert!(has(&words, wanted), "{wanted}");
+            }
+            click(&ctx, &mut services, "Sign In with Canva");
+            assert!(services.canva.request.take().is_none(), "greyed until both are typed");
+            type_into(&ctx, &mut services, "Client ID", "OC-test-client");
+            type_into(&ctx, &mut services, "Client secret", "a-secret");
+            click(&ctx, &mut services, "Sign In with Canva");
+            assert!(
+                matches!(services.canva.request.take(), Some(R::SignIn(id, secret)) if id == "OC-test-client" && secret == "a-secret")
+            );
+            assert!(services.canva.typed_secret.is_empty(), "the secret isn't kept once asked");
+            click(&ctx, &mut services, "Use the Sign-in from the Old Sync Script");
+            assert!(matches!(services.canva.request.take(), Some(R::Import)));
+            // Waiting for the browser: what it waits for, and Stop.
+            services.canva.phase = crate::canva::Phase::SigningIn;
+            click(&ctx, &mut services, "Stop");
+            assert!(matches!(services.canva.request.take(), Some(R::Stop)));
+        });
+    }
+
+    #[test]
+    fn timelychurch_shows_its_services_then_the_connection() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let ctx = crate::studio::tests::styled();
+            let mut services = timelychurch_connected();
+            let words = drawn(&ctx, &mut services, 740.0, vec![]);
+            for wanted in [
+                "Upcoming services",
+                "4 IN TIMELYCHURCH",
+                "Sunday Morning",
+                "UP TO DATE",
+                "CHANGED HERE",
+                "CHANGED HERE; NEWER IN TIMELYCHURCH",
+                "REMOVED IN TIMELYCHURCH",
+                "Connection",
+                "CONNECTED",
+                "Connected to Demo Church · not checked yet",
+                "https://demo.timelychurch.test",
+                "Check Now",
+                "Disconnect",
+                "1 song shown is waiting to be told to TimelyChurch.",
+            ] {
+                assert!(has(&words, wanted), "{wanted}");
+            }
+            assert!(words.iter().any(|(said, _)| said.ends_with(" · 5 songs")), "the date and the songs");
+            assert!(has(
+                &words,
+                "Check Now asks TimelyChurch for changes now (it is asked every few minutes anyway). Disconnect forgets the connection on this computer; the songs and playlists it made stay"
+            ));
+            assert!(at(&words, "Upcoming services").max.y < at(&words, "Connection").min.y);
+            click(&ctx, &mut services, "Check Now");
+            assert_eq!(services.timelychurch.request.take(), Some(crate::timelychurch::Request::CheckNow));
+            click(&ctx, &mut services, "Disconnect");
+            assert_eq!(services.timelychurch.request, None, "it asks first");
+            assert!(asked_to_disconnect(&ctx, "timelychurch"));
+            // Checking now: Check Now is greyed.
+            services.timelychurch.checking = true;
+            click(&ctx, &mut services, "Check Now");
+            assert_eq!(services.timelychurch.request.take(), None);
+        });
+    }
+
+    #[test]
+    fn timelychurch_connects_with_the_address_and_the_pairing_code() {
+        use crate::timelychurch::Request as R;
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let ctx = crate::studio::tests::styled();
+            let mut services = timelychurch_signed_out();
+            let words = drawn(&ctx, &mut services, 740.0, vec![]);
+            assert!(has(&words, "Connect to TimelyChurch") && has(&words, "WITH A PAIRING CODE"));
+            assert!(has(&words, "yourchurch.timelychurch.com"), "the address's hint");
+            click(&ctx, &mut services, "Connect");
+            assert_eq!(services.timelychurch.request.take(), None, "greyed until both are typed");
+            type_into(&ctx, &mut services, "Address", "http://127.0.0.1:4320");
+            type_into(&ctx, &mut services, "Pairing code", "DEMO-2026");
+            press_return(&ctx, &mut services);
+            let connect = R::Connect { address: "http://127.0.0.1:4320".to_owned(), code: "DEMO-2026".to_owned() };
+            assert_eq!(services.timelychurch.request.take(), Some(connect.clone()));
+            assert!(services.timelychurch.typed_code.is_empty(), "the code isn't kept once asked");
+            type_into(&ctx, &mut services, "Pairing code", "DEMO-2026");
+            click(&ctx, &mut services, "Connect");
+            assert_eq!(services.timelychurch.request.take(), Some(connect));
+            // Connecting: said beside the key, which is greyed.
+            services.timelychurch.status = crate::timelychurch::Status::Pairing;
+            type_into(&ctx, &mut services, "Pairing code", "DEMO-2026");
+            let words = drawn(&ctx, &mut services, 740.0, vec![]);
+            assert!(has(&words, "Connecting…"));
+            click(&ctx, &mut services, "Connect");
+            assert_eq!(services.timelychurch.request.take(), None);
+        });
+    }
+
+    /// Every state of the three pages the tests draw.
+    fn every_page() -> Vec<(&'static str, Services)> {
+        let mut refused = voxlive_connected();
+        refused.voxlive.status = Status::Refused("VoxLive doesn't know that key: check it in VoxLive.".to_owned());
+        let mut signed_out = Services::default();
+        signed_out.voxlive.open = true;
+        let mut warned = canva_connected();
+        warned.canva.settings.old_script_warning = true;
+        warned.canva.old_steps = vec!["launchctl bootout gui/501/com.church.canva-sync".to_owned()];
+        warned.canva.status = crate::canva::Status::Doubtful("Canva may have used up the sign-in.".to_owned());
+        let mut syncing = canva_connected();
+        syncing.canva.phase = crate::canva::Phase::Downloading { done: 64, total: Some(100) };
+        let mut signing_in = canva_signed_out();
+        signing_in.canva.phase = crate::canva::Phase::SigningIn;
+        let mut trouble = timelychurch_connected();
+        trouble.timelychurch.trouble = Some("TimelyChurch couldn't be reached.".to_owned());
+        vec![
+            ("voxlive", voxlive_connected()),
+            ("voxlive refused", refused),
+            ("voxlive signed out", signed_out),
+            ("canva", canva_connected()),
+            ("canva warned", warned),
+            ("canva syncing", syncing),
+            ("canva signed out", canva_signed_out()),
+            ("canva signing in", signing_in),
+            ("timelychurch", timelychurch_connected()),
+            ("timelychurch trouble", trouble),
+            ("timelychurch signed out", timelychurch_signed_out()),
+        ]
+    }
+
+    #[test]
+    fn every_page_fits_the_narrowest_settings_page_with_nothing_drawn_over_anything() {
+        use crate::i18n::Language;
+        for language in [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian] {
+            crate::i18n::with_language(language, || {
+                for (name, mut services) in every_page() {
+                    // The least Settings window leaves its page 490 wide; the usual, 740.
+                    for width in [490.0, 740.0] {
+                        let ctx = crate::studio::tests::styled();
+                        let words: Vec<(String, Rect)> = drawn(&ctx, &mut services, width, vec![])
+                            .into_iter()
+                            .filter(|(said, _)| !said.trim().is_empty())
+                            .collect();
+                        for (said, rect) in &words {
+                            assert!(
+                                rect.max.x <= width + 0.5,
+                                "{language:?} {name} at {width}: \u{201c}{said}\u{201d} ends at {}",
+                                rect.max.x
+                            );
+                        }
+                        for (index, (first, one)) in words.iter().enumerate() {
+                            for (second, other) in &words[index + 1..] {
+                                assert!(
+                                    !one.shrink(0.5).intersects(other.shrink(0.5)),
+                                    "{language:?} {name} at {width}: \u{201c}{first}\u{201d} {one:?} and \u{201c}{second}\u{201d} {other:?} overlap"
+                                );
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn a_row_with_a_field_keeps_its_height() {
+        crate::i18n::with_language(crate::i18n::Language::Russian, || {
+            let ctx = crate::studio::tests::styled();
+            for width in [490.0, 740.0] {
+                let mut services = canva_signed_out();
+                let words = drawn(&ctx, &mut services, width, vec![]);
+                let (id, secret) = (
+                    at(&words, t("integrations.canva.client_id", "Client ID")),
+                    at(&words, t("integrations.canva.client_secret", "Client secret")),
+                );
+                assert!(
+                    secret.min.y >= id.max.y + 24.0,
+                    "at {width}: the secret's row at {} under {}",
+                    secret.min.y,
+                    id.max.y
+                );
+                let sign_in = at(&words, t("integrations.canva.sign_in", "Sign In with Canva"));
+                assert!(sign_in.min.y >= secret.max.y + 12.0, "at {width}");
+                let mut services = Services::default();
+                services.voxlive.open = true;
+                let words = drawn(&ctx, &mut services, width, vec![]);
+                let key = at(&words, t("integrations.voxlive.key", "Key"));
+                let how = at(&words, how_to_get_a_key());
+                assert!(how.min.y >= key.max.y - 0.5, "at {width}: the row's line is under its name");
+            }
         });
     }
 }

@@ -5,7 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-Nothing yet.
+- The pages of Settings › Integrations (VoxLive, Canva Sync and TimelyChurch) are laid out in the same cards and rows as the rest of Settings: what the service shows first (VoxLive's screens, Canva Sync's sync, TimelyChurch's upcoming services), then the presentation or the connection, then the account. What the hints said only under the pointer is written on the page, and Canva Sync's pages are a strip of numbered pictures with the divider ringed. Nothing they do has changed.
 
 ## 0.9.0-dev.21 — 25 November 2026 (development build)
 

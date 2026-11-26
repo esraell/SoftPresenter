@@ -1941,8 +1941,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   how it stands in the fixed-width face and one key (Connect, Open, or Soon), and a dashed card
   saying more will come. Worship Leader App's card shows only where the song catalog is offered,
   as before; TimelyChurch's is greyed as Coming soon, taking no clicks, unless it is offered. A card opens
-  that service's page in place, every one the same way: the way back to Integrations, its logo,
-  name and how it stands with what it brings, then the account. Logos of other companies are
+  that service's page in place, every one the same way and in the cards and rows of the rest of
+  Settings: the way back to Integrations, its logo, name and how it stands with what it brings,
+  the long line saying what it does, then its cards, what the service shows first (VoxLive's
+  screens, Canva Sync's sync, TimelyChurch's upcoming services), then the presentation or the
+  connection, then the account. What its hints said only under the pointer is written on the
+  page, and trouble (a key refused, a service out of reach) is an amber line in the card it is
+  about. Logos of other companies are
   their owners' trademarks, kept apart and not covered by the GPL
   ([docs/licences/logos.md](licences/logos.md)). **VoxLive** (live translation captions) is connected with an
   API key made in VoxLive (Settings › API keys, with the screens permissions), pasted on its
@@ -1950,7 +1955,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   (below) and sent only to VoxLive, with redirects off; it never goes
   into a settings file, the log, a command's reply or a song pack, and only its first
   characters (VoxLive's own handle for it) are shown. Connected, the page lists the church's
-  VoxLive screens (name, language, captions or Scripture), found again every 30 seconds; a
+  VoxLive screens in Your VoxLive screens (a row each: name, then captions or Scripture and
+  the language, with Change Look ›), found again every 30 seconds, then Connection: the key's
+  first characters with Find Screens Again and Disconnect. With no key, or one VoxLive
+  refused, Connect has the field (Return connects too) and where to make a key; a
   key VoxLive refuses stops the asking until another is given, so the church's other devices
   aren't locked out, and a "wait" answer is waited out. Disconnect forgets the key on this
   computer, after asking ("Disconnect VoxLive? … This can't be undone.").
@@ -1994,7 +2002,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   for with the window still answering ("Keeping the Canva sign-in…"), at most as long as a token
   request may take, and a sign-in that couldn't be kept before is kept. Disconnect forgets it on
   this computer, after asking ("Disconnect Canva Sync? … This can't be undone.").
-  The presentation is chosen by pasting its link; its pages show with their pictures, and a click
+  Signed in, its page has the cards Sync (when the video was last updated and its file, with
+  Sync Now, or what a job is doing with Stop), The presentation, Where it goes and Account
+  (the integration's ID and Disconnect), and, while the old script must be switched off, The
+  old sync script first. Signed out, Connect has the redirect URL with Copy, the client ID and
+  secret, and Sign In with Canva.
+  The presentation is chosen by pasting its link; its pages show as a strip of numbered tiles
+  with their pictures (those under the divider dimmed, the divider ringed and named), and a click
   makes one the **divider page**: only the pages above it go in the video (Canva can't tell an
   app which slides are hidden, so volunteers drag old slides below it). If the divider is gone
   from the design, nothing is made and the page says so. **Sync Now** (or a macro's Sync from
@@ -2021,9 +2035,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   pairing code an administrator makes there (Setlists › Song Sync), or `sp timelychurch
   connect` with the code on its standard input; the device token goes into the system's store for
   secrets (the Keychain, Credential Manager or the Secret Service; a test copy keeps its own in
-  its own folder), only ever in the `Authorization` header, only to that address, over HTTPS. Connected, the card says "Connected to <church> · last checked
-  …", with Check Now, Disconnect (which keeps the songs and playlists made) and the upcoming
-  services listed with how each stands. The services of the next four weeks are asked for soon
+  its own folder), only ever in the `Authorization` header, only to that address, over HTTPS. Connected, the page lists the upcoming services (a row each,
+  its day and songs, and how it stands at the right: Up to date in green, Changed here, or newer
+  in TimelyChurch and removed in amber), then Connection: "Connected to <church> · last checked
+  …", its address, Check Now and Disconnect (which keeps the songs and playlists made). The services of the next four weeks are asked for soon
   after the start and every five minutes, with the last list's ETag; each becomes a playlist
   (headings, placeholders for readings and other items) and its songs library songs (in a
   library named TimelyChurch), in groups in the order sung, with the published translation
@@ -2035,8 +2050,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   its own idempotency key until sent. A disconnected computer says "This computer was
   disconnected from TimelyChurch" and stops asking. [timelychurch.md](timelychurch.md) has the
   design.
-- **A VoxLive screen's look**, changed from Settings › Integrations › VoxLive: clicking a screen
-  opens its look, with a control for each setting VoxLive describes (a menu, a colour, a tick or
+- **A VoxLive screen's look**, changed from Settings › Integrations › VoxLive: Change Look › on a
+  screen's row opens its look, with a control for each setting VoxLive describes (a menu, a colour, a tick or
   a slider within VoxLive's range; only those that apply to the screen's mode) and a preview drawn
   by VoxLive's own display page in its free preview mode, so nothing reaches the projector or
   starts a translation while adjusting. **Save to VoxLive** sends only the settings changed, and

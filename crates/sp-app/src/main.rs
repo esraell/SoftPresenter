@@ -9584,11 +9584,12 @@ impl App {
                 // Testing aid: a page by name (integrations, or voxlive for VoxLive's own page).
                 let state = &mut running.home_state;
                 match pane.as_str() {
-                    "voxlive" | "voxlive-look" => {
+                    // A service's page; with -end, scrolled to its end (`integrations`).
+                    "voxlive" | "voxlive-look" | "voxlive-end" => {
                         state.preferences_pane = home::Pane::Integrations;
                         state.voxlive.open = true;
                     }
-                    "canva" => {
+                    "canva" | "canva-end" => {
                         state.preferences_pane = home::Pane::Integrations;
                         state.canva.open = true;
                     }
@@ -9615,7 +9616,7 @@ impl App {
                         state.show_interface_size = true;
                     }
                     // TimelyChurch's page, where it is offered.
-                    "timelychurch" => {
+                    "timelychurch" | "timelychurch-end" => {
                         state.preferences_pane = home::Pane::Integrations;
                         state.timelychurch.open = true;
                     }

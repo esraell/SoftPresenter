@@ -216,6 +216,235 @@ fn inked_row(
     draw(ui, Rect::from_min_size(at, control));
 }
 
+/// The least room a row's words keep beside its controls; with less, the controls go on a line
+/// of their own under the words.
+pub const LABEL_ROOM: f32 = 200.0;
+
+/// A text field in the design's look in `rect` (32 high): the panel's dark, its words 10 in from
+/// either end, `hint` faint in it while it is empty, a ring while it has the keyboard; `secret`
+/// shows dots for the letters.
+pub fn field(ui: &mut egui::Ui, rect: Rect, text: &mut String, secret: bool, hint: &str) -> egui::Response {
+    ui.painter().rect_filled(rect, crate::studio::RADIUS, crate::studio::PANEL);
+    let font = FontId::proportional(13.0);
+    let inside =
+        Rect::from_center_size(rect.center(), vec2(rect.width() - 20.0, ui.fonts_mut(|f| f.row_height(&font))));
+    // In a child of its own, so the field takes no room from the card: the row it is in has
+    // taken it already, and putting it there would draw the next row over this one's words.
+    let mut place = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+    let mut edit = egui::TextEdit::singleline(text)
+        .password(secret)
+        .frame(egui::Frame::NONE)
+        .font(font)
+        .text_color(TEXT)
+        .margin(egui::Margin::ZERO)
+        .desired_width(inside.width());
+    if !hint.is_empty() {
+        edit = edit.hint_text(egui::RichText::new(hint).color(TEXT_FAINT));
+    }
+    let field = place.put(inside, edit);
+    if field.has_focus() {
+        ui.painter().rect_stroke(rect, crate::studio::RADIUS, Stroke::new(1.5, TEXT_FAINT), StrokeKind::Inside);
+    }
+    field
+}
+
+/// A line of small words in a card, in `ink` (amber for something to take care of).
+pub fn coloured_note(ui: &mut egui::Ui, text: &str, ink: Color32) {
+    let width = ui.available_width();
+    let galley = lines(ui, text, FontId::proportional(12.5), ink, width, LINE_HEIGHT);
+    let (place, _) = ui.allocate_exact_size(vec2(width, galley.size().y), Sense::hover());
+    ui.painter().galley(place.min, galley, ink);
+    ui.add_space(10.0);
+}
+
+/// A flat key among the few at a row's end or on a line of its own.
+#[derive(Clone, Copy)]
+pub struct Key<'a> {
+    pub words: &'a str,
+    /// Every wording the key can have, so it keeps one width whichever it says.
+    pub wordings: &'a [&'a str],
+    pub look: Flat,
+    pub enabled: bool,
+}
+
+impl<'a> Key<'a> {
+    /// A key in the button grey.
+    pub fn plain(words: &'a str) -> Key<'a> {
+        Key { words, wordings: &[], look: Flat::Plain, enabled: true }
+    }
+
+    /// The page's one main key, in white.
+    pub fn main(words: &'a str) -> Key<'a> {
+        Key { look: Flat::Main, ..Key::plain(words) }
+    }
+
+    /// Greyed, taking no clicks, unless `enabled`.
+    pub fn enabled(self, enabled: bool) -> Key<'a> {
+        Key { enabled, ..self }
+    }
+
+    /// As wide as the widest of `wordings`.
+    pub fn as_wide_as(self, wordings: &'a [&'a str]) -> Key<'a> {
+        Key { wordings, ..self }
+    }
+
+    fn size(&self, ui: &egui::Ui) -> egui::Vec2 {
+        let mut all = vec![self.words];
+        all.extend_from_slice(self.wordings);
+        vec2(widest(ui, &all, &FontId::proportional(12.5)) + 26.0, 30.0)
+    }
+}
+
+/// How wide keys are side by side, 8 apart.
+fn keys_width(ui: &egui::Ui, keys: &[Key]) -> f32 {
+    keys.iter().map(|key| key.size(ui).x).sum::<f32>() + 8.0 * keys.len().saturating_sub(1) as f32
+}
+
+/// Draws `keys` side by side, the last ending at `right`, in the middle of `middle`'s height.
+/// The one clicked, if any.
+fn draw_keys(ui: &egui::Ui, right: f32, middle: f32, salt: &str, keys: &[Key]) -> Option<usize> {
+    let mut clicked = None;
+    let mut x = right;
+    for (index, key) in keys.iter().enumerate().rev() {
+        let size = key.size(ui);
+        let place = Rect::from_min_size(pos2(x - size.x, middle - size.y / 2.0), size);
+        let id = ui.scope_id().with((salt, index));
+        if flat_button(ui, place, id, key.words, FontId::proportional(12.5), key.look, key.enabled).clicked() {
+            clicked = Some(index);
+        }
+        x = place.min.x - 8.0;
+    }
+    clicked
+}
+
+/// How large a readout in the fixed-width face on the chosen grey is, for `text` (24 high).
+fn readout_size(ui: &egui::Ui, text: &str) -> egui::Vec2 {
+    let wide = ui.painter().layout_no_wrap(text.to_owned(), crate::studio::fixed_semibold(12.5), TEXT).size().x;
+    vec2(wide.ceil() + 14.0, 24.0)
+}
+
+/// A readout in the fixed-width face on the chosen grey (a key's start, an address), in `at`, cut
+/// short with "…" where it would pass it.
+fn paint_readout(ui: &egui::Ui, at: Rect, text: &str) {
+    ui.painter().rect_filled(at, 6.0, SELECTED);
+    let galley = one_line(ui, text, crate::studio::fixed_semibold(12.5), TEXT, at.width() - 14.0);
+    ui.painter().galley(pos2(at.min.x + 7.0, at.center().y - galley.size().y / 2.0), galley, TEXT);
+}
+
+/// A row whose control is a readout in the fixed-width face (when `readout` gives one) and keys
+/// after it. Where they don't fit beside its words, they go on a line of their own under the
+/// words, at the right (and the readout on a line of its own above them, whole, if even that is
+/// too narrow). The key clicked, if any.
+pub fn keys_row(
+    ui: &mut egui::Ui,
+    salt: &str,
+    label: &str,
+    note: &str,
+    readout: Option<&str>,
+    keys: &[Key],
+) -> Option<usize> {
+    let width = ui.available_width();
+    let keys_wide = keys_width(ui, keys);
+    let readout_wide = readout.map_or(0.0, |text| readout_size(ui, text).x + 8.0);
+    let control = vec2(readout_wide + keys_wide, if keys.is_empty() { 24.0 } else { 30.0 });
+    if control.x + 16.0 + LABEL_ROOM <= width {
+        let mut clicked = None;
+        row(ui, label, note, control, |ui, place| {
+            if let Some(text) = readout {
+                let size = readout_size(ui, text);
+                paint_readout(ui, Rect::from_min_size(pos2(place.min.x, place.center().y - 12.0), size), text);
+            }
+            clicked = draw_keys(ui, place.max.x, place.center().y, salt, keys);
+        });
+        return clicked;
+    }
+    row(ui, label, note, vec2(0.0, 0.0), |_, _| {});
+    let together = readout_wide + keys_wide <= width;
+    if let Some(text) = readout.filter(|_| !together) {
+        let size = readout_size(ui, text);
+        let (line, _) = ui.allocate_exact_size(vec2(width, size.y), Sense::hover());
+        paint_readout(ui, Rect::from_min_size(line.min, vec2(size.x.min(width), size.y)), text);
+        ui.add_space(8.0);
+    }
+    let (line, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
+    if let Some(text) = readout.filter(|_| together) {
+        let size = readout_size(ui, text);
+        paint_readout(ui, Rect::from_min_size(pos2(line.min.x, line.center().y - 12.0), size), text);
+    }
+    let clicked = draw_keys(ui, line.max.x, line.center().y, salt, keys);
+    ui.add_space(12.0);
+    clicked
+}
+
+/// A line of keys at a card's right, with `lead` in small faint words before them (what the
+/// main key does, or what is under way); `lead` goes on a line of its own above them where they
+/// don't fit side by side. The key clicked, if any.
+pub fn keys_line(ui: &mut egui::Ui, salt: &str, lead: &str, keys: &[Key]) -> Option<usize> {
+    let width = ui.available_width();
+    let keys_wide = keys_width(ui, keys);
+    let font = FontId::proportional(12.5);
+    let beside = !lead.is_empty()
+        && words(ui, lead, font.clone(), TEXT_FAINT, 0.0, f32::INFINITY).size().x + 12.0 + keys_wide <= width;
+    if !lead.is_empty() && !beside {
+        let galley = lines(ui, lead, font.clone(), TEXT_FAINT, width, LINE_HEIGHT);
+        let (place, _) = ui.allocate_exact_size(vec2(width, galley.size().y), Sense::hover());
+        ui.painter().galley(pos2(place.max.x - galley.size().x, place.min.y), galley, TEXT_FAINT);
+        ui.add_space(6.0);
+    }
+    let (line, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
+    if beside {
+        let galley = words(ui, lead, font, TEXT_FAINT, 0.0, f32::INFINITY);
+        let at = pos2(line.max.x - keys_wide - 12.0 - galley.size().x, line.center().y - galley.size().y / 2.0);
+        ui.painter().galley(at, galley, TEXT_FAINT);
+    }
+    let clicked = draw_keys(ui, line.max.x, line.center().y, salt, keys);
+    ui.add_space(12.0);
+    clicked
+}
+
+/// A row whose control is a text field (`field_width` wide at most) and, when `key` gives one, a
+/// key after it. Where they don't fit beside the row's words, the field and the key go on a line
+/// of their own under them, the field taking what the key leaves. The field's response, and
+/// whether the key was clicked.
+#[allow(clippy::too_many_arguments)]
+pub fn field_row(
+    ui: &mut egui::Ui,
+    salt: &str,
+    label: &str,
+    note: &str,
+    text: &mut String,
+    (secret, hint): (bool, &str),
+    field_width: f32,
+    key: Option<Key>,
+) -> (egui::Response, bool) {
+    let width = ui.available_width();
+    let key_size = key.map_or(vec2(0.0, 0.0), |key| key.size(ui));
+    let after = if key.is_some() { key_size.x + 8.0 } else { 0.0 };
+    let mut drawn = None;
+    let mut clicked = false;
+    let mut draw = |ui: &mut egui::Ui, place: Rect| {
+        let field_place = Rect::from_min_size(place.min, vec2(place.width() - after, 32.0));
+        drawn = Some(field(ui, field_place, text, secret, hint));
+        if let Some(key) = key {
+            let id = ui.scope_id().with((salt, "key"));
+            let at = Rect::from_min_size(pos2(place.max.x - key_size.x, place.min.y + 1.0), key_size);
+            clicked = flat_button(ui, at, id, key.words, FontId::proportional(12.5), key.look, key.enabled).clicked();
+        }
+    };
+    // The field narrows to 140 before it leaves the row's words less than their least room.
+    let field_wide = (width - 16.0 - LABEL_ROOM - after).min(field_width);
+    if field_wide >= 140.0 {
+        row(ui, label, note, vec2(field_wide + after, 32.0), draw);
+    } else {
+        row(ui, label, note, vec2(0.0, 0.0), |_, _| {});
+        let (line, _) = ui.allocate_exact_size(vec2(width, 32.0), Sense::hover());
+        let wide = (width - after).min(field_width + 120.0);
+        draw(ui, Rect::from_min_max(pos2(line.max.x - wide - after, line.min.y), line.max));
+        ui.add_space(12.0);
+    }
+    (drawn.expect("the field is drawn"), clicked)
+}
+
 /// A line of small words in a card, wrapped (the design's note), 18 to a line.
 pub fn note(ui: &mut egui::Ui, text: &str) {
     let width = ui.available_width().min(600.0);

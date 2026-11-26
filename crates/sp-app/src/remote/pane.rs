@@ -42,8 +42,6 @@ fn written(time: impl std::fmt::Display) -> String {
 /// How wide a password field is, and the port's.
 const FIELD_WIDTH: f32 = 190.0;
 const PORT_WIDTH: f32 = 96.0;
-/// The least room a row's words keep beside its controls.
-const LABEL_ROOM: f32 = 200.0;
 
 pub fn pane(ui: &mut egui::Ui, view: &mut View) {
     // What the last change did, or why it couldn't, above the cards, whichever card it came from.
@@ -112,7 +110,7 @@ fn address_row(ui: &mut egui::Ui, view: &View, address: &str) {
     let font = crate::studio::fixed_semibold(12.5);
     let wide = ui.painter().layout_no_wrap(address.to_owned(), font.clone(), crate::studio::TEXT).size().x;
     let whole = vec2(wide.ceil() + 14.0, 24.0);
-    let beside = whole.x + 8.0 + key.x + LABEL_ROOM <= ui.available_width();
+    let beside = whole.x + 8.0 + key.x + parts::LABEL_ROOM <= ui.available_width();
     let note = view
         .address_ip
         .as_ref()
@@ -159,7 +157,7 @@ fn port_row(ui: &mut egui::Ui, view: &mut View) {
     let key = parts::key_size(ui, use_words);
     let range = t("remote.port.range", "A port is a number from 1024 to 65535.");
     parts::row(ui, t("remote.port", "Port"), range, vec2(PORT_WIDTH + 8.0 + key.x, 32.0), |ui, place| {
-        let field = field(ui, Rect::from_min_size(place.min, vec2(PORT_WIDTH, 32.0)), &mut view.port, false);
+        let field = parts::field(ui, Rect::from_min_size(place.min, vec2(PORT_WIDTH, 32.0)), &mut view.port, false, "");
         let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let key_place = Rect::from_min_size(place.min + vec2(PORT_WIDTH + 8.0, 1.0), key);
         if parts::key(ui, key_place, ui.scope_id().with("remote port use"), use_words, false).clicked() || entered {
@@ -192,37 +190,6 @@ fn certificate(ui: &mut egui::Ui, view: &mut View) {
             view.request = Some(Request::NewCertificate);
         }
     });
-}
-
-/// A text field in the design's look in `rect` (32 high): the panel's dark, its words 10 in from
-/// either end, a ring while it has the keyboard; `secret` shows dots for the letters.
-fn field(ui: &mut egui::Ui, rect: Rect, text: &mut String, secret: bool) -> egui::Response {
-    ui.painter().rect_filled(rect, crate::studio::RADIUS, crate::studio::PANEL);
-    let font = FontId::proportional(13.0);
-    let inside =
-        Rect::from_center_size(rect.center(), vec2(rect.width() - 20.0, ui.fonts_mut(|f| f.row_height(&font))));
-    // In a child of its own, so the field takes no room from the card: the row it is in has
-    // taken it already, and putting it there would draw the next row over this one's words.
-    let mut place = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-    let field = place.put(
-        inside,
-        egui::TextEdit::singleline(text)
-            .password(secret)
-            .frame(egui::Frame::NONE)
-            .font(font)
-            .text_color(crate::studio::TEXT)
-            .margin(egui::Margin::ZERO)
-            .desired_width(inside.width()),
-    );
-    if field.has_focus() {
-        ui.painter().rect_stroke(
-            rect,
-            crate::studio::RADIUS,
-            egui::Stroke::new(1.5, TEXT_FAINT),
-            egui::StrokeKind::Inside,
-        );
-    }
-    field
 }
 
 /// The one password: Set or Not set yet. Once set, one row with Change Password…; with none, or
@@ -261,7 +228,7 @@ fn password_card(ui: &mut egui::Ui, view: &mut View) {
                     &[("n", &crate::i18n::count(n as u64))],
                 ),
             };
-            coloured_note(ui, &words, if view.wrong >= 3 { CARE } else { TEXT_FAINT });
+            parts::coloured_note(ui, &words, if view.wrong >= 3 { CARE } else { TEXT_FAINT });
         }
     });
 }
@@ -273,16 +240,7 @@ fn short_warning(ui: &mut egui::Ui) {
         "The saved password is shorter than {n} characters, which is too easy to guess. Set a new one.",
         &[("n", &super::auth::SHORTEST_PASSWORD.to_string())],
     );
-    coloured_note(ui, &words, CARE);
-}
-
-/// A line of small words in a card, in `ink`.
-fn coloured_note(ui: &mut egui::Ui, text: &str, ink: egui::Color32) {
-    let width = ui.available_width();
-    let galley = parts::lines(ui, text, FontId::proportional(12.5), ink, width, 18.0);
-    let (place, _) = ui.allocate_exact_size(vec2(width, galley.size().y), Sense::hover());
-    ui.painter().galley(place.min, galley, ink);
-    ui.add_space(10.0);
+    parts::coloured_note(ui, &words, CARE);
 }
 
 /// The password typed twice, then, on a line of their own at the right, Cancel (while changing
@@ -301,10 +259,10 @@ fn password_fields(ui: &mut egui::Ui, view: &mut View, forgets: &str) {
     };
     let size = vec2(FIELD_WIDTH, 32.0);
     parts::row(ui, label, note, size, |ui, place| {
-        field(ui, place, &mut view.password, true);
+        parts::field(ui, place, &mut view.password, true, "");
     });
     parts::row(ui, t("remote.password.again", "Again"), "", size, |ui, place| {
-        field(ui, place, &mut view.password_again, true);
+        parts::field(ui, place, &mut view.password_again, true, "");
     });
     let set = if view.has_password {
         t("remote.password.change", "Change Password")

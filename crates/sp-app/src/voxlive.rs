@@ -79,9 +79,14 @@ impl Screen {
         }
     }
 
+    /// What it is called.
+    pub fn name(&self) -> &str {
+        if self.name.trim().is_empty() { "VoxLive screen" } else { self.name.trim() }
+    }
+
     /// What it is called, with its language.
     pub fn label(&self) -> String {
-        let name = if self.name.trim().is_empty() { "VoxLive screen" } else { self.name.trim() };
+        let name = self.name();
         if self.language.is_empty() { name.to_owned() } else { format!("{name} · {}", self.language.to_uppercase()) }
     }
 
