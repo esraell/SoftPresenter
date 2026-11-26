@@ -181,6 +181,9 @@ fn refusal(args: &[String]) -> String {
         ("song", "import" | "export") | ("media", "add" | "samples") | ("audio", "add") | ("prop", "new") => {
             at_computer("Files on the computer are opened")
         }
+        ("songs", "find") => {
+            at_computer("Looking through the computer's folders for songs, and bringing them in, are done")
+        }
         ("slide", "web") => at_computer("Web pages are put on slides"),
         ("library", "tidy") => at_computer("The library's songs are tidied"),
         // A Bible named alone that isn't offered (a file's path among them): which are.

@@ -1114,6 +1114,99 @@ fn a_big_import_on_a_slow_disk_keeps_answering_and_quitting_keeps_every_song() {
     copy.quit().assert_clean(&run);
 }
 
+#[test]
+fn songs_found_on_the_computer_are_listed_and_only_their_new_songs_come_in() {
+    let Some(run) = Run::new("songs_found_on_the_computer_are_listed_and_only_their_new_songs_come_in") else {
+        return;
+    };
+    // The copy's home folder for the search (SOFTPRESENTER_FIND_SONGS_HOME): a songbook in
+    // Documents, a copy of it in Downloads beside a damaged one, a folder of songs on the
+    // Desktop, and a songbook in a hidden folder; and a folder of the test's own, added.
+    let songbook: &[u8] = include_bytes!("../../sp-model/tests/songbooks/songbook.sps");
+    let home = run.file("home");
+    let put = |path: &str, bytes: &[u8]| {
+        let path = home.join(path);
+        std::fs::create_dir_all(path.parent().expect("a folder")).expect("the folder");
+        std::fs::write(path, bytes).expect("the file");
+    };
+    put("Documents/Old laptop/Zkouška.sps", songbook);
+    put("Downloads/Zkouška.sps", songbook);
+    put("Downloads/Broken.sps", &songbook[..5 * 1024]);
+    put("Documents/.hidden/Secret.sps", songbook);
+    for title in ["Morning Light", "River Song", "Evening Hymn"] {
+        let words = song_text(&[("Verse 1", &format!("A line written for {title}"))]);
+        put(&format!("Desktop/Hymns/{title}.txt"), words.as_bytes());
+    }
+    let added = run.file("Added");
+    std::fs::create_dir_all(&added).expect("the folder added");
+    std::fs::write(
+        added.join("One.cho"),
+        "{title: Lantern}\n{start_of_verse}\nA lantern in the window\n{end_of_verse}\n",
+    )
+    .expect("a ChordPro song");
+    let copy = run.start(&[("SOFTPRESENTER_FIND_SONGS_HOME", &home.to_string_lossy())]);
+    let songs_now = || copy.ok(&["songs"]).data.as_array().map_or(0, Vec::len);
+    // One of the hymns is in the library already, imported by hand.
+    copy.ok(&["song", "import", &home.join("Desktop/Hymns/River Song.txt").to_string_lossy()]);
+    let before = songs_now();
+    // The dry run: every source, numbered, with what is new; nothing comes in.
+    let found = copy.ok(&["songs", "find", "--in", &added.to_string_lossy()]);
+    let rows = found.data["sources"].as_array().cloned().unwrap_or_default();
+    let row = |rows: &[Value], name: &str, place: &str| -> Value {
+        rows.iter()
+            .find(|row| row["name"] == name && row["where"] == place)
+            .cloned()
+            .unwrap_or_else(|| panic!("{name} in {place}: {}", found.text))
+    };
+    assert_eq!(rows.len(), 5, "{}", found.text);
+    let first = row(&rows, "Zpěvník pro zkoušku", "Documents \u{203a} Old laptop");
+    assert_eq!(
+        (first["kind"].as_str(), first["songs"].as_u64(), first["new"].as_u64()),
+        (Some("library"), Some(7), Some(7))
+    );
+    assert_eq!(first["softprojector"], true);
+    let shown = "Library \u{b7} from SoftProjector \u{b7} Documents \u{203a} Old laptop \u{b7} 7 songs";
+    assert!(found.text.contains(shown), "{}", found.text);
+    let copied = row(&rows, "Zpěvník pro zkoušku", "Downloads");
+    assert_eq!(copied["new"].as_u64(), Some(7));
+    let broken = row(&rows, "Broken.sps", "Downloads");
+    assert!(broken["why"].as_str().is_some_and(|why| why.contains("cut short or damaged")), "{broken}");
+    let hymns = row(&rows, "Hymns", "Desktop");
+    let counts = |row: &Value| (row["songs"].as_u64(), row["new"].as_u64(), row["here"].as_u64());
+    assert_eq!(hymns["kind"].as_str(), Some("song files"));
+    assert_eq!(counts(&hymns), (Some(3), Some(2), Some(1)), "River Song is here already");
+    let lantern = row(&rows, "Added", "Added");
+    assert_eq!(lantern["new"].as_u64(), Some(1));
+    assert!(!found.text.contains("Secret"), "the hidden folder is passed over: {}", found.text);
+    assert!(found.text.contains("be read: the file is cut short or damaged"), "{}", found.text);
+    assert_eq!(songs_now(), before, "nothing came in");
+    // A source that can't be read can't be brought in.
+    let number = |row: &Value| row["number"].as_u64().expect("a number").to_string();
+    copy.refused(&["songs", "find", "--import", &number(&broken)], "couldn't be read");
+    // Bringing in the first songbook brings its seven songs, into a library of its name.
+    let brought = copy.ok(&["songs", "find", "--import", &number(&first)]);
+    assert!(brought.text.starts_with("7 songs came in: Zpěvník pro zkoušku (7)."), "{}", brought.text);
+    assert_eq!(songs_now(), before + 7);
+    let libraries = copy.ok(&["libraries"]).data;
+    let library = libraries.as_array().into_iter().flatten().find(|l| l["name"] == "Zpěvník pro zkoušku");
+    assert_eq!(library.and_then(|l| l["songs"].as_u64()), Some(7), "{libraries}");
+    // Found again, the copy has nothing new, and can't be brought in.
+    let again = copy.ok(&["songs", "find"]);
+    let rows = again.data["sources"].as_array().cloned().unwrap_or_default();
+    let copied = row(&rows, "Zpěvník pro zkoušku", "Downloads");
+    assert_eq!((copied["new"].as_u64(), copied["here"].as_u64()), (Some(0), Some(7)), "{}", again.text);
+    copy.refused(&["songs", "find", "--import", &number(&copied)], "already in your library");
+    // The hymns, by name, bring their two new ones only, into a library of their own; the one
+    // here already stays where it was.
+    let brought = copy.ok(&["songs", "find", "--import", "Hymns"]);
+    assert_eq!(brought.text, "2 songs came in: Hymns (2). 1 already in your library was left out.", "{}", brought.text);
+    assert_eq!(songs_now(), before + 9);
+    let libraries = copy.ok(&["libraries"]).data;
+    let library = libraries.as_array().into_iter().flatten().find(|l| l["name"] == "Hymns");
+    assert_eq!(library.and_then(|l| l["songs"].as_u64()), Some(2), "{libraries}");
+    copy.quit().assert_clean(&run);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Remote Control, over HTTPS on 127.0.0.1 (a quiet copy listens there only)
 

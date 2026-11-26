@@ -296,7 +296,7 @@ impl<'a> Key<'a> {
 }
 
 /// How wide keys are side by side, 8 apart.
-fn keys_width(ui: &egui::Ui, keys: &[Key]) -> f32 {
+pub fn keys_width(ui: &egui::Ui, keys: &[Key]) -> f32 {
     keys.iter().map(|key| key.size(ui).x).sum::<f32>() + 8.0 * keys.len().saturating_sub(1) as f32
 }
 
@@ -443,6 +443,58 @@ pub fn field_row(
         ui.add_space(12.0);
     }
     (drawn.expect("the field is drawn"), clicked)
+}
+
+/// A row whose control is a few names, each in a pill (the design's chips): beside the row's
+/// name where they all fit on one line there, else on lines of their own under it.
+pub fn chips_row(ui: &mut egui::Ui, label: &str, chips: &[String]) {
+    const HEIGHT: f32 = 22.0;
+    const BETWEEN: f32 = 6.0;
+    let width = ui.available_width();
+    let font = FontId::proportional(12.0);
+    let laid: Vec<Arc<egui::Galley>> =
+        chips.iter().map(|chip| words(ui, chip, font.clone(), TEXT, 0.0, width - 20.0)).collect();
+    let sizes: Vec<egui::Vec2> = laid.iter().map(|galley| vec2(galley.size().x + 20.0, HEIGHT)).collect();
+    let one_line = sizes.iter().map(|size| size.x).sum::<f32>() + BETWEEN * sizes.len().saturating_sub(1) as f32;
+    let paint = |ui: &egui::Ui, at: Pos2, size: egui::Vec2, galley: &Arc<egui::Galley>| {
+        let pill = Rect::from_min_size(at, size);
+        ui.painter().rect_filled(pill, HEIGHT / 2.0, BUTTON);
+        let corner = pill.center() - galley.size() / 2.0;
+        ui.painter().galley(corner, galley.clone(), TEXT);
+    };
+    if one_line + 16.0 + LABEL_ROOM <= width {
+        row(ui, label, "", vec2(one_line, HEIGHT), |ui, place| {
+            let mut x = place.min.x;
+            for (size, galley) in sizes.iter().zip(&laid) {
+                paint(ui, pos2(x, place.min.y), *size, galley);
+                x += size.x + BETWEEN;
+            }
+        });
+        return;
+    }
+    row(ui, label, "", vec2(0.0, 0.0), |_, _| {});
+    // As many on a line as fit, the rest on lines under them.
+    let mut lines: Vec<Vec<usize>> = vec![Vec::new()];
+    let mut x = 0.0;
+    for (at, size) in sizes.iter().enumerate() {
+        let line = lines.last_mut().expect("a line");
+        if !line.is_empty() && x + size.x > width {
+            lines.push(Vec::new());
+            x = 0.0;
+        }
+        lines.last_mut().expect("a line").push(at);
+        x += size.x + BETWEEN;
+    }
+    let height = lines.len() as f32 * HEIGHT + (lines.len() - 1) as f32 * BETWEEN;
+    let (place, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    for (row_at, line) in lines.iter().enumerate() {
+        let mut x = place.min.x;
+        for at in line {
+            paint(ui, pos2(x, place.min.y + row_at as f32 * (HEIGHT + BETWEEN)), sizes[*at], &laid[*at]);
+            x += sizes[*at].x + BETWEEN;
+        }
+    }
+    ui.add_space(12.0);
 }
 
 /// A line of small words in a card, wrapped (the design's note), 18 to a line.

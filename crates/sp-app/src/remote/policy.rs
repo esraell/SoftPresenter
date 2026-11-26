@@ -117,6 +117,9 @@ pub const OPEN_SUBCOMMANDS: &[(&str, &[&str])] = &[
     // Listing the free songbooks is open; installing one (a download from the internet) and
     // removing one are done at the computer.
     ("songbook", &[""]),
+    // Listing the library's songs is open; looking through the computer's folders for songs,
+    // and bringing them in, are done at the computer.
+    ("songs", &[""]),
     ("settings", &["", "set"]),
     ("screen", &["add", "set", "delete"]),
     (
@@ -150,6 +153,7 @@ pub const CLOSED_SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("canva", &["connect", "import", "disconnect", "presentation"]),
     ("catalog", &["download", "check", "remove", "sizes"]),
     ("songbook", &["install", "remove"]),
+    ("songs", &["find"]),
     ("song", &["import", "export"]),
     ("media", &["add", "samples"]),
 ];
@@ -199,6 +203,7 @@ pub enum AtComputer {
     Samples,
     SongWordsFile,
     TidyLibrary,
+    FindSongs,
 }
 
 impl AtComputer {
@@ -270,6 +275,10 @@ impl AtComputer {
             AtComputer::TidyLibrary => {
                 t("remote.at_computer.tidy", "Tidying the library is done at the computer, not from the remote page.")
             }
+            AtComputer::FindSongs => t(
+                "remote.at_computer.find_songs",
+                "Looking for songs on the computer is done at the computer, not from the remote page.",
+            ),
         }
     }
 }
@@ -300,6 +309,7 @@ fn control_refusal(args: &[String]) -> Option<String> {
             ("catalog", _) => at_computer(AtComputer::Catalog),
             ("songbook", "remove") => at_computer(AtComputer::RemoveSongs),
             ("songbook", _) => at_computer(AtComputer::DownloadSongs),
+            ("songs", "find") => at_computer(AtComputer::FindSongs),
             ("song", "import") => at_computer(AtComputer::ImportSongs),
             ("song", "export") => at_computer(AtComputer::ExportPack),
             ("media", "add") => at_computer(AtComputer::AddMedia),
@@ -638,6 +648,17 @@ mod tests {
         }
     }
 
+    /// The library's songs can be listed from a page; looking through the computer's folders
+    /// for songs, and bringing them in, can't.
+    #[test]
+    fn songs_are_listed_from_a_page_but_never_looked_for_on_the_computer() {
+        assert_eq!(refusal(Role::Control, &words("songs")), None);
+        for asked in ["songs find", "songs find --in /tmp", "songs find --import 1", "songs FIND"] {
+            let refused = refusal(Role::Control, &words(asked));
+            assert_eq!(refused.as_deref(), Some(AtComputer::FindSongs.words()), "{asked}");
+        }
+    }
+
     /// Every sub-command `sp help` shows for the commands made of them is listed as open or
     /// closed, so a new one is looked at before a page can use it.
     #[test]
@@ -749,6 +770,7 @@ mod tests {
             AtComputer::AddMedia,
             AtComputer::Samples,
             AtComputer::SongWordsFile,
+            AtComputer::FindSongs,
         ];
         for what in all {
             let (english, spanish) =

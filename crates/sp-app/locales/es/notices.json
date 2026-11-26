@@ -392,5 +392,10 @@
   "notices.timelychurch.removed": "{name} se quitó en TimelyChurch; su lista se queda.",
   "notices.ndi.stopped": "La fuente NDI {source} dejó de enviar. Sus diapositivas se muestran sin ella hasta que vuelva.",
   "notices.ask.allow": "Permitir",
-  "notices.ask.dont_allow": "No permitir"
+  "notices.ask.dont_allow": "No permitir",
+  "notices.dialog.find_folder": "Buscar en otra carpeta",
+  "notices.import.why.not_songbook": "no es un cancionero de SoftProjector que SoftPresenter pueda leer",
+  "notices.import.why.no_songs": "no tiene canciones",
+  "notices.import.why.zip_no_songbook": "no tiene dentro ningún cancionero de SoftProjector que SoftPresenter pueda leer",
+  "notices.import.why.zip_too_much": "al descomprimirlo ocupa más que cualquier cancionero"
 }

@@ -111,6 +111,7 @@
   "remote.at_computer.language": "Мову програми вибирають за компʼютером, не зі сторінки пульта.",
   "remote.at_computer.words_file": "Читати слова пісні з файлу можна за компʼютером, не зі сторінки пульта.",
   "remote.at_computer.tidy": "Упорядковувати бібліотеку можна за компʼютером, не зі сторінки пульта.",
+  "remote.at_computer.find_songs": "Шукати пісні на компʼютері можна тільки за компʼютером, не зі сторінки пульта.",
   "remote.item.missing": "{title} (немає)",
   "remote.item.video": "{title} (відео)",
   "remote.item.picture": "{title} (зображення)",

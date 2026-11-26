@@ -164,7 +164,7 @@ fn library_found() -> Option<(PathBuf, usize, usize)> {
     let mut libraries = 0;
     for library in std::fs::read_dir(&folder).ok()?.flatten().map(|entry| entry.path()).filter(|p| p.is_dir()) {
         let count = std::fs::read_dir(&library)
-            .map(|read| read.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "pro")).count())
+            .map(|read| read.flatten().filter(|e| crate::load::is_song_document(&e.path())).count())
             .unwrap_or(0);
         if count > 0 {
             songs += count;

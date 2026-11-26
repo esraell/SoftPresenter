@@ -290,6 +290,28 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   name gives (so importing both brings each song once). A songbook saved as XML
   is not read yet, and says so. SoftProjector's Bible files (`.spb`) install as other Bible
   files do (see the Bible page).
+- **Finding the songs already on this computer.** Settings › Song files › Find songs on this
+  computer looks, at any time, for what the song import reads: SoftProjector's songbooks
+  (`.sps`, zipped or not) and its database `spData.sqlite` (where SoftProjector keeps it on each
+  system: beside its program, its VirtualStore copy or ProgramData on Windows, inside the app on
+  a Mac), folders of `.pro` song documents (a library), and folders of song files (ChordPro and
+  lyric files, SoftPresenter's own, and `.txt` whose words name a song's parts). It looks in
+  Documents, Downloads, Desktop and SoftProjector's folder, and in any folder added with Search
+  Another Folder…, on a thread of its own: never into hidden folders, app or library bundles,
+  `node_modules` and caches, never through a link, eight folders deep, 200,000 files and 90
+  seconds at most, and never in SoftPresenter's own library. Each source found is read there and
+  then as a dry run and listed as it comes: its name, what and where it is ("Library · from
+  SoftProjector · Downloads", the owner's word for what SoftProjector keeps), how many songs, and
+  how many are new and already here, by the import's own rule (word for word under the same
+  title, after the tidy an import gives). Stop keeps what was found. A source with nothing new is
+  dimmed and unticked, so is one that can't be read, with the importer's reason in amber, and a
+  place the computer won't let it look in is a row saying so. Nothing comes in until Import:
+  each ticked source then comes in through the import's own path, as a library of its name with
+  only its new songs (a song already here stays where it is), read on a thread of its own and
+  taken in a few milliseconds at a time, with a bar, so neither the window nor the screens wait;
+  a notice and the card say how many came in, from which, and how many were left out. Two ticked
+  copies of one songbook count their songs once. `sp songs find [--in FOLDER]…` lists the same,
+  numbered, and `sp songs find --import N…|NAME` brings them in (at the computer only).
 - **Bringing a library across from ProPresenter 7.** File › Import Songs › A Library Folder… opens
   its Libraries folder; choose song documents, one library, or the folder of all of them. Each folder becomes a
   library of the same name. Each song is named as its file is ("12 - Amazing Grace", hymn
@@ -2352,7 +2374,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **What the menu bar did is in the window too, on every system** (Windows and Linux have no menu
   bar; the design has none either): Settings › Screens has Identify and the test patterns (Off,
   Colour bars, Grid, White: everyone watching sees them), and its cards open the Screens window;
-  Settings › Song files has Read them
+  Settings › Song files has Find songs on this computer, then Read them
   again (Reload songs) and says what happens when a song was changed elsewhere; Settings › Keys
   has Show keys on buttons; Settings has Set up SoftPresenter… under its list (Settings steps
   aside so the setup opens over the home window); Settings › Command line has the sp command's

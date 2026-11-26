@@ -29,6 +29,8 @@ mod editor;
 mod ffmpeg_fetch;
 mod file_drop;
 mod find;
+mod find_songs;
+mod find_songs_cli;
 mod followed;
 mod free_songbooks;
 mod free_songbooks_cli;
@@ -720,6 +722,9 @@ enum AppEvent {
     CatalogDone,
     /// A free songbook's download finished on its thread (see `free_songbooks_cli`).
     SongbookDone,
+    /// A search for songs on the computer found something, or its import read some songs (see
+    /// `find_songs_cli`).
+    FindSongs,
     /// The library's writer wrote everything handed to it, or a file couldn't be written (see
     /// `writer`).
     Saved,
@@ -904,10 +909,8 @@ struct Bringing<'a> {
     failed: Vec<String>,
 }
 
-/// How an import knows a song the library has: its title, in any case, and its words.
-fn import_key(song: &sp_model::Presentation) -> (String, String) {
-    (song.title.trim().to_lowercase(), sp_model::to_song_text(song))
-}
+/// How an import knows a song the library has (`load::import_key`).
+use load::import_key;
 
 /// Where the library (`songs`) has a song being imported already: the song with its title and
 /// words (`have`, by [`import_key`]), else the one with its id (`ids`).
@@ -2188,6 +2191,8 @@ struct App {
     catalog: catalog_cli::CatalogState,
     /// The free songbooks shared by churches being downloaded (see `free_songbooks_cli`).
     free_songbooks: free_songbooks_cli::Installs,
+    /// Settings › Song files' Find songs on this computer: the search and the import under way.
+    finding: find_songs_cli::Finding,
     /// The connection to the church's TimelyChurch: its services as playlists, its songs in the
     /// library, and the songs shown told to it (see `timelychurch`).
     timelychurch: timelychurch::Connection,
@@ -7460,22 +7465,33 @@ impl App {
         None
     }
 
-    /// Takes in the songs read for an import (see [`App::import_songs_to`]), noting in `done`
-    /// what came in, what was here already and what couldn't come.
-    fn take_songs(&mut self, read: Vec<SongRead>, to: &SongsTo, done: &mut Imported) {
-        // What the library has, looked up once rather than song by song.
-        let mut ids: std::collections::HashSet<Uuid> = self.show.presentations().iter().map(|s| s.id).collect();
-        // A song deleted in the app (or a Bible page) isn't "already here": its file can be
-        // imported again. Its id stays taken, so the one imported gets an id of its own.
+    /// The songs an import looks for a song being imported in, with their places: all but the
+    /// songs deleted in the app (or a Bible page) and the app's own presentations. A deleted
+    /// song isn't "already here": its file can be imported again.
+    fn import_compares_with(&self) -> Vec<(usize, Arc<sp_model::Presentation>)> {
         let removed = self.running.as_ref().map(|r| r.home_state.removed_songs.clone()).unwrap_or_default();
-        let mut have: HashMap<(String, String), usize> = self
-            .show
+        self.show
             .presentations()
             .iter()
             .enumerate()
             .filter(|(at, _)| !removed.contains(at) && !self.app_made(*at))
-            .map(|(at, s)| (import_key(s), at))
-            .collect();
+            .map(|(at, song)| (at, song.clone()))
+            .collect()
+    }
+
+    /// Every id the library has given out, a deleted song's included: its id stays taken, so a
+    /// song imported in its place gets an id of its own.
+    fn import_ids(&self) -> std::collections::HashSet<Uuid> {
+        self.show.presentations().iter().map(|s| s.id).collect()
+    }
+
+    /// Takes in the songs read for an import (see [`App::import_songs_to`]), noting in `done`
+    /// what came in, what was here already and what couldn't come.
+    fn take_songs(&mut self, read: Vec<SongRead>, to: &SongsTo, done: &mut Imported) {
+        // What the library has, looked up once rather than song by song.
+        let mut ids = self.import_ids();
+        let mut have: HashMap<(String, String), usize> =
+            self.import_compares_with().iter().map(|(at, s)| (import_key(s), *at)).collect();
         let chosen_library = to.library.or(self.import_library_override);
         if let Some(Some(id)) = to.library {
             done.library = self.running.as_ref().and_then(|r| {
@@ -7485,7 +7501,7 @@ impl App {
         for read in read {
             match read {
                 SongRead::Song { song: Ok(song), path, library } => {
-                    self.take_song(song, &path, &library, None, chosen_library, &mut have, &mut ids, done);
+                    self.take_song(song, &path, &library, None, chosen_library, (&mut have, &mut ids), false, done);
                 }
                 SongRead::Song { song: Err(problem), .. } => done.problems.push(problem),
                 SongRead::Bundle { opened, path, library } => {
@@ -7499,8 +7515,8 @@ impl App {
                             &library,
                             from,
                             chosen_library,
-                            &mut have,
-                            &mut ids,
+                            (&mut have, &mut ids),
+                            false,
                             done,
                         );
                     }
@@ -7569,25 +7585,22 @@ impl App {
         library: &Option<String>,
         bundle: Option<(&mut Bringing, &bundle::Song)>,
         chosen_library: Option<Option<Uuid>>,
-        have: &mut HashMap<(String, String), usize>,
-        ids: &mut std::collections::HashSet<Uuid>,
+        (have, ids): (&mut HashMap<(String, String), usize>, &mut std::collections::HashSet<Uuid>),
+        only_new: bool,
         done: &mut Imported,
     ) {
-        // A song from another program's file comes in tidied (its title and words put right, as
-        // `sp library tidy` puts the library's), before it is looked for in the library, so
-        // the same file imported again is found there. SoftPresenter's own songs come as saved,
-        // and so does a song kept in step with an outside source (its fingerprint would change).
-        if !load::is_song_file(path) && song.catalog.is_none() {
-            song = sp_model::tidy_song(&song, sp_model::TidyOptions::default()).song;
-        }
+        // A song from another program's file comes in tidied, before it is looked for in the
+        // library, so the same file imported again is found there (`load::as_imported`).
+        song = load::as_imported(song, path);
         let look = import_key(&song);
         if let Some(at) = already_here(&song, have, ids, self.show.presentations()) {
             done.problems.push(format!("{}{}", song.title, already()));
             done.first.get_or_insert(at);
             done.landed.push(at);
             // A song in two of the folders imported goes into both their libraries; one dropped
-            // on a library goes into it.
-            if let Some(running) = self.running.as_mut() {
+            // on a library goes into it. Settings › Song files' Find brings only new songs into
+            // the library of their songbook (`only_new`).
+            if !only_new && let Some(running) = self.running.as_mut() {
                 let state = &mut running.home_state;
                 if let Some(key) = state.song_keys.get(at).cloned() {
                     let into = state.libraries.iter_mut().find(|l| match chosen_library {
@@ -9742,6 +9755,13 @@ impl App {
                         state.preferences_pane = home::Pane::Slides;
                         state.show_interface_size = true;
                     }
+                    // Settings › Song files with Find pressed at once (find-songs), and with Import
+                    // pressed too once the search has ended (find-songs-import: see
+                    // `find_songs_cli::end_search`).
+                    "find-songs" | "find-songs-import" => {
+                        state.preferences_pane = home::Pane::SongFiles;
+                        state.find_songs.asks.push(find_songs::Ask::Find);
+                    }
                     // TimelyChurch's page, where it is offered.
                     "timelychurch" | "timelychurch-end" => {
                         state.preferences_pane = home::Pane::Integrations;
@@ -11431,6 +11451,11 @@ impl ApplicationHandler<AppEvent> for App {
                 self.tick_free_songbooks();
                 return;
             }
+            AppEvent::FindSongs => {
+                // The idle loop that follows asks again when it wants to be called.
+                self.tick_find_songs();
+                return;
+            }
             AppEvent::Saved => {
                 self.finish_saves();
                 return;
@@ -11580,6 +11605,8 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                     // Settings may have asked for a songbook.
                     self.handle_songbooks();
+                    // Or for a search for songs on this computer, or what it found.
+                    self.handle_find_songs();
                     self.sync_screens(el);
                 }
                 _ => {
@@ -12032,6 +12059,7 @@ impl ApplicationHandler<AppEvent> for App {
         let canva_at = self.tick_canva();
         let catalog_at = self.tick_catalog();
         let songbooks_at = self.tick_free_songbooks();
+        let find_at = self.tick_find_songs();
         let timelychurch_at = self.tick_timelychurch();
         let audio_at = self.tick_audio();
         let announce_at = self.tick_announcements();
@@ -12097,6 +12125,7 @@ impl ApplicationHandler<AppEvent> for App {
             canva_at,
             catalog_at,
             songbooks_at,
+            find_at,
             timelychurch_at,
             audio_at,
             announce_at,
@@ -12633,6 +12662,7 @@ fn main() -> ExitCode {
         canva,
         catalog: catalog_cli::CatalogState::default(),
         free_songbooks: free_songbooks_cli::Installs::default(),
+        finding: find_songs_cli::Finding::default(),
         timelychurch: timelychurch::Connection::new(timelychurch::gate(), timelychurch::Files::in_data_dir()),
         voxlive_preview: None,
         voxlive_said: None,

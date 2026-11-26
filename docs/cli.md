@@ -594,6 +594,8 @@ names the passage as it was typed, while the screens and the playlist follow the
 | `song new TITLE [FILE.txt] [--library NAME\|none]` | A new song, with its words from a [song text](#song-text) file, or one empty slide |
 | `song new TITLE --words TEXT` | A new song with its words given as song text in one word (quoted, line breaks and all): for a script or an assistant that has the words but no file. Every other word is the title, and the disk is never looked at |
 | `song import FILE… \| FOLDER… [--library NAME\|none]` | Imports songs, as File › Import Songs does (any of its kinds of file; formats below). A folder becomes a library of its name (and each folder in it another), unless `--library` says where its songs go. A song already in the library is skipped |
+| `songs find [--in FOLDER]…` | Looks for songbooks, libraries and song files on this computer, as Settings › Song files › Find songs on this computer does (it is the same search, and the window shows it): Documents, Downloads, Desktop, SoftProjector's folder and each FOLDER (added to where the window looks too). A job: `sp` waits for it and lists each source found, numbered, as the window shows it, with its songs new and already here, or why it couldn't be read. Nothing comes in. `--json` gives the `places` looked in, whether it was `stopped`, the `new` songs in all, and each source's `number`, `name`, `kind` (`library`, `song files`, or `folder` for a place it couldn't look in), `softprojector`, `where`, `path`, `songs`, `new`, `here` and `why`. At the computer only |
+| `songs find --import N…\|NAME` | Brings in the new songs of the sources numbered (or the one named) in the last `songs find`'s list, as the window's Import does: each into a library of its name, with only its new songs; a song already in the library stays where it is. A job, waited for: says how many came in, from which, and how many were left out. One that couldn't be read, or has nothing new, is refused. At the computer only |
 | `song text SONG` | Prints the song as song text |
 | `song text SONG FILE` | Replaces the song's words from a song text file, keeping the song (its id, theme, playlist places) and its slides' looks, labels and notes where they still match; a song with a verse and a chorus sings the chorus after each verse, as Edit Words makes it (below) |
 | `song rename SONG to TITLE`, `song duplicate SONG [as TITLE]` | Renames or copies a song (the copy goes just after it in the libraries it is in, and next to it in the window's song list) |
@@ -604,6 +606,15 @@ names the passage as it was typed, while the screens and the playlist follow the
 | `song delete SONG --yes` | Deletes a song (one made in SoftPresenter goes to the Trash) |
 | `song reload [SONG [--now]]`, `song keep SONG` | [Song files edited outside the app](#song-files-edited-outside-the-app) |
 | `song export …`, `song import FILE.sppack …` | [Song packs](#song-packs) |
+
+    $ sp songs find --in ~/Music/Worship
+    3 songbooks and libraries found in Documents, Downloads, Desktop, SoftProjector's folder, Worship:
+       1  Zpěvník pro zkoušku  —  Library · from SoftProjector · Downloads · 7 songs  —  7 new
+       2  spData.sqlite  —  Library · from SoftProjector · Downloads › old laptop  —  couldn’t be read: the file is cut short or damaged (…)
+       3  Christmas 2025  —  Song files · Desktop · 3 songs  —  2 new · 1 already here
+    sp songs find --import N… brings in the new songs of those numbered (or one by its name): 9 new in all. Nothing comes in until then.
+    $ sp songs find --import 1 3
+    9 songs came in: Zpěvník pro zkoušku (7), Christmas 2025 (2). 1 already in your library was left out.
 
 New and imported songs go into the library shown in the song list, and the reply says which;
 `--library NAME` or `--library none` chooses. Titles should be unique: `song new` and

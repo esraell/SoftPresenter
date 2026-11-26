@@ -127,16 +127,23 @@ fn songbooks_in_zip(path: &Path) -> Option<(ZipFile, Vec<(usize, String)>)> {
 /// The songs of every songbook in a zip (the songbooks SoftProjector offers for download come
 /// zipped). The zip is read with limits and nothing is unpacked to disk; a songbook in it that
 /// can't be read is said, and the others still come in.
-fn import_zipped_songbooks(path: &Path, name: &str) -> Result<Songbook, String> {
-    let not_songbook = || {
-        tf(
+fn import_zipped_songbooks(path: &Path, name: &str) -> Result<Songbook, Refused> {
+    let not_songbook = || Refused {
+        said: tf(
             "notices.import.zip_no_songbook",
             "{name} has no SoftProjector songbook in it that SoftPresenter can read.",
             &[("name", name)],
+        ),
+        why: t(
+            "notices.import.why.zip_no_songbook",
+            "it has no SoftProjector songbook in it that SoftPresenter can read",
         )
+        .to_owned(),
     };
     let (mut zip, books) = songbooks_in_zip(path).filter(|(_, books)| !books.is_empty()).ok_or_else(not_songbook)?;
     let mut all = Songbook { songs: Vec::new(), cautions: Vec::new() };
+    // The reason the first songbook in it that couldn't be read gave.
+    let mut first_why = None;
     let mut room = SONGBOOK_ZIP.unpacked;
     for (at, entry) in books {
         let file = entry.rsplit(['/', '\\']).next().unwrap_or(&entry);
@@ -146,27 +153,48 @@ fn import_zipped_songbooks(path: &Path, name: &str) -> Result<Songbook, String> 
                 room -= bytes.len() as u64;
                 songbook_songs(std::io::Cursor::new(bytes), &inside)
             }
-            Err(ZipRefusal::UnpacksTooMuch) => Err(tf(
-                "notices.import.zip_too_much",
-                "{name} unpacks to more than any songbook, so it wasn't read.",
-                &[("name", &inside)],
-            )),
-            Err(_) => Err(tf(
-                "notices.import.unreadable",
-                "{name} could not be read ({error}).",
-                &[("name", &inside), ("error", t("notices.import.zip_damaged", "the zip is damaged"))],
-            )),
+            Err(ZipRefusal::UnpacksTooMuch) => Err(Refused {
+                said: tf(
+                    "notices.import.zip_too_much",
+                    "{name} unpacks to more than any songbook, so it wasn't read.",
+                    &[("name", &inside)],
+                ),
+                why: t("notices.import.why.zip_too_much", "it unpacks to more than any songbook").to_owned(),
+            }),
+            Err(_) => {
+                let damaged = t("notices.import.zip_damaged", "the zip is damaged");
+                Err(Refused {
+                    said: tf(
+                        "notices.import.unreadable",
+                        "{name} could not be read ({error}).",
+                        &[("name", &inside), ("error", damaged)],
+                    ),
+                    why: damaged.to_owned(),
+                })
+            }
         };
         match read {
             Ok(songs) => all.songs.extend(songs),
-            Err(problem) => all.cautions.push(problem),
+            Err(refused) => {
+                first_why.get_or_insert(refused.why);
+                all.cautions.push(refused.said);
+            }
         }
     }
     // Nothing came in: what went wrong is the answer.
     if all.songs.is_empty() && !all.cautions.is_empty() {
-        return Err(all.cautions.join(" "));
+        return Err(Refused { said: all.cautions.join(" "), why: first_why.unwrap_or_default() });
     }
     Ok(all)
+}
+
+/// Why a file of many songs gave none: the sentence an import says of it, which names the
+/// file, and the reason alone, for a place that names the file already (Settings › Song files'
+/// "Couldn't be read: {why}").
+#[derive(Clone, Debug, PartialEq)]
+pub struct Refused {
+    pub said: String,
+    pub why: String,
 }
 
 /// What a file of many songs gave: each song with the name of its songbook, and anything the
@@ -182,16 +210,22 @@ pub struct Songbook {
 /// songs. Both are SQLite files, which SoftPresenter reads itself (`sp_model::sqlite_read`), the
 /// same way on every system, and never writes.
 pub fn import_songbook(path: &Path) -> Result<Songbook, String> {
+    read_songbook_file(path).map_err(|refused| refused.said)
+}
+
+/// The same, with the reason alone when it gives no songs (see [`Refused`]).
+pub fn read_songbook_file(path: &Path) -> Result<Songbook, Refused> {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     if has_extension(path, SONGBOOK_ZIP_ENDING) {
         return import_zipped_songbooks(path, &name);
     }
-    let file = std::fs::File::open(path).map_err(|e| {
-        tf(
+    let file = std::fs::File::open(path).map_err(|e| Refused {
+        said: tf(
             "notices.import.not_found",
             "{name} could not be found ({error}).",
             &[("name", &name), ("error", &e.to_string())],
-        )
+        ),
+        why: e.to_string(),
     })?;
     let songs = songbook_songs(file, &name)?;
     Ok(Songbook { songs, cautions: unsaved_changes(path, &name).into_iter().collect() })
@@ -201,18 +235,30 @@ pub fn import_songbook(path: &Path) -> Result<Songbook, String> {
 fn songbook_songs<R: std::io::Read + std::io::Seek>(
     source: R,
     name: &str,
-) -> Result<Vec<(Presentation, Option<String>)>, String> {
+) -> Result<Vec<(Presentation, Option<String>)>, Refused> {
     use sp_model::SongbookProblem;
     let songs = sp_model::read_songbook(source).map_err(|problem| match problem {
-        SongbookProblem::NotSongbook => tf(
-            "notices.import.not_songbook",
-            "{name} isn't a SoftProjector songbook SoftPresenter can read.",
-            &[("name", name)],
-        ),
-        SongbookProblem::NoSongs => tf("notices.import.no_songs", "{name} has no songs in it.", &[("name", name)]),
-        SongbookProblem::Unreadable(why) => {
-            tf("notices.import.unreadable", "{name} could not be read ({error}).", &[("name", name), ("error", &why)])
-        }
+        SongbookProblem::NotSongbook => Refused {
+            said: tf(
+                "notices.import.not_songbook",
+                "{name} isn't a SoftProjector songbook SoftPresenter can read.",
+                &[("name", name)],
+            ),
+            why: t("notices.import.why.not_songbook", "it isn't a SoftProjector songbook SoftPresenter can read")
+                .to_owned(),
+        },
+        SongbookProblem::NoSongs => Refused {
+            said: tf("notices.import.no_songs", "{name} has no songs in it.", &[("name", name)]),
+            why: t("notices.import.why.no_songs", "it has no songs in it").to_owned(),
+        },
+        SongbookProblem::Unreadable(why) => Refused {
+            said: tf(
+                "notices.import.unreadable",
+                "{name} could not be read ({error}).",
+                &[("name", name), ("error", &why)],
+            ),
+            why,
+        },
     })?;
     Ok(songs
         .into_iter()
@@ -463,6 +509,55 @@ pub fn read_song_file(path: &Path) -> Result<Presentation, String> {
 /// True for a SoftPresenter song file, of either extension.
 pub fn is_song_file(path: &Path) -> bool {
     has_extension(path, SONG_EXTENSION) || has_extension(path, OLD_SONG_EXTENSION)
+}
+
+/// True for a song document (`.pro`): what a library of them, one folder of a libraries folder,
+/// holds (the setup's Look for a Song Library, and Settings › Song files' Find).
+pub fn is_song_document(path: &Path) -> bool {
+    has_extension(path, PRO_ENDING)
+}
+
+/// True for a file of words in a kind only songs are kept in: ChordPro and lyric files, not
+/// plain text (which may be anything).
+pub fn is_lyrics_file(path: &Path) -> bool {
+    TEXT_ENDINGS.iter().filter(|ending| !matches!(**ending, "txt" | "text")).any(|ending| has_extension(path, ending))
+}
+
+/// True for plain text (`.txt`), which is a song only when its words read as one (see
+/// [`reads_as_song`]).
+pub fn is_plain_text(path: &Path) -> bool {
+    has_extension(path, "txt") || has_extension(path, "text")
+}
+
+/// Whether text reads as a song as the importer understands one, not just any words: a line of
+/// its own names a part ("Verse 1", "Припев"…), as SoftPresenter's own song text and ChordPro
+/// do.
+pub fn reads_as_song(text: &str) -> bool {
+    text.lines().map(str::trim).any(|line| {
+        sp_model::section_name(line).is_some()
+            || (line.len() > 2 && line.starts_with('[') && line.ends_with(']') && !line[1..].contains('['))
+            || line.starts_with("{start_of_")
+            || line.starts_with("{title:")
+            || line.starts_with("{t:")
+    })
+}
+
+/// A song read from a file to import, as the import takes it in: a song from another program's
+/// file comes in tidied (its title and words put right, as `sp library tidy` puts the
+/// library's), so the same file imported again is found in the library. SoftPresenter's own
+/// songs come as saved, and so does a song kept in step with an outside source (its
+/// fingerprint would change).
+pub fn as_imported(song: Presentation, path: &Path) -> Presentation {
+    if is_song_file(path) || song.catalog.is_some() {
+        return song;
+    }
+    sp_model::tidy_song(&song, sp_model::TidyOptions::default()).song
+}
+
+/// How an import knows a song the library has: its title, in any case, and its words. A song
+/// the library has word for word under the same title is never brought in twice.
+pub fn import_key(song: &Presentation) -> (String, String) {
+    (song.title.trim().to_lowercase(), sp_model::to_song_text(song))
 }
 
 /// The SoftPresenter song file that belongs with a path: the path itself for a song file;

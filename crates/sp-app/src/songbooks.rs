@@ -353,13 +353,7 @@ pub(crate) fn tick_card(
     };
     ui.painter().rect_filled(place, 9.0, fill);
     let tick = egui::Rect::from_center_size(place.left_center() + vec2(20.0, 0.0), vec2(16.0, 16.0));
-    if ticked {
-        ui.painter().rect_filled(tick, 4.0, if here { TEXT_FAINT } else { READY });
-        ui.painter().text(tick.center(), Align2::CENTER_CENTER, "\u{2713}", semibold(12.0), Color32::BLACK);
-    } else {
-        let ink = if can { TEXT_DIM } else { TEXT_FAINT };
-        ui.painter().rect_stroke(tick, 4.0, Stroke::new(1.2, ink), egui::StrokeKind::Inside);
-    }
+    paint_tick_box(ui.painter(), tick, ticked, here, can);
     let (name_at, detail_at) = if detail.is_empty() { (0.0, 0.0) } else { (-7.0, 9.0) };
     ui.painter().text(
         place.left_center() + vec2(40.0, name_at),
@@ -378,6 +372,18 @@ pub(crate) fn tick_card(
         );
     }
     response
+}
+
+/// A tick box, 16 square in `tick`: ticked, a tick on green (on grey when `fixed`, a tick that
+/// can't be taken away); not, an outline, fainter when it can't be ticked (`can`).
+pub(crate) fn paint_tick_box(painter: &egui::Painter, tick: egui::Rect, ticked: bool, fixed: bool, can: bool) {
+    if ticked {
+        painter.rect_filled(tick, 4.0, if fixed { TEXT_FAINT } else { READY });
+        painter.text(tick.center(), Align2::CENTER_CENTER, "\u{2713}", semibold(12.0), Color32::BLACK);
+    } else {
+        let ink = if can { TEXT_DIM } else { TEXT_FAINT };
+        painter.rect_stroke(tick, 4.0, Stroke::new(1.2, ink), egui::StrokeKind::Inside);
+    }
 }
 
 /// A songbook on the Settings page: a card with its name and what it is, and a button (Download

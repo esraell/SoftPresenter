@@ -600,6 +600,9 @@ pub struct HomeState {
     pub catalog: crate::catalog_songs::CatalogSongs,
     /// Settings › Command line: where the sp command stands, and what it said.
     pub command_line: crate::cli_install::Card,
+    /// Settings › Song files › Find songs on this computer: where it looks, what it found, and
+    /// what was asked of it (`find_songs`).
+    pub find_songs: crate::find_songs::Card,
     /// Settings › AI assistants (MCP): its switches and tiles, and what the page said.
     pub mcp: crate::mcp::pane::View,
     /// An NDI name being typed in the Screens window, and the screen it is for. It is used
@@ -2046,6 +2049,7 @@ impl Default for HomeState {
             free_songbooks: crate::free_songbooks::View::default(),
             catalog: crate::catalog_songs::CatalogSongs::default(),
             command_line: crate::cli_install::Card::default(),
+            find_songs: crate::find_songs::Card::default(),
             mcp: crate::mcp::pane::View::load(),
             ndi_draft: None,
             // Assumed until it has been looked for.

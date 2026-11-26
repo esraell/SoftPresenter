@@ -8,6 +8,7 @@ use sp_engine::Show;
 
 use super::{HomeState, Page, open_page};
 
+mod find_card;
 pub(crate) mod parts;
 mod screens_page;
 use crate::i18n::{t, tf, tk, tn};
@@ -905,9 +906,11 @@ fn command_line_page(ui: &mut egui::Ui, state: &mut HomeState) {
     }
 }
 
-/// Settings › Song files: songs are plain files that can be changed outside the app; read them
-/// again, and what happens when one was.
+/// Settings › Song files: first, finding the songs already on this computer (`find_card`); then
+/// that songs are plain files that can be changed outside the app, reading them again, and what
+/// happens when one was.
 fn song_files_page(ui: &mut egui::Ui, state: &mut HomeState) {
+    find_card::find_card(ui, &mut state.find_songs);
     card(
         ui,
         t("settings.song_files.title", "Song files"),
@@ -1255,7 +1258,7 @@ mod tests {
     }
 
     /// Every piece of words a frame drew, with the rectangle it took.
-    fn words_drawn(output: &egui::FullOutput) -> Vec<(String, Rect)> {
+    pub(super) fn words_drawn(output: &egui::FullOutput) -> Vec<(String, Rect)> {
         fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect)>) {
             match shape {
                 egui::Shape::Text(text) => into.push((text.galley.text().to_owned(), text.visual_bounding_rect())),

@@ -699,7 +699,9 @@ pub fn only_reads(args: &[String]) -> bool {
     let word = |at: usize| args.get(at).map(|w| w.to_lowercase()).unwrap_or_default();
     let alone = args.len() == 1;
     match word(0).as_str() {
-        "" | "help" | "status" | "songs" | "slides" | "playlists" | "libraries" | "themes" | "screens" | "timers"
+        // `songs find` looks, `songs find --import` brings songs in.
+        "songs" => alone || (word(1) == "find" && !args.iter().any(|w| w == "--import")),
+        "" | "help" | "status" | "slides" | "playlists" | "libraries" | "themes" | "screens" | "timers"
         | "messages" | "props" | "macros" | "groups" | "displays" | "decklink" | "bibles" | "search" | "job"
         | "songbooks" => true,
         "media" | "media-playlist" | "settings" | "menu" => alone,
@@ -770,6 +772,19 @@ fn with_full_paths(args: Vec<String>) -> Vec<String> {
             && let Ok(full) = Path::new(word).canonicalize()
         {
             args[2] = full.to_string_lossy().into_owned();
+        }
+        return args;
+    }
+    // `songs find --in FOLDER`: each folder made whole.
+    if first("songs") && second(&["find"]) {
+        let mut args = args;
+        for at in 2..args.len() {
+            if args[at - 1] == "--in"
+                && Path::new(&args[at]).is_relative()
+                && let Ok(here) = std::env::current_dir()
+            {
+                args[at] = here.join(&args[at]).to_string_lossy().into_owned();
+            }
         }
         return args;
     }
@@ -1042,6 +1057,12 @@ Songs, libraries and playlists
   song new TITLE --words TEXT  a new song, its words given as song text (one word, quoted)
   song import FILE… | FOLDER…  import songs (text, lyric, ChordPro, rich text, Word, .pro,
                                .proBundle); a folder becomes a library of its name
+  songs find [--in FOLDER]…    look for songbooks, libraries and song files on this computer
+                               (Documents, Downloads, Desktop, SoftProjector's folder, and
+                               each FOLDER), as Settings › Song files does: lists each,
+                               numbered, with its songs new and already here. Nothing comes in
+  songs find --import N…|NAME  bring in the new songs of those numbered (or the one named),
+                               each into a library of its name; songs already here stay out
   libraries                    the libraries, with how many songs each has
   library NAME                 list a library's songs
   library open NAME | all      show a library's songs, or all songs
@@ -1381,7 +1402,13 @@ impl crate::App {
                 Some(Err(usage)) => Err(usage),
                 Some(Ok((_, since))) => Ok(with_changes(self.ctl_status(), since.as_deref())),
             },
-            "songs" => Ok(self.ctl_songs()),
+            "songs" => {
+                if args.get(1).is_some_and(|w| w.eq_ignore_ascii_case("find")) {
+                    self.ctl_songs_find(args)
+                } else {
+                    Ok(self.ctl_songs())
+                }
+            }
             "slides" => self.ctl_slides(args),
             "slide" => self.ctl_slide(args),
             "playlists" => Ok(self.ctl_playlists()),
@@ -1624,7 +1651,14 @@ impl crate::App {
             .and_then(|w| w.parse().ok())
             .ok_or("job N (the number a background song pack job was given)")?;
         let kept = self.jobs.iter().find(|(have, _)| *have == job).map(|(_, how)| how);
-        Ok(job_reply(job, kept, &self.run_word))
+        let mut reply = job_reply(job, kept, &self.run_word);
+        // A search for songs (`songs find`) gives what it found as data too.
+        if let (Some(more), serde_json::Value::Object(map)) = (self.finding.job_data(job), &mut reply.data)
+            && let serde_json::Value::Object(more) = more
+        {
+            map.extend(more.clone());
+        }
+        Ok(reply)
     }
 
     /// `song reload [SONG [--now]]`.
