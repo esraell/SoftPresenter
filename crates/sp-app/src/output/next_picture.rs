@@ -44,10 +44,17 @@ pub(super) struct NextPicture {
 
 impl NextPicture {
     /// Starts the window's thread. It ends once this is let go and any picture it is waiting
-    /// for has come (and is let go too).
-    pub(super) fn new(surface: Arc<wgpu::Surface<'static>>) -> NextPicture {
+    /// for has come (and is let go too). With `slow`, every picture asked for comes that much
+    /// later (a testing aid: see `super::slow_present`).
+    pub(super) fn new(surface: Arc<wgpu::Surface<'static>>, slow: Option<Duration>) -> NextPicture {
         let theirs = surface.clone();
-        NextPicture { asker: Asker::new("window pictures", move || super::next_screen_texture(&theirs)), surface }
+        let ask = move || {
+            if let Some(slow) = slow {
+                std::thread::sleep(slow);
+            }
+            super::next_screen_texture(&theirs)
+        };
+        NextPicture { asker: Asker::new("window pictures", ask), surface }
     }
 
     /// The surface the window is drawn on.

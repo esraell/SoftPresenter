@@ -228,4 +228,69 @@ mod tests {
         assert!(count > 0 && (width, height) == (64, 36));
         drop(incoming);
     }
+
+    /// Testing aid: SOFTPRESENTER_NDI_WATCH=NAME or NAME:SECONDS watches the source on the
+    /// network whose name holds NAME (a SoftPresenter screen sent over NDI, say) for that many
+    /// seconds (20 without), as a receiver does, and says how its pictures arrived: how many,
+    /// how many of them differed from the one before, and how long the waits between them were.
+    /// For measuring by hand what a receiver sees while the sender's windows are held up:
+    /// `SOFTPRESENTER_NDI_WATCH="Stream" cargo test -p sp-ndi -- --ignored --nocapture a_named_source`.
+    #[test]
+    #[ignore = "needs the NDI runtime, the network and a source to watch"]
+    fn a_named_source_is_watched_and_how_its_pictures_arrive_is_said() {
+        let Ok(asked) = std::env::var("SOFTPRESENTER_NDI_WATCH") else { return };
+        let (name, seconds) = match asked.rsplit_once(':') {
+            Some((name, seconds)) if seconds.trim().parse::<f32>().is_ok() => (name, seconds.trim().parse().unwrap()),
+            _ => (asked.as_str(), 20.0),
+        };
+        let finder = Finder::start();
+        let began = Instant::now();
+        let found = loop {
+            if let Some(found) = finder.sources().into_iter().find(|source| source.contains(name)) {
+                break found;
+            }
+            assert!(began.elapsed() < Duration::from_secs(30), "no source named {name:?}: {:?}", finder.sources());
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        // When each picture arrived, and a sum of some of its pixels to tell a new one by.
+        let seen: Arc<Mutex<Vec<(Instant, u64)>>> = Arc::default();
+        let into = Arc::clone(&seen);
+        let incoming = Incoming::start(&found, false, move |video| {
+            let rows = video.rows;
+            let sum =
+                rows.iter().step_by(1009).fold(0u64, |sum, byte| sum.wrapping_mul(31).wrapping_add(u64::from(*byte)));
+            if let Ok(mut seen) = into.lock() {
+                seen.push((Instant::now(), sum));
+            }
+        });
+        let began = Instant::now();
+        while seen.lock().unwrap().is_empty() {
+            assert!(began.elapsed() < Duration::from_secs(30), "no picture arrives from {found:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::thread::sleep(Duration::from_secs_f32(seconds));
+        drop(incoming);
+        let seen = seen.lock().unwrap().clone();
+        let ms = |took: Duration| took.as_secs_f64() * 1000.0;
+        let gaps: Vec<Duration> = seen.windows(2).map(|pair| pair[1].0 - pair[0].0).collect();
+        let new: Vec<Instant> = seen.windows(2).filter(|pair| pair[1].1 != pair[0].1).map(|pair| pair[1].0).collect();
+        let longest = gaps.iter().max().copied().unwrap_or_default();
+        let over = |than: f64| gaps.iter().filter(|gap| ms(**gap) > than).count();
+        let mut sorted = gaps.clone();
+        sorted.sort();
+        let middle = sorted.get(sorted.len() / 2).copied().unwrap_or_default();
+        println!(
+            "watched {found:?} for {seconds} s: {} pictures arrived ({:.1} a second), {} of them new; waits between \
+             pictures: middle {:.1} ms, longest {:.1} ms, {} over 50 ms, {} over 67 ms, {} over 100 ms, {} over 500 ms",
+            seen.len(),
+            seen.len() as f64 / f64::from(seconds),
+            new.len(),
+            ms(middle),
+            ms(longest),
+            over(50.0),
+            over(67.0),
+            over(100.0),
+            over(500.0),
+        );
+    }
 }

@@ -1271,6 +1271,24 @@ fn held_picture(asked: &str) -> Option<(Duration, Duration)> {
     Some((hold, after))
 }
 
+/// Testing aid: SOFTPRESENTER_SLOW_PRESENT=MS or MS@SCREEN has every picture a screen's window
+/// asks for come MS milliseconds late (only the window of the screen of that name, with one;
+/// every screen's without), as when the window system is slow to take a window's pictures and
+/// give them back, time after time: a display behind a splitter or on a slow connection, a
+/// window system busy with something else. The window is then shown fewer pictures; nothing
+/// else should be held up by it. It works in a quiet run, as SOFTPRESENTER_HOLD_WINDOW_PICTURE
+/// (which holds one picture, once) does. How late the pictures of the window of the screen
+/// `name` come, if they do.
+fn slow_present(asked: &str, name: &str) -> Option<Duration> {
+    let (slow, screen) = match asked.split_once('@') {
+        Some((slow, screen)) => (slow, Some(screen.trim())),
+        None => (asked, None),
+    };
+    let slow = Duration::from_millis(slow.trim().parse().ok()?);
+    let this_one = screen.is_none_or(|screen| screen.eq_ignore_ascii_case(name.trim()));
+    (this_one && !slow.is_zero()).then_some(slow)
+}
+
 /// Sets a window's surface up, saying whether that worked. A failure is caught here, not left to
 /// stop the thread: a screen that can't be drawn this moment is tried again next frame.
 ///
@@ -2174,7 +2192,18 @@ impl Output {
             view_formats: vec![],
         };
         let configured = configure(&self.device, &surface, &config);
-        let next = NextPicture::new(Arc::new(surface));
+        // Testing aid: SOFTPRESENTER_SLOW_PRESENT (see `slow_present`).
+        let slow = std::env::var("SOFTPRESENTER_SLOW_PRESENT").ok().and_then(|asked| slow_present(&asked, &name));
+        if let Some(slow) = slow {
+            crate::applog::event(
+                "output",
+                &format!(
+                    "Testing aid: every picture the window of \"{name}\" asks for comes {} ms late.",
+                    slow.as_millis()
+                ),
+            );
+        }
+        let next = NextPicture::new(Arc::new(surface), slow);
         // What draws the X over the window's picture (see `close_button`): made with the first
         // window of each format, as it is set up, never as the X first shows (making it holds
         // the thread as long as setting a window up does).
@@ -5062,6 +5091,12 @@ mod tests {
         assert_eq!(held_picture(" 1000 @ 90 "), Some((ms(1000), Duration::from_secs(90))));
         for bad in ["", "x", "-5", "1000@", "1000@-1", "1000@nan", "@3", "1.5@3"] {
             assert_eq!(held_picture(bad), None, "{bad:?}");
+        }
+        assert_eq!(slow_present("150", "Screen 1"), Some(ms(150)));
+        assert_eq!(slow_present(" 150 @ screen 1 ", "Screen 1"), Some(ms(150)));
+        assert_eq!(slow_present("150@Stage", "Screen 1"), None, "another screen's window");
+        for bad in ["", "0", "x", "-5", "1.5", "0@Screen 1", "@Screen 1"] {
+            assert_eq!(slow_present(bad, "Screen 1"), None, "{bad:?}");
         }
         let room = output_room("20000").expect("room");
         assert_eq!((room.lines, room.seg_counts, room.segments), (20_000, 20_000, 20_000));

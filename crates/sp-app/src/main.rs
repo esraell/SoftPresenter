@@ -8785,7 +8785,8 @@ impl App {
         let mut placed = screens::place_all(&list, &displays, &operator);
         // A capture never fills a display or sends over the network, whatever the list says.
         if quiet {
-            let ndi_aid = std::env::var_os("SOFTPRESENTER_NDI").is_some();
+            // Testing aid: SOFTPRESENTER_PRETEND_NDI's sources send nothing anywhere.
+            let ndi_aid = std::env::var_os("SOFTPRESENTER_NDI").is_some() || sp_ndi::pretending();
             for place in &mut placed {
                 match place {
                     // Testing aid: SOFTPRESENTER_SCREENS_FILL=<display name> lets a quiet run's

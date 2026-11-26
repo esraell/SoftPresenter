@@ -644,6 +644,10 @@ impl NdiOutput {
         // A source started again under the name it had (for another rate) may find the one
         // before it still being taken down, on that one's own thread, and NDI refuses a second
         // of the name: it is tried again for a moment, here on the new source's thread.
+        // Testing aid: SOFTPRESENTER_PRETEND_NDI (see `Pretend`).
+        if let Some(minute) = pretend_minute() {
+            return spawn(name, rate, move |_: &str| Ok(Pretend::new(rate)), wake, log, minute);
+        }
         let open = move |name: &str| {
             let runtime = runtime::get()?;
             let mut tries = 0;
@@ -828,6 +832,63 @@ impl Sink for runtime::Source {
     fn sound(&self, planar: &[f32], heard: std::time::SystemTime) {
         self.send_sound(SOUND_RATE, SOUND_CHANNELS, planar, heard);
     }
+}
+
+/// Testing aid: SOFTPRESENTER_PRETEND_NDI=1 (or a number of seconds) has every source send to a
+/// stand-in instead of NDI, so the whole way a picture travels to a source, and the source's own
+/// timing of it, can be tried in a quiet run and on a computer without NDI. The stand-in always
+/// has one receiver, takes each picture at the source's rate as NDI's own pacing does (a send
+/// waits for its turn, one picture's time after the one before), and sends nothing anywhere.
+/// With a number, the source says how its pictures went every that many seconds instead of
+/// every minute.
+struct Pretend {
+    frame: Duration,
+    /// When the next picture's turn comes.
+    turn: Mutex<Instant>,
+}
+
+impl Pretend {
+    fn new(rate: Rate) -> Pretend {
+        Pretend { frame: rate.frame(), turn: Mutex::new(Instant::now()) }
+    }
+}
+
+impl Sink for Pretend {
+    fn receivers(&self) -> Option<u32> {
+        Some(1)
+    }
+
+    fn send(&self, _width: u32, _height: u32, _rgba: &[u8], _alpha: bool) {
+        let Ok(mut turn) = self.turn.lock() else { return };
+        let now = Instant::now();
+        std::thread::sleep(turn.saturating_duration_since(now));
+        *turn = (*turn).max(now) + self.frame;
+    }
+
+    fn sound(&self, _planar: &[f32], _heard: std::time::SystemTime) {}
+}
+
+/// How often a pretend source says how its pictures went, when the testing switch asks for
+/// pretend sources at all (see [`Pretend`]).
+fn pretend_minute() -> Option<Duration> {
+    let asked = std::env::var("SOFTPRESENTER_PRETEND_NDI").ok()?;
+    pretend_minute_of(&asked)
+}
+
+/// What SOFTPRESENTER_PRETEND_NDI asks for: nothing when empty or 0, the usual minute for 1 or
+/// anything that isn't a number, else that many seconds.
+fn pretend_minute_of(asked: &str) -> Option<Duration> {
+    match asked.trim() {
+        "" | "0" => None,
+        "1" => Some(MINUTE),
+        seconds => Some(seconds.parse().ok().and_then(|s| Duration::try_from_secs_f32(s).ok()).unwrap_or(MINUTE)),
+    }
+}
+
+/// True when the testing switch has every source send to a stand-in (see [`Pretend`]): a quiet
+/// run may then have its NDI screens, which send nothing anywhere.
+pub fn pretending() -> bool {
+    pretend_minute().is_some()
 }
 
 /// Starts a source's thread, which opens where its pictures go with `open` and then sends,
@@ -2617,5 +2678,28 @@ mod tests {
         source.output.show(3, 1, vec![9; 12], Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 3, "the fresh picture, and not the old one");
         assert!(source.black.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_pretend_source_takes_pictures_at_the_sources_rate_and_always_has_one_receiver() {
+        assert_eq!(pretend_minute_of(""), None);
+        assert_eq!(pretend_minute_of("0"), None);
+        assert_eq!(pretend_minute_of("1"), Some(MINUTE));
+        assert_eq!(pretend_minute_of("yes"), Some(MINUTE));
+        assert_eq!(pretend_minute_of(" 2.5 "), Some(Duration::from_millis(2500)));
+        let pretend = Pretend::new(Rate::R50);
+        assert_eq!(pretend.receivers(), Some(1));
+        // The first goes at once; each one after it waits for its turn, 20 ms after the last.
+        let began = Instant::now();
+        for _ in 0..6 {
+            pretend.send(1, 1, &[0; 4], false);
+        }
+        let took = began.elapsed();
+        assert!(took >= Duration::from_millis(100) && took < Duration::from_millis(400), "took {took:?}");
+        // One that comes late goes at once, and the turns go on from there.
+        std::thread::sleep(Duration::from_millis(60));
+        let began = Instant::now();
+        pretend.send(1, 1, &[0; 4], false);
+        assert!(began.elapsed() < Duration::from_millis(15));
     }
 }
