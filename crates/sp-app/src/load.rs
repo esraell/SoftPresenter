@@ -132,7 +132,7 @@ fn import_zipped_songbooks(
     name: &str,
     until: &dyn Fn() -> bool,
     each: EachSong,
-) -> Result<Vec<String>, Refused> {
+) -> Result<Vec<Caution>, Refused> {
     let not_songbook = || Refused {
         said: tf(
             "notices.import.zip_no_songbook",
@@ -185,15 +185,25 @@ fn import_zipped_songbooks(
             Ok(given) => came += given,
             Err(refused) => {
                 first_why.get_or_insert(refused.why);
-                cautions.push(refused.said);
+                cautions.push(Caution { short: refused.said.clone(), said: refused.said });
             }
         }
     }
     // Nothing came in: what went wrong is the answer.
     if came == 0 && !cautions.is_empty() {
-        return Err(Refused { said: cautions.join(" "), why: first_why.unwrap_or_default() });
+        let said: Vec<String> = cautions.into_iter().map(|caution| caution.said).collect();
+        return Err(Refused { said: said.join(" "), why: first_why.unwrap_or_default() });
     }
     Ok(cautions)
+}
+
+/// What the operator should know of a file of many songs that gave songs: the sentence an import
+/// says, which names the file, and a short one for a row that names it already (Settings ›
+/// Song files' Find, under the row).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Caution {
+    pub said: String,
+    pub short: String,
 }
 
 /// Where each song made of a file of many songs goes, with the name of its songbook.
@@ -234,12 +244,12 @@ pub fn read_songbook_file(path: &Path) -> Result<Songbook, Refused> {
 pub fn read_songbook_file_until(path: &Path, until: &dyn Fn() -> bool) -> Result<Songbook, Refused> {
     let mut songs = Vec::new();
     let cautions = read_songbook_file_each(path, until, &mut |song, book| songs.push((song, book)))?;
-    Ok(Songbook { songs, cautions })
+    Ok(Songbook { songs, cautions: cautions.into_iter().map(|caution| caution.said).collect() })
 }
 
 /// The same, each song handed to `each` as it is made, so the songs are never all held at once
 /// (Settings › Song files' Find counts them so); what the operator should know of it, after.
-pub fn read_songbook_file_each(path: &Path, until: &dyn Fn() -> bool, each: EachSong) -> Result<Vec<String>, Refused> {
+pub fn read_songbook_file_each(path: &Path, until: &dyn Fn() -> bool, each: EachSong) -> Result<Vec<Caution>, Refused> {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     if has_extension(path, SONGBOOK_ZIP_ENDING) {
         return import_zipped_songbooks(path, &name, until, each);
@@ -266,7 +276,7 @@ fn songbook_songs<R: std::io::Read + std::io::Seek>(
     name: &str,
     until: &dyn Fn() -> bool,
     each: EachSong,
-    cautions: &mut Vec<String>,
+    cautions: &mut Vec<Caution>,
 ) -> Result<usize, Refused> {
     use sp_model::SongbookProblem;
     let read = sp_model::read_songbook_whole(source).map_err(|problem| match problem {
@@ -295,11 +305,18 @@ fn songbook_songs<R: std::io::Read + std::io::Seek>(
     // A text songbook that ends part way through a song was cut short as it was copied or
     // downloaded: that song is left out, and those after it are missing.
     if read.cut_short {
-        cautions.push(tf(
-            "notices.import.songbook_cut_short",
-            "{name} ends part way through a song, as a file cut short while it was copied or downloaded does: that song was left out, and any after it are missing.",
-            &[("name", name)],
-        ));
+        cautions.push(Caution {
+            said: tf(
+                "notices.import.songbook_cut_short",
+                "{name} ends part way through a song, as a file cut short while it was copied or downloaded does: that song was left out, and any after it are missing.",
+                &[("name", name)],
+            ),
+            short: t(
+                "settings.find.caution.cut_short",
+                "Cut short when it was copied or downloaded: its last songs are missing",
+            )
+            .to_owned(),
+        });
     }
     let mut given = 0;
     for song in read.songs {
@@ -319,18 +336,23 @@ fn songbook_songs<R: std::io::Read + std::io::Seek>(
 /// A database copied while the program that keeps it had it open may have changes waiting in
 /// a file beside it (`-wal`, or `-journal` part way through a change). Only the database itself
 /// is read, so the operator is told its latest changes may be missing.
-fn unsaved_changes(path: &Path, name: &str) -> Option<String> {
+fn unsaved_changes(path: &Path, name: &str) -> Option<Caution> {
     let beside = |ending: &str| {
         let mut other = path.as_os_str().to_owned();
         other.push(ending);
         std::fs::metadata(other).is_ok_and(|meta| meta.is_file() && meta.len() > 0)
     };
-    (beside("-wal") || beside("-journal")).then(|| {
-        tf(
+    (beside("-wal") || beside("-journal")).then(|| Caution {
+        said: tf(
             "notices.import.songbook_unsaved",
             "{name} was still open in SoftProjector when it was copied, so its latest changes may be missing. Close SoftProjector and import it again to be sure.",
             &[("name", name)],
+        ),
+        short: t(
+            "settings.find.caution.unsaved",
+            "Copied while it was open in SoftProjector: its latest changes may be missing",
         )
+        .to_owned(),
     })
 }
 

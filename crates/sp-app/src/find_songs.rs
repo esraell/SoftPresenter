@@ -283,9 +283,10 @@ pub struct Source {
     pub twice: usize,
     /// Why it couldn't be read: the importer's own reason.
     pub why: Option<String>,
-    /// What the operator should know of one that can be read: that it was copied while
-    /// SoftProjector had it open, or ends part way through a song (the importer's own words),
-    /// or that more of its song files are in the cloud.
+    /// What the operator should know of one that can be read, in a few words under its row: that
+    /// it was copied while SoftProjector had it open, or ends part way through a song (the
+    /// importer's own cautions, `load::Caution`), or that more of its song files are in the
+    /// cloud.
     pub caution: Option<String>,
     /// It is only in the cloud (iCloud Drive, OneDrive), not on this computer: never read, which
     /// would download it.
@@ -665,14 +666,14 @@ fn start_with(stop: Arc<AtomicBool>, begin: Begin, wake: impl Fn() + Send + 'sta
             let (ended, entries) = walked.unwrap_or((Ended::Failed, 0));
             let _ = tx.send((id, Found::Done(ended)));
             wake();
-            crate::applog::event(
-                "find",
-                &format!(
-                    "looked at {entries} files and folders in {} ms{}",
-                    began.elapsed().as_millis(),
-                    if ended == Ended::Everywhere { String::new() } else { format!(" (ended: {})", ended.english()) }
-                ),
-            );
+            let took = began.elapsed().as_millis();
+            let said = match ended {
+                // How far it got went with the panic, which the log has above this.
+                Ended::Failed => format!("went wrong after {took} ms (the panic above says where)"),
+                Ended::Everywhere => format!("looked at {entries} files and folders in {took} ms"),
+                ended => format!("looked at {entries} files and folders in {took} ms (ended: {})", ended.english()),
+            };
+            crate::applog::event("find", &said);
         })
         .map_err(|e| e.to_string())?;
     Ok(Search { id, stop, rx, thread: Some(thread) })
@@ -694,6 +695,10 @@ struct Walk<'a> {
     /// Each folder's look takes this much longer (`SOFTPRESENTER_FIND_SONGS_SLOW`).
     slow: Duration,
     marks: fn(&std::fs::DirEntry) -> Marks,
+    /// How many sources it has listed, and after how many it goes wrong
+    /// (`SOFTPRESENTER_FIND_SONGS_FAIL`).
+    listed: std::cell::Cell<usize>,
+    fail_after: Option<usize>,
 }
 
 /// Testing aid: SOFTPRESENTER_FIND_SONGS_SLOW=<ms> makes each folder a search looks in, and
@@ -733,6 +738,8 @@ impl<'a> Walk<'a> {
             walked: HashSet::new(),
             slow: slow(),
             marks,
+            listed: std::cell::Cell::new(0),
+            fail_after: fail_after(),
         }
     }
 
@@ -756,8 +763,15 @@ impl<'a> Walk<'a> {
     }
 
     fn say(&self, found: Found) {
+        let source = matches!(found, Found::Source(_));
         let _ = self.tx.send((self.id, found));
         (self.wake)();
+        if source {
+            self.listed.set(self.listed.get() + 1);
+            if self.fail_after.is_some_and(|after| self.listed.get() >= after) {
+                panic!("SOFTPRESENTER_FIND_SONGS_FAIL: the search goes wrong, as a test asked");
+            }
+        }
     }
 
     fn place(&mut self, place: &Looked) {
@@ -989,9 +1003,43 @@ pub struct Marks {
     pub cloud: bool,
 }
 
+/// What the system says of an entry of a folder ([`system_marks`]); in a test copy with
+/// `SOFTPRESENTER_FIND_SONGS_CLOUD`, a file whose name holds one of its words is only in the
+/// cloud.
+fn marks(entry: &std::fs::DirEntry) -> Marks {
+    let marks = system_marks(entry);
+    let name = entry.file_name().to_string_lossy().into_owned();
+    if cloud_words().iter().any(|word| name.contains(word.as_str())) { Marks { cloud: true, ..marks } } else { marks }
+}
+
+/// Testing aid: SOFTPRESENTER_FIND_SONGS_CLOUD=<words, by commas> makes a test copy's search
+/// take a file whose name holds one of the words as only in the cloud, as iCloud Drive or
+/// OneDrive keeps one (nothing on this computer can make one), so a picture can show the card's
+/// rows for such files. Only in a test copy.
+fn cloud_words() -> &'static [String] {
+    static WORDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    WORDS.get_or_init(|| {
+        let words = if test_copy() {
+            std::env::var("SOFTPRESENTER_FIND_SONGS_CLOUD").unwrap_or_default()
+        } else {
+            String::new()
+        };
+        words.split(',').map(str::trim).filter(|word| !word.is_empty()).map(str::to_owned).collect()
+    })
+}
+
+/// Testing aid: SOFTPRESENTER_FIND_SONGS_FAIL=<n> makes a test copy's search thread panic once it
+/// has listed n sources, so a picture can show a search that went wrong. Only in a test copy.
+fn fail_after() -> Option<usize> {
+    if !test_copy() {
+        return None;
+    }
+    std::env::var("SOFTPRESENTER_FIND_SONGS_FAIL").ok()?.parse().ok()
+}
+
 /// What the system says of an entry of a folder: on Windows, from the folder's own listing; on
 /// a Mac, from the file's flags, asked without following a link or opening the file.
-fn marks(entry: &std::fs::DirEntry) -> Marks {
+fn system_marks(entry: &std::fs::DirEntry) -> Marks {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -1094,7 +1142,8 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
     match read {
         // Each of its songbooks' rows says what the operator should know of the file.
         Ok(cautions) => {
-            let caution = (!cautions.is_empty()).then(|| cautions.join(" "));
+            let shorts: Vec<String> = cautions.into_iter().map(|caution| caution.short).collect();
+            let caution = (!shorts.is_empty()).then(|| shorts.join(" "));
             Ok(books
                 .into_iter()
                 .map(|(name, counted)| Source {
@@ -1177,8 +1226,8 @@ fn folder_source(
         tn(
             "settings.find.caution.cloud",
             cloud as u64,
-            "{n} more song file here is in the cloud, not on this computer, so it wasn\u{2019}t looked at.",
-            "{n} more song files here are in the cloud, not on this computer, so they weren\u{2019}t looked at.",
+            "{n} more song file here is only in the cloud, so it wasn\u{2019}t looked at",
+            "{n} more song files here are only in the cloud, so they weren\u{2019}t looked at",
             &[],
         )
     });
@@ -1267,7 +1316,9 @@ pub fn row_words(source: &Source) -> (String, String, String) {
             tf("settings.find.line_unread", "{kind} \u{b7} {where}", &[("kind", kind.name()), ("where", &place)]),
         ),
         kind => {
-            let songs = tn("settings.find.songs", source.songs as u64, "{n} song", "{n} songs", &[]);
+            // A count and its word are never parted at a line's end.
+            let songs =
+                tn("settings.find.songs", source.songs as u64, "{n} song", "{n} songs", &[]).replace(' ', "\u{a0}");
             (
                 source.name.clone(),
                 tf(
@@ -1742,19 +1793,29 @@ pub(crate) mod tests {
         assert!(!open.is_empty());
         for source in open {
             let caution = source.caution.as_deref().unwrap_or_default();
-            assert!(caution.contains("latest changes may be missing"), "{}: {caution}", source.name);
+            assert_eq!(
+                caution, "Copied while it was open in SoftProjector: its latest changes may be missing",
+                "{}",
+                source.name
+            );
             assert!(source.can_import(), "it can still be brought in");
         }
         let cut = found.iter().find(|source| source.name == "Cut book").unwrap();
         assert_eq!(cut.songs, 2, "the song it ends in is left out");
-        assert!(cut.caution.as_deref().unwrap_or_default().contains("ends part way through a song"), "{cut:#?}");
+        assert_eq!(
+            cut.caution.as_deref(),
+            Some("Cut short when it was copied or downloaded: its last songs are missing"),
+            "{cut:#?}"
+        );
+        // A count and its word stay together under the row.
+        assert_eq!(row_words(cut).1, "Library \u{b7} from SoftProjector \u{b7} Downloads \u{b7} 2\u{a0}songs");
     }
 
     #[test]
     fn a_song_twice_in_one_source_is_counted_once_and_said() {
         // Two files of one song (its title and words) and another: three songs, two new, one
         // found twice, and nothing "already here" (the library has neither).
-        let tree = Tree::new("twice");
+        let tree = Tree::new("twice-in-one");
         tree.write("Songs/Morning Light.cho", song_text("Morning Light").as_bytes());
         tree.write("Songs/Morning Light copy.cho", song_text("Morning Light").as_bytes());
         tree.write("Songs/River Song.cho", song_text("River Song").as_bytes());
@@ -1818,8 +1879,7 @@ pub(crate) mod tests {
         // A folder with a song read and two only in the cloud: the one, and a caution.
         let mixed = found.iter().find(|source| source.name == "Mixed").unwrap();
         assert_eq!((mixed.songs, mixed.cloud), (1, false));
-        let caution =
-            "2 more song files here are in the cloud, not on this computer, so they weren\u{2019}t looked at.";
+        let caution = "2 more song files here are only in the cloud, so they weren\u{2019}t looked at";
         assert_eq!(mixed.caution.as_deref(), Some(caution));
         // A folder of song documents all in the cloud: a library in the cloud, not to tick.
         let away = found.iter().find(|source| source.name == "Away").unwrap();

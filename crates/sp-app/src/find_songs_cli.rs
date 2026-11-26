@@ -126,6 +126,8 @@ fn listing(card: &find_songs::Card, ended: Ended) -> (String, serde_json::Value)
         let mut rows = Vec::new();
         for (at, source) in card.sources.iter().enumerate() {
             let (name, line, count) = find_songs::row_words(source);
+            // The card keeps a count with its word; a terminal needs no such space.
+            let line = line.replace('\u{a0}', " ");
             text.push_str(&format!("\n  {:>2}  {name}  \u{2014}  {line}  \u{2014}  {}", at + 1, count.to_lowercase()));
             if let Some(caution) = &source.caution {
                 text.push_str(&format!("\n      {caution}"));
@@ -356,6 +358,9 @@ impl crate::App {
         if let Some(search) = self.finding.search.as_ref() {
             let said = search.said();
             let mut ended = None;
+            // Testing aid: SOFTPRESENTER_CAPTURE_PREFERENCES=find-songs-stop presses Stop once the
+            // search has listed two sources, so a picture can show a search that was stopped.
+            let stop_now = std::env::var("SOFTPRESENTER_CAPTURE_PREFERENCES").as_deref() == Ok("find-songs-stop");
             if let Some(running) = self.running.as_mut()
                 && !said.is_empty()
             {
@@ -366,6 +371,9 @@ impl crate::App {
                         Found::Source(source) => card.add(*source),
                         Found::Done(how) => ended = Some(how),
                     }
+                }
+                if stop_now && ended.is_none() && card.sources.len() >= 2 {
+                    ended = Some(Ended::Stopped);
                 }
                 self.redraw_settings();
             }

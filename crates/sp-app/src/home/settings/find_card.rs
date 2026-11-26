@@ -108,7 +108,7 @@ fn nothing_found(ui: &mut egui::Ui, state: &mut Card) {
 /// unticked), what comes in of them, Find Again and Import.
 fn found(ui: &mut egui::Ui, state: &mut Card) {
     if let Some(cut) = state.ended.words() {
-        note(ui, &format!("{cut} {}", t("settings.find.so_far", "These are what it found until then.")));
+        note(ui, &format!("{cut} {}", t("settings.find.so_far", "This is what it found until then.")));
     }
     if let Some(at) = rows(ui, state, None, true)
         && let Some(tick) = state.ticked.get_mut(at)
@@ -383,11 +383,11 @@ mod tests {
             ..source("spData.sqlite", Kind::Songbook, (Usual::Downloads, &["old laptop"]), 0, 0)
         };
         // Copied while SoftProjector had it open.
-        let open = crate::i18n::tf(
-            "notices.import.songbook_unsaved",
-            "{name} was still open in SoftProjector when it was copied, so its latest changes may be missing. Close SoftProjector and import it again to be sure.",
-            &[("name", "spData.sqlite")],
-        );
+        let open = t(
+            "settings.find.caution.unsaved",
+            "Copied while it was open in SoftProjector: its latest changes may be missing",
+        )
+        .to_owned();
         vec![
             Source {
                 caution: Some(open),
@@ -401,8 +401,8 @@ mod tests {
                 caution: Some(crate::i18n::tn(
                     "settings.find.caution.cloud",
                     2,
-                    "{n} more song file here is in the cloud, not on this computer, so it wasn\u{2019}t looked at.",
-                    "{n} more song files here are in the cloud, not on this computer, so they weren\u{2019}t looked at.",
+                    "{n} more song file here is only in the cloud, so it wasn\u{2019}t looked at",
+                    "{n} more song files here are only in the cloud, so they weren\u{2019}t looked at",
                     &[],
                 )),
                 ..source("Christmas 2025", Kind::SongFiles, (Usual::Downloads, &[]), 32, 0)
@@ -516,12 +516,12 @@ mod tests {
                     "Library \u{b7} from SoftProjector \u{b7} Desktop",
                     "3,288 new \u{b7} 13 already here",
                     "32 new \u{b7} 2 found twice",
-                    "Song files \u{b7} Downloads \u{b7} 34 songs",
+                    "Song files \u{b7} Downloads \u{b7} 34\u{a0}songs",
                     "Everything here is already in your library",
                     "Couldn\u{2019}t be read: the file is cut short or damaged",
-                    "Library \u{b7} from SoftProjector \u{b7} 3,301 songs",
-                    "spData.sqlite was still open in SoftProjector when it was copied, so its latest changes may be missing. Close SoftProjector and import it again to be sure.",
-                    "Library \u{b7} Documents \u{203a} Worship \u{b7} 214 songs",
+                    "Library \u{b7} from SoftProjector \u{b7} 3,301\u{a0}songs",
+                    "Copied while it was open in SoftProjector: its latest changes may be missing",
+                    "Library \u{b7} Documents \u{203a} Worship \u{b7} 214\u{a0}songs",
                     "Library \u{b7} from SoftProjector \u{b7} Downloads \u{203a} old laptop",
                 ],
             ),
@@ -547,7 +547,7 @@ mod tests {
         let mut state = state_in(Phase::Found);
         state.find_songs.ended = Ended::TooLong;
         let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
-        let cut = "It stopped after 90 seconds, the longest it looks, before it had looked everywhere. These are what it found until then.";
+        let cut = "It stopped after 90 seconds, the longest it looks, before it had looked everywhere. This is what it found until then.";
         assert!(crate::studio::tests::place_of(&drawn, cut).is_some());
         drawn.drop_without_applying_deltas();
         state.find_songs.ended = Ended::Stopped;

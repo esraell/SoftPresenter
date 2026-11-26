@@ -9872,8 +9872,9 @@ impl App {
                     }
                     // Settings › Song files with Find pressed at once (find-songs), and with Import
                     // pressed too once the search has ended (find-songs-import: see
-                    // `find_songs_cli::end_search`).
-                    "find-songs" | "find-songs-import" => {
+                    // `find_songs_cli::end_search`), or Stop once it has found two
+                    // (find-songs-stop: see `find_songs_cli::tick_find_songs`).
+                    "find-songs" | "find-songs-import" | "find-songs-stop" => {
                         state.preferences_pane = home::Pane::SongFiles;
                         state.find_songs.asks.push(find_songs::Ask::Find);
                     }

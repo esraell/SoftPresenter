@@ -325,7 +325,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   SoftPresenter's own library. A file only in the cloud (iCloud Drive's on a Mac, a OneDrive
   placeholder on Windows) is never opened, which would download it: a songbook there is a row
   saying "In the cloud, not on this computer", and a folder's song files there are said under
-  its row ("2 more song files here are in the cloud…"), or make a row of their own when it has
+  its row ("2 more song files here are only in the cloud…"), or make a row of their own when it has
   no other. Each source found is read there and
   then as a dry run and listed as it comes: its name, what and where it is ("Library · from
   SoftProjector · Downloads", the owner's word for what SoftProjector keeps), how many songs, and
