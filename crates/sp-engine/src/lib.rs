@@ -52,8 +52,9 @@ pub enum Command {
     Clear(Layer),
     ClearAll,
     /// Takes the live slide's words off the screens. The slide stays live, and its background
-    /// with it. Show Again, or any slide put on screen (this one too), brings the words back; a
-    /// clear takes the slide off.
+    /// with it. Show Again, a click on the slide, or another slide (or build) put on screen brings
+    /// the words back; Next or Previous with nowhere to go leaves them hidden; a clear takes the
+    /// slide off.
     HideWords,
     /// Shows hidden words again. With nothing live, puts back the slide the last clear took off,
     /// if no slide has gone up since and it is still there.
@@ -86,9 +87,10 @@ pub struct Show {
     build_step: usize,
     /// The live slide is up without its words; see [`Show::words_hidden`].
     words_hidden: bool,
-    /// The id of the slide the last clear took off, until a slide goes up. The cursor stays on
-    /// it (following it through edits); Show Again puts it back only while the slide there still
-    /// has this id, so a song or passage put in its place never shows a slide never shown.
+    /// The id of the slide the last clear took off, until a slide goes up. The cursor keeps its
+    /// place (some edits move it with its slide, others keep the index); the id says whether that
+    /// place still holds the slide, so a song or passage put in its place never shows a slide
+    /// that was never shown.
     taken_off: Option<sp_model::Uuid>,
     media: Vec<MediaItem>,
     live_media: Option<usize>,
@@ -473,12 +475,12 @@ impl Show {
                 self.build_step += 1;
                 Changes { builds: true, slides: std::mem::take(&mut self.words_hidden), ..Changes::default() }
             }
-            Command::Next => self.go_to(self.next_target()),
+            Command::Next => self.step_to(self.next_target()),
             Command::Previous if self.live.is_some() && self.build_step > 0 => {
                 self.build_step -= 1;
                 Changes { builds: true, slides: std::mem::take(&mut self.words_hidden), ..Changes::default() }
             }
-            Command::Previous => self.go_to(self.previous_target()),
+            Command::Previous => self.step_to(self.previous_target()),
             Command::First => self.go_to(self.edge_of_selected(false)),
             Command::Last => self.go_to(self.edge_of_selected(true)),
             Command::ShowMedia(index) => {
@@ -552,8 +554,22 @@ impl Show {
         true
     }
 
-    /// Puts back the slide the last clear took off, where the cursor has followed it, if it is
-    /// still there and can be shown; otherwise nothing, and it is forgotten either way. Next then
+    /// Next or Previous to `target`, as `go_to`, except that with no other slide to go to (the
+    /// end of the item, or the same slide again at its next place in the play order) hidden
+    /// words stay hidden and nothing changes on screen: a stray Next, or a timer's, never brings
+    /// back the last verse.
+    fn step_to(&mut self, target: Option<(SlideRef, Option<usize>)>) -> Changes {
+        let stays_hidden = self.words_hidden && target.is_some_and(|(at, _)| self.live == Some(at));
+        let changes = self.go_to(target);
+        if stays_hidden {
+            self.words_hidden = true;
+            return Changes::default();
+        }
+        changes
+    }
+
+    /// Puts back the slide the last clear took off, at the cursor's place, if that place still
+    /// holds it and it can be shown; otherwise nothing, and it is forgotten either way. Next then
     /// carries on from it.
     fn show_again(&mut self) -> Changes {
         let Some(id) = self.taken_off.take() else { return Changes::default() };

@@ -109,12 +109,8 @@ fn hidden_words_come_back_with_any_slide_put_on_screen_and_go_with_the_slide() {
         assert!(s.words_hidden());
     }
     let mut s = show();
-    // Next on the last slide keeps it, and brings its words back.
+    // Clicking the slide on screen brings its words back, and Previous goes back with them.
     s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 }));
-    hide(&mut s);
-    assert!(s.apply(Command::Next).slides);
-    assert_eq!((s.live(), s.words_hidden()), (at(0, 2), false));
-    // So does clicking the slide on screen, and Previous goes back with the words.
     hide(&mut s);
     assert!(s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 })).slides);
     assert!(!s.words_hidden());
@@ -135,22 +131,27 @@ fn hidden_words_come_back_with_any_slide_put_on_screen_and_go_with_the_slide() {
     hide(&mut s);
     assert!(s.apply(Command::ClearAll).slides);
     assert!(!s.words_hidden());
-    // The slide taken away by an edit: the words are never hidden with nothing live.
+    // The slide taken away by an edit: the words are never hidden with nothing live, and
+    // Show Again has nothing to put back (no clear took it off).
     s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 }));
     hide(&mut s);
     s.replace_presentation(0, Arc::new(parse_song_text("One", "A\n")));
     assert_eq!((s.live(), s.words_hidden()), (None, false));
+    assert_eq!(s.apply(Command::ShowAgain), Changes::default());
     s.apply(Command::GoTo(SlideRef { presentation: 1, slide: 1 }));
     hide(&mut s);
     s.slides_shifted(1, 1, false);
     assert_eq!((s.live(), s.words_hidden()), (None, false));
+    assert_eq!(s.apply(Command::ShowAgain), Changes::default());
     let mut s = show();
     s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 1 }));
     hide(&mut s);
     let without_b = Arc::new(s.presentations()[0].without_slide(1).unwrap());
     s.replace_presentation_following(0, without_b);
     assert_eq!((s.live(), s.words_hidden()), (None, false));
-    // A click build left: Next sets it going, and the words come back with it.
+    assert_eq!(s.apply(Command::ShowAgain), Changes::default());
+    // A click build left: Next sets it going, and the words come back with it; Previous
+    // taking it back brings them back too.
     let mut song = parse_song_text("Song", "A\n\nB\n");
     let click = sp_model::Build { on_click: true, ..sp_model::Build::of(sp_model::BuildEffect::Dissolve) };
     song.groups[0].slides[0].objects[0].build_in = Some(click);
@@ -160,6 +161,56 @@ fn hidden_words_come_back_with_any_slide_put_on_screen_and_go_with_the_slide() {
     let changes = s.apply(Command::Next);
     assert!(changes.builds && changes.slides);
     assert_eq!((s.live(), s.build_step(), s.words_hidden()), (at(0, 0), 1, false));
+    hide(&mut s);
+    let changes = s.apply(Command::Previous);
+    assert!(changes.builds && changes.slides);
+    assert_eq!((s.live(), s.build_step(), s.words_hidden()), (at(0, 0), 0, false));
+}
+
+#[test]
+fn next_or_previous_with_nowhere_to_go_leaves_the_words_hidden() {
+    fn hide(s: &mut Show) {
+        s.apply(Command::HideWords);
+        assert!(s.words_hidden());
+    }
+    // The song's last slide, its words hidden (the background left up after the song): Next,
+    // pressed or sent by a timer, changes nothing, and says so before it is pressed.
+    let mut s = show();
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 }));
+    hide(&mut s);
+    for _ in 0..2 {
+        assert_eq!(s.next_on_screen(), None);
+        assert_eq!(s.apply(Command::Next), Changes::default());
+        assert_eq!((s.live(), s.words_hidden()), (at(0, 2), true));
+    }
+    // Show Again, or a click on the slide, still brings them back.
+    assert!(s.apply(Command::ShowAgain).slides);
+    hide(&mut s);
+    assert!(s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 })).slides);
+    assert!(!s.words_hidden());
+    // Previous on the first slide: the same.
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+    hide(&mut s);
+    assert_eq!(s.apply(Command::Previous), Changes::default());
+    assert_eq!((s.live(), s.words_hidden()), (at(0, 0), true));
+    // A song that loops has somewhere to go: Next goes round, with the words.
+    let mut song = parse_song_text("Notices", "A\n\nB\n");
+    song.loops = true;
+    let mut s = Show::new(vec![Arc::new(song)]);
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 1 }));
+    hide(&mut s);
+    assert!(s.apply(Command::Next).slides);
+    assert_eq!((s.live(), s.words_hidden()), (at(0, 0), false));
+    // The same slide again at its next place in an arrangement puts no other slide up: the
+    // place moves on, and the words stay hidden.
+    let mut s = arranged();
+    let mut song = (*s.presentations()[0]).clone();
+    song.groups[2].slides[0].enabled = false;
+    s.replace_presentation(0, Arc::new(song));
+    s.apply(Command::GoToStep { presentation: 0, step: 1 });
+    hide(&mut s);
+    assert_eq!(s.apply(Command::Next), Changes::default());
+    assert_eq!((s.live(), s.position(), s.words_hidden()), (at(0, 1), Some((3, 4)), true));
 }
 
 #[test]
