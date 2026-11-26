@@ -650,21 +650,26 @@ fn start_with(stop: Arc<AtomicBool>, begin: Begin, wake: impl Fn() + Send + 'sta
             if let Some(before) = after {
                 let _ = before.join();
             }
-            let known = Known::of(&library);
-            let mut walk = Walk::new(&stopped, &known, &skip, &tx, id, limits, &wake);
-            walk.marks = marks;
-            for place in &places {
-                walk.place(place);
-            }
-            let ended = walk.ended();
+            // A panic in reading a file (ours, or a library's) ends the search as failed, never
+            // the app, and never as if it had looked everywhere.
+            let began = Instant::now();
+            let walked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let known = Known::of(&library);
+                let mut walk = Walk::new(&stopped, &known, &skip, &tx, id, limits, &wake);
+                walk.marks = marks;
+                for place in &places {
+                    walk.place(place);
+                }
+                (walk.ended(), walk.entries)
+            }));
+            let (ended, entries) = walked.unwrap_or((Ended::Failed, 0));
             let _ = tx.send((id, Found::Done(ended)));
             wake();
             crate::applog::event(
                 "find",
                 &format!(
-                    "looked at {} files and folders in {} ms{}",
-                    walk.entries,
-                    walk.began.elapsed().as_millis(),
+                    "looked at {entries} files and folders in {} ms{}",
+                    began.elapsed().as_millis(),
                     if ended == Ended::Everywhere { String::new() } else { format!(" (ended: {})", ended.english()) }
                 ),
             );
@@ -798,7 +803,18 @@ impl<'a> Walk<'a> {
         if !self.slow.is_zero() {
             std::thread::sleep(self.slow);
         }
-        let mut entries: Vec<std::fs::DirEntry> = std::fs::read_dir(dir)?.flatten().collect();
+        // Each entry is counted as it is listed, and the listing stops at the most a search looks
+        // at, so a folder of millions is never all held and sorted.
+        let mut entries: Vec<std::fs::DirEntry> = Vec::new();
+        for entry in std::fs::read_dir(dir)? {
+            self.entries += 1;
+            if self.cut() {
+                return Ok(());
+            }
+            if let Ok(entry) = entry {
+                entries.push(entry);
+            }
+        }
         entries.sort_by_key(|entry| entry.file_name());
         // A cache (a build's, say) or SoftPresenter's own library: nothing in it is listed.
         let marked = |name: &str| name == "CACHEDIR.TAG" || name == crate::library_folder::MARKER;
@@ -811,7 +827,6 @@ impl<'a> Walk<'a> {
         // many song files and whether a song document is among them.
         let (mut cloud_books, mut cloud_files, mut cloud_documents) = (Vec::new(), 0, false);
         for entry in &entries {
-            self.entries += 1;
             if self.cut() {
                 return Ok(());
             }
@@ -1321,7 +1336,14 @@ pub fn brought_words(brought: &Brought) -> [String; 3] {
             &[],
         )
     });
-    let left: String = [left, twice].into_iter().flatten().map(|words| format!(" {words}")).collect();
+    let failed = brought.failed.then(|| {
+        t(
+            "settings.find.import_failed",
+            "Something went wrong, so it stopped before every song had come in (the log says what).",
+        )
+        .to_owned()
+    });
+    let left: String = [left, twice, failed].into_iter().flatten().map(|words| format!(" {words}")).collect();
     match sentence.find(&came) {
         Some(at) => [sentence[..at].to_owned(), came.clone(), format!("{}{left}", &sentence[at + came.len()..])],
         None => [format!("{sentence}{left}"), String::new(), String::new()],
@@ -1363,6 +1385,8 @@ pub struct Brought {
     /// The songs read again after one of them had come in (found in two of the sources, or
     /// twice in one): it came in once.
     pub twice: usize,
+    /// Something went wrong on the reading thread, so not every song came in.
+    pub failed: bool,
 }
 
 /// The card's state, kept with the window's (`HomeState::find_songs`); the search and the import
@@ -1387,6 +1411,19 @@ pub struct Card {
     pub brought: Option<Brought>,
     /// What was clicked, for the app.
     pub asks: Vec<Ask>,
+    /// The rows' heights, so only those in view are laid out (see `find_card`).
+    pub heights: RowHeights,
+    /// How many new songs the sources ticked bring in, kept with what it was worked out for.
+    new_ticked: std::cell::Cell<Option<(u64, usize)>>,
+}
+
+/// How tall each row of the card's list is, at the width it was last laid out at; rows not yet
+/// laid out at that width are taken to be as tall as the last one that was.
+#[derive(Clone, Debug, Default)]
+pub struct RowHeights {
+    pub width: f32,
+    pub heights: Vec<Option<f32>>,
+    pub typical: f32,
 }
 
 impl Card {
@@ -1403,9 +1440,24 @@ impl Card {
             .collect()
     }
 
-    /// How many new songs the sources ticked bring in, each counted once.
+    /// How many new songs the sources ticked bring in, each counted once. Worked out again only
+    /// when the sources or the ticks change, not each time the card is drawn (a search may find
+    /// thousands of sources).
     pub fn new_ticked(&self) -> usize {
-        new_in(self.chosen().into_iter().map(|at| &self.sources[at]))
+        let mut hasher = std::hash::DefaultHasher::new();
+        for (source, ticked) in self.sources.iter().zip(&self.ticked) {
+            (ticked, source.new.len(), source.new.first(), source.new.last()).hash(&mut hasher);
+        }
+        self.sources.len().hash(&mut hasher);
+        let key = hasher.finish();
+        if let Some((have, new)) = self.new_ticked.get()
+            && have == key
+        {
+            return new;
+        }
+        let new = new_in(self.chosen().into_iter().map(|at| &self.sources[at]));
+        self.new_ticked.set(Some((key, new)));
+        new
     }
 
     /// The places where it looks: the usual ones, then the folders added.
@@ -1729,6 +1781,7 @@ pub(crate) mod tests {
             from: vec![("Zkouška".to_owned(), 7), ("Zkouška".to_owned(), 0)],
             left_out: 0,
             twice: 7,
+            failed: false,
         };
         assert_eq!(
             brought_words(&brought).concat(),
@@ -1785,6 +1838,29 @@ pub(crate) mod tests {
         let found = search_marked(at(&tree, &["Docs"]));
         assert_eq!(found.len(), 1, "{found:#?}");
         assert_eq!(found[0].place.words(), "Docs \u{203a} Shown");
+    }
+
+    #[test]
+    fn a_panic_on_the_searchs_thread_ends_it_as_failed() {
+        let tree = tree("panic");
+        let begin = Begin {
+            id: 10,
+            places: at(&tree, &["Downloads"]),
+            library: Library::default(),
+            skip: Vec::new(),
+            limits: Limits::NORMAL,
+            after: None,
+            marks: |_| panic!("a file the search couldn't take (a test)"),
+        };
+        let (found, ended) = listen(&start_with(Arc::new(AtomicBool::new(false)), begin, || {}).unwrap());
+        assert_eq!(ended, Ended::Failed);
+        assert!(found.is_empty());
+        // And an import that went wrong says so.
+        let brought = Brought { came: 3, from: vec![("Zkouška".to_owned(), 3)], left_out: 0, twice: 0, failed: true };
+        assert_eq!(
+            brought_words(&brought).concat(),
+            "3 songs came in: Zkouška (3). Something went wrong, so it stopped before every song had come in (the log says what)."
+        );
     }
 
     #[test]

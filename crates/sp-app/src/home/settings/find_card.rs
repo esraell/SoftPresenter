@@ -78,9 +78,7 @@ fn searching(ui: &mut egui::Ui, state: &mut Card) {
     if progress_line(ui, &words, Some(t("settings.find.stop", "Stop"))) {
         state.asks.push(Ask::Stop);
     }
-    for (at, source) in state.sources.iter().enumerate() {
-        source_row(ui, source, state.ticked.get(at).copied().unwrap_or(false), false);
-    }
+    rows(ui, state, None, false);
     // The rows and the place change as the search goes.
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
 }
@@ -112,13 +110,10 @@ fn found(ui: &mut egui::Ui, state: &mut Card) {
     if let Some(cut) = state.ended.words() {
         note(ui, &format!("{cut} {}", t("settings.find.so_far", "These are what it found until then.")));
     }
-    for at in 0..state.sources.len() {
-        let ticked = state.ticked.get(at).copied().unwrap_or(false);
-        if source_row(ui, &state.sources[at], ticked, true)
-            && let Some(tick) = state.ticked.get_mut(at)
-        {
-            *tick = !*tick;
-        }
+    if let Some(at) = rows(ui, state, None, true)
+        && let Some(tick) = state.ticked.get_mut(at)
+    {
+        *tick = !*tick;
     }
     let new = state.new_ticked();
     let import = if new > 0 {
@@ -156,9 +151,8 @@ fn importing(ui: &mut egui::Ui, state: &mut Card) {
     let filled = Rect::from_min_size(bar.min, vec2(width * state.progress.clamp(0.0, 1.0), 4.0));
     ui.painter().rect_filled(filled, 2.0, TEXT);
     ui.add_space(6.0);
-    for at in state.chosen() {
-        source_row(ui, &state.sources[at], true, false);
-    }
+    let chosen = state.chosen();
+    rows(ui, state, Some(&chosen), false);
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
 }
 
@@ -235,6 +229,52 @@ fn foot(ui: &mut egui::Ui, lead: &str, keys: &[Key]) -> Option<usize> {
     }
     note(ui, lead);
     keys_line(ui, "find foot", "", keys)
+}
+
+/// The rows of the sources (`chosen`: only these, ticked), only those in view laid out: a search
+/// may find thousands, and the page is drawn many times a second. A row out of view takes the
+/// room it took when last laid out at this width, or the last row's until then (worked out when
+/// it comes into view). `can_tick`: as for [`source_row`]. The row clicked, if any.
+fn rows(ui: &mut egui::Ui, state: &mut Card, chosen: Option<&[usize]>, can_tick: bool) -> Option<usize> {
+    let Card { sources, ticked, heights, .. } = state;
+    let width = ui.available_width();
+    if heights.width != width {
+        heights.width = width;
+        heights.heights.iter_mut().for_each(|height| *height = None);
+    }
+    heights.heights.resize(sources.len(), None);
+    if heights.typical <= 0.0 {
+        heights.typical = 58.0;
+    }
+    let count = chosen.map_or(sources.len(), <[usize]>::len);
+    let index = |k: usize| chosen.map_or(k, |chosen| chosen[k]);
+    // Where each row starts, from the top of the list, and where the list ends.
+    let mut tops = Vec::with_capacity(count + 1);
+    let mut y = 0.0;
+    for k in 0..count {
+        tops.push(y);
+        y += heights.heights.get(index(k)).copied().flatten().unwrap_or(heights.typical);
+    }
+    tops.push(y);
+    let top = ui.cursor().min.y;
+    let view = ui.clip_rect().translate(vec2(0.0, -top));
+    let (first, end) = crate::studio::rows_in_view(&tops, view);
+    ui.add_space(tops[first]);
+    let mut clicked = None;
+    for k in first..end {
+        let at = index(k);
+        let Some(source) = sources.get(at) else { continue };
+        let tick = chosen.is_some() || ticked.get(at).copied().unwrap_or(false);
+        let before = ui.cursor().min.y;
+        if source_row(ui, source, tick, can_tick) {
+            clicked = Some(at);
+        }
+        let height = ui.cursor().min.y - before;
+        heights.heights[at] = Some(height);
+        heights.typical = height;
+    }
+    ui.add_space(tops[count] - tops[end]);
+    clicked
 }
 
 /// The design's least room for a row's words beside its counts: past that, the counts go under
@@ -393,6 +433,7 @@ mod tests {
                 from: vec![("Zpěvník pro zkoušku".to_owned(), 3288), ("Youth Songs".to_owned(), 198)],
                 left_out: 29,
                 twice: 4,
+                failed: false,
             });
         }
         state
@@ -523,6 +564,37 @@ mod tests {
             words,
             "3,518 songs came in: Zpěvník pro zkoušku (3,288), Youth Songs (198). 29 already in your library were left out. 4 found in more than one place came in once."
         );
+    }
+
+    #[test]
+    fn only_the_rows_in_view_are_laid_out() {
+        // 20,000 songbooks found, in the narrowest Settings window: the page scrolls, and only
+        // the rows in view are laid out, the others taking their room.
+        let mut state = state_in(Phase::Found);
+        state.find_songs.sources.clear();
+        state.find_songs.ticked.clear();
+        for n in 0..20_000 {
+            state.find_songs.add(source(&format!("Songbook {n}"), Kind::Songbook, (Usual::Downloads, &[]), 10, 0));
+        }
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut drawn = Vec::new();
+        for _ in 0..2 {
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(820.0, 700.0))),
+                ..egui::RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| settings_ui(ui, &mut state, &show));
+            drawn = crate::home::settings::tests::words_drawn(&output);
+            output.drop_without_applying_deltas();
+        }
+        let shown = |name: &str| drawn.iter().any(|(words, _)| words == name);
+        assert!(shown("Songbook 0") && shown("Songbook 3"), "the first rows are drawn");
+        assert!(!shown("Songbook 100") && !shown("Songbook 19999"), "rows out of view aren't laid out");
+        let laid_out = state.find_songs.heights.heights.iter().flatten().count();
+        assert!(laid_out < 30, "{laid_out} rows were laid out");
+        // Its count is worked out once for the ticks as they are.
+        assert_eq!(state.find_songs.new_ticked(), 10);
     }
 
     #[test]

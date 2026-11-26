@@ -342,7 +342,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   place the computer won't let it look in is a row saying so. Nothing comes in until Import:
   each ticked source then comes in through the import's own path, as a library of its name with
   only its new songs (a song already here stays where it is), read on a thread of its own and
-  taken in a few milliseconds at a time, with a bar, so neither the window nor the screens wait;
+  taken in a few milliseconds at a time, with a bar, so neither the window nor the screens wait
+  (a search or an import whose thread goes wrong ends as failed, keeps what it had, and says so;
+  the card lays out only the rows in view, so 200,000 found draw in a few milliseconds);
   a notice and the card say how many came in, from which, and how many were left out. Two ticked
   copies of one songbook count their songs once, and so does a source with a song twice in it
   ("2 new · 1 found twice"); what came in says those came in once ("7 found in more than one

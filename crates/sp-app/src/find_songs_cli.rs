@@ -67,6 +67,8 @@ enum Taken {
     /// What the operator should be told of a source (a file that couldn't be read).
     Problems(Vec<String>),
     Done,
+    /// Something went wrong on the reading thread (the log says what): no more songs come.
+    Failed,
 }
 
 /// An import under way.
@@ -93,6 +95,8 @@ struct Importing {
     expected: usize,
     taken: usize,
     read_all: bool,
+    /// The reading thread went wrong, or ended without a word: not every song came in.
+    failed: bool,
     began: Instant,
 }
 
@@ -281,27 +285,31 @@ impl crate::App {
         std::thread::Builder::new()
             .name("find songs import".to_owned())
             .spawn(move || {
-                let have = compare.iter().map(|(at, song)| (crate::load::import_key(song), *at)).collect();
-                let _ = tx.send(Taken::Have(have));
-                wake();
-                for (at, source) in reading.iter().enumerate() {
-                    let (songs, problems) = find_songs::read_again(source);
-                    if !problems.is_empty() {
-                        let _ = tx.send(Taken::Problems(problems));
-                    }
-                    let mut songs = songs.into_iter().peekable();
-                    while songs.peek().is_some() {
-                        let batch: Vec<_> = songs.by_ref().take(if slow.is_zero() { BATCH } else { 1 }).collect();
-                        if !slow.is_zero() {
-                            std::thread::sleep(slow);
+                // A panic in reading a file (ours, or a library's) ends the import as failed,
+                // never the app, and never as if every song had come in.
+                let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let have = compare.iter().map(|(at, song)| (crate::load::import_key(song), *at)).collect();
+                    let _ = tx.send(Taken::Have(have));
+                    wake();
+                    for (at, source) in reading.iter().enumerate() {
+                        let (songs, problems) = find_songs::read_again(source);
+                        if !problems.is_empty() {
+                            let _ = tx.send(Taken::Problems(problems));
                         }
-                        if tx.send(Taken::Songs(at, batch)).is_err() {
-                            return;
+                        let mut songs = songs.into_iter().peekable();
+                        while songs.peek().is_some() {
+                            let batch: Vec<_> = songs.by_ref().take(if slow.is_zero() { BATCH } else { 1 }).collect();
+                            if !slow.is_zero() {
+                                std::thread::sleep(slow);
+                            }
+                            if tx.send(Taken::Songs(at, batch)).is_err() {
+                                return;
+                            }
+                            wake();
                         }
-                        wake();
                     }
-                }
-                let _ = tx.send(Taken::Done);
+                }));
+                let _ = tx.send(if read.is_ok() { Taken::Done } else { Taken::Failed });
                 wake();
             })
             .map_err(|e| {
@@ -324,6 +332,7 @@ impl crate::App {
             expected: sources.iter().map(|source| source.songs).sum(),
             taken: 0,
             read_all: false,
+            failed: false,
             began: Instant::now(),
         });
         self.finding.import_job = job;
@@ -374,9 +383,14 @@ impl crate::App {
                 }
                 Ok(Taken::Problems(problems)) => importing.problems.extend(problems),
                 Ok(Taken::Done) => importing.read_all = true,
+                Ok(Taken::Failed) => (importing.read_all, importing.failed) = (true, true),
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                // A thread that ended without saying so has nothing more to give.
+                // A thread that ended without saying it had read everything went wrong: what
+                // it gave comes in, and the import says it stopped part way.
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    if !importing.read_all {
+                        importing.failed = true;
+                    }
                     importing.read_all = true;
                     break;
                 }
@@ -448,16 +462,18 @@ impl crate::App {
             from: importing.names.iter().cloned().zip(importing.came.iter().copied()).collect(),
             left_out: importing.left_out,
             twice: importing.twice,
+            failed: importing.failed,
         };
         crate::applog::event(
             "find",
             &format!(
-                "brought in {} songs from {} sources ({} in the library already, {} found twice) in {} ms",
+                "brought in {} songs from {} sources ({} in the library already, {} found twice) in {} ms{}",
                 brought.came,
                 brought.from.len(),
                 brought.left_out,
                 brought.twice,
-                importing.began.elapsed().as_millis()
+                importing.began.elapsed().as_millis(),
+                if brought.failed { " (the reading thread went wrong)" } else { "" }
             ),
         );
         for problem in &importing.problems {

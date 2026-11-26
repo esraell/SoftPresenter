@@ -250,6 +250,7 @@
   "settings.find.twice": ["{n} repetida", "{n} repetidas"],
   "settings.find.cloud": "En la nube, no en este ordenador",
   "settings.find.caution.cloud": ["{n} archivo de canción más está en la nube, no en este ordenador, así que no se miró.", "{n} archivos de canciones más están en la nube, no en este ordenador, así que no se miraron."],
+  "settings.find.import_failed": "Algo salió mal, así que se detuvo antes de que entraran todas las canciones (el registro dice qué).",
   "settings.find.busy": "Se están trayendo canciones; vuelve a buscar cuando hayan entrado.",
   "settings.find.not_started": "No se pudo empezar a buscar: {error}",
   "settings.find.importing_already": "Ya se están trayendo canciones.",

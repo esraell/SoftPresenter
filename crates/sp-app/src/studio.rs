@@ -2355,7 +2355,7 @@ impl SongRowHeights {
 
 /// The rows of a list (starting at `tops`, with where the last ends after them) that a scroll
 /// area's `viewport` shows: from the first to the one before the end.
-fn rows_in_view(tops: &[f32], viewport: Rect) -> (usize, usize) {
+pub(crate) fn rows_in_view(tops: &[f32], viewport: Rect) -> (usize, usize) {
     let rows = tops.len().saturating_sub(1);
     let first = tops.partition_point(|top| *top <= viewport.min.y).saturating_sub(1).min(rows);
     let end = tops[..rows].partition_point(|top| *top < viewport.max.y).max(first);
