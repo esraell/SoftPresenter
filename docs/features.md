@@ -1790,6 +1790,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   painter does). On the DeckLink side, a solid picture is turned into the card's BGRA or YUV
   frame in a fifth to a quarter of the time it took, and one scaled to a card's other size
   (720p, a 4K mode) in about a third.
+- **The operator's window is drawn only when what it shows changes.** With nothing moving it is
+  drawn once a second, as the clock turns; the displays are looked at again a second after the
+  window last looked, without drawing it, and it is drawn then only if they changed. A playing
+  video's new pictures draw it for the Program preview, but not in the Edit view, which has no
+  preview.
 - Screens fill displays by the names System Settings shows ("3DTV", "HP 27f"); on Windows by
   the names the monitors give themselves, as Windows' display settings show them ("Mi TV",
   "Philips FTV"), or by the device name (`\\.\DISPLAY2`) for a monitor that gives none. Two of

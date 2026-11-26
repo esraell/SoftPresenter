@@ -69,6 +69,7 @@ mod props;
 mod remote;
 mod removed;
 mod renamed;
+mod repaints;
 mod reports;
 mod running;
 mod samples;
@@ -736,6 +737,33 @@ enum AppEvent {
     /// changed, a size or the arrangement changed). Only macOS sends it.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     DisplaysChanged,
+}
+
+impl AppEvent {
+    /// Its name, for the log (`repaints`).
+    fn name(&self) -> &'static str {
+        match self {
+            AppEvent::Menu(_) => "Menu",
+            AppEvent::LivePreview => "LivePreview",
+            AppEvent::Control(_) => "Control",
+            AppEvent::Remote(_) => "Remote",
+            AppEvent::Mirror => "Mirror",
+            AppEvent::DeckDone => "DeckDone",
+            AppEvent::PackDone => "PackDone",
+            AppEvent::BibleRead => "BibleRead",
+            AppEvent::MediaRead => "MediaRead",
+            AppEvent::FoldersRead => "FoldersRead",
+            AppEvent::Tidied(_) => "Tidied",
+            AppEvent::DeckLink => "DeckLink",
+            AppEvent::Canva => "Canva",
+            AppEvent::CatalogDone => "CatalogDone",
+            AppEvent::SongbookDone => "SongbookDone",
+            AppEvent::Saved => "Saved",
+            AppEvent::UpdateChecked => "UpdateChecked",
+            AppEvent::FfmpegFetch => "FfmpegFetch",
+            AppEvent::DisplaysChanged => "DisplaysChanged",
+        }
+    }
 }
 
 /// The most web pages kept running at once: those on screen, then those loaded ahead. Each is a
@@ -1714,13 +1742,22 @@ struct UiTarget<'a> {
 }
 
 /// Draws one frame of the interface in a window and returns what was drawn, for a capture.
+/// Also says where the time went (for `repaints`).
 fn paint_ui(
     gpu: &Gpu,
     target: UiTarget<'_>,
     mut full: egui::FullOutput,
-) -> (Vec<egui::ClippedPrimitive>, egui_wgpu::ScreenDescriptor) {
+) -> (Vec<egui::ClippedPrimitive>, egui_wgpu::ScreenDescriptor, repaints::PaintTimes) {
     let UiTarget { window, surface, config, renderer, ctx, label, offscreen } = target;
+    let mut times = repaints::PaintTimes::default();
+    let mut step = Instant::now();
+    let mut lap = |into: &mut Duration| {
+        let now = Instant::now();
+        *into = now.duration_since(step);
+        step = now;
+    };
     let jobs = ctx.tessellate(std::mem::take(&mut full.shapes), full.pixels_per_point);
+    lap(&mut times.tessellate);
     for (id, deltas) in &full.textures_delta.set {
         for delta in deltas {
             renderer.update_texture(&gpu.device, &gpu.queue, *id, delta);
@@ -1732,7 +1769,10 @@ fn paint_ui(
     };
     let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     let extra = renderer.update_buffers(&gpu.device, &gpu.queue, &mut encoder, &jobs, &screen);
-    let frame = match offscreen.is_none().then(|| output::next_texture(surface)) {
+    lap(&mut times.upload);
+    let next = offscreen.is_none().then(|| output::next_texture(surface));
+    lap(&mut times.acquire);
+    let frame = match next {
         // Drawn off the window: only into the capture's own picture.
         None => None,
         Some(Some(wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame))) => {
@@ -1766,7 +1806,9 @@ fn paint_ui(
             renderer.render(&mut pass, &jobs, &screen);
         }
         gpu.queue.submit(extra.into_iter().chain(std::iter::once(encoder.finish())));
+        lap(&mut times.submit);
         gpu.queue.present(frame);
+        lap(&mut times.present);
     } else {
         // No frame to draw into (the window is hidden or covered). The interface's data for
         // this frame has already been handed to the GPU queue, and it stays in memory until
@@ -1783,7 +1825,7 @@ fn paint_ui(
     let _ = gpu.device.poll(wgpu::PollType::Poll);
     // The toolkit insists on being told its texture changes were applied.
     full.textures_delta.clear();
-    (jobs, screen)
+    (jobs, screen, times)
 }
 
 /// Which window of its own a panel window is.
@@ -1842,7 +1884,7 @@ struct PanelWindow {
 
 /// Everything that exists once the windows are open.
 struct Running {
-    home_window: Arc<Window>,
+    home_window: repaints::HomeWindow,
     home_surface: wgpu::Surface<'static>,
     home_config: wgpu::SurfaceConfiguration,
     /// A new size for the home window while its edge is being dragged, and when it last changed.
@@ -2451,6 +2493,7 @@ impl App {
 
         let egui_ctx = egui::Context::default();
         studio::apply_style(&egui_ctx);
+        repaints::watch(&egui_ctx);
         let egui_state = egui_winit::State::new(
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
@@ -2478,7 +2521,7 @@ impl App {
         output.send(OutputMsg::PreviewTargets(live_textures.clone()));
 
         Ok(Some(Running {
-            home_window,
+            home_window: repaints::HomeWindow::new(home_window),
             home_surface,
             home_config,
             home_resize: None,
@@ -2736,7 +2779,7 @@ impl App {
                 self.apply(vec![Command::Next]);
             }
         } else if let Some(running) = self.running.as_mut() {
-            running.next_repaint = Some(running.next_repaint.map_or(due, |at| at.min(due)));
+            repaints::wake_at(&mut running.next_repaint, due, repaints::Timer::Advance);
         }
     }
 
@@ -3804,11 +3847,12 @@ impl App {
         }
         if let Some(live) = running.home_state.video_live.as_mut() {
             let (position, duration, playing) = (player.position(), player.duration(), player.playing());
-            // The window shows whole seconds, so it is drawn again only when one passes.
+            // The window shows whole seconds, so it is drawn again only when one passes, and only
+            // while it shows them (in the row under the Program preview, not in the Edit view).
             let changed =
                 live.position.floor() != position.floor() || live.duration != duration || live.playing != playing;
             *live = home::VideoLive { position, duration, playing, ..live.clone() };
-            if changed {
+            if changed && running.home_state.preview_painted {
                 running.home_window.request_redraw();
             }
         }
@@ -8686,18 +8730,26 @@ impl App {
         let Some(seen) = running.displays_seen.as_ref() else { return };
         let (displays, operator) = (seen.displays.clone(), seen.operator.clone());
         if fresh {
-            // A frame drawn with what was seen a moment ago: one more once that is a second old,
-            // so a change seen in the meantime (a display's size, the window moved to another
-            // display) is never left until something else happens.
+            // What was seen a moment ago was used: it is looked at again once it is a second
+            // old, so a change seen in the meantime (a display's size, the window moved to
+            // another display) is never left until something else happens. That look is the
+            // loop's (`look_at_displays`), which draws nothing unless it finds a difference:
+            // drawing the window again for it drew a window that shows the clock twice a second.
             let due = seen.at + DisplaysSeen::KEPT_FOR;
-            running.next_repaint = Some(running.next_repaint.map_or(due, |at| at.min(due)));
+            running.displays_look_at = running.displays_look_at.min(due);
         }
         // Automatic screens given a display, and old display names made new, saved so.
+        let mut differs = false;
         if screens::settle(&mut running.home_state.screens, &displays, &operator) {
             running.home_state.screens_changed = true;
+            differs = true;
         }
-        running.home_state.operator_displays.clone_from(&operator);
+        if running.home_state.operator_displays != operator {
+            running.home_state.operator_displays.clone_from(&operator);
+            differs = true;
+        }
         if displays != running.home_state.displays {
+            differs = true;
             // Said in the log: a display that goes or comes back, or changes size, can hold up the
             // screens' windows on it (see `output/held.rs`).
             let listed: Vec<String> = displays
@@ -8706,6 +8758,11 @@ impl App {
                 .collect();
             applog::event("screens", &format!("Displays now: {}", listed.join("; ")));
             running.home_state.displays = displays.clone();
+        }
+        // The window shows what was found (the screens' displays, the operator's): a look the
+        // loop made, with no drawing, draws it once it differs.
+        if differs {
+            running.home_window.request_redraw();
         }
         if std::mem::take(&mut running.home_state.screens_changed)
             && !quiet
@@ -9260,7 +9317,11 @@ impl App {
         }
         // Starting NDI takes a moment on the output thread; look again shortly.
         if starting || ndi_moved {
-            running.next_repaint = Some(Instant::now() + Duration::from_millis(400));
+            repaints::wake_after(
+                &mut running.next_repaint,
+                Duration::from_millis(400),
+                repaints::Timer::OutputStarting,
+            );
         }
         // A video put on (or taken off) a stage layout starts (or stops) at once.
         if stage_changed {
@@ -9594,6 +9655,9 @@ impl App {
         let theme = edited.unwrap_or(if on_bible { bible_theme } else { songs_theme });
         let canvas = running.canvas;
         let home_state = &mut running.home_state;
+        home_state.preview_painted = false;
+        repaints::laying_out();
+        let laying_out = Instant::now();
         let mut full = egui_ctx.run_ui(raw_input, |ui| {
             // The toolkit may run this closure twice in one frame, and input arrives only the
             // first time, so add to the list rather than replace it.
@@ -9663,23 +9727,24 @@ impl App {
             };
             commands.extend(home_ui(ui, show, home_state, theme, &mut thumb, preview, canvas));
         });
+        repaints::laid_out(egui_ctx, laying_out.elapsed());
         egui_state.handle_platform_output(home_window, std::mem::take(&mut full.platform_output));
 
         let delay = full.viewport_output.get(&egui::ViewportId::ROOT).map_or(Duration::MAX, |v| v.repaint_delay);
         // A new size settling, or thumbnails still of the size before: drawn again soon.
-        let delay = settling.map_or(delay, |wait| delay.min(wait));
-        let delay = if thumbs.stale_shown() { Duration::ZERO } else { delay };
+        let (delay, why) = match settling {
+            Some(wait) if wait < delay => (wait, repaints::Timer::Settling),
+            _ => (delay, repaints::Timer::Toolkit),
+        };
+        let (delay, why) =
+            if thumbs.stale_shown() { (Duration::ZERO, repaints::Timer::OldThumbnails) } else { (delay, why) };
         // An animation is drawn at most a frame a screen refresh apart. A window macOS isn't
         // showing does not wait for the screen, and would otherwise be drawn thousands of times
         // a second while the preview fades.
         let delay = delay.max(FRAME);
-        // Testing aid: say what keeps asking the window to be drawn again.
-        if std::env::var_os("SOFTPRESENTER_TRACE_REPAINT").is_some() && running.frames % 100 == 0 {
-            eprintln!("frame {}: delay {delay:?}, causes {:?}", running.frames, egui_ctx.repaint_causes());
-        }
         // Testing aid: redraw continuously, to check that memory stays flat under load.
         let delay = if std::env::var_os("SOFTPRESENTER_STRESS").is_some() { Duration::ZERO } else { delay };
-        running.next_repaint = Instant::now().checked_add(delay);
+        repaints::wake_after(&mut running.next_repaint, delay, why);
 
         let target = UiTarget {
             window: home_window,
@@ -9690,7 +9755,8 @@ impl App {
             label: "home window",
             offscreen,
         };
-        let (jobs, screen) = paint_ui(gpu, target, full);
+        let (jobs, screen, times) = paint_ui(gpu, target, full);
+        repaints::painted(times);
 
         // Testing aid: show a slide, let the thumbnails fill in, then save what was drawn.
         running.frames += 1;
@@ -10300,7 +10366,7 @@ impl App {
             label: "panel window",
             offscreen: None,
         };
-        let (jobs, screen) = paint_ui(gpu, target, full);
+        let (jobs, screen, _) = paint_ui(gpu, target, full);
         panel.frames += 1;
         // Testing aid: a capture run with a panel asked for also saves that window, every
         // frame once it has settled, so the last one saved is the latest.
@@ -11405,8 +11471,13 @@ impl ApplicationHandler<AppEvent> for App {
         }
     }
 
+    fn new_events(&mut self, _el: &ActiveEventLoop, cause: winit::event::StartCause) {
+        repaints::woke(matches!(cause, winit::event::StartCause::ResumeTimeReached { .. }));
+    }
+
     fn user_event(&mut self, el: &ActiveEventLoop, event: AppEvent) {
         let _busy = reports::stats::BusyGuard::new(reports::stats::Who::Ui);
+        repaints::event(|| format!("the app was told {}", event.name()));
         let id = match event {
             AppEvent::Menu(id) => id,
             // A command from `softpresenter ctl`: done now, and its outcome sent back.
@@ -11508,11 +11579,21 @@ impl ApplicationHandler<AppEvent> for App {
         };
         // The output thread drew a new live preview: the window shows it.
         if id.is_empty() {
+            let mut screens_only = false;
             if let Some(running) = self.running.as_ref()
                 && let Some(output) = running.output.as_ref()
             {
                 output.live_preview_woken();
-                running.home_window.request_redraw();
+                // Drawn while the window shows the Program preview. Where it doesn't (the Edit
+                // view), a video's pictures no longer draw the whole window thirty times a second
+                // for nothing; what the screens' thread may have woken it for besides (how many
+                // watch an NDI source, a DeckLink output's state) still reaches the Screens
+                // window, which `sync_screens` keeps up to date.
+                if running.home_state.preview_painted {
+                    running.home_window.request_redraw_for(|| repaints::Why::LivePreview);
+                } else {
+                    screens_only = true;
+                }
                 // Remote pages watching the preview are sent the new picture (read back on the
                 // server's own thread, at most ten a second).
                 if let Some(shared) = self.remote.shared() {
@@ -11534,6 +11615,16 @@ impl ApplicationHandler<AppEvent> for App {
                     }
                 }
             }
+            if screens_only {
+                let said = self.running.as_ref().map(|running| running.home_state.notices.mark());
+                self.sync_screens(el);
+                // A notice it gave (a DeckLink output trying again) is shown at once.
+                if let Some(running) = self.running.as_ref()
+                    && Some(running.home_state.notices.mark()) != said
+                {
+                    running.home_window.request_redraw();
+                }
+            }
             return;
         }
         if let Some(action) = menubar::action_of(&id) {
@@ -11551,6 +11642,16 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let _busy = reports::stats::BusyGuard::new(reports::stats::Who::Ui);
+        repaints::event(|| {
+            let which = match self.running.as_ref() {
+                Some(running) if running.home_window.id() == id => "the operator's window",
+                Some(running) if running.screen_windows.iter().any(|have| have.window.id() == id) => {
+                    "a screen's window"
+                }
+                _ => "another window",
+            };
+            format!("{which} told {}", repaints::event_name(&event))
+        });
         reports::ui::window_event(&event);
         match &event {
             WindowEvent::ModifiersChanged(now) => self.held = now.state(),
@@ -11779,7 +11880,7 @@ impl ApplicationHandler<AppEvent> for App {
         if !matches!(event, WindowEvent::RedrawRequested)
             && running.egui_state.on_window_event(&running.home_window, &event).repaint
         {
-            running.home_window.request_redraw();
+            running.home_window.request_redraw_for(|| repaints::Why::Told(repaints::event_name(&event)));
         }
         match event {
             // Files dragged over the window from the Finder, each told one after another; where
@@ -11820,6 +11921,7 @@ impl ApplicationHandler<AppEvent> for App {
                 let drawing = Instant::now();
                 let commands = self.draw_home();
                 self.home_timing.add(drawing.elapsed());
+                repaints::drawn(drawing.elapsed());
                 if log_keys() && drawing.elapsed() >= Duration::from_millis(40) {
                     applog::event("keys", &format!("the window took {} ms to draw", drawing.elapsed().as_millis()));
                 }
@@ -12099,7 +12201,7 @@ impl ApplicationHandler<AppEvent> for App {
         // until then, or until a save is due.
         if running.next_repaint.is_some_and(|at| at <= Instant::now()) {
             running.next_repaint = None;
-            running.home_window.request_redraw();
+            running.home_window.request_redraw_for(|| repaints::Why::Timer(repaints::timer()));
         }
         let mut panel_at: Option<Instant> = None;
         for panel in &mut running.panels {
@@ -12112,45 +12214,41 @@ impl ApplicationHandler<AppEvent> for App {
         // Once thumbnails and previews have stopped being drawn, their painter gives back the
         // GPU memory a heavy slide made it take.
         let thumbs_rest_at = running.thumbs.rest_when_settled(Instant::now());
+        // Each clock by the name the log gives it (`repaints`).
         let wake = [
-            running.next_repaint,
-            panel_at,
-            thumbs_rest_at,
-            save_at,
-            followed_at,
-            video_at,
-            box_video_at,
-            web_at,
-            voxlive_at,
-            canva_at,
-            catalog_at,
-            songbooks_at,
-            find_at,
-            timelychurch_at,
-            audio_at,
-            announce_at,
-            cycle_at,
-            folders_at,
-            waiting_at,
-            remote_at,
-            mirror_at,
-            looked_at,
-            close_at,
+            (running.next_repaint, "the window's next drawing"),
+            (panel_at, "a panel window's next drawing"),
+            (thumbs_rest_at, "the thumbnails' painter resting"),
+            (save_at, "saving"),
+            (followed_at, "followed folders"),
+            (video_at, "the video"),
+            (box_video_at, "videos in boxes"),
+            (web_at, "web pages"),
+            (voxlive_at, "VoxLive"),
+            (canva_at, "Canva"),
+            (catalog_at, "the song catalog"),
+            (songbooks_at, "songbooks"),
+            (find_at, "finding songs"),
+            (timelychurch_at, "TimelyChurch"),
+            (audio_at, "audio"),
+            (announce_at, "announcements"),
+            (cycle_at, "a media playlist"),
+            (folders_at, "media folders"),
+            (waiting_at, "status waits"),
+            (remote_at, "Remote Control"),
+            (mirror_at, "phone screens"),
+            (looked_at, "the displays"),
+            (close_at, "the screens' close buttons"),
         ];
-        match wake.into_iter().flatten().min() {
-            Some(at) => {
+        let soonest = wake.into_iter().filter_map(|(at, name)| at.map(|at| (at, name))).min_by_key(|(at, _)| *at);
+        let now = Instant::now();
+        repaints::sleeping(soonest.map(|(_, name)| name), soonest.is_some_and(|(at, _)| at <= now));
+        match soonest {
+            Some((at, _)) => {
                 // Everything due has just been done, so a time already past is a mistake in
                 // one of the clocks above; waiting for it would wake the loop again at once,
                 // round and round at full speed. A short wait keeps that from running away.
-                let now = Instant::now();
-                let at = if at <= now {
-                    if std::env::var_os("SOFTPRESENTER_TRACE_REPAINT").is_some() {
-                        applog::event("wake", "a clock asked for a wake-up already past");
-                    }
-                    now + Duration::from_millis(15)
-                } else {
-                    at
-                };
+                let at = if at <= now { now + Duration::from_millis(15) } else { at };
                 el.set_control_flow(ControlFlow::WaitUntil(at));
             }
             None => el.set_control_flow(ControlFlow::Wait),

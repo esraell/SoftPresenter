@@ -5372,6 +5372,7 @@ fn preview_block(
 ) {
     let on = show.output_enabled();
     let on_screen = anything_shows && on;
+    state.preview_painted = true;
     ui.painter().rect_filled(block, 13.0, Color32::BLACK);
     let inner = block.shrink(10.0);
 

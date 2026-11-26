@@ -570,6 +570,9 @@ pub struct HomeState {
     pub stage_rename_started: bool,
     /// True when the Program preview shows what the stage screens show, not the audience's.
     pub preview_stage: bool,
+    /// True when the window's last drawing painted the Program preview (not in the Edit view,
+    /// say): a new picture of it is only worth drawing the window for then.
+    pub preview_painted: bool,
     /// The one screen the Program preview looks at (the small arrow in its head), drawn as that
     /// screen draws it; `None` for what the room (or the stage) sees.
     pub preview_screen: Option<sp_model::Uuid>,
@@ -2034,6 +2037,7 @@ impl Default for HomeState {
             stage_rename: None,
             stage_rename_started: false,
             preview_stage: false,
+            preview_painted: true,
             preview_screen: None,
             message_clip: None,
             message_rename: None,

@@ -420,6 +420,11 @@ sources are switched on (one that could not start included); its "video pictures
 pictures that came in to be shown (videos, and NDI Source boxes), never the pictures sent out
 over NDI.
 
+With `SOFTPRESENTER_LOG_REPAINTS=1` (or a file `log-repaints` in the data folder), `repaints.rs`
+writes two `[repaints]` lines a minute: the operator window's drawings, where each one's time
+went and what asked for it, and how often the loop woke, for what, and which of its clocks it
+slept until.
+
 Each NDI source's own thread (`sp-ndi`, `Pace` in `lib.rs`) writes an `[ndi]` line each minute,
 counted only while somebody watches it (or NDI can't count its receivers), like the
 `[decklink]` lines: new pictures sent (and how many a second, against the rate the
