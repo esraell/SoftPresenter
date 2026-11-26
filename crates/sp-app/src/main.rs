@@ -2153,13 +2153,16 @@ impl App {
             .ok_or("No graphics device was found that SoftPresenter can use.")?;
         let handle = &context.devices[device_id];
         // Which graphics the app drew with, for the log of a computer that draws slowly: and
-        // whether they are Windows' software graphics, which the painters take the early stages
-        // of every picture off (`sp_render::early_stages_on_processor`).
+        // whether the painters take the early stages of every picture off them
+        // (`sp_render::early_stages_on_processor`): Windows' software graphics, or an Intel
+        // Mac's.
         let chosen = handle.adapter().get_info();
-        let stages = if sp_render::early_stages_on_processor(&chosen) {
-            "; software graphics: pictures are worked out on the processor"
-        } else {
+        let stages = if !sp_render::early_stages_on_processor(&chosen) {
             ""
+        } else if chosen.backend == wgpu::Backend::Metal {
+            "; an Intel Mac's graphics: pictures are worked out on the processor and filled in by the GPU"
+        } else {
+            "; software graphics: pictures are worked out on the processor"
         };
         applog::event(
             "gpu",

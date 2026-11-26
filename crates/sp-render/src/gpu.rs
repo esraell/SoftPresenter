@@ -159,14 +159,28 @@ impl MovingPicture {
 
 /// True for graphics that cannot run the renderer's early stages, so that a painter runs them
 /// on the processor instead and leaves the graphics only the last one, which fills in the
-/// pixels: Windows' own software graphics (WARP, "Microsoft Basic Render Driver", which a PC
-/// with no graphics driver, a virtual machine or a remote session draws with). Its compiler
-/// faults on one of those stages the first time it is run (`vello.coarse`: an access violation
-/// in `d3d10warp.dll`, in `ComputeShaderTransformer::ConstructLoadStoreSets`, seen in version
-/// 10.0.26100.10068), which ends the program whatever it does. Every other graphics device
-/// runs all the stages itself, as before.
+/// pixels:
+///
+/// - Windows' own software graphics (WARP, "Microsoft Basic Render Driver", which a PC with no
+///   graphics driver, a virtual machine or a remote session draws with). Its compiler faults on
+///   one of those stages the first time it is run (`vello.coarse`: an access violation in
+///   `d3d10warp.dll`, in `ComputeShaderTransformer::ConstructLoadStoreSets`, seen in version
+///   10.0.26100.10068), which ends the program whatever it does.
+/// - An Intel Mac's graphics: every Metal device that isn't Apple's own (AMD's Radeons and
+///   Intel's graphics). An AMD Radeon R9 M395 (an iMac of 2015, macOS 12.7.6) never finished
+///   the first of those stages: Metal gave the work up after about a minute, and macOS
+///   restarted the graphics, the whole screen standing still meanwhile. With the early stages
+///   on the processor it drew a 5K slide in a few tens of milliseconds. Intel's own graphics
+///   haven't been tried, and are treated the same way.
+///
+/// Every other graphics device runs all the stages itself, as before; so does an Intel Mac's
+/// program run on Apple silicon, whose GPU is Apple's.
 pub fn early_stages_on_processor(graphics: &wgpu::AdapterInfo) -> bool {
-    graphics.backend == wgpu::Backend::Dx12 && graphics.device_type == wgpu::DeviceType::Cpu
+    match graphics.backend {
+        wgpu::Backend::Dx12 => graphics.device_type == wgpu::DeviceType::Cpu,
+        wgpu::Backend::Metal => !graphics.name.starts_with("Apple"),
+        _ => false,
+    }
 }
 
 impl Painter {
@@ -879,19 +893,34 @@ mod tests {
     use super::*;
     use wgpu::{AdapterInfo, Backend, DeviceType};
 
-    /// Only Windows' software graphics have the renderer's early stages taken off them: its
-    /// DirectX 12 device that runs on the processor. Every real GPU, and the software Vulkan
-    /// that Linux has, keep running every stage themselves.
+    /// Only Windows' software graphics (its DirectX 12 device that runs on the processor) and
+    /// an Intel Mac's graphics (a Metal device that isn't Apple's) have the renderer's early
+    /// stages taken off them. Every other GPU, Apple's own and the software Vulkan that Linux
+    /// has, keep running every stage themselves.
     #[test]
-    fn only_windows_software_graphics_leave_the_early_stages_to_the_processor() {
+    fn only_windows_software_graphics_and_intel_macs_leave_the_early_stages_to_the_processor() {
+        let named =
+            |name: &str, kind, backend| AdapterInfo { name: name.to_owned(), ..AdapterInfo::new(kind, backend) };
         assert!(early_stages_on_processor(&AdapterInfo::new(DeviceType::Cpu, Backend::Dx12)));
         for kind in [DeviceType::DiscreteGpu, DeviceType::IntegratedGpu, DeviceType::VirtualGpu, DeviceType::Other] {
             assert!(!early_stages_on_processor(&AdapterInfo::new(kind, Backend::Dx12)), "{kind:?} through DirectX 12");
         }
-        for backend in [Backend::Vulkan, Backend::Metal, Backend::Gl] {
+        for backend in [Backend::Vulkan, Backend::Gl] {
             for kind in [DeviceType::Cpu, DeviceType::IntegratedGpu, DeviceType::DiscreteGpu] {
                 assert!(!early_stages_on_processor(&AdapterInfo::new(kind, backend)), "{kind:?} through {backend:?}");
             }
+        }
+        for apple in ["Apple M1", "Apple M4 Max", "Apple Paravirtual device"] {
+            let kind = DeviceType::IntegratedGpu;
+            assert!(!early_stages_on_processor(&named(apple, kind, Backend::Metal)), "{apple}");
+        }
+        for (intel_mac, kind) in [
+            ("AMD Radeon R9 M395", DeviceType::DiscreteGpu),
+            ("AMD Radeon Pro 5500M", DeviceType::DiscreteGpu),
+            ("Intel(R) Iris(TM) Plus Graphics", DeviceType::IntegratedGpu),
+            ("Intel(R) UHD Graphics 630", DeviceType::IntegratedGpu),
+        ] {
+            assert!(early_stages_on_processor(&named(intel_mac, kind, Backend::Metal)), "{intel_mac}");
         }
     }
 }

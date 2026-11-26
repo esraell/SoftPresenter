@@ -2770,10 +2770,10 @@ fn the_close_mark_lies_over_the_picture_in_its_corner_and_nowhere_else() {
     assert!(outside == before);
 }
 
-// ---- The early stages on the processor (Windows' software graphics) --------------------------
+// ---- The early stages on the processor (Windows' software graphics, an Intel Mac's) ----------
 
 /// A painter that runs the renderer's early stages on the processor, as the app's does on
-/// Windows' software graphics, here whatever this computer's graphics are.
+/// Windows' software graphics and an Intel Mac's, here whatever this computer's graphics are.
 fn easel_with_early_stages_on_processor() -> Easel {
     let mut easel = Easel::new();
     easel.painter = Painter::with_early_stages_on_processor(&easel.device).expect("painter");
