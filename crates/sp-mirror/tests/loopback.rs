@@ -732,6 +732,36 @@ fn what_is_out_of_order_too_long_or_not_a_request_is_refused() {
 }
 
 #[test]
+fn a_sender_whose_connection_was_closed_may_connect_again_at_once() {
+    // One address is served three connections at a time. With two of them held open, the
+    // third is answered and closed (streams asked for before a session; then a request too
+    // long to read), and the sender connects again straight away: its place is free by the
+    // time it can know the connection is over, however late the receiver's thread runs.
+    let helper = Helper::start(false, None);
+    let mut held = [Sender::connect(helper.control), Sender::connect(helper.control)];
+    for sender in &mut held {
+        assert_eq!(sender.request("GET", "/info", None, &[]).0, 200);
+    }
+    for _ in 0..3 {
+        let mut sender = Sender::connect(helper.control);
+        sender.begin(4);
+        let body = plist_bytes(&dict(vec![(
+            "streams",
+            Value::Array(vec![dict(vec![("type", Value::Integer(110_u64.into()))])]),
+        )]));
+        assert_eq!(sender.request("SETUP", "rtsp://x/1", Some("application/x-apple-binary-plist"), &body).0, 400);
+        let mut sender = Sender::connect(helper.control);
+        sender.stream.write_all(b"POST /fp-setup RTSP/1.0\r\nCSeq: 1\r\nContent-Length: 100000000\r\n\r\n").unwrap();
+        sender.cseq = 1;
+        assert!(sender.answer().is_none());
+    }
+    let mut sender = Sender::connect(helper.control);
+    sender.begin(4);
+    drop(held);
+    helper.finish();
+}
+
+#[test]
 fn a_video_packet_that_claims_too_much_ends_the_session() {
     let helper = Helper::start(false, None);
     let mut sender = Sender::connect(helper.control);

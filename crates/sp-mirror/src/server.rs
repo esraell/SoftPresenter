@@ -323,11 +323,9 @@ pub fn serve(shared: &Arc<Shared>, listeners: Listeners) {
                     // Too many: closed without a word.
                     continue;
                 }
+                let place = Place { shared: shared.clone(), peer: peer.ip() };
                 let shared = shared.clone();
-                std::thread::spawn(move || {
-                    control_connection(&shared, stream, peer);
-                    shared.give_place(peer.ip());
-                });
+                std::thread::spawn(move || control_connection(&shared, stream, peer, place));
             }
         });
     }
@@ -347,6 +345,25 @@ pub fn serve(shared: &Arc<Shared>, listeners: Listeners) {
     }
 }
 
+/// A control connection's place among those served ([`Shared::take_place`]), given back when
+/// it is dropped: before the sender can know the connection is over (before an answer that
+/// closes it is written, and before it is closed), so that a sender may connect again at once,
+/// and also when the connection's thread panics. Given back after, a sender quick to connect
+/// again found its address still holding every place, and was closed without a word. A
+/// session ended from elsewhere (the operator's Stop, its video stream failing) is shut by
+/// that thread ([`Shared::end`]), and its place is given back a moment later, when the
+/// connection's own thread finds it shut.
+struct Place {
+    shared: Arc<Shared>,
+    peer: IpAddr,
+}
+
+impl Drop for Place {
+    fn drop(&mut self) {
+        self.shared.give_place(self.peer);
+    }
+}
+
 /// What one control connection knows.
 struct Connection {
     fairplay: FairPlay,
@@ -355,7 +372,8 @@ struct Connection {
     session: Option<(u32, [u8; 16], u16)>,
 }
 
-fn control_connection(shared: &Arc<Shared>, stream: TcpStream, peer: SocketAddr) {
+fn control_connection(shared: &Arc<Shared>, stream: TcpStream, peer: SocketAddr, place: Place) {
+    let mut place = Some(place);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
     let _ = stream.set_nodelay(true);
@@ -384,6 +402,9 @@ fn control_connection(shared: &Arc<Shared>, stream: TcpStream, peer: SocketAddr)
         if response.code() != 200 {
             log(format!("answered {}", response.code()));
         }
+        if response.close {
+            drop(place.take());
+        }
         if (&stream).write_all(&response.to_bytes(&request.protocol, request.cseq)).is_err() {
             break "the connection failed while answering".to_owned();
         }
@@ -391,6 +412,7 @@ fn control_connection(shared: &Arc<Shared>, stream: TcpStream, peer: SocketAddr)
             break "the session was closed".to_owned();
         }
     };
+    drop(place);
     let _ = stream.shutdown(Shutdown::Both);
     if let Some((id, ..)) = connection.session {
         shared.end(id, &why);
