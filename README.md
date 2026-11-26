@@ -169,7 +169,7 @@ anyway").
 later, and the systems made from them), download `softpresenter_<version>_amd64.deb` from the
 releases page and install it with apt, which fetches the few libraries it needs:
 
-    sudo apt install ./softpresenter_0.9.0~dev.18_amd64.deb
+    sudo apt install ./softpresenter_*_amd64.deb
 
 SoftPresenter is then in the applications menu, and `sp` works in a terminal. Videos play
 through the LGPL FFmpeg that comes in the package, whatever FFmpeg the computer has. To play a
