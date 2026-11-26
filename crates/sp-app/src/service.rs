@@ -908,6 +908,10 @@ pub struct Prefs {
     /// True when each button's key is written beside it (Help › Show Keys on Buttons).
     #[serde(default)]
     pub keys_on_buttons: bool,
+    /// What each key that runs the show does (Settings › Keys): the style, and the keys changed
+    /// from it. A file from before the table: SoftPresenter's style, nothing changed.
+    #[serde(default)]
+    pub keys: crate::key_table::KeyTable,
     /// True when Settings › Screens adds a technical line to every screen's card (Details).
     #[serde(default)]
     pub screens_details: bool,
@@ -983,6 +987,7 @@ impl Default for Prefs {
             playlist_in_front: false,
             song_order: "listed".to_owned(),
             keys_on_buttons: false,
+            keys: crate::key_table::KeyTable::default(),
             screens_details: false,
             language: String::new(),
             import_as: std::collections::BTreeMap::new(),
@@ -1689,6 +1694,51 @@ mod tests {
         // A file from an older version, with fewer choices in it, still reads.
         let old: Prefs = serde_json::from_str("{\"columns\": 3}").unwrap();
         assert_eq!((old.columns, old.dissolve, old.dissolve_time), (3, true, 0.4));
+    }
+
+    #[test]
+    fn the_key_table_reads_back_and_an_old_file_is_the_softpresenter_style() {
+        use crate::key_table::{KeyAction, KeyStyle, KeyTable, ShowKey};
+        let old: Prefs = serde_json::from_str("{\"columns\": 3}").unwrap();
+        assert_eq!(old.keys, KeyTable::default());
+        assert_eq!(old.keys.style, KeyStyle::SoftPresenter);
+        let saved: Prefs =
+            serde_json::from_str(r#"{"keys": {"style": "softprojector", "changed": {"esc": "clear_slide"}}}"#).unwrap();
+        assert_eq!(saved.keys.style, KeyStyle::SoftProjector);
+        assert_eq!(saved.keys.action(ShowKey::Escape), KeyAction::ClearSlide);
+        assert_eq!(saved.keys.action(ShowKey::F2), KeyAction::AddToPlaylist, "the rest are the style's");
+        // Written and read again, it is the same table.
+        let again: Prefs = serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+        assert_eq!(again.keys, saved.keys);
+        assert_eq!(again.keys.action(ShowKey::Escape), KeyAction::ClearSlide);
+    }
+
+    #[test]
+    fn an_unknown_key_or_action_in_the_table_keeps_every_other_preference() {
+        use crate::key_table::{KeyAction, KeyStyle, ShowKey};
+        let prefs: Prefs =
+            serde_json::from_str(r#"{"columns": 3, "keys": {"changed": {"f9": "clear_all", "esc": "fly_away"}}}"#)
+                .unwrap();
+        assert_eq!(prefs.columns, 3);
+        assert_eq!(prefs.keys.action(ShowKey::Escape), KeyAction::ClearAll);
+        assert!(!prefs.keys.is_changed(ShowKey::Escape) && !prefs.keys.any_changed(), "nothing to reset");
+        // A newer copy's style, or a row saved in another shape, is passed over too, and the rows
+        // that can be read are kept.
+        let prefs: Prefs = serde_json::from_str(
+            r#"{"columns": 3, "keys": {"style": "something_newer", "changed": {"esc": 7, "f2": "nothing"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(prefs.columns, 3);
+        assert_eq!(prefs.keys.style, KeyStyle::SoftPresenter);
+        assert_eq!(prefs.keys.action(ShowKey::Escape), KeyAction::ClearAll);
+        assert_eq!(prefs.keys.action(ShowKey::F2), KeyAction::Nothing);
+        assert!(prefs.keys.is_changed(ShowKey::F2) && !prefs.keys.is_changed(ShowKey::Escape));
+        // A row saved as its style's default is no change.
+        let prefs: Prefs = serde_json::from_str(r#"{"keys": {"changed": {"esc": "clear_all"}}}"#).unwrap();
+        assert!(!prefs.keys.any_changed());
+        // And a table that is not a table at all.
+        let prefs: Prefs = serde_json::from_str(r#"{"columns": 3, "keys": 5}"#).unwrap();
+        assert_eq!((prefs.columns, prefs.keys.style), (3, KeyStyle::SoftPresenter));
     }
 
     #[test]

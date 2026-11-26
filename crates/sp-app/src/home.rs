@@ -393,6 +393,8 @@ pub struct HomeState {
     /// Keys on Buttons, or the switch in the list of keys; kept with the preferences), and
     /// whether a testing aid shows them for a picture without changing the setting.
     pub keys_on_buttons: bool,
+    /// What each key that runs the show does (Settings › Keys; kept with the preferences).
+    pub keys: crate::key_table::KeyTable,
     /// How large the operator's windows draw everything (Settings › Slides › In your window),
     /// and the factor the home window draws at now, for the setting to say.
     pub interface_size: crate::interface_size::InterfaceSize,
@@ -2028,6 +2030,7 @@ impl Default for HomeState {
             pick_scroll: 0,
             numbers: None,
             keys_on_buttons: false,
+            keys: crate::key_table::KeyTable::default(),
             interface_size: crate::interface_size::InterfaceSize::Automatic,
             zoom_now: 1.0,
             show_interface_size: false,
@@ -2492,6 +2495,7 @@ impl HomeState {
             playlist_in_front: self.playlist_open,
             song_order: self.song_order.name().to_owned(),
             keys_on_buttons: self.keys_on_buttons,
+            keys: self.keys.clone(),
             screens_details: self.screens_details,
             language: crate::i18n::choice().code().to_owned(),
             import_as: self.import_as.clone(),
@@ -2533,6 +2537,7 @@ impl HomeState {
         self.playlist_open = prefs.playlist_in_front;
         self.song_order = crate::kept::SongOrder::named(&prefs.song_order);
         self.keys_on_buttons = prefs.keys_on_buttons;
+        self.keys = prefs.keys.clone();
         self.screens_details = prefs.screens_details;
         crate::i18n::set_choice(crate::i18n::Choice::from_code(&prefs.language));
         self.import_as = prefs.import_as.clone();
@@ -14316,6 +14321,24 @@ mod tests {
         // A preferences file from before the page: the page.
         fresh.apply_prefs(&crate::service::Prefs::default());
         assert_eq!(fresh.bible.view, BibleView::Page);
+    }
+
+    #[test]
+    fn the_key_table_is_kept_with_the_preferences() {
+        use crate::key_table::{KeyAction, KeyStyle, KeyTable, ShowKey};
+        let mut state = HomeState::default();
+        assert_eq!(state.keys, KeyTable::default());
+        state.keys.set_style(KeyStyle::SoftProjector);
+        state.keys.set(ShowKey::Escape, KeyAction::ClearSlide);
+        let prefs = state.prefs();
+        assert_eq!(prefs.keys, state.keys);
+        let mut fresh = HomeState::default();
+        fresh.apply_prefs(&prefs);
+        assert_eq!(fresh.keys, state.keys);
+        assert_eq!(fresh.keys.action(ShowKey::Escape), KeyAction::ClearSlide);
+        // A preferences file from before the table: SoftPresenter's style, nothing changed.
+        fresh.apply_prefs(&crate::service::Prefs::default());
+        assert_eq!(fresh.keys, KeyTable::default());
     }
 
     #[test]

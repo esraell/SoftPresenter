@@ -43,6 +43,8 @@ mod inspector;
 mod integrations;
 mod interface_size;
 mod kept;
+#[allow(dead_code)] // Kept with the preferences; the show keys and Settings › Keys read it next.
+mod key_table;
 mod keys;
 mod libraries;
 mod library_folder;
