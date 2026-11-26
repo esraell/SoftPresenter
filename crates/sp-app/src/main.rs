@@ -3174,10 +3174,9 @@ impl App {
         }
     }
 
-    /// Plays the video in a box on the slide on screen, if it has one, and stops the one that was.
-    /// The video loops, with its sound; it is the first visible picture box naming a video.
-    /// The shapes, pictures, videos and web pages the slide on screen's layout puts behind its
-    /// words: its theme's template, or the version's while a version its theme has is on.
+    /// The shapes, pictures, videos and web pages the slide on screen's layout adds to it, both
+    /// those behind its words and those in front of them: its theme's template, or the version's
+    /// while a version its theme has is on.
     fn live_layout_objects(&self) -> Option<Slide> {
         let (at, (_, slide)) = (self.show.live()?, self.show.live_slide()?);
         let theme = self.theme_of(at.presentation);
