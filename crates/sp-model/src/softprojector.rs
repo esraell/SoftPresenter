@@ -200,7 +200,7 @@ fn ends_part_way(lines: &[&str]) -> bool {
 const MOST_SONGS: usize = 200_000;
 
 /// What one file's songs may come to, all told. A file past them is no songbook but one made to
-/// exhaust the computer (a 120 KB zip once came to 400 MB of words), and is refused.
+/// exhaust the computer (a 487 KB zip once came to 400 MB of words), and is refused.
 #[derive(Clone, Copy, Debug)]
 struct Bounds {
     songs: usize,
@@ -748,7 +748,7 @@ mod tests {
     #[test]
     fn songbooks_sharing_an_id_give_a_song_once_with_the_first_of_them() {
         // A song with one songbook and a thousand more rows sharing its id came a thousand times
-        // over (a 120 KB zip came to 400 MB of words); it comes once, with the first.
+        // over (a 487 KB zip came to 400 MB of words); it comes once, with the first.
         let songs = read(include_bytes!("../tests/songbooks/shared.sqlite")).unwrap();
         let shared: Vec<&SongbookSong> = songs.iter().filter(|song| song.title == "In two songbooks").collect();
         assert_eq!(shared.len(), 1);
