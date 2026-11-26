@@ -972,14 +972,17 @@ function followLive(sel = '.live') {
 }
 // The item that is open on the left is where the keys are aimed. When it is not the one on screen (Up, Down or a click moved it),
 // Next or Previous starts it from its first slide instead of carrying on in the song that is showing.
-function aimed() {
+function aimed(dir = 1) {
   if (state.mode !== 'show' || !state.live) return null;
   const all = decks(), open = all.find(x => x.key === (state.src.type === 'lib' ? 'lib-' + state.openSong : state.openItem));
   if (!open || open.key === state.live.deck) return null;
   // What was last shown came from outside the playlist (a verse from the Bible page, say). While it is still on screen, Next
   // keeps stepping through it; once it is cleared, Next starts the open item (the app, c1b3afe; the owner: "if you open a
   // song in playlist, next should be the song not bible verse since they clicked on song")
-  if (!all.some(x => x.key === state.live.deck) && state.on) return null;
+  // …and at the reading's last slide, Next goes on to the open item (the app, 34e61d7): Next moves what the audience sees;
+  // opening an item only lines it up. Previous at its first slide still stays.
+  if (!all.some(x => x.key === state.live.deck) && state.on) { const d = deckByKey(state.live.deck);
+    if (!(dir > 0 && d && d.seq && state.live.q >= d.seq.length - 1 && state.build >= buildSteps(state.on.slide).length)) return null; }
   return (open.slides && open.seq.length) || (open.kind === 'media' && open.media) || (open.kind === 'mediaPlaylist' && open.mp) ? open : null;
 }
 // The cue: a slide or verse picked by the keyboard (a search, or Up and Down), ready to go on screen. It is never orange:
@@ -1004,7 +1007,7 @@ function step(dir) {
   // With nothing on screen, Space puts the cue on (the arrows only move it: see the key handler). With something on screen,
   // Space and the arrows keep running that, so a song can be finished; Enter takes the cue.
   if (cueHere()) { if (!state.on) return dir > 0 ? goCue() : moveCue(-1); }
-  const aim = cueHere() ? null : aimed();
+  const aim = cueHere() ? null : aimed(dir);
   if (aim) return aim.slides ? go(aim.key, 0) : aim.kind === 'media' ? showMedia(aim.media.id) : playMediaPlaylist(aim.mp.id);
   let d = state.live && deckByKey(state.live.deck);
   if (!d || !d.slides) {
@@ -1025,6 +1028,27 @@ function step(dir) {
   if (d.key.startsWith('bible') || (d === state.heldDeck && !decks().some(x => x.key === d.key)) || d.key === 'vox' || state.src.type !== 'pl' || !DOC.settings.continuous) return;
   const all = decks(), at = all.findIndex(x => x.key === d.key);
   for (let n = at + dir; n >= 0 && n < all.length; n += dir) if (all[n].slides && all[n].seq.length && (all[n].kind === 'song' || all[n].kind === 'passage')) return go(all[n].key, dir > 0 ? 0 : all[n].seq.length - 1);   // on through songs and passages; over media, placeholders and headers
+}
+// What Next would put on, for the line under the preview's counter (the app, 34e61d7; the owner may take the line out later).
+// Empty when Next would show nothing new: a click build still to come, a slide picked and waiting for Enter, a reading's
+// last verse with nothing lined up.
+function nextWhat() {
+  if (typeof REMOTE === 'object' && REMOTE.on) return '';      // the app decides what Next does; the page doesn't guess
+  if (state.mode !== 'show' && state.mode !== 'bible') return '';
+  if (cueHere() && !state.on) return '';
+  if (state.on && !state.vox && state.build < buildSteps(state.on.slide).length) return '';
+  const start = x => x.slides ? `${x.title}, slide 1` : x.kind === 'media' && x.media ? x.media.name : x.mp ? x.mp.name : '';
+  const aim = cueHere() ? null : aimed(1); if (aim) return start(aim);
+  const d = state.live && deckByKey(state.live.deck);
+  if (!d || !d.slides) { if (state.mode === 'bible') return ''; const s = decks().find(x => x.key === (state.src.type === 'lib' ? 'lib-' + state.openSong : state.openItem) && x.slides) || decks().find(x => x.slides && x.slides.length); return s ? start(s) : ''; }
+  const q = (state.live.q >= 0 ? state.live.q : d.seq.findIndex(i => i > state.live.s) - 1) + 1, name = k => (d.slides[d.seq[k]] || {}).group || `Slide ${k + 1}`;
+  if (q >= 0 && q < d.seq.length) return name(q);
+  if (d.song && d.song.loop) return name(0);
+  if (d.key.startsWith('bible') || d.key === 'vox' || state.src.type !== 'pl' || !decks().some(x => x.key === d.key)) return '';
+  if (!DOC.settings.continuous) return 'Nothing — Continuous is off';
+  const all = decks(), at = all.findIndex(x => x.key === d.key);
+  for (let n = at + 1; n < all.length; n++) if (all[n].slides && all[n].seq.length && (all[n].kind === 'song' || all[n].kind === 'passage')) return start(all[n]);
+  return 'Nothing — end of the playlist';
 }
 function clear(layer) {
   for (const k of layer === 'all' ? ['slide', 'media', 'props', 'messages', 'audio', 'announcements'] : [layer]) {
@@ -1791,7 +1815,7 @@ function renderRight() {
   put('pgHead', html`<div class="pg-h"><i class="dot"></i>${seg(['Audience', 'Stage'], state.monitor, 'monitor')}${DOC.screens.length > 2 ? html`<button class="iconbtn lv-monpick ${monScreen() ? 'lit' : ''}" data-a="menu:monPick" title="Look at one screen" aria-label="Look at one screen"><span class="sc-chev">${I.chev}</span></button>` : ''}<span class="state">${on ? 'ON SCREEN' : 'CLEAR'}</span></div>`);
   renderMonitor();
   put('pgFoot', html`<div class="readout" ${s ? { 'data-a': 'goLiveSlide', title: 'Go to the slide on screen', role: 'button', tabindex: '0' } : {}}><span class="big">${s ? two(s.n) : '--'}<small>/${s ? two(s.total) : '--'}</small></span>
-      <span class="txtline"><span class="l1">${s ? html`<b>${s.group || ''}</b> · ${s.title}` : state.ann && annName() ? html`<b>Announcements</b> · ${annName()}` : 'Nothing on screen'}</span><span class="l2">${[monScreen() ? 'Looking at ' + monScreen().name : '', s && buildSteps(s.slide).length ? `build ${state.build}/${buildSteps(s.slide).length}` : ''].filter(Boolean).join(' · ')}${state.advanceLeft ? html`${monScreen() || (s && buildSteps(s.slide).length) ? ' · ' : ''}next in <span id="lvAdv">${state.advanceLeft}</span>s` : ''}</span></span></div>
+      <span class="txtline"><span class="l1">${s ? html`<b>${s.group || ''}</b> · ${s.title}` : state.ann && annName() ? html`<b>Announcements</b> · ${annName()}` : 'Nothing on screen'}</span><span class="l2">${[monScreen() ? 'Looking at ' + monScreen().name : '', s && buildSteps(s.slide).length ? `build ${state.build}/${buildSteps(s.slide).length}` : ''].filter(Boolean).join(' · ')}${state.advanceLeft ? html`${monScreen() || (s && buildSteps(s.slide).length) ? ' · ' : ''}next in <span id="lvAdv">${state.advanceLeft}</span>s` : ''}</span><span class="l3" id="lvNext">${(nx => nx ? `Next: ${nx}` : '')(nextWhat())}</span></span></div>
     <div class="pg-ctx">${vm ? html`<div class="lv-vid"><button class="vk big" data-a="${vk}:play" title="${v.playing ? 'Pause' : 'Play'}" aria-label="${v.playing ? 'Pause' : 'Play'}">${v.playing ? I.pause : I.play}</button><button class="vk" data-a="${vk}:restart" title="Start over">${I.prev}</button><button class="vk" data-a="${vk}:fwd" title="Forward 10 seconds">${I.fwd}</button>
         <span class="tm" id="vGone" hidden>${mmss(v.pos)}</span><input type="range" id="vSeek" data-i="vseek" min="0" max="${vm.length}" value="${v.pos}" aria-label="Place in the video"><span class="tm" id="vLeft">-${mmss(vm.length - v.pos)}</span>
         <button class="vk ${v.loop ? 'act' : ''}" data-a="${vk}:loop" title="Loop">${I.loop}</button><button class="vk ${v.mute ? '' : 'act'}" data-a="${vk}:mute" title="Sound">${v.mute ? I.mute : I.sound}</button>${mp ? html`<button class="vk wide" data-a="clear:media" title="Stop the media playlist ${mp.name}">Stop</button>` : ''}</div>`
@@ -1800,6 +1824,7 @@ function renderRight() {
       : state.identify ? html`<div class="lv-line"><span>Identifying the screens: <b>the room sees it</b></span><button class="vk wide" data-a="identify" title="Take each screen’s name and colour off it">Stop</button></div>` : ''}</div>`);      // Identify can be stopped from anywhere
 
   // in the order the screens stack them, from the back (the app, 58a7d95); audio is heard, not seen, so it comes last
+  { const e = $('lvNext'); if (e) e.title = e.scrollWidth > e.clientWidth ? e.textContent : ''; }      // the whole line on hover, only when it is cut
   const keys = [['media', 'Media'], ['slide', 'Slide'], ['announcements', 'Announce'], ['props', 'Props'], ['messages', 'Messages'], ['audio', 'Audio']];
   put('layers', keys.map(([k, nm]) => html`<button class="layer ${layerOn(k) ? 'on' : ''}" data-a="clear:${k}" title="${layerOn(k) ? 'Clear it' : 'Nothing showing'}"><i class="led"></i><span class="nm">${nm}</span></button>`),
     html`<button class="clearall ${on ? '' : 'idle'}" data-a="clear:all">Clear All</button>`);
@@ -4152,6 +4177,7 @@ const REMOTE_WORDS = {
    "No song is open": "No hay ninguna canción abierta",
    "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Aún no hay canciones aquí. Crea una, importa algunas o arrastra canciones sobre el nombre de esta biblioteca.",
    "No tracks yet. Add music files from this computer.": "Aún no hay pistas. Añade archivos de música de este ordenador.",
+   "Not connected to SoftPresenter.": "No hay conexión con SoftPresenter.",
    "Notes": "Notas",
    "Nothing found": "No se encontró nada",
    "Nothing showing": "No se muestra nada",
@@ -4543,6 +4569,7 @@ const REMOTE_WORDS = {
    "No song is open": "Песня не открыта",
    "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Здесь пока нет песен. Создайте песню, импортируйте или перетащите песни на название этой библиотеки.",
    "No tracks yet. Add music files from this computer.": "Треков пока нет. Добавьте музыкальные файлы с этого компьютера.",
+   "Not connected to SoftPresenter.": "Нет связи с SoftPresenter.",
    "Notes": "Заметки",
    "Nothing found": "Ничего не найдено",
    "Nothing showing": "Ничего не показано",
@@ -4934,6 +4961,7 @@ const REMOTE_WORDS = {
    "No song is open": "Жодну пісню не відкрито",
    "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Тут ще немає пісень. Створіть пісню, імпортуйте кілька або перетягніть пісні на назву цієї бібліотеки.",
    "No tracks yet. Add music files from this computer.": "Треків ще немає. Додайте музичні файли з цього компʼютера.",
+   "Not connected to SoftPresenter.": "Немає звʼязку з SoftPresenter.",
    "Notes": "Нотатки",
    "Nothing found": "Нічого не знайдено",
    "Nothing showing": "Нічого не показується",
@@ -5320,8 +5348,14 @@ function remoteTake(m) {
 function remotePicture(blob) {
   blob.slice(0, 1).arrayBuffer().then(head => {
     if (new Uint8Array(head)[0] !== 1) return;
-    const url = URL.createObjectURL(blob.slice(1, blob.size, 'image/jpeg')), old = REMOTE.preview;
-    REMOTE.preview = url; remotePaintPreview(); if (old) setTimeout(() => URL.revokeObjectURL(old), 1000);
+    // A frame is decoded before it is shown, and goes into the picture already there: the picture is never rebuilt and never
+    // empty, so nothing flickers while a video plays or a slide fades (the owner saw the picture's label flash between frames).
+    const url = URL.createObjectURL(blob.slice(1, blob.size, 'image/jpeg')), seq = REMOTE.frame = (REMOTE.frame || 0) + 1, next = new Image();
+    const show = () => { if (seq < (REMOTE.shownFrame || 0)) return URL.revokeObjectURL(url);      // a later frame is up already
+      const old = REMOTE.preview, img = document.querySelector('#monLayers img.rm-preview'); REMOTE.shownFrame = seq; REMOTE.preview = url;
+      if (img) { img.src = url; const kept = typeof monLast !== 'undefined' && monLast && monLast.querySelector('img.rm-preview'); if (kept) kept.src = url; } else remotePaintPreview();
+      if (old) setTimeout(() => URL.revokeObjectURL(old), 1000); };
+    next.src = url; (next.decode ? next.decode() : Promise.resolve()).then(show, show);
   });
 }
 // A command, as `sp` would type it. A refusal comes back in the app's own words, shown as the cue under what was clicked.
@@ -5576,6 +5610,7 @@ remoteWrap('showMedia', (orig, id) => { const m = mediaById(id); if (m) remoteSe
 remoteWrap('playMediaPlaylist', (orig, id) => { const mp = byId(DOC.mediaPlaylists, id); if (mp) remoteSend(['media-playlist', 'play', mp.name]); });
 remoteWrap('versionUse', (orig, id, keep) => remoteSend(id ? ['version', 'use', versionName(id), ...(keep ? ['--keep'] : [])] : ['version', 'off']));
 remoteWrap('mutate', () => refuse(AT_THE_COMPUTER));
+remoteWrapA('mode', (orig, [m]) => REASON[m] ? refuse(REASON[m]) : orig([m]));      // Bible and Edit aren't on the page yet: a tap says so
 remoteWrapA('out', (orig, [k]) => remoteSend([k, state[k] ? 'off' : 'on']));
 remoteWrapA('identify', () => remoteSend(['identify', state.identify ? 'off' : 'on']));
 remoteWrapA('test', (orig, [k]) => remoteSend(['test', k]));
@@ -5608,8 +5643,8 @@ remoteWrap('render', orig => {
 remoteWrap('renderTop', orig => {
   orig();
   const why = { bible: REASON.bible, edit: REASON.edit };
-  for (const b of document.querySelectorAll('#modes [data-a^="mode:"]')) { const m = b.dataset.a.slice(5); if (why[m]) { b.disabled = true; b.title = why[m]; } }
-  const gear = $('gear'); if (gear) { gear.disabled = true; gear.title = REASON.settings; }
+  for (const b of document.querySelectorAll('#modes [data-a^="mode:"]')) { const m = b.dataset.a.slice(5); if (why[m]) { b.classList.add('rm-not'); b.title = why[m]; } }
+  const gear = $('gear'); if (gear) { gear.classList.add('rm-not'); gear.title = REASON.settings; }
   const c = $('connBtn'); if (!c) return;
   c.classList.add('rm'); c.classList.toggle('live', REMOTE.status === 'on'); c.classList.toggle('lost', REMOTE.status === 'lost' || REMOTE.status === 'stopped');
   c.querySelector('span').textContent = { on: 'Connected', connecting: 'Connecting…', lost: 'Reconnecting…', stopped: 'Connect', off: 'Not connected' }[REMOTE.status] || 'Not connected';
@@ -5629,7 +5664,7 @@ function remoteSignOut() {
 remoteWrap('monitorHTML', orig => {
   if (state.monitor !== 'Audience' || monScreen()) return html`<div class="bg" style="background:#000"></div><div class="off">This picture comes to the remote page with the next step</div>`;
   if (!REMOTE.preview) return orig();
-  return html`<img class="rm-preview" src="${REMOTE.preview}" alt="What the audience sees" draggable="false">${state.audience ? '' : html`<div class="off">The audience screens are off</div>`}`;
+  return html`<img class="rm-preview" src="${REMOTE.preview}" alt="" aria-label="What the audience sees" draggable="false">${state.audience ? '' : html`<div class="off">The audience screens are off</div>`}`;
 });
 function remotePaintPreview() { if (REMOTE.on) renderMonitor(); }
 

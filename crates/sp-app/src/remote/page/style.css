@@ -1861,3 +1861,7 @@ body.login { display: grid; grid-template: 1fr / 1fr; place-items: center; heigh
 .su-rep { max-width: 640px; } .su-rep .sline { border-top: 0; } .su-rep .st-fold pre, .settings .st-fold .st-coderow pre { max-height: 220px; overflow: auto; } .st-fold summary::-webkit-details-marker { color: var(--faint); }
 /* the setup's pre-release note: a quiet card, no warning colour */
 .su-pre { display: grid; gap: 4px; margin-top: 12px; padding: 12px 14px; border-radius: var(--r-key); background: var(--well); max-width: 560px; } .su-pre b { font-size: 13px; font-weight: 600; } .su-pre span { font-size: 12.5px; line-height: 1.45; color: var(--dim); }
+/* "Next: …" under the preview's counter: dimmed, cut with … to the column; its room is kept when empty, so nothing moves */
+.readout .l3 { min-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); } .readout .txtline { min-height: 52px; }      /* room for all three lines, so a second line never moves what is under it */
+/* the remote page: a view that isn't here yet is dimmed but can be tapped, and the tap says why */
+#modes .rm-not, #gear.rm-not { opacity: .5; }
