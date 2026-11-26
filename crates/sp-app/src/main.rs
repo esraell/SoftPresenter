@@ -12247,14 +12247,16 @@ impl ApplicationHandler<AppEvent> for App {
         // Testing aid: SOFTPRESENTER_TERMINATE_AFTER=<seconds> has macOS terminate the app that
         // many seconds after it started, the way the Dock's Quit, a log-out, a restart and a
         // shut-down do (never through the app's own Quit), so that what the app does then can
-        // be tried without a pointer. On a Mac only; looked at each time the loop waits (once a
-        // second at least).
+        // be tried without a pointer. On a Mac only; read once, and looked at each time the loop
+        // waits (once a second at least).
         #[cfg(target_os = "macos")]
-        if !self.terminate_asked
-            && std::env::var("SOFTPRESENTER_TERMINATE_AFTER")
-                .ok()
-                .and_then(|s| s.trim().parse::<f32>().ok())
-                .is_some_and(|after| self.started.elapsed().as_secs_f32() >= after)
+        if !self.terminate_asked && {
+            static AFTER: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+            *AFTER.get_or_init(|| {
+                std::env::var("SOFTPRESENTER_TERMINATE_AFTER").ok().and_then(|s| s.trim().parse::<f32>().ok())
+            })
+        }
+        .is_some_and(|after| self.started.elapsed().as_secs_f32() >= after)
         {
             self.terminate_asked = true;
             applog::event("quit", "Testing aid: asking macOS to terminate the app, as the Dock's Quit does");
