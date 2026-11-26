@@ -891,6 +891,9 @@ pub struct Prefs {
     /// True when each button's key is written beside it (Help › Show Keys on Buttons).
     #[serde(default)]
     pub keys_on_buttons: bool,
+    /// True when Settings › Screens adds a technical line to every screen's card (Details).
+    #[serde(default)]
+    pub screens_details: bool,
     /// The language of the app's own words: `auto` (the computer's, the default), or `en`, `es`,
     /// `ru` or `uk`.
     #[serde(default)]
@@ -963,6 +966,7 @@ impl Default for Prefs {
             playlist_in_front: false,
             song_order: "listed".to_owned(),
             keys_on_buttons: false,
+            screens_details: false,
             language: String::new(),
             import_as: std::collections::BTreeMap::new(),
             interface_size: String::new(),

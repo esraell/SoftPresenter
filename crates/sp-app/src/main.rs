@@ -10081,6 +10081,14 @@ impl App {
                 }
             }
         }
+        // A card in Settings › Screens brings the Screens window in front, where it may be
+        // behind (never in a quiet run, whose windows stay behind everything).
+        if std::mem::take(&mut running.home_state.screens_to_front)
+            && !quiet
+            && let Some(panel) = running.panels.iter().find(|panel| panel.kind == Panel::Screens)
+        {
+            panel.window.focus_window();
+        }
     }
 
     /// Draws one frame of a panel window and returns what was asked for in it.

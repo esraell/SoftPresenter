@@ -362,6 +362,12 @@ pub struct HomeState {
     pub zoom_now: f32,
     /// Testing aid: Settings › Slides scrolled on to In your window, once.
     pub show_interface_size: bool,
+    /// Settings › Screens' Details: a technical line on every screen's card (kept with the
+    /// preferences).
+    pub screens_details: bool,
+    /// The Screens window is asked to come in front (a card in Settings › Screens was clicked
+    /// while it was open behind).
+    pub screens_to_front: bool,
     /// The presentation file the sheet asks about: as slides or as pictures.
     pub ask_import: Option<AskImport>,
     /// The answer: the file, and how it is to come in. Taken by the app.
@@ -1969,6 +1975,8 @@ impl Default for HomeState {
             interface_size: crate::interface_size::InterfaceSize::Automatic,
             zoom_now: 1.0,
             show_interface_size: false,
+            screens_details: false,
+            screens_to_front: false,
             ask_import: None,
             import_answer: None,
             pages_waiting: std::collections::HashMap::new(),
@@ -2367,6 +2375,7 @@ impl HomeState {
             playlist_in_front: self.playlist_open,
             song_order: self.song_order.name().to_owned(),
             keys_on_buttons: self.keys_on_buttons,
+            screens_details: self.screens_details,
             language: crate::i18n::choice().code().to_owned(),
             import_as: self.import_as.clone(),
             interface_size: self.interface_size.code(),
@@ -2407,6 +2416,7 @@ impl HomeState {
         self.playlist_open = prefs.playlist_in_front;
         self.song_order = crate::kept::SongOrder::named(&prefs.song_order);
         self.keys_on_buttons = prefs.keys_on_buttons;
+        self.screens_details = prefs.screens_details;
         crate::i18n::set_choice(crate::i18n::Choice::from_code(&prefs.language));
         self.import_as = prefs.import_as.clone();
         self.interface_size = crate::interface_size::InterfaceSize::from_code(&prefs.interface_size);

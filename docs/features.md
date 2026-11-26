@@ -1900,6 +1900,25 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Language in Language, its Reload songs in Song files. The window opens at 1040 × 720 and keeps
   at least 820 × 560, room for the list beside a page in every language (the list scrolls when the
   window is shorter than it).
+- **Settings › Screens** is a page of cards: how many screens are going out ("2 of 4 going out"),
+  and how many need attention, in amber; the check strip (Identify, and the test patterns Off,
+  Colour bars, Grid and White, which everyone watching sees); All audience screens and All stage
+  screens, the top bar's two keys, and Details, which adds a technical line to every card (where
+  it goes in full: the display's size, NDI's name, size and rate, the DeckLink format and keyer;
+  then solid, see-through and its soft edges, or another screen's key; the theme; the layers;
+  covered edges; the colour; a stage screen's layout) and is kept with the settings. Then a card
+  for each screen, audience screens first, three across where there is room: a picture standing
+  for it (its colour or the checks of a see-through screen, where it goes, a green ring while it
+  goes out, dimmed with Off or Not plugged in while it doesn't, MAIN on the first audience
+  screen, and, while the screens are identified, its colour and name as the screen shows them),
+  its colour, its name and an On key, what it is doing (green going out, grey off, amber for
+  trouble: never Off's grey), and its kind and where it goes. On sends the screen nowhere, as Off
+  under Output in the Screens window does (the screen and its settings stay in the list); while
+  it goes nowhere, the key opens it in the Screens window to choose where. A screen on a display
+  that isn't plugged in has **Use a window for now**. A click on a card opens that screen in the
+  Screens window (bringing the window in front), where everything about it is set, and the
+  dashed **Add a screen** card adds an audience screen that goes nowhere until it is told where,
+  opened there to be set up.
 - **Integrations** (Settings): the services SoftPresenter works with, each the same card, two
   across where there is room: its logo (VoxLive's and TimelyChurch's, the owner's own; Canva's
   icon for Canva Sync; Worship Leader App's initials), its name and one line, then a light with
@@ -2230,7 +2249,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   names every file moved; the window says how many went, only when some did.
 - **What the menu bar did is in the window too, on every system** (Windows and Linux have no menu
   bar; the design has none either): Settings › Screens has Identify and the test patterns (Off,
-  Colour bars, Grid, White: everyone watching sees them); Settings › Song files has Read them
+  Colour bars, Grid, White: everyone watching sees them), and its cards open the Screens window;
+  Settings › Song files has Read them
   again (Reload songs) and says what happens when a song was changed elsewhere; Settings › Keys
   has Show keys on buttons; Settings has Set up SoftPresenter… under its list (Settings steps
   aside so the setup opens over the home window); Settings › Command line has the sp command's

@@ -9,6 +9,7 @@ use sp_engine::Show;
 use super::{HomeState, Page, open_page};
 
 pub(crate) mod parts;
+mod screens_page;
 use crate::i18n::{t, tf, tk, tn};
 use crate::icons::{self, Icon};
 use crate::studio::{
@@ -398,7 +399,7 @@ const PAGE_WIDTH: f32 = 860.0;
 /// What a page holds.
 fn pane_contents(ui: &mut egui::Ui, state: &mut HomeState, show: &Show, pane: Pane) {
     match pane {
-        Pane::Screens => screens_page(ui, state, show),
+        Pane::Screens => screens_page::page(ui, state, show),
         Pane::PhoneScreens => crate::mirror::pane(ui, &mut state.mirror),
         Pane::Slides => slides_page(ui, state, show),
         Pane::Groups => groups_page(ui, state, show),
@@ -414,149 +415,6 @@ fn pane_contents(ui: &mut egui::Ui, state: &mut HomeState, show: &Show, pane: Pa
         Pane::SongFiles => song_files_page(ui, state),
         Pane::About => about_page(ui, state),
     }
-}
-
-/// Settings › Screens, until its cards by purpose are agreed: how many screens are going out; the
-/// check strip (mark each screen with its name and colour, and a test pattern on every screen, to
-/// line up projectors and cables); then the screens' own window and the stage screens' switch.
-fn screens_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
-    use crate::props::TestPattern;
-    // How many are going out.
-    {
-        let (on, all) = screens_on(state, show);
-        let counts = [("on", crate::i18n::count(on as u64)), ("all", crate::i18n::count(all as u64))];
-        let counts: Vec<(&str, &str)> = counts.iter().map(|(name, value)| (*name, value.as_str())).collect();
-        let summary = tf("settings.screens.summary", "{on} of {all} going out", &counts);
-        let width = ui.available_width();
-        let line = parts::words(ui, &summary, FontId::proportional(13.0), TEXT_FAINT, 0.0, width);
-        let (place, _) = ui.allocate_exact_size(vec2(width, line.size().y), Sense::hover());
-        ui.painter().galley(place.min, line, TEXT_FAINT);
-        ui.add_space(12.0);
-    }
-    // The check strip: Identify, then the test patterns.
-    let font = FontId::proportional(12.5);
-    let (identify, stop) =
-        (t("settings.screens.identify", "Identify"), t("settings.screens.identify.stop", "Stop identifying"));
-    let identify_width = crate::studio::widest(ui, &[identify, stop], &font) + 26.0;
-    let look = crate::studio::SwitchLook {
-        font: FontId::proportional(12.0),
-        spacing: 0.0,
-        pad: 11.0,
-        height: 24.0,
-        inset: 3.0,
-        track: CARD,
-        idle: TEXT_DIM,
-    };
-    let patterns = [
-        (None, t("settings.screens.pattern.off", "Off")),
-        (Some(TestPattern::ColorBars), t("right.playing.bars", "Colour bars")),
-        (Some(TestPattern::Grid), t("right.playing.grid", "Grid")),
-        (Some(TestPattern::White), t("right.playing.white", "White")),
-    ];
-    let labels: Vec<&str> = patterns.iter().map(|(_, label)| *label).collect();
-    let chosen = patterns.iter().position(|(pattern, _)| *pattern == state.test_pattern);
-    let caption = parts::words(
-        ui,
-        &t("settings.screens.pattern", "Test pattern").to_uppercase(),
-        fixed_semibold(11.5),
-        TEXT_DIM,
-        0.575,
-        f32::INFINITY,
-    );
-    let seen_words = t("settings.screens.seen", "Everyone watching sees these").to_uppercase();
-    let seen = |ui: &egui::Ui, wrap: f32| parts::words(ui, &seen_words, fixed(11.5), TEXT_FAINT, 0.575, wrap);
-    // Identify, then the caption and the switch on the same line where they fit, 20 after it (the
-    // design's rule there draws nothing); where they don't, the caption and the switch on a line
-    // of their own under Identify (and the switch on a line of its own too, narrower still).
-    let width = ui.available_width();
-    let switch_width = crate::studio::pill_switch_width(ui, &labels, &look);
-    let caption_width = caption.size().x;
-    let one_line = identify_width + 20.0 + caption_width + 10.0 + switch_width <= width;
-    let (strip, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
-    let key = Rect::from_min_size(strip.min, vec2(identify_width, 30.0));
-    let words = if state.identify { stop } else { identify };
-    let look_now = if state.identify { Flat::On } else { Flat::Plain };
-    let identify_response = flat_button(ui, key, ui.scope_id().with("identify"), words, font, look_now, true);
-    if identify_response
-        .on_hover_text(t(
-            "settings.screens.identify.hint",
-            "Each screen shows its name and colour. The room and the stream see it.",
-        ))
-        .clicked()
-    {
-        state.identify = !state.identify;
-    }
-    let line = if one_line {
-        Rect::from_min_max(pos2(key.max.x + 20.0, strip.min.y), strip.max)
-    } else {
-        ui.add_space(8.0 - ui.spacing().item_spacing.y);
-        ui.allocate_exact_size(vec2(width, 30.0), Sense::hover()).0
-    };
-    ui.painter().galley(pos2(line.min.x, line.center().y - caption.size().y / 2.0), caption, TEXT_DIM);
-    let switch_at = if caption_width + 10.0 + switch_width <= line.width() {
-        pos2(line.min.x + caption_width + 10.0, line.min.y)
-    } else {
-        ui.add_space(8.0 - ui.spacing().item_spacing.y);
-        ui.allocate_exact_size(vec2(width, 30.0), Sense::hover()).0.min
-    };
-    let (track, clicked) = crate::studio::pill_switch(ui, "test pattern", switch_at, &labels, &[], chosen, &look);
-    if let Some(at) = clicked {
-        state.test_pattern = patterns[at].0;
-    }
-    // The note goes beside the switch where there is room, on two lines if it must, as the
-    // design's; else under it.
-    let beside = strip.max.x - track.max.x - 12.0;
-    let wrapped = seen(ui, beside.max(1.0));
-    if beside >= 120.0 && wrapped.rows.len() <= 2 && wrapped.size().x <= beside + 0.5 {
-        let at = pos2(track.max.x + 12.0, track.center().y - wrapped.size().y / 2.0);
-        ui.painter().galley(at, wrapped, TEXT_FAINT);
-    } else {
-        let whole = seen(ui, f32::INFINITY);
-        ui.add_space(6.0);
-        let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), whole.size().y), Sense::hover());
-        ui.painter().galley(place.min, whole, TEXT_FAINT);
-    }
-    ui.add_space(14.0);
-    card(
-        ui,
-        t("settings.screens.title", "Screens"),
-        t("settings.screens.about", "Where each screen's picture goes, and how it looks"),
-        None,
-        |ui| {
-            let configure = t("settings.screens.configure", "Configure Screens\u{2026}");
-            let hint = match crate::keys::screens_key() {
-                Some(key) => tf("settings.screens.configure.key", "Configure Screens ({key})", &[("key", &key)]),
-                None => t("settings.screens.configure.hint", "Configure Screens").to_owned(),
-            };
-            let size = parts::key_size(ui, configure);
-            row(
-                ui,
-                t("settings.screens.window", "Each screen"),
-                t("settings.screens.window.about", "Its output, look, background and key, in the screens' own window"),
-                size,
-                |ui, place| {
-                    if parts::key(ui, place, ui.scope_id().with("configure screens"), configure, false)
-                        .on_hover_text(hint)
-                        .clicked()
-                    {
-                        state.settings_open = true;
-                    }
-                },
-            );
-            let size = on_off_size(ui);
-            row(
-                ui,
-                t("settings.screens.stage_on", "Stage screens"),
-                t("settings.screens.stage_on.about", "Every stage screen, as the Stage key in the top bar"),
-                size,
-                |ui, place| {
-                    if on_off(ui, place, ui.scope_id().with("stage on"), state.stage_on).clicked() {
-                        state.stage_on = !state.stage_on;
-                    }
-                },
-            );
-        },
-    );
 }
 
 /// Settings › Slides: what the room sees with every song, shown. The copyright line drawn on a
