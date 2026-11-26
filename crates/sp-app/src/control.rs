@@ -100,7 +100,61 @@ impl Reply {
 /// A request that has come in, with where its reply goes.
 pub struct Incoming {
     pub request: Request,
-    pub reply: Sender<Reply>,
+    pub reply: ReplyTo,
+}
+
+/// Where a request's reply goes: the main thread hands it over here, and the thread that read
+/// the request writes it back. A reply handed over counts as unwritten until it has been written
+/// and its connection closed, or dropped unwritten, and the app doesn't end before then
+/// ([`finish_replies`]): `menu Quit`'s reply is handed over as the app begins to leave, and the
+/// program could end before it was written, so that `sp` read nothing ("EOF while parsing").
+/// A request still waiting for its reply (`status --wait`, held) counts for nothing.
+pub struct ReplyTo(Sender<Handed>);
+
+impl ReplyTo {
+    /// Hands the reply over to be written. Gives it back when nobody waits for it any more (the
+    /// connection gave up).
+    pub fn send(&self, reply: Reply) -> Result<(), Reply> {
+        self.0.send(Handed { reply, _unwritten: Unwritten::counted() }).map_err(|handed| handed.0.reply)
+    }
+}
+
+/// A reply handed over, with its place in the count of replies not yet written.
+struct Handed {
+    reply: Reply,
+    _unwritten: Unwritten,
+}
+
+/// Replies handed over and not yet written and closed, or dropped.
+static UNWRITTEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// One of [`UNWRITTEN`], for as long as it is kept.
+struct Unwritten;
+
+impl Unwritten {
+    fn counted() -> Unwritten {
+        UNWRITTEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Unwritten
+    }
+}
+
+impl Drop for Unwritten {
+    fn drop(&mut self) {
+        UNWRITTEN.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Waits, as the app ends, until every reply handed over has been written and its connection
+/// closed, for at most `within`. Returns how many were still unwritten then.
+pub fn finish_replies(within: Duration) -> usize {
+    let began = std::time::Instant::now();
+    loop {
+        let left = UNWRITTEN.load(std::sync::atomic::Ordering::SeqCst);
+        if left == 0 || began.elapsed() >= within {
+            return left;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
 }
 
 /// Where the socket is: `SOFTPRESENTER_CONTROL_SOCKET` if set (for tests, whose folders have
@@ -261,29 +315,35 @@ fn answer(stream: UnixStream, deliver: &Deliver) {
     let mut line = String::new();
     let read = BufReader::new((&stream).take(MAX_REQUEST)).read_line(&mut line);
     let too_long = line.len() as u64 >= MAX_REQUEST && !line.ends_with('\n');
-    let reply = match read.map_err(|e| e.to_string()).and_then(|_| {
+    let (reply, unwritten) = match read.map_err(|e| e.to_string()).and_then(|_| {
         if too_long {
             return Err(format!("A command may be at most {} KB.", MAX_REQUEST / 1024));
         }
         serde_json::from_str::<Request>(line.trim())
             .map_err(|e| format!("Not a request SoftPresenter understands: {e}"))
     }) {
-        Err(problem) => Reply::failed(problem),
+        Err(problem) => (Reply::failed(problem), None),
         // An older command line (version 1) can't carry an assistant's mark, so its requests are
         // the computer's own and still welcome: `sp menu Quit` from the build before an update.
         // Only a version 1 request that carries the mark is refused, with any other version.
-        Ok(request) if request.v != PROTOCOL && !(request.v == 1 && request.mcp.is_none()) => Reply::failed(format!(
-            "This command line speaks version {} of the protocol, the running app version {PROTOCOL}. Use the same build for both.",
-            request.v
-        )),
+        Ok(request) if request.v != PROTOCOL && !(request.v == 1 && request.mcp.is_none()) => (
+            Reply::failed(format!(
+                "This command line speaks version {} of the protocol, the running app version {PROTOCOL}. Use the same build for both.",
+                request.v
+            )),
+            None,
+        ),
         Ok(request) => match wait_for(&request.args) {
             Some(Ok((wait, _))) => {
                 let leaving = Leaving;
                 if WAITING.fetch_add(1, std::sync::atomic::Ordering::Relaxed) >= MOST_WAITING {
                     drop(leaving);
-                    Reply::failed(format!(
-                        "{MOST_WAITING} connections are already waiting for a change; ask again in a moment, or without --wait."
-                    ))
+                    (
+                        Reply::failed(format!(
+                            "{MOST_WAITING} connections are already waiting for a change; ask again in a moment, or without --wait."
+                        )),
+                        None,
+                    )
                 } else {
                     let deliver = deliver.clone();
                     // The app answers at the change or when the wait is up; past that, as for
@@ -291,7 +351,10 @@ fn answer(stream: UnixStream, deliver: &Deliver) {
                     // drops the connection unanswered, and `leaving` with it.
                     let _ = std::thread::Builder::new().name("control-wait".to_owned()).spawn(move || {
                         let _leaving = leaving;
-                        write_reply(&stream, ask(&deliver, request, wait + Duration::from_secs(15)));
+                        let (reply, unwritten) = ask(&deliver, request, wait + Duration::from_secs(15));
+                        write_reply(&stream, reply);
+                        drop(stream);
+                        drop(unwritten);
                     });
                     return;
                 }
@@ -300,12 +363,15 @@ fn answer(stream: UnixStream, deliver: &Deliver) {
         },
     };
     write_reply(&stream, reply);
+    // Closed before the reply stops counting as unwritten: all of it is the other end's then.
+    drop(stream);
+    drop(unwritten);
 }
 
 /// A `status --wait` the app holds: answered when something changes from its token, or when
 /// its time is up.
 pub struct Waiter {
-    reply: Sender<Reply>,
+    reply: ReplyTo,
     since: String,
     until: std::time::Instant,
     seconds: f64,
@@ -359,13 +425,32 @@ fn hash_of(text: &str) -> u64 {
 }
 
 /// Hands a request to the app and waits that long for its reply.
-fn ask(deliver: &Deliver, request: Request, within: Duration) -> Reply {
+/// Hands a request to the app and waits for its reply, with its place among those unwritten.
+fn ask(deliver: &Deliver, request: Request, within: Duration) -> (Reply, Option<Unwritten>) {
     let (tx, rx) = std::sync::mpsc::channel();
-    deliver(Incoming { request, reply: tx });
-    rx.recv_timeout(within).unwrap_or_else(|_| Reply::failed("SoftPresenter did not answer in time."))
+    deliver(Incoming { request, reply: ReplyTo(tx) });
+    match rx.recv_timeout(within) {
+        Ok(Handed { reply, _unwritten }) => (reply, Some(_unwritten)),
+        Err(_) => (Reply::failed("SoftPresenter did not answer in time."), None),
+    }
 }
 
 fn write_reply(stream: &UnixStream, mut reply: Reply) {
+    // Testing aid: SOFTPRESENTER_SLOW_REPLIES=<ms> waits that long before each reply is written,
+    // as when the thread that writes it runs late on a busy computer, to see that the app doesn't
+    // end before its reply to `menu Quit` is written. Only for a copy with its own data folder.
+    static SLOW: std::sync::OnceLock<Option<Duration>> = std::sync::OnceLock::new();
+    let slow = SLOW.get_or_init(|| {
+        let own_folder = std::env::var_os("SOFTPRESENTER_DATA").is_some_and(|folder| !folder.is_empty());
+        std::env::var("SOFTPRESENTER_SLOW_REPLIES")
+            .ok()
+            .and_then(|ms| ms.trim().parse::<u64>().ok())
+            .filter(|_| own_folder)
+            .map(|ms| Duration::from_millis(ms.min(10_000)))
+    });
+    if let Some(slow) = slow {
+        std::thread::sleep(*slow);
+    }
     // Scripts read the replies: in English whatever language the window speaks, even where a
     // reply repeats what the window said.
     reply.text = crate::i18n::english_of(&reply.text);

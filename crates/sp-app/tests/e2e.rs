@@ -406,7 +406,7 @@ impl Drop for Copy<'_> {
 
 impl Quitted {
     /// It closed by itself with nothing wrong: exit code 0, no crash or graphics error in its
-    /// log or on its standard error. (The log has no tag of its own for a problem: a crash is
+    /// log or on its standard error, no reply to sp left unwritten. (The log has no tag of its own for a problem: a crash is
     /// `[crash]`, and every problem logged is also written to the standard error.)
     fn assert_clean(&self, run: &Run) {
         assert!(self.status.success(), "the copy exited with {}{}", self.status, run.context());
@@ -414,6 +414,8 @@ impl Quitted {
             assert!(!self.log.contains(bad), "the copy's log says {bad:?}{}", run.context());
             assert!(!self.stderr.contains(bad), "the copy's standard error says {bad:?}{}", run.context());
         }
+        // Every reply to sp was written before it went (`control::finish_replies`).
+        assert!(!self.log.contains("still unwritten"), "the copy went with replies unwritten{}", run.context());
         // Looked at without following it: on Windows a socket is a stand-in file `exists` can't
         // follow.
         let socket = std::fs::symlink_metadata(&run.socket);
@@ -642,6 +644,16 @@ fn a_window_whose_surface_set_up_is_lost_draws_nothing_wrong_and_follows_its_siz
             "the copy's window was given no picture to draw into (covered, or the display is asleep)",
         );
     }
+}
+
+#[test]
+fn sp_is_answered_menu_quit_however_late_the_reply_is_written() {
+    let Some(run) = Run::new("sp_is_answered_menu_quit_however_late_the_reply_is_written") else { return };
+    // Each reply is written half a second late (SOFTPRESENTER_SLOW_REPLIES), as when the thread
+    // that writes it runs late on a busy computer. `menu Quit`'s is handed over as the app begins
+    // to leave, and the app had ended by then: sp read nothing ("EOF while parsing").
+    let copy = run.start(&[("SOFTPRESENTER_SLOW_REPLIES", "500")]);
+    copy.quit().assert_clean(&run);
 }
 
 #[test]

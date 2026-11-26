@@ -1341,6 +1341,16 @@ fn log_keys() -> bool {
     })
 }
 
+/// Waits, as the app ends, for the replies to `sp` it has handed over to be written: `menu Quit`'s
+/// was handed over as the app began to leave, and the program could end before it was written.
+/// A reply not written in two seconds (its thread stuck) is said in the log and left.
+fn finish_replies() {
+    let left = control::finish_replies(Duration::from_secs(2));
+    if left > 0 {
+        applog::problem("control", &format!("{left} replies to sp were still unwritten as the app ended"));
+    }
+}
+
 /// True for the key that opens the find box in the bar along the top: `/`.
 fn opens_find(key: &Key) -> bool {
     matches!(key, Key::Character(typed) if typed == "/")
@@ -9507,6 +9517,7 @@ impl App {
             // the end of `main`, where the run is noted as quit).
             self.writer.drain();
             applog::last_run::ended();
+            finish_replies();
             std::process::exit(0);
         }
         aid.step += 1;
@@ -12337,6 +12348,7 @@ impl ApplicationHandler<AppEvent> for App {
         }
         #[cfg(target_os = "linux")]
         drop(self.running.take());
+        finish_replies();
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
