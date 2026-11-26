@@ -33,11 +33,16 @@ first, then in `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`.
 - **Only what SoftPresenter asks of it:** every decoder, file format and parser FFmpeg has, for
   reading; for writing, only raw pictures and raw 32-bit float sound, which it pipes to the
   app; only the `file` and `pipe` protocols, and no network.
+- **For every Mac:** built twice from the same source with the same options, for Apple silicon
+  (arm64) and for Intel (x86_64, with FFmpeg's x86 assembly when `nasm` is installed), each for
+  macOS 11 and later, and joined with `lipo` into programs that run on both. `SOURCE.txt` gives
+  both configurations. A newer macOS call FFmpeg makes (one, in macOS 12) is checked for as it
+  runs, by FFmpeg itself.
 
 Decoding H.264, HEVC, VP8, VP9, MPEG-1, MPEG-2, MPEG-4, WMV, ProRes, AAC, MP3, Opus, Vorbis,
 AC-3, WMA and the rest is FFmpeg's own code. AV1 is decoded by FFmpeg through the Mac's video
-hardware, which M3 and later Macs have; an older Mac would need the dav1d decoder (BSD
-licence) added to the build.
+hardware, which M3 and later Macs have; an older Mac, and every Intel Mac, would need the dav1d
+decoder (BSD licence) added to the build.
 
 What the LGPL asks, and how the app meets it:
 

@@ -8,6 +8,9 @@ line.
 SoftPresenter is young: some of this is rough, and file formats may still change. When a
 feature changes, this page changes in the same commit.
 
+On a Mac it runs on macOS 11 (Big Sur) and later, on Apple silicon and on Intel: one app, built
+for both (`scripts/macos-app.sh --universal`).
+
 No list, page or menu in the app shows a scroll bar: everything scrolls by the trackpad, the
 mouse wheel (with Shift for sideways) or the keys, and the whole width is the content's.
 
@@ -574,7 +577,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   WMV, FLV, MPEG, TS and others, or an MP4 the Mac's player can't decode) through FFmpeg,
   played as it is, never converted first. FFmpeg comes inside the app (an LGPL build of FFmpeg
   9.0.2, with its licence and source in the app's Resources), so nothing needs installing; AV1
-  plays on Macs whose video hardware decodes it (M3 and later). On Windows every video plays
+  plays on Macs whose video hardware decodes it (M3 and later; no Intel Mac). On Windows every video plays
   through FFmpeg, whose LGPL build (`ffmpeg.exe`, `ffprobe.exe`) sits beside the program in the
   zip `scripts/windows-package.sh` makes; so it does on Linux, through the LGPL FFmpeg the `.deb`
   package (`scripts/linux-deb.sh`) puts beside the program in `/usr/lib/softpresenter`, used in

@@ -16,13 +16,22 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, MutexGuard, Once};
+use std::sync::{LazyLock, Mutex, MutexGuard, Once};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-/// The program: the app, and `sp` too (the same program with a command after it).
-const APP: &str = env!("CARGO_BIN_EXE_softpresenter");
+/// The program: the app, and `sp` too (the same program with a command after it). The one
+/// Cargo built, unless `SOFTPRESENTER_E2E_APP` names another.
+// Testing aid: SOFTPRESENTER_E2E_APP=<program> runs the tests against that program instead, for
+// tests built on one computer and run on another, where the build's own path doesn't exist (the
+// Mac's Intel build, tried on an Intel Mac).
+static APP: LazyLock<String> = LazyLock::new(|| {
+    std::env::var("SOFTPRESENTER_E2E_APP")
+        .ok()
+        .filter(|program| !program.is_empty())
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_softpresenter").to_owned())
+});
 
 /// One copy at a time (AGENTS.md: run one instance at a time), and honest timings.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
@@ -100,7 +109,13 @@ impl Run {
         static COUNT: AtomicUsize = AtomicUsize::new(0);
         // A short path, so the socket's stays under the limit: /tmp on a Mac and Linux (a Mac's
         // own temporary folder is long), the user's temporary folder on Windows.
-        let base = if cfg!(unix) { PathBuf::from("/tmp") } else { std::env::temp_dir() };
+        // Testing aid: SOFTPRESENTER_E2E_FOLDER=<folder> puts the tests' folders in that one
+        // instead, on a computer that isn't ours to write all over.
+        let base = match std::env::var_os("SOFTPRESENTER_E2E_FOLDER").filter(|folder| !folder.is_empty()) {
+            Some(folder) => PathBuf::from(folder),
+            None if cfg!(unix) => PathBuf::from("/tmp"),
+            None => std::env::temp_dir(),
+        };
         let root = base.join(format!("spe2e-{}-{}", std::process::id(), COUNT.fetch_add(1, Ordering::Relaxed)));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("files")).expect("the test's folder");
@@ -123,7 +138,7 @@ impl Run {
     /// The program with this run's copy's variables, and nothing else of SoftPresenter's from the
     /// environment the tests run in: never the owner's library, log or socket.
     fn program(&self) -> Command {
-        let mut command = Command::new(APP);
+        let mut command = Command::new(&*APP);
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("SOFTPRESENTER_") {
                 command.env_remove(&name);
@@ -150,7 +165,7 @@ impl Run {
         command
             .stdout(std::fs::File::create(&out).expect("the copy's output file"))
             .stderr(std::fs::File::create(&err).expect("the copy's error file"));
-        let child = command.spawn().unwrap_or_else(|e| panic!("could not start {APP}: {e}"));
+        let child = command.spawn().unwrap_or_else(|e| panic!("could not start {}: {e}", *APP));
         let mut copy = Copy { run: self, child, exit: None, err };
         copy.wait_until_it_answers();
         copy
@@ -401,7 +416,7 @@ fn run_to_end(
     if input.is_some() {
         command.stdin(Stdio::piped());
     }
-    let mut child = command.spawn().unwrap_or_else(|e| panic!("could not run {APP}: {e}"));
+    let mut child = command.spawn().unwrap_or_else(|e| panic!("could not run {}: {e}", *APP));
     if let (Some(line), Some(mut stdin)) = (input, child.stdin.take()) {
         let _ = writeln!(stdin, "{line}");
     }

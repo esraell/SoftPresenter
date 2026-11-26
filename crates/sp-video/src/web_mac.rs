@@ -71,14 +71,19 @@ define_class!(
             action: &WKNavigationAction,
             decision: &DynBlock<dyn Fn(WKNavigationActionPolicy)>,
         ) {
-            // SAFETY: plain getters on live objects WebKit hands the delegate.
+            // Whether the page asked for a download (the `download` attribute of a link) is known
+            // from macOS 11.3; before, the action can't say, and a download is still refused
+            // when its answer comes (in `decide_response`, as something the view can't show).
+            let can_say_download = action.respondsToSelector(sel!(shouldPerformDownload));
+            // SAFETY: plain getters on live objects WebKit hands the delegate;
+            // `shouldPerformDownload` is called only when the action answers to it.
             let (url, main, new_window, download) = unsafe {
                 let target = action.targetFrame();
                 (
                     action.request().URL(),
                     target.as_ref().is_some_and(|frame| frame.isMainFrame()),
                     target.is_none(),
-                    action.shouldPerformDownload(),
+                    can_say_download && action.shouldPerformDownload(),
                 )
             };
             let here = self.ivars().opened_here.get();
@@ -141,6 +146,7 @@ define_class!(
 
         /// A page asking for the camera or microphone is refused (the app has no reason to
         /// give a slide either, and macOS would ask the operator in the middle of a service).
+        /// WebKit asks this from macOS 12; macOS 11 never calls it.
         #[unsafe(method(webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:))]
         fn camera(
             &self,

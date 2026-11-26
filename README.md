@@ -125,8 +125,9 @@ The full list, area by area, is in [docs/features.md](docs/features.md), and wha
 
 Pre-releases for the Mac, Windows and Linux are on the
 [releases page](https://github.com/esraell/SoftPresenter/releases); Windows and Linux are still
-in testing. On Linux, install the package, as below. To build SoftPresenter from source on a Mac
-with macOS 13 or later, you need:
+in testing. The Mac one runs on any Mac with macOS 11 (Big Sur) or later, Apple silicon or
+Intel. On Linux, install the package, as below. To build SoftPresenter from source on a Mac, you
+need:
 
 - **The Xcode Command Line Tools:** `xcode-select --install`.
 - **Rust through [rustup](https://rustup.rs).** `rust-toolchain.toml` pins the version
@@ -143,9 +144,15 @@ For a proper `SoftPresenter.app`, named correctly in the menu bar and the Dock:
     scripts/macos-app.sh
     open target/release/SoftPresenter.app
 
+That one is for your own Mac's processor only. One to give to others, which runs on Apple silicon
+and Intel Macs alike, is built with `scripts/macos-app.sh --universal` (once, first:
+`rustup target add x86_64-apple-darwin`, or `aarch64-apple-darwin` on an Intel Mac). It builds
+everything twice, once for each, so it takes about twice as long.
+
 The first build also downloads FFmpeg's source from ffmpeg.org (12 MB, checked against its
-SHA-256) and builds the LGPL FFmpeg that plays MKV, WebM, AVI and other videos
-(`scripts/build-ffmpeg.sh`, about a minute); later builds reuse it. Without it the app still
+SHA-256) and builds the LGPL FFmpeg that plays MKV, WebM, AVI and other videos, for Apple silicon
+and Intel both (`scripts/build-ffmpeg.sh`, a few minutes; `brew install nasm` first makes the
+Intel one faster); later builds reuse it. Without it the app still
 builds, and uses an FFmpeg installed on the computer.
 
 For a Windows 10 or 11 (64-bit) package, built on a Mac with `brew install mingw-w64` and

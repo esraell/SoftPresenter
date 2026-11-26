@@ -1,0 +1,7 @@
+# The oldest macOS SoftPresenter runs on: macOS 11 (Big Sur), the first to run on both Apple
+# silicon and Intel Macs. Every Mac build is made for it: the program (rustc), the DeckLink bridge
+# (the cc crate reads the same variable), and, through scripts/build-ffmpeg.sh and
+# scripts/macos-app.sh, which read this line, FFmpeg and the app's LSMinimumSystemVersion.
+# Anything newer that the app calls is checked for while it runs. Other systems ignore it.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "11.0"

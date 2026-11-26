@@ -48,6 +48,12 @@ careless test run puts a slide in front of whoever is using the computer.
   `top -l 5 -pid <pid> -stats pid,cpu,mem` (top's MEM includes GPU memory). Expect about 0% CPU
   and flat memory. Then run a few seconds with `SOFTPRESENTER_STRESS=1` (continuous redrawing)
   and check that memory stays flat. A redraw loop once leaked a gigabyte a second.
+- **A test copy on another Mac** (a test machine reached over SSH) never goes through `open`
+  or anything else of LaunchServices, and is never left at a path that outlives a sign-out:
+  remove the copy and its folders as soon as its check is done. macOS reopens, after a session
+  restarts, the apps that were open in it, a test copy too, without its variables: on the
+  owner's library, not quiet. It happened: a hung GPU restarted the session, and the copy that
+  came back hung it again.
 - **You may not be able to see the screen.** `--capture-home FILE` and the
   `SOFTPRESENTER_CAPTURE_*` switches save pictures of the windows, so you can look at what you
   built.
@@ -150,6 +156,12 @@ a minute on a Mac. One test alone:
   reason printed, and as a notice on a GitHub run.
 - **Switches it uses:** `SOFTPRESENTER_SLOW_WRITES` (the import), `SOFTPRESENTER_RELEASES_URL`
   (the updates stand-in), `SOFTPRESENTER_LANGUAGE=en`.
+- **On another computer** (the Mac's Intel build on an Intel Mac, which this Mac can't run):
+  build the tests without running them (`cargo test --release --target x86_64-apple-darwin -p
+  sp-app --test e2e --no-run` prints the test program's path), copy that program and the app
+  there, and run it with `SOFTPRESENTER_E2E_APP=<the app's program>` (instead of the one Cargo
+  built, whose path is this Mac's) and `SOFTPRESENTER_E2E_FOLDER=<a folder of its own>` (for the
+  tests' folders, instead of `/tmp`).
 - **The tests need a graphics device,** as the app does. CI gives them one: Metal on the Mac,
   WARP (DirectX 12 in software) on Windows, and on Linux Mesa's software Vulkan under `xvfb-run`.
 - **To draw with WARP on a PC that has a graphics card** (as a PC with no graphics driver
@@ -266,6 +278,12 @@ matter most:
 - **Never force-push or rewrite `master`.** To undo a pushed commit, revert it.
 - **Several agents at once:** each works in its own git worktree. Don't write in another
   session's working tree; hand it your commits to cherry-pick instead.
+- **A Mac build that leaves this computer** is universal, for Apple silicon and Intel Macs:
+  `scripts/macos-app.sh --universal` (a build with `SOFTPRESENTER_RELEASE_VERSION` or
+  `SOFTPRESENTER_DEV_VERSION` set is universal anyway). Every Mac program is made for macOS 11,
+  the oldest the app runs on (`.cargo/config.toml`), so a call into anything macOS added later
+  is asked for only when the system answers to it (`respondsToSelector:`, or a check of the
+  version), never made unguarded.
 - **A build that leaves this computer** (sent to a tester, released, copied to another machine)
   carries no one's home folder: `scripts/macos-app.sh` shortens it to `~` with
   `--remap-path-prefix`; for any other build to share (Windows, Linux), set
