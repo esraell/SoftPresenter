@@ -773,10 +773,15 @@ impl Renderer {
             return Err(Error::SceneTooHeavy);
         }
         let target = render.out_image();
+        // The stages' own counters say how much of the two large buffers they wrote (asked
+        // for before the last stage is recorded, which takes what says so out of the render).
+        let written = render.written_bounds();
+        debug_assert!(written.is_some(), "a render knows where its counters are");
         render.record_fine(&self.shaders, &mut recording);
         // Sound to carry on from: everything a stopped recording may have left half-done (the
         // picture atlas, and the buffers and textures the engine holds for it) is let go below
         // before anything draws with this renderer again.
+        self.engine.set_written_bounds(written);
         let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.engine.run_recording(
                 device,
@@ -788,6 +793,7 @@ impl Renderer {
                 &mut self.profiler,
             )
         }));
+        self.engine.set_written_bounds(None);
         // The GPU's buffers are as long as what each frame wrote: one no frame has used for a
         // while is given back, as after a frame the GPU works out by itself.
         self.engine.release_idle(
@@ -1164,6 +1170,8 @@ impl Renderer {
     /// always returns `false`; each call after it looks at the device once.
     pub fn rest(&mut self, device: &Device, queue: &Queue) -> bool {
         use std::sync::atomic::Ordering;
+        // What frames whose early stages run on the processor keep in its memory between them.
+        self.engine.forget_kept();
         if self.scratch.is_heavy(std::time::Instant::now()) {
             self.engine.release_spare();
         } else {

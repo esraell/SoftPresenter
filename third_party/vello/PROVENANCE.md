@@ -170,6 +170,21 @@ Everything is marked `SoftPresenter:` in the source. Removed from the published 
   480 x 270 picture took 16 seconds with the whole buffers and 0.9 with the shorter ones; a
   1080p one 21 seconds and 6.5. The spare GPU buffers are given back when idle, as after a
   frame the GPU works out itself.
+- **`src/wgpu_engine.rs` and `src/render.rs`, the large buffers of a frame on the processor:**
+  upstream makes each buffer a stage on the processor writes anew, zeroed, for every frame:
+  165 MB at the constant sizes for the five large ones (lines, tiles, segment counts, path
+  segments, per-tile command lists), nearly all of it never touched. The copy above then read
+  through the two the last stage needs for their last byte that is not zero. Together that was
+  nearly all of a picture's time, whatever its size: on a 2015 Intel iMac, 43 ms for an empty
+  1080p picture (28 ms reading through the two, about 11 ms making the five). Now the frame's
+  own counters, which the processor's stages keep in the bump buffer, say how much of each of
+  the five was written (`WrittenBounds`, `BindMap::known_written`): the two are sent that far
+  (with the same 256 bytes of zeros after), and the five are kept for the next frame with only
+  that much made zero again (`BindMap::keep`), so each frame still starts from zeros. Debug
+  builds check that nothing past the counters was written. The kept buffers are let go when
+  the renderer rests (`Renderer::rest`) and when a stage panics. The same iMac: an empty 1080p
+  picture 2.5 ms, a line of words 12 ms (was 53), at 5120 x 2880 28 ms (was 65). Stages on
+  the GPU are untouched.
 - **`src/lib.rs`, wait for the GPU:** see the account of `Renderer::render_to_texture` above
   (a wait for each run, longer for a GPU that is not a Mac's or a discrete one, and
   learnt from a GPU seen to finish what a call gave up on).

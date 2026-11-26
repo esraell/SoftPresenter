@@ -113,7 +113,96 @@ struct BindMap {
     buf_map: HashMap<ResourceId, BindMapBuffer>,
     image_map: HashMap<ResourceId, (Texture, TextureView)>,
     pending_clears: HashSet<ResourceId>,
+    /// SoftPresenter: for a frame whose early stages run on the processor, where to read how
+    /// much of its large buffers they wrote (see [`WrittenBounds`]).
+    written: Option<WrittenBounds>,
+    /// SoftPresenter: the large buffers of frames whose early stages ran on the processor,
+    /// kept for the next frame, every byte zero again (see [`BindMap::keep`]).
+    kept: Vec<Vec<u8>>,
 }
+
+/// SoftPresenter: how to tell, for a frame whose early stages run on the processor, how much of
+/// its five large buffers those stages wrote, from the counters they kept (the frame's bump
+/// buffer, which stays in the processor's memory): the lines, tiles, segment counts, path
+/// segments and per-tile command lists, 165 MB at Vello's constant sizes and nearly all of it
+/// never touched. Upstream makes each of them anew, zeroed, for every frame, and this copy
+/// then looked through the two the last stage reads for their last byte that is not zero;
+/// together that was nearly all of a picture's time, whatever its size (on a 2015 Intel iMac,
+/// 43 ms for an empty picture: 28 ms looking through the two, about 11 ms zeroing the five).
+#[derive(Clone, Copy)]
+pub(crate) struct WrittenBounds {
+    /// The frame's counters ([`vello_encoding::BumpAllocators`]).
+    pub(crate) bump: ResourceId,
+    /// The lines the paths were flattened into.
+    pub(crate) lines: ResourceId,
+    /// The tiles given out to the paths.
+    pub(crate) tiles: ResourceId,
+    /// The segment counts.
+    pub(crate) seg_counts: ResourceId,
+    /// The path segments.
+    pub(crate) segments: ResourceId,
+    /// The per-tile command lists: each tile's first part, then the parts given out after.
+    pub(crate) ptcl: ResourceId,
+    /// The words of the command lists that every frame of this size has (the tiles' first
+    /// parts), before the ones the counters count.
+    pub(crate) ptcl_fixed_words: u64,
+}
+
+impl BindMap {
+    /// SoftPresenter: the bytes at the start of a buffer that the stages on the processor may
+    /// have written, when the frame's counters say (see [`WrittenBounds`]): everything after
+    /// them is zeros still. `None` for a buffer the counters say nothing of, and once the
+    /// counters have gone.
+    fn known_written(&self, id: ResourceId) -> Option<usize> {
+        use vello_encoding::{BumpAllocators, LineSoup, PathSegment, SegmentCount, Tile};
+        let bounds = self.written.as_ref()?;
+        let MaterializedBuffer::Cpu(bump) = &self.buf_map.get(&bounds.bump)?.buffer else {
+            return None;
+        };
+        let bump = bump.borrow();
+        let bump: BumpAllocators =
+            bytemuck::pod_read_unaligned(bump.get(..size_of::<BumpAllocators>())?);
+        let (count, each) = if id == bounds.lines {
+            (u64::from(bump.lines), size_of::<LineSoup>())
+        } else if id == bounds.tiles {
+            (u64::from(bump.tile), size_of::<Tile>())
+        } else if id == bounds.seg_counts {
+            (u64::from(bump.seg_counts), size_of::<SegmentCount>())
+        } else if id == bounds.segments {
+            (u64::from(bump.segments), size_of::<PathSegment>())
+        } else if id == bounds.ptcl {
+            (
+                bounds.ptcl_fixed_words + u64::from(bump.ptcl),
+                size_of::<u32>(),
+            )
+        } else {
+            return None;
+        };
+        usize::try_from(count * each as u64).ok()
+    }
+
+    /// SoftPresenter: keeps a buffer the stages on the processor are done with for the next
+    /// frame, with its first `written` bytes, the only ones that may be other than zero (see
+    /// [`BindMap::known_written`]), made zero again: a buffer always starts as zeros, as one
+    /// made anew does.
+    fn keep(&mut self, mut bytes: Vec<u8>, written: usize, name: &str) {
+        let written = written.min(bytes.len());
+        debug_assert!(
+            bytes[written..].iter().all(|byte| *byte == 0),
+            "{name}: the counters say {written} bytes were written, but there is more"
+        );
+        bytes[..written].fill(0);
+        // Never more than a frame's five (a frame that came with other sizes left its own).
+        if self.kept.len() >= KEPT_ON_PROCESSOR {
+            self.kept.remove(0);
+        }
+        self.kept.push(bytes);
+    }
+}
+
+/// SoftPresenter: how many buffers are kept between frames whose early stages run on the
+/// processor: the five the counters bound (see [`WrittenBounds`]).
+const KEPT_ON_PROCESSOR: usize = 5;
 
 #[derive(Hash, PartialEq, Eq)]
 struct BufferProperties {
@@ -786,6 +875,24 @@ impl WgpuEngine {
         let handing = Instant::now();
         queue.submit(Some(encoder.finish()));
         self.work.handing_over += handing.elapsed();
+        // SoftPresenter: what the frame's counters say of the buffers about to go, asked for
+        // while the counters are still there (they go with them).
+        let written: Vec<(ResourceId, usize)> = free_bufs
+            .iter()
+            .filter_map(|id| Some((*id, self.bind_map.known_written(*id)?)))
+            .collect();
+        for (id, written) in written {
+            if let Some(buf) = self.bind_map.buf_map.remove(&id) {
+                match buf.buffer {
+                    MaterializedBuffer::Cpu(bytes) => {
+                        self.bind_map.keep(bytes.into_inner(), written, buf.label);
+                    }
+                    MaterializedBuffer::Gpu(_) => {
+                        self.bind_map.buf_map.insert(id, buf);
+                    }
+                }
+            }
+        }
         for id in free_bufs {
             if let Some(buf) = self.bind_map.buf_map.remove(&id)
                 && let MaterializedBuffer::Gpu(gpu_buf) = buf.buffer
@@ -856,9 +963,25 @@ impl WgpuEngine {
     /// lost. The textures are dropped, not destroyed: pixels sent to one are still on their
     /// way to it until the next commands are handed over.
     pub(crate) fn forget_stopped_recording(&mut self) {
+        self.bind_map.written = None;
+        // A stage that stopped part-way may have written past what its counters say.
+        self.bind_map.kept.clear();
         self.bind_map.buf_map.clear();
         self.bind_map.pending_clears.clear();
         self.bind_map.image_map.clear();
+    }
+
+    /// SoftPresenter: says where the frame run next keeps its counters, for a frame whose
+    /// early stages run on the processor (see [`WrittenBounds`]); `None` once it has run.
+    pub(crate) fn set_written_bounds(&mut self, bounds: Option<WrittenBounds>) {
+        self.bind_map.written = bounds;
+    }
+
+    /// SoftPresenter: lets go of the buffers kept in the processor's memory between frames
+    /// whose early stages run there, when nothing will be drawn for a while: the next frame
+    /// makes its own again.
+    pub(crate) fn forget_kept(&mut self) {
+        self.bind_map.kept = Vec::new();
     }
 
     /// The bytes of GPU memory held in spare buffers.
@@ -1019,7 +1142,15 @@ impl BindMap {
 
     fn materialize_cpu_buf(&mut self, buf: &BufferProxy) {
         self.buf_map.entry(buf.id).or_insert_with(|| {
-            let buffer = MaterializedBuffer::Cpu(RefCell::new(vec![0; buf.size as usize]));
+            // SoftPresenter: one kept from the frame before, all zeros, when there is one
+            // of this size (see `BindMap::keep`): making 165 MB of zeros anew took longer
+            // than drawing an ordinary slide.
+            let size = buf.size as usize;
+            let bytes = match self.kept.iter().position(|kept| kept.len() == size) {
+                Some(at) => self.kept.swap_remove(at),
+                None => vec![0; size],
+            };
+            let buffer = MaterializedBuffer::Cpu(RefCell::new(bytes));
             BindMapBuffer {
                 buffer,
                 // TODO: do we need to cfg this?
@@ -1173,13 +1304,18 @@ impl BindMapBuffer {
     // Note data flow is one way only, from CPU to GPU. Once this method is
     // called, the buffer is no longer materialized on CPU, and cannot be
     // accessed from a CPU shader.
+    //
+    // SoftPresenter: `known_written` is how many bytes at its start may be other than zero,
+    // when the frame's counters say (`BindMap::known_written`); the bytes that were sent are
+    // handed back, for the caller to keep for the next frame.
     fn upload_if_needed(
         &mut self,
         proxy: &BufferProxy,
         device: &Device,
         queue: &Queue,
         pool: &mut ResourcePool,
-    ) {
+        known_written: Option<usize>,
+    ) -> Option<Vec<u8>> {
         if let MaterializedBuffer::Cpu(cpu_buf) = &self.buffer {
             let usage = BufferUsages::COPY_SRC
                 | BufferUsages::COPY_DST
@@ -1191,16 +1327,33 @@ impl BindMapBuffer {
             // three buffers the last stage reads, nearly all of it zeros, and Windows'
             // software graphics took 16 seconds over one small picture with them. Every byte
             // of the shorter buffer is sent, so one used again holds nothing of an earlier
-            // frame.
+            // frame. Where the frame's counters say how much was written (`known_written`),
+            // the buffer is not looked through for it.
             let buf = {
                 let bytes = cpu_buf.borrow();
-                let buf = pool.get_buf(written_len(&bytes) as u64, proxy.name, usage, device);
+                let written = match known_written {
+                    Some(known) => {
+                        let needed = needed_len(known, bytes.len());
+                        debug_assert!(
+                            written_len(&bytes) <= needed,
+                            "{}: the counters say {known} bytes were written, but there is more",
+                            proxy.name
+                        );
+                        needed
+                    }
+                    None => written_len(&bytes),
+                };
+                let buf = pool.get_buf(written as u64, proxy.name, usage, device);
                 let sent = bytes.len().min(buf.size() as usize);
                 queue.write_buffer(&buf, 0, &bytes[..sent]);
                 buf
             };
-            self.buffer = MaterializedBuffer::Gpu(buf);
+            let sent = std::mem::replace(&mut self.buffer, MaterializedBuffer::Gpu(buf));
+            if let MaterializedBuffer::Cpu(bytes) = sent {
+                return Some(bytes.into_inner());
+            }
         }
+        None
     }
 }
 
@@ -1221,7 +1374,14 @@ fn written_len(bytes: &[u8]) -> usize {
         .iter()
         .rposition(|byte| *byte != 0)
         .map_or(0, |last| last + 1);
-    (written + ZERO_TAIL).next_multiple_of(4).min(bytes.len())
+    needed_len(written, bytes.len())
+}
+
+/// SoftPresenter: the length the GPU's buffer needs for a buffer of `len` bytes of which only
+/// the first `written` may be other than zeros (see [`written_len`]).
+fn needed_len(written: usize, len: usize) -> usize {
+    // Bounded first: counters may say more than the buffer holds.
+    (written.min(len) + ZERO_TAIL).next_multiple_of(4).min(len)
 }
 
 /// SoftPresenter: the zeros kept after the last byte written (see [`written_len`]): more than
@@ -1258,7 +1418,7 @@ impl<'a> TransientBindMap<'a> {
         if !self.bufs.contains_key(&buf.id)
             && let Some(b) = bind_map.buf_map.get_mut(&buf.id)
         {
-            b.upload_if_needed(buf, device, queue, pool);
+            b.upload_if_needed(buf, device, queue, pool, None);
         }
     }
 
@@ -1292,6 +1452,8 @@ impl<'a> TransientBindMap<'a> {
                     if self.bufs.contains_key(&proxy.id) {
                         continue;
                     }
+                    // SoftPresenter: what the frame's counters say was written of it.
+                    let known = bind_map.known_written(proxy.id);
                     match bind_map.buf_map.entry(proxy.id) {
                         Entry::Vacant(v) => {
                             // TODO: only some buffers will need indirect & vertex, but does it hurt?
@@ -1310,7 +1472,14 @@ impl<'a> TransientBindMap<'a> {
                             });
                         }
                         Entry::Occupied(mut o) => {
-                            o.get_mut().upload_if_needed(proxy, device, queue, pool);
+                            let sent = o
+                                .get_mut()
+                                .upload_if_needed(proxy, device, queue, pool, known);
+                            // SoftPresenter: kept for the next frame, when the counters
+                            // say how much of it to make zero again.
+                            if let (Some(bytes), Some(known)) = (sent, known) {
+                                bind_map.keep(bytes, known, proxy.name);
+                            }
                         }
                     }
                 }
@@ -1442,7 +1611,59 @@ impl<'a> TransientBindMap<'a> {
 // SoftPresenter: an addition.
 #[cfg(test)]
 mod tests {
-    use super::{ZERO_TAIL, written_len};
+    use super::{
+        BindMap, KEPT_ON_PROCESSOR, MaterializedBuffer, ZERO_TAIL, needed_len, written_len,
+    };
+    use crate::recording::BufferProxy;
+
+    /// A buffer kept for the next frame is all zeros again, is the one the next frame is given
+    /// when it asks for that size, and no more are kept than one frame has.
+    #[test]
+    fn a_buffer_kept_for_the_next_frame_starts_as_zeros_again() {
+        let mut map = BindMap::default();
+        let mut bytes = vec![0_u8; 4096];
+        bytes[..100].fill(9);
+        map.keep(bytes, 100, "test");
+        assert!(map.kept[0].iter().all(|byte| *byte == 0));
+        // Counters that say more than the buffer holds mean all of it.
+        map.keep(vec![9_u8; 64], 1 << 20, "test");
+        assert!(map.kept[1].iter().all(|byte| *byte == 0));
+
+        let same = BufferProxy::new(4096, "test");
+        map.materialize_cpu_buf(&same);
+        assert_eq!(map.kept.len(), 1, "the kept one of that size is used");
+        let other = BufferProxy::new(128, "test");
+        map.materialize_cpu_buf(&other);
+        assert_eq!(map.kept.len(), 1, "another size is made anew");
+        for proxy in [same, other] {
+            let MaterializedBuffer::Cpu(bytes) = &map.buf_map[&proxy.id].buffer else {
+                panic!("in the processor's memory");
+            };
+            assert_eq!(bytes.borrow().len() as u64, proxy.size);
+            assert!(bytes.borrow().iter().all(|byte| *byte == 0));
+        }
+
+        for _ in 0..KEPT_ON_PROCESSOR + 3 {
+            map.keep(vec![0; 16], 0, "test");
+        }
+        assert_eq!(map.kept.len(), KEPT_ON_PROCESSOR);
+    }
+
+    /// What the counters say was written is sent with the same zeros after it as what is
+    /// found by looking through the buffer.
+    #[test]
+    fn what_the_counters_bound_is_sent_as_what_was_found_is() {
+        assert_eq!(needed_len(0, 1 << 20), ZERO_TAIL);
+        assert_eq!(
+            needed_len(1001, 1 << 20),
+            (1001 + ZERO_TAIL).next_multiple_of(4)
+        );
+        assert_eq!(needed_len(4000, 4096), 4096);
+        assert_eq!(needed_len(usize::MAX, 4096), 4096);
+        let mut bytes = vec![0_u8; 8192];
+        bytes[999] = 1;
+        assert_eq!(written_len(&bytes), needed_len(1000, bytes.len()));
+    }
 
     /// What the GPU is sent of a buffer filled on the processor ends a little after the last
     /// byte that is not zero, wherever that byte is, and is never longer than the buffer.

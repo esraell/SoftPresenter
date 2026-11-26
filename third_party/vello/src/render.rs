@@ -3,7 +3,9 @@
 
 //! Take an encoded scene and create a graph to render it
 
-use crate::recording::{BufferProxy, ImageFormat, ImageProxy, Recording, ResourceProxy};
+use crate::recording::{
+    BufferProxy, ImageFormat, ImageProxy, Recording, ResourceId, ResourceProxy,
+};
 use crate::scratch::{ScratchPlan, ScratchRoom};
 use crate::shaders::FullShaders;
 use crate::{AaConfig, RenderParams};
@@ -42,6 +44,9 @@ pub struct Render {
     scratch_plan: Option<ScratchPlan>,
     // SoftPresenter: a fingerprint of the scene as sent to the GPU and of the target's size.
     scene_print: u64,
+    // SoftPresenter: the lines and the segment counts' buffers, which the frame's counters
+    // bound as they do the last stage's (see `written_bounds`).
+    counted_bufs: Option<(ResourceId, ResourceId)>,
 
     #[cfg(feature = "debug_layers")]
     captured_buffers: Option<CapturedBuffers>,
@@ -150,6 +155,7 @@ impl Render {
             mask_buf: None,
             scratch_plan: None,
             scene_print: 0,
+            counted_bufs: None,
             #[cfg(feature = "debug_layers")]
             captured_buffers: None,
         }
@@ -557,6 +563,10 @@ impl Render {
             "vello.blend_spill",
         );
         self.fine_wg_count = Some(wg_counts.fine);
+        self.counted_bufs = lines_buf
+            .as_buf()
+            .zip(seg_counts_buf.as_buf())
+            .map(|(lines, seg_counts)| (lines.id, seg_counts.id));
         self.fine_resources = Some(FineResources {
             aa_config: params.antialiasing_method,
             config_buf,
@@ -706,6 +716,26 @@ impl Render {
     /// map.
     pub fn out_image(&self) -> ImageProxy {
         self.fine_resources.as_ref().unwrap().out_image
+    }
+
+    /// SoftPresenter: where a frame whose early stages run on the processor keeps its counters,
+    /// and which buffers they bound (see [`WrittenBounds`](crate::wgpu_engine::WrittenBounds)).
+    pub(crate) fn written_bounds(&self) -> Option<crate::wgpu_engine::WrittenBounds> {
+        /// The words each tile's command list starts with (`PTCL_INITIAL_ALLOC` in the
+        /// shaders, `vello_shaders/shader/shared/ptcl.wgsl` and `src/cpu.rs`).
+        const PTCL_INITIAL_ALLOC: u64 = 64;
+        let fine = self.fine_resources.as_ref()?;
+        let (tiles_across, tiles_down, _) = self.fine_wg_count?;
+        let (lines, seg_counts) = self.counted_bufs?;
+        Some(crate::wgpu_engine::WrittenBounds {
+            bump: fine.bump_buf.as_buf()?.id,
+            lines,
+            tiles: fine.tile_buf.as_buf()?.id,
+            seg_counts,
+            segments: fine.segments_buf.as_buf()?.id,
+            ptcl: fine.ptcl_buf.as_buf()?.id,
+            ptcl_fixed_words: u64::from(tiles_across) * u64::from(tiles_down) * PTCL_INITIAL_ALLOC,
+        })
     }
 
     pub fn bump_buf(&self) -> BufferProxy {

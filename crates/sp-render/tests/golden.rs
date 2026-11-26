@@ -2808,6 +2808,30 @@ fn the_early_stages_on_the_processor_draw_the_same_pictures() {
     eprintln!("kept between pictures with the early stages on the processor: {} MB", kept >> 20);
 }
 
+/// The painter keeps the stages' large working buffers from one picture to the next there, made
+/// zero again only as far as the stages' own counters say they wrote. So a light picture after
+/// a heavy one, one after a rest (which lets the buffers go) and the same one twice running are
+/// still the pictures the GPU works out by itself: nothing of an earlier picture is left in them.
+#[test]
+fn pictures_one_after_another_on_the_processor_leave_nothing_behind() {
+    let mut on_gpu = Easel::new();
+    let mut on_processor = easel_with_early_stages_on_processor();
+    let (w, h) = (2560, 1440);
+    let scenes = heavy_scenes(w, h, 2);
+    let expected: Vec<Vec<u8>> = scenes.iter().map(|(_, scene)| on_gpu.paint(scene, w, h).expect("paint")).collect();
+    // Heaviest first (a dissolve of two readings), then lighter and heavier ones in turn.
+    for (step, at) in [1, 3, 1, 1, 4, 0, 3, 2, 3].into_iter().enumerate() {
+        if step == 5 {
+            while !on_processor.painter.rest(&on_processor.device, &on_processor.queue) {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        let (name, scene) = &scenes[at];
+        let got = on_processor.paint(scene, w, h).expect("paint with the early stages on the processor");
+        assert_same_picture(&format!("{name}, picture {step} of the run"), &got, &expected[at]);
+    }
+}
+
 /// A slide that outgrows the fixed working memory the processor's stages have is refused, and
 /// says so, where it would otherwise end the thread that draws it; asked for again and again
 /// it is soon refused at once; and the painter draws the next slides, and their picture, as if
