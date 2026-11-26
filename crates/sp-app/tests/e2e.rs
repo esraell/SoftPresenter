@@ -769,6 +769,153 @@ fn a_bible_passage_goes_on_screen_and_steps_verse_by_verse() {
     assert!(history.contains("John 3:16"), "the passage looked up is in the history: {history}");
 }
 
+/// The figures of a source's line saying how its pictures went out (`sp_ndi::Minute::words`): how
+/// many new pictures it sent, how many came late, and the longest wait between two while they
+/// moved, in milliseconds (`None` when nothing moved).
+fn ndi_lines(log: &str, name: &str) -> Vec<(u32, u32, Option<f64>)> {
+    let number = |text: &str, before: &str| -> Option<f64> {
+        let upto = &text[..text.find(before)?];
+        upto.rsplit(|c: char| !(c.is_ascii_digit() || c == '.')).next()?.parse().ok()
+    };
+    log.lines()
+        .filter(|line| line.contains(&format!("NDI \"{name}\" at ")))
+        .filter_map(|line| {
+            let sent = number(line, " pictures sent")? as u32;
+            let late = number(line, " late,")? as u32;
+            Some((sent, late, number(line, " ms, ").filter(|_| line.contains("longest gap"))))
+        })
+        .collect()
+}
+
+#[test]
+fn a_window_whose_pictures_come_late_never_holds_up_the_pictures_sent_over_ndi() {
+    let name = "a_window_whose_pictures_come_late_never_holds_up_the_pictures_sent_over_ndi";
+    // Pictures are timed to a few hundredths of a second here: not on the shared, slow
+    // computers the automatic checks run on, where anything may come late.
+    if std::env::var_os("GITHUB_ACTIONS").is_some() || std::env::var_os("CI").is_some() {
+        say_skipped(name, "pictures aren't timed on the computers of the automatic checks");
+        return;
+    }
+    let Some(run) = Run::new(name) else { return };
+    let words = song_text(&[
+        ("Verse 1", "Morning light on the hill"),
+        ("Verse 2", "We walk the quiet road"),
+        ("Verse 3", "Evening comes with gentle rain"),
+        ("Verse 4", "Night falls soft on the town"),
+        ("Verse 5", "Stars keep watch till the dawn"),
+    ]);
+    let file = run.file("Hill Road.txt");
+    std::fs::write(&file, words).expect("the song's file");
+    // A second screen goes to a stand-in for NDI that somebody is always watching, and says how
+    // its pictures went out every two seconds; every picture the first screen's window asks
+    // for comes 150 ms late, as when the window system holds a window's pictures back.
+    let copy = run.start(&[
+        ("SOFTPRESENTER_NDI", "Late window"),
+        ("SOFTPRESENTER_PRETEND_NDI", "2"),
+        ("SOFTPRESENTER_SLOW_PRESENT", "150"),
+    ]);
+    let gpu = run.log().lines().find(|line| line.contains("[gpu]")).unwrap_or_default().to_owned();
+    if gpu.contains("software graphics") || gpu.contains(", Cpu,") {
+        say_skipped(name, "this computer draws in software, too slowly to time pictures by");
+        copy.quit().assert_clean(&run);
+        return;
+    }
+    copy.ok(&["song", "import", &file.to_string_lossy()]);
+    copy.ok(&["settings", "set", "transition=dissolve:2"]);
+    // How busy this computer is meanwhile: the longest a sleep of 5 ms takes here. On one
+    // building and testing other things at once it takes several times that, and so does
+    // every wait in the copy, whatever the copy does.
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let theirs = done.clone();
+    let busy = std::thread::spawn(move || {
+        let mut longest = Duration::ZERO;
+        while !theirs.load(Ordering::Relaxed) {
+            let began = Instant::now();
+            std::thread::sleep(Duration::from_millis(5));
+            longest = longest.max(began.elapsed());
+        }
+        longest
+    });
+    copy.ok(&["go", "Hill Road"]);
+    std::thread::sleep(Duration::from_millis(2600));
+    // Four dissolves of two seconds, each some sixty pictures at NDI's pace, with a rest of
+    // half a second or so on each verse, as an operator reading along rests.
+    for _ in 0..4 {
+        copy.ok(&["next"]);
+        std::thread::sleep(Duration::from_millis(2600));
+    }
+    // The source's last line, and a moment for the window's last picture to come.
+    std::thread::sleep(Duration::from_millis(2500));
+    done.store(true, Ordering::Relaxed);
+    let slept = busy.join().unwrap_or_default();
+    let quitted = copy.quit();
+    quitted.assert_clean(&run);
+    let log = &quitted.log;
+    // The window was held up, time after time, and said so...
+    assert!(log.contains("comes 150 ms late"), "the switch was not taken{}", run.context());
+    assert!(log.contains("was given its next picture after"), "the window was never passed over{}", run.context());
+    // ...and NDI kept its own pace beside it. As it was, each time the window fell behind the
+    // screens waited 50 ms for it, so a fade's pictures went out 20 a second with one in ten
+    // late and one in fifteen standing still for two pictures' times or more, and every rest
+    // between two fades was taken for a picture that stood still half a second. (A computer
+    // busy with other tests may still be late with a picture or two: one is let pass.)
+    let lines = ndi_lines(log, "Late window");
+    let sent: u32 = lines.iter().map(|(sent, ..)| sent).sum();
+    let late: u32 = lines.iter().map(|(_, late, _)| late).sum();
+    let longest = lines.iter().filter_map(|(.., gap)| *gap).fold(0.0, f64::max);
+    let stood: Vec<&str> = log.lines().filter(|line| line.contains("stood still")).collect();
+    let more: u32 =
+        stood.iter().filter_map(|line| line.split_once(" more since")?.0.rsplit('(').next()?.parse::<u32>().ok()).sum();
+    let stood_still = stood.len() as u32 + more;
+    say(&format!(
+        "NDI beside a window 150 ms late: {sent} new pictures, {late} late, {stood_still} stood still, longest gap \
+         {longest:.1} ms"
+    ));
+    assert!(longest > 0.0, "no line said how the pictures went out{}", run.context());
+    if slept > Duration::from_millis(30) && (sent < 250 || late > 6 || stood_still > 1 || longest > 150.0) {
+        let why = format!("this computer was too busy to time pictures by (a sleep of 5 ms took {slept:.0?})");
+        say_skipped(name, &why);
+        return;
+    }
+    assert!(sent >= 250, "only {sent} new pictures went out in five fades of two seconds{}", run.context());
+    assert!(late <= 6, "{late} pictures went out late{}", run.context());
+    assert!(stood_still <= 1, "NDI pictures stood still {stood_still} times{}", run.context());
+    assert!(longest <= 150.0, "a picture came {longest:.1} ms after the one before{}", run.context());
+}
+
+#[test]
+fn quitting_while_an_ndi_screen_is_watched_stops_its_source_first_every_time() {
+    let Some(run) = Run::new("quitting_while_an_ndi_screen_is_watched_stops_its_source_first_every_time") else {
+        return;
+    };
+    let file = run.file("Hill Road.txt");
+    std::fs::write(&file, song_text(&[("Verse 1", "Morning light on the hill")])).expect("the song's file");
+    // A watched NDI screen sends its picture again thirty times a second, so a quit nearly
+    // always comes while its thread is sending one. A copy that ended then, the thread still
+    // inside NDI, crashed as it went (one quit in three, with a receiver connected). Five
+    // quits, each with a picture going out to a stand-in somebody always watches: each stops
+    // the source first, and ends cleanly.
+    for quit in 1..=5 {
+        let copy = run.start(&[("SOFTPRESENTER_NDI", "Quit watched"), ("SOFTPRESENTER_PRETEND_NDI", "1")]);
+        if quit == 1 {
+            copy.ok(&["song", "import", &file.to_string_lossy()]);
+        }
+        copy.ok(&["go", "Hill Road"]);
+        copy.wait_for("the NDI screen to be watched", Duration::from_secs(20), |_| {
+            let screens = copy.ok(&["screens"]).data.to_string();
+            screens.contains("to 1 receiver")
+        });
+        // A different moment of a picture's time each round.
+        std::thread::sleep(Duration::from_millis(200 + 7 * quit));
+        let quitted = copy.quit();
+        quitted.assert_clean(&run);
+        // (This start's part of the log: a copy started again in the same folder writes on.)
+        let this_start = quitted.log.rsplit("[start] SoftPresenter").next().unwrap_or_default();
+        let stopped = this_start.lines().filter(|line| line.contains("was stopped before closing")).count();
+        assert_eq!(stopped, 1, "quit {quit}: the source was not stopped before the copy closed{}", run.context());
+    }
+}
+
 #[test]
 fn a_picture_from_the_media_bin_shows_behind_the_words_and_clears() {
     let Some(run) = Run::new("a_picture_from_the_media_bin_shows_behind_the_words_and_clears") else { return };

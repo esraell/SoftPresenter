@@ -94,11 +94,21 @@ pub use runtime::{NOT_INSTALLED, opened_from, set_own_folder};
 /// Windows).
 pub const DOWNLOAD_URL: &str = "https://ndi.video/";
 
-/// How often the current picture is sent again while nothing changes. A receiver that joins
-/// late, or a mixer that expects a steady source, gets a picture within this time. Each send is
-/// compressed again by NDI, so this is kept slow: every 100 ms, two idle sources took about a
-/// tenth of the computer's time; every second, about a fortieth.
-const RESEND_EVERY: Duration = Duration::from_millis(1000);
+/// The current picture is sent again at the source's own rate while nothing new comes, as long
+/// as somebody is watching: a receiver, a mixer or a recorder then gets a steady run of pictures
+/// whatever the screens are doing, as it does from a camera, and one that joins late has its
+/// picture within one picture's time. (It used to be sent again once a second, and a receiver
+/// saw nothing arrive in between.) Each send is compressed again by NDI, on the source's own
+/// thread: that is what a steady source costs, and only while somebody watches.
+///
+/// A new picture still goes at once. While new pictures are coming (a fade, a video), the
+/// next one is waited for a picture's time longer than its turn before the one before it is
+/// sent again in its place ([`RESEND_GRACE`] turns): the screens' thread draws by its own
+/// clock, not NDI's, and a picture a little late would otherwise find its turn taken by a
+/// repeat and go a whole turn later still, which made a picture 20 ms late stand 90 ms. A
+/// picture said to be the last that moves ([`NdiOutput::show_shared_last`]) is sent again at
+/// its next turn.
+const RESEND_GRACE: u32 = 1;
 
 /// How often a source asks NDI how many receivers it has. A receiver that connects to a source
 /// nobody was watching gets its first picture within about this time.
@@ -242,12 +252,14 @@ struct Picture {
     ready: bool,
     /// When it was handed over, for saying what held up one that came late.
     handed: Instant,
+    /// Nothing moves after this picture (see [`NdiOutput::show_shared_last`]).
+    last: bool,
 }
 
 impl Picture {
     fn new(width: u32, height: u32, rgba: Arc<Vec<u8>>, sent: Sent) -> Picture {
         let ready = matches!(sent, Sent::Opaque | Sent::Straight);
-        Picture { width, height, rgba, sent, ready, handed: Instant::now() }
+        Picture { width, height, rgba, sent, ready, handed: Instant::now(), last: false }
     }
 
     /// Makes the change `sent` asks for, once: into a copy of its own, so other sources
@@ -499,8 +511,8 @@ pub struct Minute {
     pub rate: Rate,
     /// New pictures sent.
     pub sent: u32,
-    /// The same picture sent again, because nothing new came for a second (as it always is
-    /// while the slide stays as it is).
+    /// The same picture sent again, because nothing new came for one picture's time (as it
+    /// always is while the slide stays as it is).
     pub repeated: u32,
     /// New pictures sent more than one and a half pictures' times after the one before, at the
     /// pictures' own pace, while pictures were moving (see [`Hitch`]).
@@ -616,9 +628,27 @@ pub struct NdiOutput {
     hitches_told: Cell<u32>,
     told_at: Cell<Option<Instant>>,
     thread: Option<JoinHandle<()>>,
+    /// Closed by the source's thread as it ends, its source taken down.
+    ended: Receiver<()>,
 }
 
+/// The longest [`NdiOutput::stop`] waits for a source's thread: a picture being sent (paced to
+/// the frame rate) and the source being taken down are far shorter; one still starting NDI,
+/// or tried again for its name, could be longer, and is left behind.
+const STOP_WITHIN: Duration = Duration::from_secs(2);
+
 impl NdiOutput {
+    /// Stops the source and waits, a moment at most, until its thread has sent the picture it
+    /// is sending and taken the source down. For when the app closes: a source now sends all
+    /// the time while somebody watches, and a program that ends while one of its threads is
+    /// inside NDI crashes as it goes (one quit in three did, with a receiver connected).
+    /// Never for the thread drawing the screens while they are in use, which must not wait on
+    /// NDI: dropping the output stops it without waiting.
+    pub fn stop(mut self) {
+        self.tx = None;
+        let _ = self.ended.recv_timeout(STOP_WITHIN);
+    }
+
     /// Starts an NDI source with this name, at the usual rate. Never waits for NDI: the source starts on its own
     /// thread, and `state` says how that went. The error is a plain sentence for the operator.
     /// Nobody is told when receivers connect (use `start_with_wake` to hand them a picture),
@@ -755,12 +785,25 @@ impl NdiOutput {
     /// picture whose size and pixel count disagree is ignored, and so is one handed over
     /// while nobody is watching.
     pub fn show_shared(&self, width: u32, height: u32, rgba: Arc<Vec<u8>>, sent: Sent) {
+        self.hand_over(width, height, rgba, sent, false);
+    }
+
+    /// Hands over a picture as `show_shared` does, saying that nothing moves after it: it is a
+    /// slide that stays, or the last picture of a fade, with no video playing. The time until
+    /// the next picture is then nobody's hold-up (the operator rests on a verse before clicking
+    /// on), and is not judged: without this, the rest between two fades counted as a picture
+    /// that stood still, since the pictures of the next fade came soon after it. Never blocks.
+    pub fn show_shared_last(&self, width: u32, height: u32, rgba: Arc<Vec<u8>>, sent: Sent) {
+        self.hand_over(width, height, rgba, sent, true);
+    }
+
+    fn hand_over(&self, width: u32, height: u32, rgba: Arc<Vec<u8>>, sent: Sent, last: bool) {
         if width == 0 || height == 0 || rgba.len() != width as usize * height as usize * 4 {
             return;
         }
         self.forgotten.store(false, Ordering::Relaxed);
         if let Some(tx) = &self.tx {
-            let _ = tx.send(Told::Picture(Picture::new(width, height, rgba, sent)));
+            let _ = tx.send(Told::Picture(Picture { last, ..Picture::new(width, height, rgba, sent) }));
         }
     }
 
@@ -769,7 +812,7 @@ impl NdiOutput {
     /// was lost on the way. NDI itself keeps the last picture a source sent and gives it to a
     /// receiver the moment it connects; after this, a receiver that connects to a source nobody
     /// was watching is given a black picture instead, until one is handed over for it. A source
-    /// somebody is watching goes on sending the picture it has, once a second as always; the
+    /// somebody is watching goes on sending the picture it has, at its rate as always; the
     /// black picture follows only if its receivers all leave before a newer one is handed over.
     /// Never blocks. Said again before the next picture is handed over, it does nothing, so it
     /// can be said for every picture that is not drawn.
@@ -908,10 +951,13 @@ fn spawn<S: Sink + 'static>(
     let (tx, rx) = channel();
     let shared = Arc::new(Shared::new());
     let (source, theirs) = (name.to_owned(), shared.clone());
+    let (ending, ended) = channel::<()>();
     let thread = std::thread::Builder::new()
         .name("ndi".to_owned())
         .spawn(move || match open(&source) {
             Ok(sink) => {
+                // Let go as the thread ends, after everything of the source's (see `stop`).
+                let _ending = ending;
                 let sink = Arc::new(sink);
                 theirs.sound.set(Some(sink.clone()));
                 theirs.set_state(State::Sending);
@@ -935,6 +981,7 @@ fn spawn<S: Sink + 'static>(
         hitches_told: Cell::new(0),
         told_at: Cell::new(None),
         thread: Some(thread),
+        ended,
     })
 }
 
@@ -967,10 +1014,10 @@ struct Report<'a> {
 }
 
 /// Sends the pictures handed over to `sink` until the output is dropped: each new one at once
-/// and the current one again every second, while anyone is watching. Calls `wake` whenever the
+/// and the current one again at the source's rate, while anyone is watching. Calls `wake` whenever the
 /// count of receivers has changed, and tells the log each minute how the pictures went out.
 fn serve(sink: &impl Sink, rx: &Receiver<Told>, shared: &Shared, wake: &mut impl FnMut(), report: &Report<'_>) {
-    let mut gate = Gate::new(Instant::now());
+    let mut gate = Gate::at(Instant::now(), report.rate.frame());
     let mut pace = Pace::at(Instant::now(), report.minute, report.rate);
     // Counts the receivers, and tells everyone the count before `wake`, so that whoever is
     // woken reads the new one.
@@ -1016,7 +1063,7 @@ fn serve(sink: &impl Sink, rx: &Receiver<Told>, shared: &Shared, wake: &mut impl
             shared.sent_in(began.elapsed());
         }
         if let Some((picture, fresh)) = gate.picture_due(Instant::now()) {
-            // Changed once, the first time it is sent, then sent again as it is each second.
+            // Changed once, the first time it is sent, then sent again as it is.
             let began = Instant::now();
             picture.prepare();
             sink.send(picture.width, picture.height, &picture.rgba, picture.sent.alpha());
@@ -1024,8 +1071,17 @@ fn serve(sink: &impl Sink, rx: &Receiver<Told>, shared: &Shared, wake: &mut impl
             shared.sent_in(ended - began);
             if !fresh {
                 pace.sent_again(ended - began);
-            } else if let Some(hitch) = pace.sent_new((picture.width, picture.height), picture.handed, began, ended) {
-                shared.hitched(hitch);
+            } else {
+                if let Some(hitch) = pace.sent_new((picture.width, picture.height), picture.handed, began, ended) {
+                    shared.hitched(hitch);
+                }
+                if picture.last {
+                    pace.rested();
+                }
+            }
+            if fresh {
+                let more_coming = !picture.last;
+                gate.sent_new(ended, more_coming);
             }
         }
         if let Some(mut minute) = pace.minute_over(Instant::now()) {
@@ -1040,7 +1096,7 @@ fn serve(sink: &impl Sink, rx: &Receiver<Told>, shared: &Shared, wake: &mut impl
 
 /// How a source's pictures go out over the minute under way, counted on the source's own
 /// thread (nothing in it is shared, so nothing is waited for), and whether pictures are moving
-/// now: a playing video, as against a slide that stays, which is sent again once a second.
+/// now: a playing video, as against a slide that stays, which is sent again and again.
 /// Told the time rather than reading the clock, so it can be tested on its own.
 ///
 /// A gap is on time when it is within one and a half pictures' times at the pictures' own pace
@@ -1285,6 +1341,14 @@ impl Pace {
         hitch
     }
 
+    /// The picture just sent is the last of those that were moving, or a slide that stays (see
+    /// [`NdiOutput::show_shared_last`]): the pictures have stopped on purpose, so the wait for
+    /// the next one says nothing, however soon after it pictures move again, and late gaps
+    /// still waiting to be judged count nothing, as after any stop.
+    fn rested(&mut self) {
+        (self.run, self.pending) = (0, None);
+    }
+
     /// Late gaps the pictures went on moving after count: the longest of them is a hitch, when
     /// it is longer than two pictures' times at their own pace.
     fn count(&mut self, late: Late) -> Option<Hitch> {
@@ -1368,11 +1432,21 @@ struct Gate {
     cover: Option<bool>,
     next_count: Instant,
     next_resend: Instant,
+    /// One picture's time at the source's rate: how often the current picture is sent again.
+    frame: Duration,
 }
 
 impl Gate {
-    /// Receivers are counted straight away, before anything is sent.
+    /// For the tests of what is sent when: a source that sends one picture a second, so its
+    /// times are easy to say.
+    #[cfg(test)]
     fn new(now: Instant) -> Gate {
+        Gate::at(now, Duration::from_secs(1))
+    }
+
+    /// Receivers are counted straight away, before anything is sent. `frame` is one picture's
+    /// time at the source's rate.
+    fn at(now: Instant, frame: Duration) -> Gate {
         Gate {
             current: None,
             receivers: None,
@@ -1382,6 +1456,7 @@ impl Gate {
             cover: None,
             next_count: now,
             next_resend: now,
+            frame,
         }
     }
 
@@ -1434,7 +1509,7 @@ impl Gate {
     }
 
     /// The picture last handed over is out of date, and no newer one is coming for now.
-    /// With somebody watching it is still kept and sent again each second: it is what they
+    /// With somebody watching it is still kept and sent again at the source's rate: it is what they
     /// are looking at, and a mixer expects a steady source. (With nobody watching none is
     /// kept anyway.) Either way it is marked, so that black takes its place once nobody is.
     fn forget(&mut self) {
@@ -1494,9 +1569,23 @@ impl Gate {
         }
         let picture = self.current.as_mut()?;
         let fresh = std::mem::take(&mut self.fresh);
-        self.next_resend = now + RESEND_EVERY;
+        // Sent again, it keeps to its turns: the next is one picture's time after this turn,
+        // not after this send returns (compressing the picture takes a few milliseconds, which
+        // would stretch every turn and send 25 pictures a second for 30).
+        // (One held up past its next turn starts its turns again from now.)
+        let turn = self.next_resend + self.frame;
+        self.next_resend = if fresh || turn <= now { now + self.frame } else { turn };
         self.given = Some((picture.width, picture.height, picture.sent.alpha()));
         Some((picture, fresh))
+    }
+
+    /// A new picture has been sent, its send returning at `ended` (it may have waited for its
+    /// turn): it is sent again one picture's time after that, unless a newer one comes first.
+    /// When others follow it by themselves (`more_coming`), the next of them is given a turn
+    /// longer (see [`RESEND_GRACE`]).
+    fn sent_new(&mut self, ended: Instant, more_coming: bool) {
+        let grace = if more_coming { self.frame * RESEND_GRACE } else { Duration::ZERO };
+        self.next_resend = ended + self.frame + grace;
     }
 }
 
@@ -2668,6 +2757,8 @@ mod tests {
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 2);
         source.receivers.store(0, Ordering::Relaxed);
         woken.recv_timeout(PATIENCE).unwrap();
+        // (What it sent again while its receiver was there is not what this looks at.)
+        while source.sent.try_recv().is_ok() {}
         // A receiver connects, and before the source next counts it is told to forget: it
         // counts there and then, wakes whoever draws, and sends no black picture to the
         // receiver, now or after.
@@ -2678,6 +2769,102 @@ mod tests {
         source.output.show(3, 1, vec![9; 12], Sent::Opaque);
         assert_eq!(source.sent.recv_timeout(PATIENCE).unwrap().0, 3, "the fresh picture, and not the old one");
         assert!(source.black.try_recv().is_err());
+    }
+
+    #[test]
+    fn the_rest_between_two_fades_is_no_hitch_once_the_last_picture_says_nothing_moves() {
+        let t = Instant::now();
+        // A fade's twelve pictures, the operator resting 630 ms on the verse, the next fade's.
+        // Not told that the first fade's last picture was the last, the source takes the rest
+        // for a picture that stood still (as a video held up that long would be).
+        let mut pace = Pace::new(t, MINUTE);
+        pace.counted(t, Some(1));
+        let ended = video(&mut pace, t, 12);
+        let next = ended + Duration::from_millis(630);
+        let mut hitches = 0;
+        for picture in 0..12 {
+            hitches += u32::from(new_at(&mut pace, next + picture * FRAME).is_some());
+        }
+        assert_eq!(hitches, 1, "taken for a hold-up");
+        // Told, it judges nothing until pictures have moved again, and then judges them as ever.
+        let mut pace = Pace::new(t, MINUTE);
+        pace.counted(t, Some(1));
+        let ended = video(&mut pace, t, 12);
+        pace.rested();
+        let mut at = video(&mut pace, ended + Duration::from_millis(630), 12);
+        pace.rested();
+        // The whole picture owed after a fade, a moment later, and a click two seconds on.
+        assert_eq!(new_at(&mut pace, at + Duration::from_millis(40)), None);
+        pace.rested();
+        at = video(&mut pace, at + Duration::from_millis(1900), 12);
+        // A hold-up inside a fade is still one.
+        at += Duration::from_millis(120);
+        assert_eq!(new_at(&mut pace, at), None);
+        assert!(new_at(&mut pace, at + FRAME).is_some(), "said as the fade goes on");
+        let minute = pace.minute_over(t + MINUTE).expect("a minute");
+        assert_eq!((minute.late, minute.hitches), (1, 1));
+        assert_eq!(minute.longest_gap, Some(Duration::from_millis(120)), "the rests are not gaps");
+    }
+
+    #[test]
+    fn the_current_picture_is_sent_again_at_the_sources_rate_and_a_new_one_is_given_a_turn_longer() {
+        let t = Instant::now();
+        let frame = Rate::R29_97.frame();
+        let due = |gate: &mut Gate, at: Instant| gate.picture_due(at).map(|(picture, fresh)| (picture.width, fresh));
+        let mut gate = Gate::at(t, frame);
+        gate.counted(t, Some(1));
+        gate.picture(picture(1));
+        assert_eq!(due(&mut gate, t), Some((1, true)));
+        // Its send returned 5 ms later, and more pictures follow it (a fade): the next has its
+        // turn and a turn more to come before this one is sent again in its place.
+        let sent = t + Duration::from_millis(5);
+        gate.sent_new(sent, true);
+        assert_eq!(gate.wait(sent), 2 * frame);
+        assert!(due(&mut gate, sent + frame + frame / 2).is_none(), "not yet: a new one may be late");
+        let again = sent + 2 * frame;
+        assert_eq!(due(&mut gate, again), Some((1, false)));
+        // From then on, with nothing new, every picture's time: by its turns, however long
+        // each send takes (this one was looked at 4 ms after its turn, and took 6 ms more).
+        assert_eq!(gate.wait(again), frame);
+        assert!(due(&mut gate, again + frame / 2).is_none());
+        assert_eq!(due(&mut gate, again + frame + Duration::from_millis(4)), Some((1, false)));
+        assert_eq!(gate.wait(again + frame + Duration::from_millis(10)), frame - Duration::from_millis(10));
+        assert_eq!(due(&mut gate, again + 2 * frame), Some((1, false)));
+        // Held up for longer than a turn, it does not send the turns it missed in a burst.
+        let late = again + 5 * frame;
+        assert_eq!(due(&mut gate, late), Some((1, false)));
+        assert!(due(&mut gate, late + frame / 2).is_none());
+        // A new picture goes at once, whenever it comes; one that nothing follows (a slide
+        // that stays) is sent again at its very next turn.
+        gate.picture(picture(2));
+        let now = late + Duration::from_millis(1);
+        assert_eq!(due(&mut gate, now), Some((2, true)));
+        gate.sent_new(now, false);
+        assert_eq!(due(&mut gate, now + frame), Some((2, false)));
+    }
+
+    #[test]
+    fn a_slide_that_stays_reaches_whoever_watches_as_a_steady_run_of_pictures() {
+        let source = standing(1, || {});
+        counted(&source);
+        source.output.show(2, 1, vec![9; 8], Sent::Opaque);
+        // One handed over, and the same pixels sent again and again: at 29.97 a second, some
+        // fifteen in half a second (the stand-in takes each at once; NDI itself paces them).
+        let (_, first) = source.sent.recv_timeout(PATIENCE).unwrap();
+        let began = Instant::now();
+        let mut again = 0;
+        while began.elapsed() < Duration::from_millis(500) {
+            if let Ok((width, pixels)) = source.sent.recv_timeout(Duration::from_millis(100)) {
+                assert_eq!((width, pixels), (2, first), "the same picture, not copied");
+                again += 1;
+            }
+        }
+        assert!((8..=17).contains(&again), "sent again {again} times in half a second");
+        // Nobody watching: it stops.
+        source.receivers.store(0, Ordering::Relaxed);
+        std::thread::sleep(COUNT_EVERY + Duration::from_millis(200));
+        while source.sent.try_recv().is_ok() {}
+        assert!(source.sent.recv_timeout(Duration::from_millis(300)).is_err(), "nothing sent to nobody");
     }
 
     #[test]
@@ -2701,5 +2888,44 @@ mod tests {
         let began = Instant::now();
         pretend.send(1, 1, &[0; 4], false);
         assert!(began.elapsed() < Duration::from_millis(15));
+    }
+
+    #[test]
+    fn a_source_stopped_has_sent_its_last_picture_and_gone_before_stop_returns() {
+        // A stand-in that takes 150 ms over each picture, and says when it is let go.
+        struct Slow(Arc<AtomicBool>, Arc<AtomicBool>);
+        impl Sink for Slow {
+            fn receivers(&self) -> Option<u32> {
+                Some(1)
+            }
+            fn send(&self, _: u32, _: u32, _: &[u8], _: bool) {
+                self.0.store(true, Ordering::Relaxed);
+                std::thread::sleep(Duration::from_millis(150));
+                self.0.store(false, Ordering::Relaxed);
+            }
+            fn sound(&self, _: &[f32], _: std::time::SystemTime) {}
+        }
+        impl Drop for Slow {
+            fn drop(&mut self) {
+                self.1.store(true, Ordering::Relaxed);
+            }
+        }
+        let (sending, gone) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let (theirs, let_go) = (sending.clone(), gone.clone());
+        let quiet: Log = Arc::new(|_: &str, _: bool| {});
+        let output =
+            spawn("SoftPresenter test", Rate::default(), move |_| Ok(Slow(theirs, let_go)), || {}, quiet, MINUTE)
+                .unwrap();
+        output.show(2, 1, vec![9; 8], Sent::Opaque);
+        let began = Instant::now();
+        while !sending.load(Ordering::Relaxed) {
+            assert!(began.elapsed() < PATIENCE, "nothing was sent");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // Stopped part-way through a picture: back once that has gone and the source is let go.
+        let began = Instant::now();
+        output.stop();
+        assert!(!sending.load(Ordering::Relaxed) && gone.load(Ordering::Relaxed), "still inside the source");
+        assert!(began.elapsed() < Duration::from_secs(1), "waited {:?}", began.elapsed());
     }
 }

@@ -1781,12 +1781,22 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   say how many receivers each NDI screen has, or that nobody is watching. The number is NDI's
   own (NDI's monitor app, for one, counts as two receivers); with an NDI too old to count
   them, the screen is drawn and sent all the time.
+- **Whoever watches an NDI screen gets a steady run of pictures.** While someone is watching,
+  the screen sends at its own frame rate all the time, from a thread of its own on NDI's
+  clock: each new picture as it is drawn, and the one it has again at every picture's time
+  while nothing new comes (a slide that stays), as a camera would. A receiver, switcher or
+  recorder is never left waiting for the next change, and one that joins has its picture
+  within a picture's time. It used to send a slide that stays once a second. Sending it again
+  costs the computer some work for each watched screen (NDI compresses every picture), and
+  nothing while nobody watches.
 - **The log says how each NDI screen's pictures went out.** Once a minute, for each NDI screen,
   as for each DeckLink output: the pictures sent (and how many a second, against the rate it
   says it sends), sent again, late, skipped, the longest gap between them while a video plays, not
   drawn, lost on the way back from the GPU (and how long they took to come back), the
   receivers, and the longest send; or that nobody watched. When a picture comes more than two
-  pictures late while a video plays, which somebody watching could see as a stutter, one line
+  pictures late while a video plays or a fade runs, which somebody watching could see as a
+  stutter (the rest on a slide between two fades is not one, however soon the next fade
+  comes), one line
   (at most every five seconds for each screen) says how long, whether NDI or the screens held
   it up, and what the screens were doing then: a fade, the GPU too slow, a picture lost, the
   video standing still, or a long step, with where its time went. It costs a few readings of
@@ -1938,8 +1948,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   each window the pictures it draws into, and on a Mac can take about a second to give one back
   when it isn't showing the window for a moment. The screens wait for one a twentieth of a
   second at most: that window keeps its picture until its next comes, and NDI, the stage
-  screens, DeckLink and the operator's preview go on moving. The log says when it happens and
-  for how long.
+  screens, DeckLink and the operator's preview go on moving. While an NDI screen somebody
+  watches or a DeckLink card is drawn for too, the windows of one drawing are waited for a
+  sixtieth of a second in all (16 ms): a display whose pictures come slowly (behind an HDMI
+  splitter, on a slow connection, at 24 or 30 Hz) then misses pictures of its own, and the
+  stream never waits for it. A window passed over is shown the picture it is owed the moment
+  its next one comes, with nothing else drawn for that, so it never keeps a part of a fade or
+  the slide before on screen. The log says when a window's picture took a twentieth of a
+  second or longer to come, and how long.
 
 <img src="images/screens.png" alt="The Screens window" width="620">
 

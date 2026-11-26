@@ -453,6 +453,11 @@ impl Held {
         }
     }
 
+    /// When the pass under way began.
+    pub(super) fn began(&self) -> Instant {
+        self.pass.began
+    }
+
     /// A picture reached a window, or did not (covered, hidden, or its surface being set up).
     pub(super) fn window_shown(&mut self, shown: bool) {
         use crate::reports::stats::{Count, bump};

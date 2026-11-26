@@ -160,6 +160,10 @@ pub enum OutputMsg {
         id: Uuid,
         drawn: Option<crate::close_button::Drawn>,
     },
+    /// Said by a window's own thread: its next picture, which the screens' thread had stopped
+    /// waiting for, has come (see `output/next_picture.rs`). The window is then shown the
+    /// picture it is owed.
+    NextPictureCame,
     Shutdown,
 }
 
@@ -1081,8 +1085,10 @@ struct Target {
     /// Whether the window shows what it was last asked to.
     state: Shown,
     /// Since when the window has been passed over, its next picture not having come in time
-    /// (see `output/next_picture.rs`).
+    /// (see `output/next_picture.rs`), and whether the log has been told: it is, once the
+    /// picture is as late as a display keeping up never is.
     passed_over: Option<Instant>,
+    passed_over_said: bool,
     /// The X the window is to show over its picture, the X it last showed, and what lays it
     /// there (see `close_button`), shared by the windows of its format.
     close: Option<crate::close_button::Drawn>,
@@ -1623,7 +1629,7 @@ fn run(
         output.held.since(Part::Poll, For::Nothing, polled);
         // A window's X that couldn't be shown a moment ago is tried again.
         if output.close_again_at.is_some_and(|at| at <= Instant::now()) {
-            output.show_close_buttons();
+            output.show_windows_again();
         }
         // What the operator has asked for meanwhile comes first: it is drawn below, in place
         // of a picture that was due to be drawn again.
@@ -1791,6 +1797,9 @@ fn run(
         // Whether the live preview now looks at another screen, whether that or the NDI receivers
         // were asked about at all, and whether a window's X is to look different.
         let (mut preview_again, mut ndi_or_preview, mut close_changed) = (false, false, false);
+        // Whether a window passed over has been given its next picture: it is shown what it
+        // is owed, and nothing is drawn for that.
+        let mut window_came = false;
         while let Some(msg) = next {
             // The live preview's textures made again at another size (the operator's window
             // draws at another scale) ask for the preview alone, as another screen to look at
@@ -1803,7 +1812,13 @@ fn run(
                 _ => false,
             };
             nothing_else &= preview_resized
-                || matches!(msg, OutputMsg::NdiReceivers | OutputMsg::PreviewScreen(_) | OutputMsg::CloseButton { .. });
+                || matches!(
+                    msg,
+                    OutputMsg::NdiReceivers
+                        | OutputMsg::PreviewScreen(_)
+                        | OutputMsg::CloseButton { .. }
+                        | OutputMsg::NextPictureCame
+                );
             ndi_or_preview |= matches!(msg, OutputMsg::NdiReceivers | OutputMsg::PreviewScreen(_));
             match msg {
                 OutputMsg::Show(frame) => {
@@ -1971,7 +1986,25 @@ fn run(
                         close_changed = true;
                     }
                 }
-                OutputMsg::Shutdown => return,
+                OutputMsg::NextPictureCame => window_came = true,
+                OutputMsg::Shutdown => {
+                    // The app is closing: each NDI source finishes the picture it is sending
+                    // and is taken down before the program goes (see `NdiOutput::stop`). The
+                    // sound stops being handed to them first.
+                    output.ndi_sound.clear();
+                    for (_, ndi) in output.ndi.drain(..) {
+                        let (name, stopping) = (ndi.name().to_owned(), Instant::now());
+                        ndi.stop();
+                        crate::applog::event(
+                            "ndi",
+                            &format!(
+                                "NDI \"{name}\" was stopped before closing, in {:.0} ms",
+                                stopping.elapsed().as_secs_f64() * 1000.0
+                            ),
+                        );
+                    }
+                    return;
+                }
             }
             next = rx.try_recv().ok();
         }
@@ -1999,9 +2032,10 @@ fn run(
         } else {
             output.draw(new_picture);
         }
-        // A window whose X is to look different, and wasn't drawn just now, is shown again.
-        if close_changed {
-            output.show_close_buttons();
+        // A window whose X is to look different, and wasn't drawn just now, is shown again;
+        // so is one that was passed over, now that its next picture has come.
+        if close_changed || window_came {
+            output.show_windows_again();
         }
     }
 }
@@ -2203,7 +2237,13 @@ impl Output {
                 ),
             );
         }
-        let next = NextPicture::new(Arc::new(surface), slow);
+        // The window's thread says when a picture the screens' thread stopped waiting for has
+        // come; it only passes the word on.
+        let tell = self.from_ndi.clone();
+        let came = move || {
+            let _ = tell.send(OutputMsg::NextPictureCame);
+        };
+        let next = NextPicture::new(Arc::new(surface), slow, came);
         // What draws the X over the window's picture (see `close_button`): made with the first
         // window of each format, as it is set up, never as the X first shows (making it holds
         // the thread as long as setting a window up does).
@@ -2244,6 +2284,7 @@ impl Output {
             trouble: crate::applog::Lasting::default(),
             state: Shown::default(),
             passed_over: None,
+            passed_over_said: false,
             close: None,
             close_shown: None,
             close_mark,
@@ -2978,6 +3019,9 @@ impl Output {
         self.held.since(Part::Poll, For::Nothing, polling);
         let (w, h) = NDI_SIZE;
         let row = w as usize * 4;
+        // Whether anything on the screens moves by itself now: a fade, a build, scrolling
+        // words, a screen being identified.
+        let moving = self.fading.is_some() || self.building() || self.scrolling() || self.identify_breathing();
         let mut still = Vec::new();
         let mut lost: Vec<Uuid> = Vec::new();
         for readback in std::mem::take(&mut self.ndi_pending) {
@@ -3000,14 +3044,17 @@ impl Output {
                     // The sources it is for that still want it. One that nobody is watching
                     // any more would only throw it away: it is told that the picture it had
                     // is out of date, which is all this one would have told it.
-                    let mut sources: Vec<(&NdiOutput, sp_ndi::Sent)> = Vec::new();
+                    let mut sources: Vec<(&NdiOutput, sp_ndi::Sent, bool)> = Vec::new();
                     let came_back = sp_ndi::Before::CameBack(readback.asked.elapsed());
                     for (id, ndi) in self.ndi.iter().filter(|(id, _)| readback.ids.contains(id)) {
                         if ndi_wanted(&ndi.state(), ndi.receivers()) {
                             // A key and its fill are handed these same pixels together.
                             let sent = if readback.keys.contains(id) { sp_ndi::Sent::Key } else { readback.sent };
                             ndi.note(came_back);
-                            sources.push((ndi, sent));
+                            // Whether another picture follows this one by itself: said to the
+                            // source, which then doesn't take the operator's rest on a slide
+                            // for a picture that stood still.
+                            sources.push((ndi, sent, moving || self.ndi_moves(*id)));
                         } else {
                             ndi.forget_as(self.see_through(*id).is_some());
                         }
@@ -3033,8 +3080,12 @@ impl Output {
                         };
                         let handing = Instant::now();
                         rows = handing - copying;
-                        for (ndi, sent) in sources {
-                            ndi.show_shared(w, h, pixels.clone(), sent);
+                        for (ndi, sent, moves) in sources {
+                            if moves {
+                                ndi.show_shared(w, h, pixels.clone(), sent);
+                            } else {
+                                ndi.show_shared_last(w, h, pixels.clone(), sent);
+                            }
                         }
                         for (card, alpha) in cards {
                             card.show_shared(w, h, pixels.clone(), alpha);
@@ -4129,6 +4180,18 @@ impl Output {
         lost_due || after_fade
     }
 
+    /// Until when this pass may wait for its windows' next pictures: `None` when only windows
+    /// are drawn for (each is then waited for as long as it always was, which paces a fade to
+    /// the display). While an NDI source somebody watches (or whose count isn't known) or a
+    /// DeckLink card is drawn for too, the windows of one pass are waited for
+    /// `next_picture::FED_WAIT` in all, from when the pass began: a window whose pictures come
+    /// slowly then misses pictures of its own and never makes theirs late.
+    fn windows_until(&self) -> Option<Instant> {
+        let fed =
+            !self.decklink.is_empty() || self.ndi.iter().any(|(_, ndi)| ndi_wanted(&ndi.state(), ndi.receivers()));
+        fed.then(|| self.held.began() + next_picture::FED_WAIT)
+    }
+
     /// Paints a picture and shows it in one window; true when it was painted. A picture that
     /// cannot be painted leaves the one before it on the screen, and is said in the log once
     /// for as long as that lasts. (Too heavy stays too heavy; too slow may pass, and the end
@@ -4163,6 +4226,7 @@ impl Output {
                 }
             }
         };
+        let until = self.windows_until();
         let Output { device, queue, targets, round, held, .. } = self;
         let target = &mut targets[index];
         if let Err(e) = painted {
@@ -4177,7 +4241,7 @@ impl Output {
         if let Some(more) = target.trouble.over() {
             crate::applog::event("output", &format!("The output draws again, after {more} more frames not drawn"));
         }
-        if show_in_window(device, queue, target, &view, see_through.map(solid_fill), held) {
+        if show_in_window(device, queue, target, &view, see_through.map(solid_fill), held, until) {
             round.presented = true;
         }
         // The keys of this picture, made from it now, so they never show another moment. (A
@@ -4187,16 +4251,23 @@ impl Output {
         true
     }
 
-    /// Shows again, in each window whose X is to look different from the X it shows, the picture
-    /// it already has, with the X as it is to look now: one copy into the window, nothing painted
-    /// (see `close_button`). Not in a window that is fading, whose steps show it; nor in one with
-    /// no picture painted yet, which shows it with its first. One that couldn't be shown is tried
-    /// again a few times, a moment apart.
-    fn show_close_buttons(&mut self) {
+    /// Shows again, in each window that is owed it, the picture it already has: one copy into
+    /// the window, nothing painted. A window is owed it when its X is to look different from
+    /// the X it shows (see `close_button`), or when it was passed over, its next picture not
+    /// having come in time (see `output/next_picture.rs`): the picture painted for it then, or
+    /// a newer one since, is in its texture and never reached it. Without this a window passed
+    /// over at a fade's last step went on showing a step of the fade, and one passed over at a
+    /// cut the slide before, until something else was drawn. Not in a window that is fading,
+    /// whose steps show it; nor in one with no picture painted yet, which shows it with its
+    /// first. An X that couldn't be shown is tried again a few times, a moment apart; a window
+    /// still waiting for its next picture is shown when that comes (its thread says so).
+    fn show_windows_again(&mut self) {
         self.close_again_at = None;
+        let until = self.windows_until();
         for index in 0..self.targets.len() {
             let target = &self.targets[index];
-            if target.close == target.close_shown || target.fade.is_some() || target.close_tries >= CLOSE_TRIES {
+            let close_due = target.close != target.close_shown && target.close_tries < CLOSE_TRIES;
+            if !(close_due || target.passed_over.is_some()) || target.fade.is_some() {
                 continue;
             }
             // A key shows its fill's picture as a key; any other window its own picture, solid
@@ -4213,7 +4284,11 @@ impl Output {
             let picture = source.texture.create_view(&wgpu::TextureViewDescriptor::default());
             let Output { device, queue, targets, held, close_again_at, .. } = self;
             let target = &mut targets[index];
-            if !show_in_window(device, queue, target, &picture, solid, held) {
+            // (One still waiting for its next picture costs no try: it is shown when that comes.)
+            if !show_in_window(device, queue, target, &picture, solid, held, until)
+                && close_due
+                && target.passed_over.is_none()
+            {
                 target.close_tries += 1;
                 if target.close_tries < CLOSE_TRIES {
                     *close_again_at = Some(Instant::now() + CLOSE_AGAIN_AFTER);
@@ -4233,11 +4308,12 @@ impl Output {
             return;
         }
         let picture = self.targets[fill].texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let until = self.windows_until();
         let Output { device, queue, targets, round, held, .. } = self;
         for key in keys {
             let target = &mut targets[key];
             target.state.painted();
-            if show_in_window(device, queue, target, &picture, Some(Solid::Key), held) {
+            if show_in_window(device, queue, target, &picture, Some(Solid::Key), held, until) {
                 round.presented = true;
             }
         }
@@ -4363,7 +4439,9 @@ fn see_through_content(content: Content, mut plain: impl FnMut(&Arc<Theme>) -> A
 /// Shows a painted picture in a screen's window: through a solid pass when `solid` asks (a
 /// see-through picture, which a window shows solid, or a key), else as it is. True when it
 /// reached the window; false when the window could not take it this time (its surface is set
-/// up again, or it is hidden), and the next picture tries again.
+/// up again, it is hidden, or its next picture has not come), and the next picture tries
+/// again. `until` is how long this pass may wait for its windows' next pictures while NDI or
+/// DeckLink are drawn for too (`Output::windows_until`).
 fn show_in_window(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -4371,8 +4449,9 @@ fn show_in_window(
     picture: &wgpu::TextureView,
     solid: Option<Solid>,
     held: &mut Held,
+    until: Option<Instant>,
 ) -> bool {
-    let shown = show_in_window_timed(device, queue, target, picture, solid, held);
+    let shown = show_in_window_timed(device, queue, target, picture, solid, held, until);
     held.window_shown(shown);
     shown
 }
@@ -4385,6 +4464,7 @@ fn show_in_window_timed(
     picture: &wgpu::TextureView,
     solid: Option<Solid>,
     held: &mut Held,
+    until: Option<Instant>,
 ) -> bool {
     let window = For::Window(target.id);
     // A window whose surface isn't set up is set up first, or skipped this frame. One resized
@@ -4393,7 +4473,7 @@ fn show_in_window_timed(
     if !target.configured {
         if target.next.waiting() {
             let acquiring = Instant::now();
-            let came = target.next.take(next_picture::STILL_WAIT);
+            let came = target.next.take(next_picture::wait_for(true, until, acquiring));
             held.since(Part::Acquire, window, acquiring);
             if matches!(came, Next::NotYet) {
                 return false;
@@ -4422,14 +4502,17 @@ fn show_in_window_timed(
         // most: one that doesn't come (the window system isn't taking the window's pictures
         // back for the moment) is looked for again, briefly, at the next drawing, and the
         // window keeps the picture it shows meanwhile.
-        let wait = if target.next.waiting() { next_picture::STILL_WAIT } else { next_picture::ASKED_WAIT };
         let acquiring = Instant::now();
-        let came = target.next.take(wait);
+        let came = target.next.take(next_picture::wait_for(target.next.waiting(), until, acquiring));
         let after = held.since(Part::Acquire, window, acquiring);
         let next = match came {
             Next::Came(next) => {
-                // Said in the log, so a window that stood still says for how long.
-                if let Some(since) = target.passed_over.take() {
+                // Said in the log, so a window that stood still says for how long. (One passed
+                // over for less than a display keeping up could take, while NDI or DeckLink
+                // were drawn for, says nothing: that is every picture of a 30 Hz display.)
+                if let Some(since) = target.passed_over.take()
+                    && (std::mem::take(&mut target.passed_over_said) || since.elapsed() >= next_picture::ASKED_WAIT)
+                {
                     crate::applog::event(
                         "output",
                         &format!(
@@ -4442,8 +4525,9 @@ fn show_in_window_timed(
                 next
             }
             Next::NotYet => {
-                if target.passed_over.is_none() {
-                    target.passed_over = Some(acquiring);
+                let since = *target.passed_over.get_or_insert(acquiring);
+                if !target.passed_over_said && since.elapsed() >= next_picture::ASKED_WAIT {
+                    target.passed_over_said = true;
                     crate::applog::event(
                         "output",
                         &format!(

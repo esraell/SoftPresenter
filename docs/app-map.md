@@ -440,8 +440,9 @@ slept until.
 Each NDI source's own thread (`sp-ndi`, `Pace` in `lib.rs`) writes an `[ndi]` line each minute,
 counted only while somebody watches it (or NDI can't count its receivers), like the
 `[decklink]` lines: new pictures sent (and how many a second, against the rate the
-source says it sends); repeated (the same picture sent again because nothing new came for a
-second, as it is every second while a slide stays); late (a new picture more than one and a
+source says it sends); repeated (the same picture sent again because nothing new came for one
+picture's time, as it is all the time while a slide stays: a watched source sends at its rate
+whatever the screens do, `Gate` in `lib.rs`); late (a new picture more than one and a
 half pictures' times after the one before, while pictures are moving, at the pictures' own
 pace: a thirtieth of a second for a 30 fps video, a 24 fps video's own time for that, which
 the source follows slowly from the gaps on time, so a slower video's steady pace is no
@@ -458,7 +459,11 @@ of a second after a short late gap, three after a longer hold-up (a picture late
 hold-up is part of the same stutter, whose longest gap is the hitch); two gaps over a
 quarter of a second say the pictures had stopped, and they count nothing. So a slide that
 stays, a video that ends, the stage screens' time once a second and slides changed now and
-then count nothing, and a hitch is known a picture or three after it ends. With
+then count nothing, and a hitch is known a picture or three after it ends. The screens'
+thread also says which picture is the last that moves (`NdiOutput::show_shared_last`: a slide
+that stays, a fade's last picture with no video playing), and the wait after it is not judged:
+the rest on a verse between two fades used to count as a picture that stood still, the next
+fade's pictures coming soon after it. With
 nobody watching all minute the line says only that. The screens' thread tells a source what
 became of its pictures before they reached it (`NdiOutput::note`); the minute's figures are
 kept for other code too (`sp_ndi::Watch::last_minute`, reached through the `NdiEntry` each
@@ -483,15 +488,20 @@ now, with what the thread was doing in place of the fade):
     [ndi] NDI "SPTEST Main" stood still: 424.2 ms between two new pictures, up to 20:58:26.792, while pictures were moving and somebody watched. The picture was handed over 417.8 ms after the one before was sent, waited 0.0 ms for NDI's thread and took 6.4 ms to send. On the screens' thread then: a fade ran in the windows for 368.0 ms of it; no pass took 33.3 ms or more.
 
 A DeckLink output's thread says when opening its device took 100 ms or more, and the window
-says when a screen's window is covered or uncovered and when the displays change (`[screens]`). Where a screen's window goes when displays change is decided by `window_plan.rs` (a pure function: displays, screens' targets and where each window is, in; open, keep, put back, hide out, with the notice for a display that went; tested with made-up displays) and carried out by `App::sync_screens` in `main.rs`. On a Mac the window is placed by `sp_video::cover_display` (`crates/sp-video/src/mac/cover.rs`: level, Spaces behaviour, exact frame), and `sp_video::DisplayWatch` wakes the loop when macOS says the displays changed; elsewhere `App::look_at_displays` looks once a second. Testing aids: `SOFTPRESENTER_SCREENS_FILL=<display name>` (a quiet run's screens fill that one display), with `SOFTPRESENTER_SCREENS_ON_TOP=1` for the real window level; `spikes/virtual-display` makes a virtual display to try it on. A screen's window that fills a display shows a large X in its top-right corner when the pointer keeps moving over it, which switches that screen off: the clock, the place and what a press does are `close_button.rs` (a pure state machine held on each `ScreenWindow`, fed by `App::window_event`'s pointer events and run by `App::tick_close_buttons` from `about_to_wait`, which also shows the pointer while it is up); the screens' thread is told how strongly to draw it (`OutputMsg::CloseButton`) and lays it over the window's picture as that goes into the window (`show_in_window_timed`, with `sp_render::CloseMark`, a small shader pass), never into the window's texture, so NDI, keys, stage screens, the preview and captures never have it; a change of the X alone shows the window's picture again without painting it (`Output::show_close_buttons`). Testing aids: `SOFTPRESENTER_CLOSE_BUTTON_IN_WINDOWS=1` (screens in an ordinary window get it too) and `SOFTPRESENTER_CLOSE_BUTTON_PLAY=1` (a played pointer moves over the first such window and presses its X; `=move` only moves).
+says when a screen's window is covered or uncovered and when the displays change (`[screens]`). Where a screen's window goes when displays change is decided by `window_plan.rs` (a pure function: displays, screens' targets and where each window is, in; open, keep, put back, hide out, with the notice for a display that went; tested with made-up displays) and carried out by `App::sync_screens` in `main.rs`. On a Mac the window is placed by `sp_video::cover_display` (`crates/sp-video/src/mac/cover.rs`: level, Spaces behaviour, exact frame), and `sp_video::DisplayWatch` wakes the loop when macOS says the displays changed; elsewhere `App::look_at_displays` looks once a second. Testing aids: `SOFTPRESENTER_SCREENS_FILL=<display name>` (a quiet run's screens fill that one display), with `SOFTPRESENTER_SCREENS_ON_TOP=1` for the real window level; `spikes/virtual-display` makes a virtual display to try it on. A screen's window that fills a display shows a large X in its top-right corner when the pointer keeps moving over it, which switches that screen off: the clock, the place and what a press does are `close_button.rs` (a pure state machine held on each `ScreenWindow`, fed by `App::window_event`'s pointer events and run by `App::tick_close_buttons` from `about_to_wait`, which also shows the pointer while it is up); the screens' thread is told how strongly to draw it (`OutputMsg::CloseButton`) and lays it over the window's picture as that goes into the window (`show_in_window_timed`, with `sp_render::CloseMark`, a small shader pass), never into the window's texture, so NDI, keys, stage screens, the preview and captures never have it; a change of the X alone shows the window's picture again without painting it (`Output::show_windows_again`). Testing aids: `SOFTPRESENTER_CLOSE_BUTTON_IN_WINDOWS=1` (screens in an ordinary window get it too) and `SOFTPRESENTER_CLOSE_BUTTON_PLAY=1` (a played pointer moves over the first such window and presses its X; `=move` only moves).
 
 A screen window's next picture to draw into is asked for on a thread of the window's own
 (`output/next_picture.rs`). The window system lends a window a few pictures and takes each back
 once shown; when it isn't showing the window for a moment, asking for the next one can wait
 about a second on a Mac. The screens' thread waits 50 ms at most, then passes the window over (it
 keeps the picture it shows) and looks again for 8 ms at each drawing, so NDI, the stage,
-DeckLink and the preview go on. The log says when a window was passed over and when its next
-picture came:
+DeckLink and the preview go on. While an NDI source somebody watches or a DeckLink card is drawn
+for too, one pass waits 16 ms in all for its windows (`Output::windows_until`,
+`next_picture::wait_for`), so a slow display never makes their pictures late. When a picture
+the screens' thread stopped waiting for comes, the window's thread says so
+(`OutputMsg::NextPictureCame`), and the window is shown the picture it is owed, copied from its
+texture with nothing painted (`Output::show_windows_again`, which shows a changed X the same
+way). The log says when a window's next picture took 50 ms or longer, and when it came:
 
     [output] The window of "TV" was not given its next picture by the system within 50 ms. The other screens go on; it keeps the picture it shows until the next comes.
     [output] The window of "TV" was given its next picture after 1005 ms.
