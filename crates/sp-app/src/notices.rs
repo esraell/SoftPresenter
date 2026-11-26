@@ -493,7 +493,16 @@ pub fn button(ui: &mut egui::Ui, state: &mut crate::home::HomeState, rect: Rect,
     if let Some(galley) = badge {
         let pill = Rect::from_min_size(pos2(beside_at.x, beside_at.y - 9.0), vec2(beside, 18.0));
         painter.rect_filled(pill, 9.0, CARE);
-        painter.galley(pill.center() - galley.size() / 2.0, galley, ON_AMBER);
+        // The figure's own ink in the middle of the pill, not its line's box: a line keeps room
+        // below for letters that hang, which figures don't have, so a figure centred by its box
+        // sat high in the pill (on a Windows PC at 175% plainly so).
+        let ink = galley.mesh_bounds;
+        let at = if ink.is_positive() {
+            pill.center() - ink.center().to_vec2()
+        } else {
+            pill.center() - galley.size() / 2.0
+        };
+        painter.galley(at, galley, ON_AMBER);
     } else if look == Look::New {
         painter.circle_filled(pos2(beside_at.x + 3.5, beside_at.y), 3.5, TEXT_DIM);
     }
