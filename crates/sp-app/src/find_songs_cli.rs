@@ -139,6 +139,7 @@ fn listing(card: &find_songs::Card, ended: Ended) -> (String, serde_json::Value)
                 "twice": source.twice,
                 "why": source.why,
                 "caution": source.caution,
+                "cloud": source.cloud,
                 "ticked": card.ticked.get(at).copied().unwrap_or(false),
             }));
         }

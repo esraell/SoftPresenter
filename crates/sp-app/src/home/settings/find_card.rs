@@ -330,6 +330,7 @@ mod tests {
             twice: 0,
             why: None,
             caution: None,
+            cloud: false,
             new: (0..songs.saturating_sub(here) as u64).map(|n| n + songs as u64 * 1000).collect(),
         }
     }
@@ -354,9 +355,22 @@ mod tests {
             },
             source("Youth Songs", Kind::Library, (Usual::Documents, &["Worship"]), 214, 16),
             // Two of its songs are there twice over.
-            Source { songs: 34, twice: 2, ..source("Christmas 2025", Kind::SongFiles, (Usual::Downloads, &[]), 32, 0) },
+            Source {
+                songs: 34,
+                twice: 2,
+                caution: Some(crate::i18n::tn(
+                    "settings.find.caution.cloud",
+                    2,
+                    "{n} more song file here is in the cloud, not on this computer, so it wasn\u{2019}t looked at.",
+                    "{n} more song files here are in the cloud, not on this computer, so they weren\u{2019}t looked at.",
+                    &[],
+                )),
+                ..source("Christmas 2025", Kind::SongFiles, (Usual::Downloads, &[]), 32, 0)
+            },
             source("Hymns", Kind::SongFiles, (Usual::Desktop, &[]), 48, 48),
             broken,
+            // Only in the cloud, with nothing read; and a folder with two more song files there.
+            Source { cloud: true, ..source("Hymnal.sps", Kind::Songbook, (Usual::Desktop, &[]), 0, 0) },
         ]
     }
 
@@ -428,7 +442,7 @@ mod tests {
         // Everything here already, and couldn't be read: dimmed, unticked, never ticked.
         assert!(click(&mut state, "Hymns"));
         assert!(click(&mut state, "spData.sqlite"));
-        assert_eq!(state.find_songs.ticked, [true, false, true, false, false]);
+        assert_eq!(state.find_songs.ticked, [true, false, true, false, false, false]);
         for name in ["Zpěvník pro zkoušku", "Christmas 2025"] {
             assert!(click(&mut state, name));
         }
@@ -452,11 +466,13 @@ mod tests {
                     "SONGBOOKS, LIBRARIES AND SONG FILES YOU ALREADY HAVE",
                 ][..],
             ),
-            (Phase::Searching, &["Looking in Downloads\u{2026} 5 songbooks and libraries found", "LOOKING\u{2026}"]),
+            (Phase::Searching, &["Looking in Downloads\u{2026} 6 songbooks and libraries found", "LOOKING\u{2026}"]),
             (
                 Phase::Found,
                 &[
-                    "5 SONGBOOKS AND LIBRARIES FOUND",
+                    "6 SONGBOOKS AND LIBRARIES FOUND",
+                    "In the cloud, not on this computer",
+                    "Library \u{b7} from SoftProjector \u{b7} Desktop",
                     "3,288 new \u{b7} 13 already here",
                     "32 new \u{b7} 2 found twice",
                     "Song files \u{b7} Downloads \u{b7} 34 songs",

@@ -155,6 +155,8 @@ const BUNDLES: &[&str] = &[
     "numbers",
     "key",
     "lproj",
+    // Safari's download under way: a folder holding the part fetched so far.
+    "download",
 ];
 
 /// The places a search always looks in.
@@ -282,8 +284,12 @@ pub struct Source {
     /// Why it couldn't be read: the importer's own reason.
     pub why: Option<String>,
     /// What the operator should know of one that can be read: that it was copied while
-    /// SoftProjector had it open, or ends part way through a song (the importer's own words).
+    /// SoftProjector had it open, or ends part way through a song (the importer's own words),
+    /// or that more of its song files are in the cloud.
     pub caution: Option<String>,
+    /// It is only in the cloud (iCloud Drive, OneDrive), not on this computer: never read, which
+    /// would download it.
+    pub cloud: bool,
     /// Its songs new to the library, by their import key's hash, so songs new in two sources
     /// ticked together are counted once.
     pub new: Vec<u64>,
@@ -297,7 +303,7 @@ impl Source {
 
     /// Whether it can be ticked: read, and with something new.
     pub fn can_import(&self) -> bool {
-        self.why.is_none() && self.fresh() > 0
+        self.why.is_none() && !self.cloud && self.fresh() > 0
     }
 }
 
@@ -615,7 +621,7 @@ pub fn start(
     after: Option<std::thread::JoinHandle<()>>,
     wake: impl Fn() + Send + 'static,
 ) -> Result<Search, String> {
-    let search = Begin { id, places, library, skip, limits: Limits::NORMAL, after };
+    let search = Begin { id, places, library, skip, limits: Limits::NORMAL, after, marks };
     start_with(Arc::new(AtomicBool::new(false)), search, wake)
 }
 
@@ -627,6 +633,8 @@ struct Begin {
     skip: Vec<PathBuf>,
     limits: Limits,
     after: Option<std::thread::JoinHandle<()>>,
+    /// What the system says of a file or folder ([`marks`]; tests give their own).
+    marks: fn(&std::fs::DirEntry) -> Marks,
 }
 
 /// [`start`], with the stop given.
@@ -637,13 +645,14 @@ fn start_with(stop: Arc<AtomicBool>, begin: Begin, wake: impl Fn() + Send + 'sta
     let thread = std::thread::Builder::new()
         .name("find songs".to_owned())
         .spawn(move || {
-            let Begin { id, places, library, skip, limits, after } = begin;
+            let Begin { id, places, library, skip, limits, after, marks } = begin;
             // The search before has stopped looking, and its thread ends at once.
             if let Some(before) = after {
                 let _ = before.join();
             }
             let known = Known::of(&library);
             let mut walk = Walk::new(&stopped, &known, &skip, &tx, id, limits, &wake);
+            walk.marks = marks;
             for place in &places {
                 walk.place(place);
             }
@@ -679,6 +688,7 @@ struct Walk<'a> {
     walked: HashSet<PathBuf>,
     /// Each folder's look takes this much longer (`SOFTPRESENTER_FIND_SONGS_SLOW`).
     slow: Duration,
+    marks: fn(&std::fs::DirEntry) -> Marks,
 }
 
 /// Testing aid: SOFTPRESENTER_FIND_SONGS_SLOW=<ms> makes each folder a search looks in, and
@@ -717,6 +727,7 @@ impl<'a> Walk<'a> {
             entries: 0,
             walked: HashSet::new(),
             slow: slow(),
+            marks,
         }
     }
 
@@ -767,6 +778,7 @@ impl<'a> Walk<'a> {
                     twice: 0,
                     why: Some(not_allowed(&e)),
                     caution: None,
+                    cloud: false,
                     new: Vec::new(),
                 }))),
             }
@@ -795,6 +807,9 @@ impl<'a> Walk<'a> {
         }
         let (mut books, mut documents, mut lyrics, mut texts, mut inside) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        // Files only in the cloud, never opened (opening one downloads it): songbooks, and how
+        // many song files and whether a song document is among them.
+        let (mut cloud_books, mut cloud_files, mut cloud_documents) = (Vec::new(), 0, false);
         for entry in &entries {
             self.entries += 1;
             if self.cut() {
@@ -804,24 +819,65 @@ impl<'a> Walk<'a> {
             if name.starts_with('.') {
                 continue;
             }
-            // Never through a link: it may lead anywhere.
             let Ok(kind) = entry.file_type() else { continue };
+            // Never through a link: it may lead anywhere. On Windows the system counts every
+            // name surrogate (a symbolic link, a junction, a mounted drive) as one; a cloud
+            // placeholder is no link, and a OneDrive folder is looked through.
+            if kind.is_symlink() {
+                continue;
+            }
             let path = entry.path();
             if kind.is_dir() {
-                if !shallow && !passed_over(&name) {
+                // A folder Windows marks hidden is passed over, as one named with a dot is.
+                if !shallow && !passed_over(&name) && !(self.marks)(entry).hidden {
                     inside.push((path, name));
                 }
-            } else if kind.is_file() && is_songbook_file(&path) {
-                books.push(path);
-            } else if kind.is_file() && !shallow {
-                if load::is_song_document(&path) {
-                    documents.push(path);
-                } else if load::is_lyrics_file(&path) || load::is_song_file(&path) {
-                    lyrics.push(path);
-                } else if load::is_plain_text(&path) {
-                    texts.push(path);
-                }
+                continue;
             }
+            if !kind.is_file() {
+                continue;
+            }
+            // Only by its name first: the system is asked about the files that may hold songs.
+            let Some(ending) = ending_of(&path, shallow) else { continue };
+            let marks = (self.marks)(entry);
+            if marks.hidden {
+                continue;
+            }
+            if marks.cloud {
+                match ending {
+                    // A zip, or any program's database, may be no songbook: not said.
+                    Ending::Songbook if !has_ending(&path, "zip") && listed_unread(&path) => cloud_books.push(path),
+                    Ending::Document => (cloud_files, cloud_documents) = (cloud_files + 1, true),
+                    Ending::Lyrics => cloud_files += 1,
+                    // Text is a song only when its words read as one: not said.
+                    _ => {}
+                }
+                continue;
+            }
+            match ending {
+                Ending::Songbook if is_songbook_file(&path) => books.push(path),
+                Ending::Songbook => {}
+                Ending::Document => documents.push(path),
+                Ending::Lyrics => lyrics.push(path),
+                Ending::Text => texts.push(path),
+            }
+        }
+        for book in cloud_books {
+            let name = book.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+            self.say(Found::Source(Box::new(Source {
+                name,
+                kind: Kind::Songbook,
+                place: at.clone(),
+                path: book,
+                read: Read::Nothing,
+                songs: 0,
+                here: 0,
+                twice: 0,
+                why: None,
+                caution: None,
+                cloud: true,
+                new: Vec::new(),
+            })));
         }
         // A file being read when the search is stopped (or runs out of time) is left part way,
         // and nothing of it is listed.
@@ -832,7 +888,8 @@ impl<'a> Walk<'a> {
                 self.say(Found::Source(Box::new(source)));
             }
         }
-        let Ok(found) = folder_source(dir, at, documents, lyrics, texts, self.known, &until) else { return Ok(()) };
+        let files = Files { documents, lyrics, texts, cloud: cloud_files, cloud_documents };
+        let Ok(found) = folder_source(dir, at, files, self.known, &until) else { return Ok(()) };
         if let Some(source) = found {
             self.say(Found::Source(Box::new(source)));
         }
@@ -869,6 +926,95 @@ fn passed_over(name: &str) -> bool {
         return true;
     }
     Path::new(name).extension().is_some_and(|ending| BUNDLES.iter().any(|bundle| ending.eq_ignore_ascii_case(bundle)))
+}
+
+/// What a file may hold, by its name alone.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Ending {
+    /// `.sps`, `.sqlite` or `.zip`.
+    Songbook,
+    /// A song document (`.pro`).
+    Document,
+    /// A ChordPro or lyric file, or SoftPresenter's own.
+    Lyrics,
+    /// Plain text, a song only when its words read as one.
+    Text,
+}
+
+/// What a file may hold, by its name (`shallow`: songbooks only).
+fn ending_of(path: &Path, shallow: bool) -> Option<Ending> {
+    if ["sps", "sqlite", "zip"].iter().any(|ending| has_ending(path, ending)) {
+        return Some(Ending::Songbook);
+    }
+    if shallow {
+        return None;
+    }
+    if load::is_song_document(path) {
+        Some(Ending::Document)
+    } else if load::is_lyrics_file(path) || load::is_song_file(path) {
+        Some(Ending::Lyrics)
+    } else if load::is_plain_text(path) {
+        Some(Ending::Text)
+    } else {
+        None
+    }
+}
+
+fn has_ending(path: &Path, ending: &str) -> bool {
+    path.extension().is_some_and(|have| have.eq_ignore_ascii_case(ending))
+}
+
+/// What the system says of a file or folder, without opening it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Marks {
+    /// Windows marks it hidden.
+    pub hidden: bool,
+    /// Its data is only in the cloud: iCloud Drive's "dataless" file on a Mac, a OneDrive
+    /// placeholder on Windows. Reading it would download it.
+    pub cloud: bool,
+}
+
+/// What the system says of an entry of a folder: on Windows, from the folder's own listing; on
+/// a Mac, from the file's flags, asked without following a link or opening the file.
+fn marks(entry: &std::fs::DirEntry) -> Marks {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        windows_marks(entry.metadata().map_or(0, |meta| meta.file_attributes()))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::macos::fs::MetadataExt;
+        Marks { hidden: false, cloud: mac_dataless(entry.metadata().map_or(0, |meta| meta.st_flags())) }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = entry;
+        Marks::default()
+    }
+}
+
+/// A file's Windows attributes (`FILE_ATTRIBUTE_*`, winnt.h): hidden; and a cloud placeholder
+/// whose data isn't on the computer: offline, or fetched when it is opened or read. A file
+/// OneDrive keeps on the computer is a reparse point too, with none of those, and is read.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn windows_marks(attributes: u32) -> Marks {
+    const HIDDEN: u32 = 0x2;
+    const OFFLINE: u32 = 0x1000;
+    const RECALL_ON_OPEN: u32 = 0x4_0000;
+    const RECALL_ON_DATA_ACCESS: u32 = 0x40_0000;
+    Marks {
+        hidden: attributes & HIDDEN != 0,
+        cloud: attributes & (OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS) != 0,
+    }
+}
+
+/// Whether a Mac's file flags (`st_flags`) say its data is in the cloud: `SF_DATALESS`, as
+/// sys/stat.h defines it.
+#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
+fn mac_dataless(flags: u32) -> bool {
+    const SF_DATALESS: u32 = 0x4000_0000;
+    flags & SF_DATALESS != 0
 }
 
 /// Whether a file may be a songbook: `.sps`, `.sqlite` and zips that list one.
@@ -912,6 +1058,7 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
         twice: 0,
         why: None,
         caution: None,
+        cloud: false,
         new: Vec::new(),
     };
     // Each songbook in it, in the order its songs come (looked up by name: a database may name
@@ -952,6 +1099,16 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
     }
 }
 
+/// The files of a folder that may hold songs, by what they are, and how many song files (and
+/// whether a song document among them) are only in the cloud.
+struct Files {
+    documents: Vec<PathBuf>,
+    lyrics: Vec<PathBuf>,
+    texts: Vec<PathBuf>,
+    cloud: usize,
+    cloud_documents: bool,
+}
+
 /// A folder as a source, when it holds songs: song documents make it a library; ChordPro and
 /// lyric files, SoftPresenter's own song files and text that reads as a song make it a folder of
 /// song files (two at least, unless one is of a kind only songs are kept in). Each file is read
@@ -960,12 +1117,11 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
 fn folder_source(
     dir: &Path,
     at: &Where,
-    documents: Vec<PathBuf>,
-    lyrics: Vec<PathBuf>,
-    texts: Vec<PathBuf>,
+    files: Files,
     known: &Known,
     until: &dyn Fn() -> bool,
 ) -> Result<Option<Source>, Cut> {
+    let Files { documents, lyrics, texts, cloud, cloud_documents } = files;
     let mut songs_in_texts = Vec::new();
     for text in texts {
         if until() {
@@ -976,8 +1132,8 @@ fn folder_source(
         }
     }
     let texts = songs_in_texts;
-    let library = !documents.is_empty();
-    let distinctive = documents.len() + lyrics.len();
+    let library = !documents.is_empty() || cloud_documents;
+    let distinctive = documents.len() + lyrics.len() + cloud;
     if distinctive == 0 && texts.len() < 2 {
         return Ok(None);
     }
@@ -997,9 +1153,21 @@ fn folder_source(
             readable.push(file);
         }
     }
-    if readable.is_empty() {
+    // Song files only in the cloud aren't read: a folder of nothing else says so, and one with
+    // songs read says how many more there are.
+    if readable.is_empty() && cloud == 0 {
         return Ok(None);
     }
+    let caution = (cloud > 0 && !readable.is_empty()).then(|| {
+        tn(
+            "settings.find.caution.cloud",
+            cloud as u64,
+            "{n} more song file here is in the cloud, not on this computer, so it wasn\u{2019}t looked at.",
+            "{n} more song files here are in the cloud, not on this computer, so they weren\u{2019}t looked at.",
+            &[],
+        )
+    });
+    let cloud = readable.is_empty();
     let Counted { all: songs, here, twice, new, .. } = counted;
     // A folder inside a place is named by itself, and is in the place's folders above it; a
     // place's own folder is named by the place and is in it.
@@ -1017,7 +1185,8 @@ fn folder_source(
         here,
         twice,
         why: None,
-        caution: None,
+        caution,
+        cloud,
         new,
     }))
 }
@@ -1078,7 +1247,7 @@ pub fn row_words(source: &Source) -> (String, String, String) {
     let (name, line) = match source.kind {
         // A place that couldn't be looked in: the place, and its folder.
         Kind::Place => (place, source.path.display().to_string()),
-        kind if source.why.is_some() => (
+        kind if source.why.is_some() || source.cloud => (
             source.name.clone(),
             tf("settings.find.line_unread", "{kind} \u{b7} {where}", &[("kind", kind.name()), ("where", &place)]),
         ),
@@ -1096,6 +1265,8 @@ pub fn row_words(source: &Source) -> (String, String, String) {
     };
     let right = if let Some(why) = &source.why {
         tf("settings.find.unreadable", "Couldn\u{2019}t be read: {why}", &[("why", why)])
+    } else if source.cloud {
+        t("settings.find.cloud", "In the cloud, not on this computer").to_owned()
     } else if source.fresh() == 0 {
         t("settings.find.all_here", "Everything here is already in your library").to_owned()
     } else {
@@ -1336,8 +1507,31 @@ pub(crate) mod tests {
         limits: Limits,
         wake: impl Fn() + Send + 'static,
     ) -> Search {
-        let begin = Begin { id: 7, places, library: Library::default(), skip: Vec::new(), limits, after: None };
+        let begin = Begin { id: 7, places, library: Library::default(), skip: Vec::new(), limits, after: None, marks };
         start_with(stop, begin, wake).unwrap()
+    }
+
+    /// The system's word, as these tests give it: a name with "(cloud)" is only in the cloud,
+    /// and one with "(hidden)" is marked hidden.
+    fn marked_by_name(entry: &std::fs::DirEntry) -> Marks {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        Marks { hidden: name.contains("(hidden)"), cloud: name.contains("(cloud)") }
+    }
+
+    /// Searches these places, the system's word given by [`marked_by_name`].
+    fn search_marked(places: Vec<Looked>) -> Vec<Source> {
+        let begin = Begin {
+            id: 9,
+            places,
+            library: Library::default(),
+            skip: Vec::new(),
+            limits: Limits::NORMAL,
+            after: None,
+            marks: marked_by_name,
+        };
+        let (found, ended) = listen(&start_with(Arc::new(AtomicBool::new(false)), begin, || {}).unwrap());
+        assert_eq!(ended, Ended::Everywhere);
+        found
     }
 
     fn at(tree: &Tree, names: &[&str]) -> Vec<Looked> {
@@ -1543,6 +1737,73 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn files_only_in_the_cloud_are_never_opened_and_are_said() {
+        let tree = Tree::new("cloud");
+        // None of them is a songbook or a song: read, each would be said to be unreadable.
+        tree.write("Downloads/Hymns (cloud).sps", b"not read");
+        tree.write("Downloads/Other (cloud).zip", b"not read");
+        tree.write("Downloads/Mail (cloud).sqlite", b"not read");
+        tree.write("Mixed/Morning Light.cho", song_text("Morning Light").as_bytes());
+        tree.write("Mixed/River Song (cloud).cho", b"not read");
+        tree.write("Mixed/Evening (cloud).cho", b"not read");
+        tree.write("Away/Lantern (cloud).pro", b"not read");
+        tree.write("Away/Notes (cloud).txt", b"not read");
+        let found = search_marked(at(&tree, &["Downloads", "Mixed", "Away"]));
+        // The songbook only in the cloud is a row saying so, never read; a zip or another
+        // program's database there may be no songbook, and isn't one.
+        let downloads: Vec<&Source> =
+            found.iter().filter(|source| source.place.place == PlaceName::Folder("Downloads".to_owned())).collect();
+        assert_eq!(downloads.len(), 1, "{found:#?}");
+        let hymns = downloads[0];
+        assert_eq!((hymns.name.as_str(), hymns.cloud, hymns.why.as_deref()), ("Hymns (cloud).sps", true, None));
+        assert!(!hymns.can_import());
+        let (_, line, right) = row_words(hymns);
+        assert_eq!(
+            (line.as_str(), right.as_str()),
+            ("Library \u{b7} from SoftProjector \u{b7} Downloads", "In the cloud, not on this computer")
+        );
+        // A folder with a song read and two only in the cloud: the one, and a caution.
+        let mixed = found.iter().find(|source| source.name == "Mixed").unwrap();
+        assert_eq!((mixed.songs, mixed.cloud), (1, false));
+        let caution =
+            "2 more song files here are in the cloud, not on this computer, so they weren\u{2019}t looked at.";
+        assert_eq!(mixed.caution.as_deref(), Some(caution));
+        // A folder of song documents all in the cloud: a library in the cloud, not to tick.
+        let away = found.iter().find(|source| source.name == "Away").unwrap();
+        assert_eq!((away.kind, away.cloud, away.songs, away.can_import()), (Kind::Library, true, 0, false));
+        assert_eq!(found.len(), 3, "{found:#?}");
+    }
+
+    #[test]
+    fn folders_marked_hidden_and_safaris_downloads_under_way_are_passed_over() {
+        use sp_model::songbook_examples::SONGBOOK;
+        let tree = Tree::new("hidden");
+        tree.write("Docs/Kept (hidden)/Zkouška.sps", SONGBOOK);
+        tree.write("Docs/Zkouška.sps.download/Zkouška.sps", SONGBOOK);
+        tree.write("Docs/Secret (hidden).sps", SONGBOOK);
+        tree.write("Docs/Shown/Zkouška.sps", SONGBOOK);
+        let found = search_marked(at(&tree, &["Docs"]));
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert_eq!(found[0].place.words(), "Docs \u{203a} Shown");
+    }
+
+    #[test]
+    fn the_systems_marks_are_read_as_they_are_defined() {
+        // Windows' attributes (winnt.h): hidden; offline, recalled on open or on reading.
+        assert_eq!(windows_marks(0), Marks::default());
+        assert_eq!(windows_marks(0x2), Marks { hidden: true, cloud: false });
+        for cloud in [0x1000, 0x4_0000, 0x40_0000, 0x40_0000 | 0x400 | 0x10_0000] {
+            assert!(windows_marks(cloud).cloud, "{cloud:#x}");
+        }
+        // A file OneDrive keeps on the computer: a reparse point, archived, pinned. It is read.
+        assert_eq!(windows_marks(0x400 | 0x20 | 0x8_0000), Marks::default());
+        // A Mac's flags (sys/stat.h): SF_DATALESS is the cloud's; UF_HIDDEN is not.
+        assert!(mac_dataless(0x4000_0000));
+        assert!(!mac_dataless(0x8000));
+        assert!(!mac_dataless(0));
+    }
+
+    #[test]
     fn a_search_cut_short_by_its_limits_says_which() {
         let tree = tree("limits");
         let places = || at(&tree, &["Downloads", "Documents", "Desktop"]);
@@ -1592,13 +1853,20 @@ pub(crate) mod tests {
         assert!(asked.get() < 20, "it stopped within a few songs, not after {} of them", asked.get());
         asked.set(0);
         let files: Vec<PathBuf> = (0..40).map(|n| tree.0.join(format!("Folder/Song {n}.cho"))).collect();
-        let cut = folder_source(&tree.0.join("Folder"), &place, Vec::new(), files.clone(), Vec::new(), &known, &until);
+        let lyrics = |files: Vec<PathBuf>| Files {
+            documents: Vec::new(),
+            lyrics: files,
+            texts: Vec::new(),
+            cloud: 0,
+            cloud_documents: false,
+        };
+        let cut = folder_source(&tree.0.join("Folder"), &place, lyrics(files.clone()), &known, &until);
         assert_eq!(cut, Err(Cut));
         assert!(asked.get() < 20, "{}", asked.get());
         // Unstopped, both are read whole.
         let whole = songbook_sources(&book, &place, &known, &|| false).unwrap();
         assert_eq!(whole[0].songs, 2000);
-        let whole = folder_source(&tree.0.join("Folder"), &place, Vec::new(), files, Vec::new(), &known, &|| false);
+        let whole = folder_source(&tree.0.join("Folder"), &place, lyrics(files), &known, &|| false);
         assert_eq!(whole.unwrap().unwrap().songs, 40);
     }
 
@@ -1618,6 +1886,7 @@ pub(crate) mod tests {
             skip: Vec::new(),
             limits: Limits::NORMAL,
             after: Some(before),
+            marks,
         };
         let search = start_with(Arc::new(AtomicBool::new(false)), begin, || {}).unwrap();
         std::thread::sleep(Duration::from_millis(200));

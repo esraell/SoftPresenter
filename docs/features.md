@@ -318,9 +318,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   a Mac), folders of `.pro` song documents (a library), and folders of song files (ChordPro and
   lyric files, SoftPresenter's own, and `.txt` whose words name a song's parts). It looks in
   Documents, Downloads, Desktop and SoftProjector's folder, and in any folder added with Search
-  Another Folder…, on a thread of its own: never into hidden folders, app or library bundles,
-  `node_modules` and caches, never through a link, eight folders deep, 200,000 files and 90
-  seconds at most, and never in SoftPresenter's own library. Each source found is read there and
+  Another Folder…, on a thread of its own: never into hidden folders (named with a dot, or
+  marked hidden on Windows), app or library bundles, Safari's downloads under way,
+  `node_modules` and caches, never through a link (on Windows a junction or a mounted drive is
+  one too), eight folders deep, 200,000 files and 90 seconds at most, and never in
+  SoftPresenter's own library. A file only in the cloud (iCloud Drive's on a Mac, a OneDrive
+  placeholder on Windows) is never opened, which would download it: a songbook there is a row
+  saying "In the cloud, not on this computer", and a folder's song files there are said under
+  its row ("2 more song files here are in the cloud…"), or make a row of their own when it has
+  no other. Each source found is read there and
   then as a dry run and listed as it comes: its name, what and where it is ("Library · from
   SoftProjector · Downloads", the owner's word for what SoftProjector keeps), how many songs, and
   how many are new and already here, by the import's own rule (word for word under the same
