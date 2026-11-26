@@ -11552,10 +11552,16 @@ impl ApplicationHandler<AppEvent> for App {
                 // Followed folders are read (a macro run at the start may play one's media).
                 self.check_folders(true);
             }
-            Ok(None) => el.exit(),
+            // Nothing was started (a question answered, or a start that failed): there is nothing
+            // for `exiting` to save or stop, and the run isn't one that ended.
+            Ok(None) => {
+                self.left = true;
+                el.exit();
+            }
             Err(message) => {
                 eprintln!("{message}");
                 self.failed = true;
+                self.left = true;
                 el.exit();
             }
         }
