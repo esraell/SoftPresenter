@@ -4955,13 +4955,20 @@ impl App {
     /// Any other file dropped on the window: a Bible is installed; anything else is offered to
     /// the media bin, which says why it can't take it.
     fn add_dropped_file(&mut self, path: &std::path::Path) {
+        let shown = self.running.as_ref().and_then(|running| running.home_state.media_playlist_shown);
+        self.add_dropped_file_to(path, shown);
+    }
+
+    /// As [`App::add_dropped_file`], into the media playlist `playlist` (by its id) if it is
+    /// still there: the one shown when the media bin's Add was clicked, say.
+    fn add_dropped_file_to(&mut self, path: &std::path::Path, playlist: Option<Uuid>) {
         // Whatever its ending: a file nothing else took is looked into (its first few
         // kilobytes) in case it is a Bible.
         if sp_bible::import::looks_like_bible(path) {
             self.install_bible(path);
             return;
         }
-        let _ = self.add_media_file(path);
+        let _ = self.add_media_file_to(path, playlist);
     }
 
     /// Installs a Bible file the operator has (dropped, or chosen with the Bibles window's
@@ -5093,6 +5100,13 @@ impl App {
     /// Ok(true) when it was added, Ok(false) when it was in the bin already; the error says
     /// why it couldn't be.
     fn add_media_file(&mut self, path: &std::path::Path) -> Result<bool, String> {
+        let shown = self.running.as_ref().and_then(|running| running.home_state.media_playlist_shown);
+        self.add_media_file_to(path, shown)
+    }
+
+    /// Puts a picture or video in the media bin, and in the media playlist `playlist` (by its
+    /// id), if it is still there. As [`App::add_media_file`] says.
+    fn add_media_file_to(&mut self, path: &std::path::Path, playlist: Option<Uuid>) -> Result<bool, String> {
         let _stall = stall::inside(stall::Doing::Media);
         // A file already in the bin isn't added twice; it joins the playlist shown, if any. One a
         // followed folder brought in counts from now on as added by hand, so it stays in the bin
@@ -5123,8 +5137,7 @@ impl App {
             if let Some(running) = self.running.as_mut() {
                 running.home_state.drop_hover = false;
                 let state = &mut running.home_state;
-                if let Some(playlist) =
-                    state.media_playlist_shown.and_then(|id| state.media_playlists.iter_mut().find(|p| p.id == id))
+                if let Some(playlist) = playlist.and_then(|id| state.media_playlists.iter_mut().find(|p| p.id == id))
                     && !playlist.has(path)
                 {
                     playlist.toggle(path);
@@ -5176,8 +5189,7 @@ impl App {
                 }
                 // Added while a media playlist is shown, it goes into that playlist, so it shows.
                 let state = &mut running.home_state;
-                if let Some(playlist) =
-                    state.media_playlist_shown.and_then(|id| state.media_playlists.iter_mut().find(|p| p.id == id))
+                if let Some(playlist) = playlist.and_then(|id| state.media_playlists.iter_mut().find(|p| p.id == id))
                     && !playlist.has(path)
                 {
                     playlist.toggle(path);
@@ -5733,7 +5745,7 @@ impl App {
         // What is chosen goes to the theme or slide open now, if it is still open then
         // (`dialogs`).
         if std::mem::take(&mut running.home_state.theme_picture_request) {
-            let Some(theme) = running.home_state.theme_edit.as_ref().map(|edit| edit.index) else { return };
+            let Some(theme) = dialogs::theme_asked(running.home_state.theme_edit.as_ref()) else { return };
             let window = dialogs::Files::new(
                 dialogs::Choose::File,
                 crate::i18n::t("notices.dialog.theme_picture", "Choose a Picture for the Theme"),
@@ -5792,7 +5804,9 @@ impl App {
                     crate::i18n::t("notices.dialog.add_media", "Add Pictures and Videos"),
                 )
                 .filter(crate::i18n::t("notices.dialog.filter.media", "Pictures and Videos"), &media::PICTURE_ENDINGS);
-                self.ask(dialogs::For::AddMedia, dialogs::Window::Files(window));
+                // What is chosen goes into the media playlist shown now, as a drop on it would.
+                let playlist = self.running.as_ref().and_then(|running| running.home_state.media_playlist_shown);
+                self.ask(dialogs::For::AddMedia { playlist }, dialogs::Window::Files(window));
             }
             MediaRequest::AddSamples => {
                 if let Err(problem) = self.add_sample_backgrounds()

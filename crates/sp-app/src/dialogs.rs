@@ -596,9 +596,9 @@ pub enum For {
     },
     /// The Bibles window's Install from File….
     BibleFile,
-    /// A picture behind the theme open in the theme editor (by its place in the list).
+    /// A picture behind the theme open in the theme editor (by its id).
     ThemePicture {
-        theme: usize,
+        theme: Uuid,
     },
     /// A picture or video for the slide (or layout) open in the editor (its draft's number).
     SlidePicture {
@@ -608,8 +608,11 @@ pub enum For {
     FollowFolder {
         playlist: Uuid,
     },
-    /// The media bin's Add: pictures and videos.
-    AddMedia,
+    /// The media bin's Add: pictures and videos, for the bin and for the media playlist shown
+    /// when Add was clicked (by its id), if any.
+    AddMedia {
+        playlist: Option<Uuid>,
+    },
     /// Whether to put a song pack's videos in it, then where to save it.
     ExportVideos {
         export: Box<pack::Export>,
@@ -639,6 +642,17 @@ pub enum For {
     LibraryFilesOrFolder(Files),
 }
 
+/// What a theme's picture is asked for: the theme open in the theme editor, by its id (its place
+/// in the list changes when a theme before it is deleted, or the list is put in another order).
+pub fn theme_asked(edit: Option<&crate::home::ThemeEdit>) -> Option<Uuid> {
+    edit.map(|edit| edit.theme.id)
+}
+
+/// Whether the theme open now is the one a picture was asked for.
+fn same_theme(edit: Option<&crate::home::ThemeEdit>, asked: Uuid) -> bool {
+    edit.is_some_and(|edit| edit.theme.id == asked)
+}
+
 impl Purpose for For {
     fn name(&self) -> &'static str {
         match self {
@@ -647,7 +661,7 @@ impl Purpose for For {
             For::ThemePicture { .. } => "Theme Picture",
             For::SlidePicture { .. } => "Slide Picture or Video",
             For::FollowFolder { .. } => "Folder to Follow",
-            For::AddMedia => "Add Media",
+            For::AddMedia { .. } => "Add Media",
             For::ExportVideos { .. } => "Export Songs (videos?)",
             For::ExportTo { .. } => "Export Songs (where?)",
             For::PackSame { .. } => "Import Song Pack (songs here already?)",
@@ -696,9 +710,9 @@ impl crate::App {
                     self.follow_folder(playlist, Some(folder));
                 }
             }
-            For::AddMedia => {
+            For::AddMedia { playlist } => {
                 for path in answer.paths() {
-                    self.add_dropped_file(&path);
+                    self.add_dropped_file_to(&path, playlist);
                 }
             }
             For::ExportVideos { mut export, file } => match answer.button() {
@@ -786,11 +800,11 @@ impl crate::App {
 
     /// A picture chosen for a theme goes behind it, copied into the Images folder, if that theme
     /// is still the one open.
-    fn theme_picture_chosen(&mut self, theme: usize, chosen: Vec<PathBuf>) {
+    fn theme_picture_chosen(&mut self, theme: Uuid, chosen: Vec<PathBuf>) {
         let Some(path) = chosen.first() else { return };
         let Some(running) = self.running.as_mut() else { return };
         let state = &mut running.home_state;
-        if state.theme_edit.as_ref().is_none_or(|edit| edit.index != theme) {
+        if !same_theme(state.theme_edit.as_ref(), theme) {
             return;
         }
         match crate::images::import(path) {
@@ -1024,6 +1038,29 @@ mod tests {
         );
         on_its_own_thread(answering, || panic!("a file name that isn't whole UTF-16"));
         assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(Answer::Paths(Vec::new())));
+    }
+
+    /// The app goes on while the window is open: the theme open in the editor at the answer may
+    /// be another one at the same place in the list (the first deleted, or the list reordered),
+    /// or the same one at another place.
+    #[test]
+    fn a_themes_picture_goes_to_that_theme_wherever_it_is_in_the_list() {
+        use crate::home::ThemeEdit;
+        let edit = |index, theme: &sp_model::Theme| ThemeEdit {
+            index,
+            theme: theme.clone(),
+            version: None,
+            template: 0,
+            changed: false,
+            leave: false,
+        };
+        let (mut one, mut two) = (sp_model::Theme::builtin(), sp_model::Theme::builtin());
+        one.id = Uuid::from_u128(1);
+        two.id = Uuid::from_u128(2);
+        let asked = theme_asked(Some(&edit(2, &one))).unwrap();
+        assert!(!same_theme(Some(&edit(2, &two)), asked), "another theme now at that place");
+        assert!(same_theme(Some(&edit(1, &one)), asked), "the same theme, moved");
+        assert!(!same_theme(None, asked), "the editor closed");
     }
 
     #[test]
