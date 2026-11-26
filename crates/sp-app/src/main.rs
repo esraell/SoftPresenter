@@ -2222,6 +2222,9 @@ struct App {
     /// wait on Reload or Keep mine.
     held_songs: Vec<usize>,
     held_themes: Vec<usize>,
+    /// The held songs and themes already written to "Not saved" while quitting (see
+    /// `keep_held_aside`), so a later look writes only those held since.
+    kept_aside: (Vec<usize>, Vec<usize>),
     /// The changes made to songs in the Service view, to undo and redo.
     history: ShowHistory,
     /// The song open in the Edit view, if any, and where the song history was when it opened:
@@ -6373,12 +6376,17 @@ impl App {
 
     /// On quitting: the changes held back because their files changed outside the app are
     /// written to the library's "Not saved" folder (named by title and time), so neither
-    /// version is lost, and the log says where.
+    /// version is lost, and the log says where. Each once: quitting looks again after the
+    /// library's writer has finished, for a song it held back only then.
     fn keep_held_aside(&mut self) {
         let Some(folder) = bible_store::data_dir().map(|dir| dir.join("Not saved")) else { return };
         let when = chrono::Local::now().format("%Y-%m-%d %H.%M.%S");
         let plain = pack::safe_file_name;
         for index in self.held_songs.clone() {
+            if self.kept_aside.0.contains(&index) {
+                continue;
+            }
+            self.kept_aside.0.push(index);
             let Some(song) = self.show.presentations().get(index) else { continue };
             let file = folder.join(format!("{} {when}.{}", plain(&song.title), load::SONG_EXTENSION));
             let kept = std::fs::create_dir_all(&folder).and_then(|()| std::fs::write(&file, sp_model::to_json(song)));
@@ -6395,6 +6403,10 @@ impl App {
             }
         }
         for index in self.held_themes.clone() {
+            if self.kept_aside.1.contains(&index) {
+                continue;
+            }
+            self.kept_aside.1.push(index);
             let Some(theme) = self.themes.get(index) else { continue };
             let file = folder.join(format!("{} {when}.sptheme", plain(&theme.name)));
             let kept = std::fs::create_dir_all(&folder).and_then(|()| std::fs::write(&file, theme.to_json()));
@@ -11258,6 +11270,9 @@ impl App {
         self.finish_saves();
         self.writer.drain();
         self.finish_saves();
+        // A song the writer refused as it finished (its file changed outside meanwhile) is held
+        // only now: it is kept aside too, so no change is lost on the way out.
+        self.keep_held_aside();
         self.canva.shut_down();
         self.remove_replaced_canva_videos();
         self.mirror.quit();
@@ -11302,6 +11317,9 @@ impl App {
             }
             return;
         }
+        // A song the writer refused as it finished (its file changed outside meanwhile) is held
+        // only now: it is kept aside too, so no change is lost on the way out.
+        self.keep_held_aside();
         // A refresh of the Canva sign-in in flight is waited for (its new token must be kept),
         // here in the event loop, so the window still answers (and isn't taken for hung).
         if !self.canva.may_close(self.quitting.unwrap_or_else(Instant::now)) {
@@ -12895,6 +12913,7 @@ fn main() -> ExitCode {
         },
         held_songs: Vec::new(),
         held_themes: Vec::new(),
+        kept_aside: (Vec::new(), Vec::new()),
         media_cycle: None,
         folder_notes: media::FolderNotes::default(),
         folders_checked: Instant::now(),
