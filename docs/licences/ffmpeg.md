@@ -71,6 +71,28 @@ which looks there first, and the zip's `Licences` folder holds `COPYING.LGPLv2.1
   libraries out), so the few Matroska files with compressed headers, and PNG pictures inside a
   video, don't play. Ordinary video and sound don't need them.
 
+## In the Linux package
+
+`scripts/linux-deb.sh` builds the same FFmpeg 9.0.2 on Ubuntu 22.04 with
+`scripts/build-ffmpeg.sh linux`, from the same source file and checksum, and puts `ffmpeg` and
+`ffprobe` beside the program in `/usr/lib/softpresenter`, which the app looks in first (before
+`/usr/bin`, so a distribution's own FFmpeg, often a GPL build, is never the one used). The licence
+and the note of the source are in `/usr/share/doc/softpresenter`: the machine-readable
+`copyright` file (which names `/usr/share/common-licenses/LGPL-2.1`, Debian's copy of the
+licence), `FFmpeg-LICENSE.md` and `FFmpeg-SOURCE.txt` (the exact source, checksum and
+configuration).
+
+- **LGPL 2.1 or later,** as on the Mac: no `--enable-gpl`, `--enable-version3` or
+  `--enable-nonfree`, `--disable-autodetect`, and the script refuses a build that says otherwise.
+- **Needs nothing but what every Linux has:** FFmpeg's own libraries are built into the two
+  programs; they need only the C library, zlib and bzip2, from the system. The script refuses a
+  build that needs anything else, and the package's script one that needs a newer C library than
+  Ubuntu 22.04's.
+- **With its x86 assembly** (`--enable-x86asm`; the script refuses to build without nasm), and
+  position-independent with read-only relocations, as Debian builds its own.
+- **No hardware decoding:** SoftPresenter asks for none on Linux; FFmpeg decodes on the
+  processor.
+
 ## Rules
 
 - Never copy Homebrew's FFmpeg into the app: it is a GPL build (with x264, x265 and others) and

@@ -1,0 +1,116 @@
+name: Linux package
+
+# The .deb for a release: built with scripts/linux-deb.sh on Ubuntu 22.04, the oldest system it
+# is for; checked with lintian; installed with apt; tried as a quiet test copy on a virtual
+# display (scripts/linux-deb-check.sh); removed with apt, checking nothing of it is left; and
+# kept as the run's artifact. It publishes nothing: the maintainer attaches the .deb to the
+# release.
+#
+# Run it by hand (Actions › Linux package › Run workflow) with the pre-release's version, such
+# as 0.9.0-dev.18, or empty for the version in Cargo.toml; or push a tag v0.9.0-dev.18, whose
+# version it takes from the tag.
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "The pre-release's version, such as 0.9.0-dev.18 (empty: the version in Cargo.toml)"
+        required: false
+        default: ""
+        type: string
+  push:
+    tags: ["v*"]
+
+# One run at a time for each tag or branch, and none cancelled: each is a release's package.
+concurrency:
+  group: linux-package-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build, check, install and remove the .deb
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      # Handed to the steps as data, never pasted into a command line.
+      RELEASE_INPUT: ${{ inputs.release_version }}
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # SOFTPRESENTER_RELEASE_VERSION for the build (from the tag, or what was typed), and the
+      # version the installed app must say.
+      - name: The version
+        run: |
+          if [ "$REF_TYPE" = tag ]; then version=${REF_NAME#v}; else version=$RELEASE_INPUT; fi
+          if [ -n "$version" ] && ! printf '%s\n' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'; then
+            echo "::error title=Not a version::\"$version\" (expected 0.9.0 or 0.9.0-dev.18)"
+            exit 1
+          fi
+          echo "SOFTPRESENTER_RELEASE_VERSION=$version" >>"$GITHUB_ENV"
+          app=${version:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}
+          echo "APP_VERSION=$app" >>"$GITHUB_ENV"
+          echo "Building SoftPresenter $app"
+      # To build: a C compiler, nasm (FFmpeg's assembly), zlib and bzip2 (FFmpeg), the
+      # libraries the app is built against (sound, fonts, the window system's headers), and
+      # the packaging tools; to check: lintian, AppStream's and the menu entry's validators,
+      # and a virtual X display for the installed app.
+      - name: Install what the build and the checks need
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install -y --no-install-recommends
+          build-essential pkg-config nasm zlib1g-dev libbz2-dev
+          libasound2-dev libfontconfig-dev libwayland-dev libxkbcommon-dev
+          libx11-dev libxcursor-dev libxrandr-dev libxi-dev
+          dpkg-dev librsvg2-bin lintian appstream desktop-file-utils
+          xvfb xauth
+      - name: Install the Rust version in rust-toolchain.toml
+        run: rustup toolchain install
+      # A clean build, with no cache from other runs: it is what people will install.
+      - name: Build the .deb
+        run: scripts/linux-deb.sh
+      - name: Lintian, the menu entry and the AppStream file
+        run: |
+          deb=$(ls target/linux-deb/softpresenter_*.deb)
+          echo "DEB=$deb" >>"$GITHUB_ENV"
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb"
+          lintian --info --display-info --fail-on error,warning "$deb"
+          mkdir -p target/linux-deb/unpacked
+          dpkg-deb -x "$deb" target/linux-deb/unpacked
+          desktop-file-validate target/linux-deb/unpacked/usr/share/applications/softpresenter.desktop
+          appstreamcli validate --no-net target/linux-deb/unpacked/usr/share/metainfo/com.softpresenter.app.metainfo.xml
+      # As a person installs it: apt fetches what it depends on, and what it recommends (Mesa's
+      # Vulkan drivers, which the app draws with on this machine, in software).
+      - name: Install it with apt
+        run: |
+          sudo apt-get install -y "./$DEB"
+          dpkg-query -W -f='${Package} ${Version} ${Status}\n' softpresenter
+          dpkg -L softpresenter >target/linux-deb/installed-files.txt
+      - name: Try the installed app (a quiet test copy, on a virtual display)
+        run: >-
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24"
+          scripts/linux-deb-check.sh "$APP_VERSION"
+      - name: Remove it with apt, and nothing of it is left
+        run: |
+          sudo apt-get purge -y softpresenter
+          if dpkg-query -W -f='${Status}\n' softpresenter 2>/dev/null | grep -q installed; then
+            echo "::error::softpresenter is still installed"; exit 1
+          fi
+          left=0
+          while IFS= read -r path; do
+            case "$path" in
+              /usr/lib/softpresenter* | /usr/share/softpresenter* | /usr/share/doc/softpresenter* | */softpresenter.* | */softpresenter | */sp | */sp.1.gz | */com.softpresenter.app.*)
+                if [ -e "$path" ] || [ -L "$path" ]; then echo "left behind: $path"; left=1; fi ;;
+            esac
+          done <target/linux-deb/installed-files.txt
+          if [ "$left" != 0 ]; then echo "::error::the package left files behind (above)"; exit 1; fi
+          echo "nothing of the package is left"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: softpresenter-linux-deb
+          path: target/linux-deb/softpresenter_*.deb
+          if-no-files-found: error

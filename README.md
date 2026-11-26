@@ -123,8 +123,10 @@ The full list, area by area, is in [docs/features.md](docs/features.md), and wha
 
 ## Get started
 
-There is no download yet: SoftPresenter is built from source, on a Mac with macOS 13 or later
-Windows and Linux builds are in testing: they compile and pass their automated tests on real machines, but nothing is released for them yet. You need:
+Pre-releases for the Mac, Windows and Linux are on the
+[releases page](https://github.com/esraell/SoftPresenter/releases); Windows and Linux are still
+in testing. On Linux, install the package, as below. To build SoftPresenter from source on a Mac
+with macOS 13 or later, you need:
 
 - **The Xcode Command Line Tools:** `xcode-select --install`.
 - **Rust through [rustup](https://rustup.rs).** `rust-toolchain.toml` pins the version
@@ -156,6 +158,25 @@ FFmpeg for Windows (`ffmpeg.exe`, `ffprobe.exe`), the sample backgrounds, the li
 READ ME. The program isn't signed yet, so Windows asks the first time ("More info", then "Run
 anyway").
 
+**On Linux** (64-bit Intel or AMD; Ubuntu 22.04 or later, Linux Mint 21 or later, Debian 12 or
+later, and the systems made from them), download `softpresenter_<version>_amd64.deb` from the
+releases page and install it with apt, which fetches the few libraries it needs:
+
+    sudo apt install ./softpresenter_0.9.0~dev.18_amd64.deb
+
+SoftPresenter is then in the applications menu, and `sp` works in a terminal. Videos play
+through the LGPL FFmpeg that comes in the package, whatever FFmpeg the computer has. To play a
+screen out of a DeckLink card, also install Blackmagic Design's Desktop Video for Linux (below).
+`sudo apt remove softpresenter` takes it away again; your songs, Bibles and settings, in
+`~/.local/share/softpresenter`, stay. To build the package yourself, on Ubuntu 22.04 (the oldest
+it is for) with the packages `.github/workflows/linux-package.yml` installs:
+
+    scripts/linux-deb.sh
+
+It leaves `target/linux-deb/softpresenter_<version>_amd64.deb`, with the program, the LGPL FFmpeg
+for Linux (`scripts/build-ffmpeg.sh linux`), the sample backgrounds, the menu entry and icons,
+and the licences in `/usr/share/doc/softpresenter`.
+
 The first start opens a short setup: the screens, bringing songs in, which Bibles to show, and
 what the system will ask permission for and why (macOS, or Windows' firewall; nothing asks on
 Linux). Settings › Set Up SoftPresenter… opens it again.
@@ -166,8 +187,9 @@ Two things are optional:
   it, NDI screens say NDI isn't installed and everything else works. NDI Tools doesn't exist
   for Linux: there, Download NDI… in the Screens window fetches NDI's SDK from NDI, shows
   NDI's licence, and once it is accepted installs NDI's runtime for SoftPresenter alone.
-- **Desktop Video** 16.0 or later (free, from Blackmagic Design) to play a screen out of a
-  DeckLink card. Without it there are no DeckLink outputs to choose.
+- **Desktop Video** 16.0 or later (free, from Blackmagic Design, for the Mac, Windows and
+  Linux) to play a screen out of a DeckLink card. Without it there are no DeckLink outputs to
+  choose.
 - **An app that opens presentation files**, only to bring a presentation in as pictures of its
   slides (a `.key` file needs the app that made it). A `.pptx` can come in as editable slides
   with none installed, and PDFs and pictures need none either.
@@ -235,8 +257,10 @@ box sits and how it looks.
 Everything lives in `~/Documents/SoftPresenter/`: songs made in the app (`Songs/`), themes
 (`Themes/`), pictures (`Images/`), downloaded Bibles (`Bibles/`), playlists, libraries,
 screens and a few preferences, where you can see it and back it up. The log is in
-`~/Library/Logs/SoftPresenter/`. Nothing of yours leaves the computer: SoftPresenter sends only
-small anonymous reports of how it runs and what goes wrong, which you can read and turn off in
+`~/Library/Logs/SoftPresenter/`. (On Linux, all of it, the log included, is in
+`~/.local/share/softpresenter/`; on Windows, in `%APPDATA%\SoftPresenter`.) Nothing of yours
+leaves the computer: SoftPresenter sends only small anonymous reports of how it runs and what
+goes wrong, which you can read and turn off in
 Settings › About ([PRIVACY.md](PRIVACY.md)). A library kept in `~/Library/Application Support/SoftPresenter/`
 by an earlier version is moved to Documents the first time the new one starts; the old folder is
 kept beside it as "SoftPresenter (moved to Documents)".

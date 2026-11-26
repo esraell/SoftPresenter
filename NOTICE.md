@@ -152,10 +152,11 @@ it carries.
 
 ### FFmpeg
 
-SoftPresenter plays some videos by running FFmpeg as a separate program. The Mac app includes
-FFmpeg 9.0.2, built unchanged from FFmpeg's source, under the GNU Lesser General Public License,
-version 2.1 or later; its licence and the exact source it was built from are in the app's
-`Contents/Resources/FFmpeg`. No FFmpeg code is in or linked with SoftPresenter itself.
+SoftPresenter plays some videos by running FFmpeg as a separate program. The Mac app, the Windows
+package and the Linux package include FFmpeg 9.0.2, built unchanged from FFmpeg's source, under
+the GNU Lesser General Public License, version 2.1 or later; its licence and the exact source it
+was built from are in the Mac app's `Contents/Resources/FFmpeg`, the Windows package's `Licences`
+folder and the Linux package's `/usr/share/doc/softpresenter`. No FFmpeg code is in or linked with SoftPresenter itself.
 FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.
 [`docs/licences/ffmpeg.md`](docs/licences/ffmpeg.md) explains.
 

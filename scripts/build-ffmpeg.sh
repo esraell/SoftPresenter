@@ -22,6 +22,17 @@
 # statically so they need nothing but Windows itself. They can decode on the graphics chip
 # through Direct3D 11 or DXVA2 where the codec allows. FFmpeg's x86 assembly is used if nasm is
 # installed, and left out (slower) if not. scripts/windows-package.sh puts the programs in the zip.
+#
+#   scripts/build-ffmpeg.sh linux
+#
+# The same, built on Linux for Linux (scripts/linux-deb.sh builds it on Ubuntu 22.04 for the .deb):
+# ffmpeg and ffprobe in target/ffmpeg-linux/bin, with FFmpeg's own code linked in and nothing
+# needed but the C library, zlib and bzip2, which every Linux has, so a video plays the same
+# whichever distribution's FFmpeg is installed, or none. FFmpeg's x86 assembly needs nasm here
+# (sudo apt install nasm): a build for others to use must not be the slow one. No hardware
+# decoding: SoftPresenter asks for none on Linux.
+#
+# JOBS=8 builds with 8 jobs instead of one for each processor.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -43,8 +54,17 @@ windows)
     exe=".exe"
     work=$PWD/target/ffmpeg-build-windows
     ;;
+linux)
+    out=target/ffmpeg-linux
+    exe=""
+    work=$PWD/target/ffmpeg-build-linux
+    if [ "$(uname -s)" != Linux ]; then
+        echo "error: the Linux FFmpeg is built on Linux" >&2
+        exit 1
+    fi
+    ;;
 *)
-    echo "usage: scripts/build-ffmpeg.sh [macos|windows]" >&2
+    echo "usage: scripts/build-ffmpeg.sh [macos|windows|linux]" >&2
     exit 2
     ;;
 esac
@@ -60,7 +80,9 @@ if [ ! -f "$tarball" ]; then
     curl -fsSL -o "$tarball.part" "$URL"
     mv "$tarball.part" "$tarball"
 fi
-if ! echo "$SHA256  $tarball" | shasum -a 256 -c - >/dev/null 2>&1; then
+# shasum on a Mac; sha256sum on Linux, where shasum (Perl's) may not be installed.
+if command -v sha256sum >/dev/null; then sha256=sha256sum; else sha256="shasum -a 256"; fi
+if ! echo "$SHA256  $tarball" | $sha256 -c - >/dev/null 2>&1; then
     echo "error: $tarball doesn't match its SHA-256; it has been removed" >&2
     rm -f "$tarball"
     exit 1
@@ -85,6 +107,26 @@ if [ "$platform" = macos ]; then
         --disable-protocols --enable-protocol=file,pipe \
         --extra-cflags="-mmacosx-version-min=$MACOS" \
         --extra-ldflags="-mmacosx-version-min=$MACOS" \
+        >"$work/configure.log"
+elif [ "$platform" = linux ]; then
+    if ! command -v nasm >/dev/null; then
+        echo "error: nasm isn't installed (sudo apt install nasm); FFmpeg would be built without its x86 assembly" >&2
+        exit 1
+    fi
+    # The same choices as the Mac's, without Apple's frameworks. zlib and bzip2 are the
+    # system's own (zlib1g-dev and libbz2-dev to build), as on a Mac. Position-independent, and
+    # its relocations read-only once loaded (RELRO, bound at start), as Debian builds its own.
+    ./configure \
+        --enable-static --disable-shared \
+        --disable-autodetect --enable-x86asm --enable-pic \
+        --enable-zlib --enable-bzlib \
+        --disable-network --disable-avdevice \
+        --disable-programs --enable-ffmpeg --enable-ffprobe \
+        --disable-doc --disable-debug \
+        --disable-encoders --enable-encoder=rawvideo,pcm_f32le \
+        --disable-muxers --enable-muxer=rawvideo,pcm_f32le \
+        --disable-protocols --enable-protocol=file,pipe \
+        --extra-ldflags="-Wl,-z,relro -Wl,-z,now" \
         >"$work/configure.log"
 else
     cross=x86_64-w64-mingw32-
@@ -116,23 +158,33 @@ else
         --extra-ldflags="-static" \
         >"$work/configure.log"
 fi
-make -j"$(sysctl -n hw.ncpu)" >"$work/make.log" 2>&1
+jobs=${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu)}
+make -j"$jobs" >"$work/make.log" 2>&1
 
 cd - >/dev/null
 rm -rf "$out"
 mkdir -p "$out/bin"
 for program in ffmpeg ffprobe; do
     cp "$work/src/$program$exe" "$out/bin/$program$exe"
-    if [ "$platform" = macos ]; then
-        strip "$out/bin/$program"
-    else
+    if [ "$platform" = windows ]; then
         x86_64-w64-mingw32-strip "$out/bin/$program$exe"
+    else
+        strip "$out/bin/$program"
     fi
 done
 if [ "$platform" = macos ]; then
     # A build that needs anything outside macOS (a Homebrew library, say) won't run elsewhere.
     if otool -L "$out/bin/ffmpeg" "$out/bin/ffprobe" | tail -n +2 | grep -v ':$' | grep -vE '^\s+(/usr/lib/|/System/Library/)'; then
         echo "error: the FFmpeg build needs libraries from outside macOS (above)" >&2
+        exit 1
+    fi
+    configuration() { "$out/bin/ffmpeg" -hide_banner -buildconf; }
+elif [ "$platform" = linux ]; then
+    # Only libraries every Linux has: the C library's own, zlib and bzip2.
+    needed=$(objdump -p "$out/bin/ffmpeg" "$out/bin/ffprobe" | sed -n 's/^ *NEEDED *//p' | sort -u)
+    echo "needs: $(echo $needed)"
+    if echo "$needed" | grep -vE '^(libc|libm|libpthread|libdl|libz|libbz2)\.so\.'; then
+        echo "error: the FFmpeg build needs other libraries (above)" >&2
         exit 1
     fi
     configuration() { "$out/bin/ffmpeg" -hide_banner -buildconf; }

@@ -576,7 +576,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   9.0.2, with its licence and source in the app's Resources), so nothing needs installing; AV1
   plays on Macs whose video hardware decodes it (M3 and later). On Windows every video plays
   through FFmpeg, whose LGPL build (`ffmpeg.exe`, `ffprobe.exe`) sits beside the program in the
-  zip `scripts/windows-package.sh` makes. FFmpeg decodes on the graphics chip where the codec
+  zip `scripts/windows-package.sh` makes; so it does on Linux, through the LGPL FFmpeg the `.deb`
+  package (`scripts/linux-deb.sh`) puts beside the program in `/usr/lib/softpresenter`, used in
+  place of any FFmpeg the system has. FFmpeg decodes on the graphics chip where the codec
   allows: the Mac's video hardware, or Direct3D 11's video decoder on Windows; a video it can't
   decode that way (no graphics driver, say) plays with FFmpeg's own decoder on the processor,
   and the log says so. A video FFmpeg plays behind the words comes as the decoder's own two
