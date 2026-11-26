@@ -288,7 +288,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   writes them, and gives the songs in the order SQLite gives them: songbooks by name, songs by
   number. A file that is cut short or damaged is refused in a sentence saying which, and a file
   that isn't a songbook says so. So is one whose songs come to more than any songbook (200,000
-  songs, 64 MB of words, counting a songbook's name with each of its songs, or 2,000,000 lines),
+  songs, 64 MB of words, counting a songbook's name with each of its songs, 500,000 parts in all,
+  or 2,000 in one song),
   and songbooks in one database sharing an id (SoftProjector's never do) give a song once, with
   the first of them, so a small file made to can't fill the computer's memory. A database copied while SoftProjector had it open, with
   changes still waiting in a `-wal` or `-journal` file beside it, comes in from the database
@@ -319,7 +320,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   then as a dry run and listed as it comes: its name, what and where it is ("Library · from
   SoftProjector · Downloads", the owner's word for what SoftProjector keeps), how many songs, and
   how many are new and already here, by the import's own rule (word for word under the same
-  title, after the tidy an import gives). Stop keeps what was found, and reaches into the file
+  title, after the tidy an import gives; each song is counted as it is read and let go, so a
+  file's songs are never all held at once). Stop keeps what was found, and reaches into the file
   being read (between its songs), which is then not listed in part; Find Again waits for the
   stopped search's thread to end, so two never look at once. A search that ended before it had
   looked everywhere (stopped, out of time, past its files, or gone wrong) says which over what it

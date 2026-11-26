@@ -125,9 +125,14 @@ fn songbooks_in_zip(path: &Path) -> Option<(ZipFile, Vec<(usize, String)>)> {
 }
 
 /// The songs of every songbook in a zip (the songbooks SoftProjector offers for download come
-/// zipped). The zip is read with limits and nothing is unpacked to disk; a songbook in it that
-/// can't be read is said, and the others still come in.
-fn import_zipped_songbooks(path: &Path, name: &str, until: &dyn Fn() -> bool) -> Result<Songbook, Refused> {
+/// zipped), handed to `each`. The zip is read with limits and nothing is unpacked to disk; a
+/// songbook in it that can't be read is said, and the others still come in.
+fn import_zipped_songbooks(
+    path: &Path,
+    name: &str,
+    until: &dyn Fn() -> bool,
+    each: EachSong,
+) -> Result<Vec<String>, Refused> {
     let not_songbook = || Refused {
         said: tf(
             "notices.import.zip_no_songbook",
@@ -141,7 +146,7 @@ fn import_zipped_songbooks(path: &Path, name: &str, until: &dyn Fn() -> bool) ->
         .to_owned(),
     };
     let (mut zip, books) = songbooks_in_zip(path).filter(|(_, books)| !books.is_empty()).ok_or_else(not_songbook)?;
-    let mut all = Songbook { songs: Vec::new(), cautions: Vec::new() };
+    let (mut came, mut cautions) = (0, Vec::new());
     // The reason the first songbook in it that couldn't be read gave.
     let mut first_why = None;
     let mut room = SONGBOOK_ZIP.unpacked;
@@ -154,7 +159,7 @@ fn import_zipped_songbooks(path: &Path, name: &str, until: &dyn Fn() -> bool) ->
         let read = match sp_model::bounded_zip::read_entry(&mut zip, at, room.min(SONGBOOK_ZIP.entry)) {
             Ok(bytes) => {
                 room -= bytes.len() as u64;
-                songbook_songs(std::io::Cursor::new(bytes), &inside, until)
+                songbook_songs(std::io::Cursor::new(bytes), &inside, until, &mut *each)
             }
             Err(ZipRefusal::UnpacksTooMuch) => Err(Refused {
                 said: tf(
@@ -177,19 +182,22 @@ fn import_zipped_songbooks(path: &Path, name: &str, until: &dyn Fn() -> bool) ->
             }
         };
         match read {
-            Ok(songs) => all.songs.extend(songs),
+            Ok(given) => came += given,
             Err(refused) => {
                 first_why.get_or_insert(refused.why);
-                all.cautions.push(refused.said);
+                cautions.push(refused.said);
             }
         }
     }
     // Nothing came in: what went wrong is the answer.
-    if all.songs.is_empty() && !all.cautions.is_empty() {
-        return Err(Refused { said: all.cautions.join(" "), why: first_why.unwrap_or_default() });
+    if came == 0 && !cautions.is_empty() {
+        return Err(Refused { said: cautions.join(" "), why: first_why.unwrap_or_default() });
     }
-    Ok(all)
+    Ok(cautions)
 }
+
+/// Where each song made of a file of many songs goes, with the name of its songbook.
+type EachSong<'a> = &'a mut dyn FnMut(Presentation, Option<String>);
 
 /// Why a file of many songs gave none: the sentence an import says of it, which names the
 /// file, and the reason alone, for a place that names the file already (Settings › Song files'
@@ -224,9 +232,17 @@ pub fn read_songbook_file(path: &Path) -> Result<Songbook, Refused> {
 /// The same, stopping part way once `until` says so (Settings › Song files' Find, stopped): what
 /// it gives then is only part of the file, for the caller to set aside.
 pub fn read_songbook_file_until(path: &Path, until: &dyn Fn() -> bool) -> Result<Songbook, Refused> {
+    let mut songs = Vec::new();
+    let cautions = read_songbook_file_each(path, until, &mut |song, book| songs.push((song, book)))?;
+    Ok(Songbook { songs, cautions })
+}
+
+/// The same, each song handed to `each` as it is made, so the songs are never all held at once
+/// (Settings › Song files' Find counts them so); what the operator should know of it, after.
+pub fn read_songbook_file_each(path: &Path, until: &dyn Fn() -> bool, each: EachSong) -> Result<Vec<String>, Refused> {
     let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
     if has_extension(path, SONGBOOK_ZIP_ENDING) {
-        return import_zipped_songbooks(path, &name, until);
+        return import_zipped_songbooks(path, &name, until, each);
     }
     let file = std::fs::File::open(path).map_err(|e| Refused {
         said: tf(
@@ -236,17 +252,19 @@ pub fn read_songbook_file_until(path: &Path, until: &dyn Fn() -> bool) -> Result
         ),
         why: e.to_string(),
     })?;
-    let songs = songbook_songs(file, &name, until)?;
-    Ok(Songbook { songs, cautions: unsaved_changes(path, &name).into_iter().collect() })
+    songbook_songs(file, &name, until, each)?;
+    Ok(unsaved_changes(path, &name).into_iter().collect())
 }
 
-/// The songs of one songbook, as presentations; `name` is the file's, for what is said of it.
-/// Each song is made into a presentation only while `until` says to go on.
+/// The songs of one songbook, as presentations, handed to `each` one by one; how many.
+/// `name` is the file's, for what is said of it. Each song is made into a presentation only
+/// while `until` says to go on.
 fn songbook_songs<R: std::io::Read + std::io::Seek>(
     source: R,
     name: &str,
     until: &dyn Fn() -> bool,
-) -> Result<Vec<(Presentation, Option<String>)>, Refused> {
+    each: EachSong,
+) -> Result<usize, Refused> {
     use sp_model::SongbookProblem;
     let songs = sp_model::read_songbook(source).map_err(|problem| match problem {
         SongbookProblem::NotSongbook => Refused {
@@ -271,16 +289,19 @@ fn songbook_songs<R: std::io::Read + std::io::Seek>(
             why,
         },
     })?;
-    Ok(songs
-        .into_iter()
-        .take_while(|_| !until())
-        .map(|song| {
-            let mut made = sp_model::from_softprojector(song.number, &song.title, &song.words, &song.music, &song.text);
-            made.name_chorus_after(&crate::home::chorus_after_name());
-            (made, song.book)
-        })
-        .filter(|(song, _)| song.slide_count() > 0)
-        .collect())
+    let mut given = 0;
+    for song in songs {
+        if until() {
+            break;
+        }
+        let mut made = sp_model::from_softprojector(song.number, &song.title, &song.words, &song.music, &song.text);
+        made.name_chorus_after(&crate::home::chorus_after_name());
+        if made.slide_count() > 0 {
+            each(made, song.book);
+            given += 1;
+        }
+    }
+    Ok(given)
 }
 
 /// A database copied while the program that keeps it had it open may have changes waiting in

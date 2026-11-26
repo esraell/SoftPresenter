@@ -164,26 +164,21 @@ struct Bounds {
     /// The bytes of every song's number, title, writers, words and songbook name, a name counted
     /// with each song that carries it.
     bytes: usize,
-    /// The lines of every song's words, each of which may become a slide.
-    lines: usize,
+    /// The parts of every song (each a group and a slide, about 2 KB once made), and of one.
+    parts: usize,
+    song_parts: usize,
 }
 
 impl Bounds {
     /// Many times the largest songbooks there are: the largest has 3,301 songs, about four
-    /// megabytes of words and 100,000 lines.
-    const NORMAL: Bounds = Bounds { songs: MOST_SONGS, bytes: 64 * 1024 * 1024, lines: 2_000_000 };
+    /// megabytes of words and 15,000 parts; a song has a few dozen parts at most.
+    const NORMAL: Bounds = Bounds { songs: MOST_SONGS, bytes: 64 * 1024 * 1024, parts: 500_000, song_parts: 2_000 };
 }
 
-/// How many lines a song's words have: each ends at a line feed, a carriage return, or the two
-/// together, as [`from_softprojector`] reads them.
-fn lines_in(text: &str) -> usize {
-    let bytes = text.as_bytes();
-    let ends = bytes.iter().enumerate().filter(|(at, byte)| match byte {
-        b'\n' => true,
-        b'\r' => bytes.get(at + 1) != Some(&b'\n'),
-        _ => false,
-    });
-    1 + ends.count()
+/// How many parts a song's words may make: one for each line naming a part, and one for words
+/// before the first, as [`from_softprojector`] reads them.
+fn parts_in(text: &str) -> usize {
+    1 + text.split(['\n', '\r']).filter(|line| title_line(line).is_some()).count()
 }
 
 /// What a file's songs have come to so far, against its bounds.
@@ -191,12 +186,12 @@ struct Tally {
     bounds: Bounds,
     songs: usize,
     bytes: usize,
-    lines: usize,
+    parts: usize,
 }
 
 impl Tally {
     fn new(bounds: Bounds) -> Tally {
-        Tally { bounds, songs: 0, bytes: 0, lines: 0 }
+        Tally { bounds, songs: 0, bytes: 0, parts: 0 }
     }
 
     /// Counts one more song; an error once the file has come to more than any songbook.
@@ -209,14 +204,18 @@ impl Tally {
         self.songs += 1;
         self.bytes =
             [number, title, words, music, text, book].into_iter().map(size).fold(self.bytes, usize::saturating_add);
-        self.lines += match text {
-            Value::Text(text) => lines_in(text),
+        let parts = match text {
+            Value::Text(text) => parts_in(text),
             _ => 1,
         };
+        self.parts += parts;
+        if parts > self.bounds.song_parts {
+            return Err(SongbookProblem::Unreadable("it has a song longer than any song".to_owned()));
+        }
         if self.songs > self.bounds.songs {
             return Err(SongbookProblem::Unreadable("it has more songs than any songbook".to_owned()));
         }
-        if self.bytes > self.bounds.bytes || self.lines > self.bounds.lines {
+        if self.bytes > self.bounds.bytes || self.parts > self.bounds.parts {
             return Err(SongbookProblem::Unreadable("it is larger than any songbook".to_owned()));
         }
         Ok(())
@@ -716,14 +715,15 @@ mod tests {
     #[test]
     fn a_file_past_its_bounds_is_refused_however_it_gets_there() {
         let within = |bytes: &[u8], bounds| read_songbook_within(std::io::Cursor::new(bytes), bounds);
-        let refused = |read: Result<Vec<SongbookSong>, SongbookProblem>| matches!(read, Err(SongbookProblem::Unreadable(why)) if why.ends_with("than any songbook"));
+        let refused = |read: Result<Vec<SongbookSong>, SongbookProblem>| matches!(read, Err(SongbookProblem::Unreadable(why)) if why.ends_with("than any songbook") || why.ends_with("than any song"));
         let database: &[u8] = include_bytes!("../tests/songbooks/database.sqlite");
         let text = TEXT_SONGBOOK.as_bytes();
         for bytes in [database, text] {
             assert!(within(bytes, Bounds::NORMAL).is_ok());
             assert!(refused(within(bytes, Bounds { songs: 2, ..Bounds::NORMAL })));
             assert!(refused(within(bytes, Bounds { bytes: 100, ..Bounds::NORMAL })));
-            assert!(refused(within(bytes, Bounds { lines: 5, ..Bounds::NORMAL })));
+            assert!(refused(within(bytes, Bounds { parts: 5, ..Bounds::NORMAL })));
+            assert!(refused(within(bytes, Bounds { song_parts: 1, ..Bounds::NORMAL })));
         }
         // A songbook's name is counted with each song that carries it: a 10 KB name on 100
         // songs is a megabyte, from a file of 13 KB.
@@ -733,8 +733,18 @@ mod tests {
         }
         assert_eq!(within(long.as_bytes(), Bounds::NORMAL).unwrap().len(), 100);
         assert!(refused(within(long.as_bytes(), Bounds { bytes: 512 * 1024, ..Bounds::NORMAL })));
-        // Lines end as the songs' words are read: at a line feed, a return, or both together.
-        assert_eq!([lines_in("a"), lines_in("a\nb"), lines_in("a\r\nb\rc\n")], [1, 2, 4]);
+        // A song's parts are counted as its words are read: each line naming a part, whatever
+        // ends the lines, and the words before the first.
+        assert_eq!(parts_in("a"), 1);
+        assert_eq!(parts_in("Verse 1\na\n\nChorus\nb"), 3);
+        assert_eq!(parts_in("Verse 1\r\na\r\rChorus\rb\r\n&Chorus\r\nc"), 4);
+        // One song of a thousand choruses is a songbook; of 3,000, it is refused.
+        let choruses = |n: usize| -> String {
+            let text: String = (0..n).map(|at| format!("Chorus {at}@%x@$")).collect();
+            format!("##1\n##Long\n##\n1#$#Long#$#0#$##$##$##$#{text}\n")
+        };
+        assert!(within(choruses(1000).as_bytes(), Bounds::NORMAL).is_ok());
+        assert!(refused(within(choruses(3000).as_bytes(), Bounds::NORMAL)));
     }
 
     #[test]

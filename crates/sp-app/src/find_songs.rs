@@ -335,30 +335,28 @@ impl Known {
     }
 }
 
-/// Counts songs read for an import (each with the file it came from) against the library, and
-/// against one another (a song twice in a source comes in once): how many, how many are here
-/// already, and the new ones' hashes. `Cut` once `until` says to stop.
-fn dry_run<'p>(
-    songs: impl IntoIterator<Item = (Presentation, &'p Path)>,
-    known: &Known,
-    until: &dyn Fn() -> bool,
-) -> Result<(usize, usize, Vec<u64>), Cut> {
-    let mut seen = HashSet::new();
-    let (mut all, mut here, mut new) = (0, 0, Vec::new());
-    for (song, path) in songs {
-        if until() {
-            return Err(Cut);
-        }
+/// A dry run's count of songs read for an import (each with the file it came from), against the
+/// library and against one another (a song twice in a source comes in once): how many, how many
+/// are here already, and the new ones' hashes. Only the hashes are kept, never the songs.
+#[derive(Default)]
+struct Counted {
+    all: usize,
+    here: usize,
+    seen: HashSet<u64>,
+    new: Vec<u64>,
+}
+
+impl Counted {
+    fn count(&mut self, song: Presentation, path: &Path, known: &Known) {
         let song = load::as_imported(song, path);
         let hash = key_hash(&load::import_key(&song));
-        all += 1;
-        if known.keys.contains(&hash) || known.ids.contains(&song.id) || !seen.insert(hash) {
-            here += 1;
+        self.all += 1;
+        if known.keys.contains(&hash) || known.ids.contains(&song.id) || !self.seen.insert(hash) {
+            self.here += 1;
         } else {
-            new.push(hash);
+            self.new.push(hash);
         }
     }
-    Ok((all, here, new))
 }
 
 /// What a search's thread says, as it goes.
@@ -903,33 +901,31 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
         why: None,
         new: Vec::new(),
     };
-    let read = load::read_songbook_file_until(path, until);
+    // Each songbook in it, in the order its songs come (looked up by name: a database may name
+    // thousands), each song counted as it is made and let go, so the file's songs are never all
+    // held at once.
+    let mut books: Vec<(Option<String>, Counted)> = Vec::new();
+    let mut by_name: std::collections::HashMap<Option<String>, usize> = std::collections::HashMap::new();
+    let read = load::read_songbook_file_each(path, until, &mut |song, name| {
+        let at = *by_name.entry(name.clone()).or_insert_with(|| {
+            books.push((name, Counted::default()));
+            books.len() - 1
+        });
+        books[at].1.count(song, path, known);
+    });
     if until() {
         return Err(Cut);
     }
     match read {
-        Ok(book) => {
-            // Each songbook in it, in the order its songs come (looked up by name: a database
-            // may name thousands).
-            let mut books: Vec<(Option<String>, Vec<Presentation>)> = Vec::new();
-            let mut by_name: std::collections::HashMap<Option<String>, usize> = std::collections::HashMap::new();
-            for (song, name) in book.songs {
-                match by_name.get(&name) {
-                    Some(at) => books[*at].1.push(song),
-                    None => {
-                        by_name.insert(name.clone(), books.len());
-                        books.push((name, vec![song]));
-                    }
-                }
-            }
-            books
-                .into_iter()
-                .map(|(name, songs)| {
-                    let (all, here, new) = dry_run(songs.into_iter().map(|song| (song, path)), known, until)?;
-                    Ok(Source { songs: all, here, new, ..base(name.clone().unwrap_or_else(|| stem.clone()), name) })
-                })
-                .collect()
-        }
+        Ok(_) => Ok(books
+            .into_iter()
+            .map(|(name, counted)| Source {
+                songs: counted.all,
+                here: counted.here,
+                new: counted.new,
+                ..base(name.clone().unwrap_or_else(|| stem.clone()), name)
+            })
+            .collect()),
         Err(refused) if listed_unread(path) => {
             Ok(vec![Source { why: Some(refused.why), read: Read::Nothing, ..base(file_name, None) }])
         }
@@ -968,22 +964,24 @@ fn folder_source(
     }
     let mut files: Vec<PathBuf> = documents.into_iter().chain(lyrics).chain(texts).collect();
     files.sort();
-    let mut read = Vec::new();
+    // Every file is counted against the same songs seen, as one import takes them in, as it is
+    // read.
+    let mut counted = Counted::default();
+    let mut readable = Vec::new();
     for file in files {
         if until() {
             return Err(Cut);
         }
         let song = if load::is_song_file(&file) { load::read_song_file(&file) } else { load::import_file(&file) };
         if let Ok(song) = song {
-            read.push((song, file));
+            counted.count(song, &file, known);
+            readable.push(file);
         }
     }
-    if read.is_empty() {
+    if readable.is_empty() {
         return Ok(None);
     }
-    // Every file is counted against the same songs seen, as one import takes them in.
-    let (songs, here, new) = dry_run(read.iter().map(|(song, file)| (song.clone(), file.as_path())), known, until)?;
-    let readable: Vec<PathBuf> = read.into_iter().map(|(_, file)| file).collect();
+    let (songs, here, new) = (counted.all, counted.here, counted.new);
     // A folder inside a place is named by itself, and is in the place's folders above it; a
     // place's own folder is named by the place and is in it.
     let (name, place) = match at.parts.split_last() {
