@@ -811,6 +811,21 @@ fn a_playlist_is_made_and_run_from_item_to_item() {
     assert!(saved.contains("Evening Test") && saved.contains("John 3:16-17"), "the playlist was saved: {saved}");
 }
 
+/// The slides a song shows, by their numbers, from its first as Next goes until it says it is at
+/// the end.
+fn sung_order(copy: &Copy, song: &str) -> Vec<u64> {
+    copy.ok(&["go", song]);
+    let mut seen = vec![copy.live().expect("on screen").1];
+    loop {
+        let next = copy.ok(&["next"]);
+        if next.data["at_end"] == true {
+            break seen;
+        }
+        seen.push(copy.live().expect("on screen").1);
+        assert!(seen.len() < 12, "Next never came to the end: {seen:?}");
+    }
+}
+
 /// A song whose chorus is written once, as SoftProjector keeps a song, is sung with it after
 /// each verse: imported, chosen again after As written, followed when its words change as
 /// text, and left alone once it is set by hand.
@@ -838,18 +853,7 @@ fn a_chorus_written_once_is_sung_after_each_verse() {
         listed.text
     );
     // Next goes Verse 1, Chorus, Verse 2, Chorus, and then says it is at the end.
-    let sung = |copy: &Copy| {
-        copy.ok(&["go", "River Road"]);
-        let mut seen = vec![copy.live().expect("on screen").1];
-        loop {
-            let next = copy.ok(&["next"]);
-            if next.data["at_end"] == true {
-                break seen;
-            }
-            seen.push(copy.live().expect("on screen").1);
-            assert!(seen.len() < 12, "Next never came to the end: {seen:?}");
-        }
-    };
+    let sung = |copy: &Copy| sung_order(copy, "River Road");
     assert_eq!(sung(&copy), [1, 2, 3, 2]);
     // As written, then Chorus After Each Verse again.
     copy.ok(&["song", "arrangement", "River Road", "use", "none"]);
@@ -870,6 +874,10 @@ fn a_chorus_written_once_is_sung_after_each_verse() {
         "{}",
         listed.text
     );
+    // A new song from pasted words: the same, at once.
+    let pasted = "Verse 1\nOne for a test\n\nChorus\nSung for a test\n\nVerse 2\nTwo for a test\n";
+    copy.ok(&["song", "new", "Pasted Song", "--words", pasted]);
+    assert_eq!(sung_order(&copy, "Pasted Song"), [1, 2, 3, 2]);
     // A song with no chorus can't be sung so, and says why.
     let verses = run.file("Verses Only.txt");
     std::fs::write(&verses, song_text(&[("Verse 1", "One for a test"), ("Verse 2", "Two for a test")]))

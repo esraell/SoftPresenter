@@ -169,6 +169,27 @@ impl Presentation {
         }
     }
 
+    /// As [`follow_parts`], after the song's groups changed from those of `before` (the song as
+    /// it was): an "As sung" the SoftProjector import made before arrangements were marked, as
+    /// it made it (still in the order the rule gives `before`'s groups), is taken for the
+    /// automatic arrangement first, so it follows the change too. One changed by hand since
+    /// gives another order and is left alone.
+    ///
+    /// [`follow_parts`]: Self::follow_parts
+    pub fn follow_parts_from(&mut self, before: &Presentation) {
+        if !self.arrangements.iter().any(|arrangement| arrangement.auto)
+            && let Some(order) = before.chorus_after_each_verse()
+            && let Some(old) = before
+                .arrangements
+                .iter()
+                .find(|arrangement| arrangement.name == AS_SUNG && arrangement.groups == order)
+            && let Some(taken) = self.arrangements.iter_mut().find(|arrangement| arrangement.id == old.id)
+        {
+            taken.auto = true;
+        }
+        self.follow_parts();
+    }
+
     /// For a song made, or whose words were changed, as text: as [`follow_parts`], and a song
     /// with no automatic arrangement gets one, named `name`, when singing the chorus after each
     /// verse changes the order the parts are written in. The song plays it unless another
@@ -446,6 +467,30 @@ mod tests {
         assert_eq!(moved.groups.len(), 2);
         let auto = moved.automatic_arrangement().unwrap();
         assert_eq!(names(&moved, auto), ["Verse 1", "Chorus"]);
+    }
+
+    #[test]
+    fn an_as_sung_the_import_made_before_follows_the_words_as_they_change() {
+        // As an older build imported it: "As sung", not marked, in the order the rule gives.
+        let mut old = parse_song_text("T", SONG);
+        let order = old.chorus_after_each_verse().unwrap();
+        let as_sung = Arrangement { id: Uuid::new_v4(), name: AS_SUNG.to_owned(), groups: order, auto: false };
+        old.arrangement = Some(as_sung.id);
+        old.arrangements.push(as_sung.clone());
+        let mut edited = old.reflowed(&format!("{SONG}\n[Verse 3]\nThree\n"));
+        edited.follow_parts_as_text("x");
+        let [taken] = edited.arrangements.as_slice() else { panic!("{:?}", edited.arrangements) };
+        assert_eq!((taken.id, taken.name.as_str(), taken.auto), (as_sung.id, AS_SUNG, true));
+        assert_eq!(names(&edited, taken), ["Verse 1", "Chorus", "Verse 2", "Chorus", "Verse 3", "Chorus"]);
+        assert_eq!(edited.arrangement, Some(as_sung.id));
+        // A group started in the editor too.
+        let split = old.with_group_starting(2, "Verse 3").unwrap();
+        assert!(split.arrangements[0].auto);
+        // One changed by hand since is left as it is.
+        let mut changed = old.clone();
+        changed.arrangements[0].groups.truncate(2);
+        let edited = changed.reflowed(&format!("{SONG}\n[Verse 3]\nThree\n"));
+        assert_eq!(edited.arrangements, changed.arrangements);
     }
 
     #[test]

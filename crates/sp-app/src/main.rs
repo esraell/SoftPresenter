@@ -7150,7 +7150,7 @@ impl App {
             renamed.groups[group].color = sp_model::group_color(&name);
             renamed.groups[group].name = name;
             // The arrangement that sings the chorus after each verse follows the new name.
-            renamed.follow_parts();
+            renamed.follow_parts_from(song);
             let ids: Vec<Uuid> = renamed.groups[group].slides.iter().map(|slide| slide.id).collect();
             self.history.forget(index);
             self.show.replace_presentation(index, Arc::new(renamed));

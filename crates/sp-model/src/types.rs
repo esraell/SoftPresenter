@@ -1154,7 +1154,7 @@ impl Presentation {
             transition: self.transition,
             catalog: self.catalog.clone(),
         };
-        rebuilt.follow_parts();
+        rebuilt.follow_parts_from(self);
         rebuilt
     }
 
@@ -1230,7 +1230,7 @@ impl Presentation {
         for arrangement in &mut copy.arrangements {
             arrangement.groups.retain(|id| !gone.contains(id));
         }
-        copy.follow_parts();
+        copy.follow_parts_from(self);
         let mut new_of_old = vec![0; count];
         for (new, old) in order.iter().enumerate() {
             new_of_old[*old] = new;
@@ -1246,7 +1246,7 @@ impl Presentation {
         copy.groups[group].slides.remove(at);
         if copy.groups[group].slides.is_empty() {
             copy.groups.remove(group);
-            copy.follow_parts();
+            copy.follow_parts_from(self);
         }
         Some(copy)
     }
@@ -1340,7 +1340,7 @@ impl Presentation {
             }
             copy.groups.insert(group + 1, started);
         }
-        copy.follow_parts();
+        copy.follow_parts_from(self);
         Some(copy)
     }
 

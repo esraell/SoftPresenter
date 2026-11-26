@@ -141,8 +141,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   made beside it. Other arrangements are never touched. For songs from before, **Chorus After
   Each Verse** in the Arrangement menu (offered for a song with a verse and a chorus) makes it,
   or brings it up to date, and chooses it; an "As sung" a SoftProjector import made before is
-  brought up to date rather than a second made. `sp song arrangement SONG chorus-after` does
-  the same.
+  brought up to date rather than a second made. Such an "As sung" still as the import made it
+  follows the song's parts like one made now; one changed by hand is left alone. `sp song
+  arrangement SONG chorus-after` does the same as the menu.
 - Nineteen transitions: Cut, Dissolve, Fade, Fade Black, Fade White, Push, Move In, Reveal,
   Fly In, Zoom In, Door, Flip, Swap, Wipe, Split, Blinds, Iris, Clock and Checkerboard, with
   their direction and time (0 to 5 seconds), from Cut, Dissolve or Advanced. One is chosen for all slides from the bar under the slides; a song

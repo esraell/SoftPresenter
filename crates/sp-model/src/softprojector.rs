@@ -490,6 +490,40 @@ mod tests {
     }
 
     #[test]
+    fn a_later_chorus_takes_over_as_softprojector_sings_it() {
+        // Written for this test: a chorus at the top, two verses, a second chorus, a verse, an
+        // insert and a third chorus (named as the first, so numbered), then a last verse.
+        let text = "Припев\nДомой\n\nКуплет 1\nСвет\n\nКуплет 2\nВечер\n\nПрипев 1.2\nДомой опять\n\n\
+            Куплет 3\nНочь\n\nВставка\nТихо\n\nПрипев\nВ конце\n\nКуплет 4\nУтро\n";
+        let song = from_softprojector(None, "Дом", "", "", text);
+        let arrangement = &song.arrangements[0];
+        assert!(arrangement.auto, "it follows the song's parts");
+        assert_eq!(arrangement.name, "Chorus after each verse");
+        assert_eq!(song.arrangement, Some(arrangement.id));
+        let names: Vec<&str> = arrangement
+            .groups
+            .iter()
+            .map(|id| song.groups.iter().find(|g| g.id == *id).unwrap().name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "Припев",
+                "Куплет 1",
+                "Припев",
+                "Куплет 2",
+                "Припев 1.2",
+                "Куплет 3",
+                "Припев 1.2",
+                "Вставка",
+                "Припев 3",
+                "Куплет 4",
+                "Припев 3"
+            ]
+        );
+    }
+
+    #[test]
     fn a_song_without_titles_or_chorus_is_one_slide_and_no_arrangement() {
         let song = from_softprojector(None, "Words", "", "", "One line\nTwo line\n");
         assert_eq!(words(&song).len(), 1);
