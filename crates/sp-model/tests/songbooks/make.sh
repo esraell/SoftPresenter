@@ -12,7 +12,9 @@ SQLITE=/usr/bin/sqlite3
 cd "$(dirname "$0")"
 rm -f ./*.sqlite ./*.sps ./*.json
 
-DATABASE_QUERY="SELECT s.number AS number, s.title AS title, s.words AS words, s.music AS music, s.song_text AS text, b.name AS book FROM Songs s LEFT JOIN Songbooks b ON b.id = s.songbook_id ORDER BY b.name, s.number"
+# A song comes once, with the first of the songbooks of its id (only ever one, where ids are the
+# rows' own numbers, as SoftProjector's are): rows sharing an id can't copy the song over and over.
+DATABASE_QUERY="SELECT s.number AS number, s.title AS title, s.words AS words, s.music AS music, s.song_text AS text, b.name AS book FROM Songs s LEFT JOIN Songbooks b ON b.rowid = (SELECT MIN(rowid) FROM Songbooks WHERE id = s.songbook_id) ORDER BY b.name, s.number"
 SONGBOOK_QUERY="SELECT s.number AS number, s.title AS title, s.words AS words, s.music AS music, s.song_text AS text, (SELECT title FROM SongBook LIMIT 1) AS book FROM Songs s ORDER BY s.number"
 
 SONGS_COLUMNS="'number' INTEGER, 'title' TEXT, 'category' INTEGER DEFAULT 0, 'tune' TEXT, 'words' TEXT, 'music' TEXT, 'song_text' TEXT, 'notes' TEXT, 'use_private' BOOL, 'alignment_v' INTEGER, 'alignment_h' INTEGER, 'color' INTEGER, 'font' TEXT, 'info_color' INTEGER, 'info_font' TEXT, 'ending_color' INTEGER, 'ending_font' TEXT, 'use_background' BOOL, 'background_name' TEXT, 'background' BLOB, 'count' INTEGER DEFAULT 0, 'date' TEXT"

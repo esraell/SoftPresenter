@@ -287,7 +287,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   from SQLite's published description of the file; nothing on the computer is asked to), never
   writes them, and gives the songs in the order SQLite gives them: songbooks by name, songs by
   number. A file that is cut short or damaged is refused in a sentence saying which, and a file
-  that isn't a songbook says so. A database copied while SoftProjector had it open, with
+  that isn't a songbook says so. So is one whose songs come to more than any songbook (200,000
+  songs, 64 MB of words, counting a songbook's name with each of its songs, or 2,000,000 lines),
+  and songbooks in one database sharing an id (SoftProjector's never do) give a song once, with
+  the first of them, so a small file made to can't fill the computer's memory. A database copied while SoftProjector had it open, with
   changes still waiting in a `-wal` or `-journal` file beside it, comes in from the database
   alone, with a line saying its latest changes may be missing. Songbooks are passed around
   zipped, and a `.zip` that holds any (`.sps` or `.sqlite`, in folders or not) comes in the same

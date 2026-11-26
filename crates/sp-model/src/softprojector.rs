@@ -54,12 +54,17 @@ type Fields = [Value; 6];
 /// Every song in a SoftProjector database, an exported songbook or a songbook kept as text,
 /// told apart by how the file starts. They come in the songbooks' order by name and, within a songbook, by number; songs
 /// with the same number stay in the order they were kept in.
-pub fn read_songbook<R: Read + Seek>(mut source: R) -> Result<Vec<SongbookSong>, SongbookProblem> {
+pub fn read_songbook<R: Read + Seek>(source: R) -> Result<Vec<SongbookSong>, SongbookProblem> {
+    read_songbook_within(source, Bounds::NORMAL)
+}
+
+/// [`read_songbook`], within these bounds.
+fn read_songbook_within<R: Read + Seek>(mut source: R, bounds: Bounds) -> Result<Vec<SongbookSong>, SongbookProblem> {
     let unreadable = |e: std::io::Error| SongbookProblem::Unreadable(format!("it could not be read ({e})"));
     let mut head = Vec::new();
     source.by_ref().take(16).read_to_end(&mut head).map_err(unreadable)?;
     let fields = if is_database(&head) {
-        database_songs(source).map_err(|problem| problem.unwrap_or(SongbookProblem::NotSongbook))?
+        database_songs(source, bounds).map_err(|problem| problem.unwrap_or(SongbookProblem::NotSongbook))?
     } else {
         source.seek(SeekFrom::Start(0)).map_err(unreadable)?;
         let mut bytes = Vec::new();
@@ -77,20 +82,21 @@ pub fn read_songbook<R: Read + Seek>(mut source: R) -> Result<Vec<SongbookSong>,
         if bytes.len() as u64 > LARGEST_TEXT_SONGBOOK {
             return Err(SongbookProblem::Unreadable("it is larger than any songbook".to_owned()));
         }
-        text_songs(whole)
+        text_songs(whole, bounds)?
     };
     if fields.is_empty() {
         return Err(SongbookProblem::NoSongs);
     }
-    let words = |value: &Value| match value {
-        Value::Text(text) => text.clone(),
+    // Each value is moved into its song, never copied: a songbook's words are held once.
+    let words = |value: Value| match value {
+        Value::Text(text) => text,
         _ => String::new(),
     };
     Ok(fields
-        .iter()
+        .into_iter()
         .map(|[number, title, by_words, by_music, text, book]| SongbookSong {
             number: match number {
-                Value::Integer(number) => Some(*number),
+                Value::Integer(number) => Some(number),
                 Value::Text(written) => written.trim().parse().ok(),
                 _ => None,
             },
@@ -113,12 +119,13 @@ const LARGEST_TEXT_SONGBOOK: u64 = 64 * 1024 * 1024;
 /// text, in which `@$` ends a verse and `@%` ends a line. A line with fewer parts is no song.
 /// They come in the order of their numbers, as they would out of the database SoftProjector
 /// puts them in.
-fn text_songs(whole: &str) -> Vec<Fields> {
+fn text_songs(whole: &str, bounds: Bounds) -> Result<Vec<Fields>, SongbookProblem> {
     let mut lines = whole.split('\n');
     let _code = lines.next();
     let book = lines.next().unwrap_or("").replace('#', "").trim().to_owned();
     let _note = lines.next();
-    let mut fields: Vec<Fields> = lines
+    let mut tally = Tally::new(bounds);
+    let mut fields = lines
         .filter_map(|line| {
             let parts: Vec<&str> = line.trim_end_matches('\r').split("#$#").collect();
             let [number, title, _category, _tune, words, music, text, ..] = parts.as_slice() else { return None };
@@ -139,15 +146,82 @@ fn text_songs(whole: &str) -> Vec<Fields> {
             let text = verses.join("\n\n");
             Some([number, written(title), written(words), written(music), written(text.trim()), written(&book)])
         })
-        .take(MOST_SONGS)
-        .collect();
+        .map(|song| tally.count(&song).map(|()| song))
+        .collect::<Result<Vec<Fields>, SongbookProblem>>()?;
     fields.sort_by(|[a, ..], [b, ..]| sort_order(a, b, &|a: &str, b: &str| a.cmp(b)));
-    fields
+    Ok(fields)
 }
 
 /// The most songs one file may give: many times the largest songbook, and few enough that a
 /// file made to exhaust the computer can't.
 const MOST_SONGS: usize = 200_000;
+
+/// What one file's songs may come to, all told. A file past them is no songbook but one made to
+/// exhaust the computer (a 120 KB zip once came to 400 MB of words), and is refused.
+#[derive(Clone, Copy, Debug)]
+struct Bounds {
+    songs: usize,
+    /// The bytes of every song's number, title, writers, words and songbook name, a name counted
+    /// with each song that carries it.
+    bytes: usize,
+    /// The lines of every song's words, each of which may become a slide.
+    lines: usize,
+}
+
+impl Bounds {
+    /// Many times the largest songbooks there are: the largest has 3,301 songs, about four
+    /// megabytes of words and 100,000 lines.
+    const NORMAL: Bounds = Bounds { songs: MOST_SONGS, bytes: 64 * 1024 * 1024, lines: 2_000_000 };
+}
+
+/// How many lines a song's words have: each ends at a line feed, a carriage return, or the two
+/// together, as [`from_softprojector`] reads them.
+fn lines_in(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    let ends = bytes.iter().enumerate().filter(|(at, byte)| match byte {
+        b'\n' => true,
+        b'\r' => bytes.get(at + 1) != Some(&b'\n'),
+        _ => false,
+    });
+    1 + ends.count()
+}
+
+/// What a file's songs have come to so far, against its bounds.
+struct Tally {
+    bounds: Bounds,
+    songs: usize,
+    bytes: usize,
+    lines: usize,
+}
+
+impl Tally {
+    fn new(bounds: Bounds) -> Tally {
+        Tally { bounds, songs: 0, bytes: 0, lines: 0 }
+    }
+
+    /// Counts one more song; an error once the file has come to more than any songbook.
+    fn count(&mut self, [number, title, words, music, text, book]: &Fields) -> Result<(), SongbookProblem> {
+        let size = |value: &Value| match value {
+            Value::Text(text) => text.len(),
+            Value::Blob(bytes) => bytes.len(),
+            _ => 8,
+        };
+        self.songs += 1;
+        self.bytes =
+            [number, title, words, music, text, book].into_iter().map(size).fold(self.bytes, usize::saturating_add);
+        self.lines += match text {
+            Value::Text(text) => lines_in(text),
+            _ => 1,
+        };
+        if self.songs > self.bounds.songs {
+            return Err(SongbookProblem::Unreadable("it has more songs than any songbook".to_owned()));
+        }
+        if self.bytes > self.bounds.bytes || self.lines > self.bounds.lines {
+            return Err(SongbookProblem::Unreadable("it is larger than any songbook".to_owned()));
+        }
+        Ok(())
+    }
+}
 
 /// A whole number against one with a fraction, exactly (not by rounding the whole number to
 /// the nearest the other kind can hold), so that sorting by it is always one order.
@@ -219,7 +293,9 @@ fn sort_order(a: &Value, b: &Value, text: &impl Fn(&str, &str) -> Ordering) -> O
 /// FROM Songs s LEFT JOIN Songbooks b ON b.id = s.songbook_id ORDER BY b.name, s.number
 /// ```
 ///
-/// and of an exported songbook (it has a `SongBook` table, of one row):
+/// (except that songbooks sharing an id, which SoftProjector's never do, give a song once, with the
+/// first of them: rows made to share one can't copy a song over and over), and of an exported
+/// songbook (it has a `SongBook` table, of one row):
 ///
 /// ```sql
 /// SELECT s.number, s.title, s.words, s.music, s.song_text, (SELECT title FROM SongBook LIMIT 1)
@@ -227,9 +303,9 @@ fn sort_order(a: &Value, b: &Value, text: &impl Fn(&str, &str) -> Ordering) -> O
 /// ```
 ///
 /// `Err(None)` is a database that is neither.
-fn database_songs<R: Read + Seek>(source: R) -> Result<Vec<Fields>, Option<SongbookProblem>> {
+fn database_songs<R: Read + Seek>(source: R, bounds: Bounds) -> Result<Vec<Fields>, Option<SongbookProblem>> {
     let unreadable = |why: String| Some(SongbookProblem::Unreadable(why));
-    let limits = Limits { rows: MOST_SONGS, ..Limits::NORMAL };
+    let limits = Limits { rows: bounds.songs, bytes: bounds.bytes as u64, ..Limits::NORMAL };
     let mut db = Database::open(source, limits).map_err(unreadable)?;
     let (whole, one) = (db.has_table("Songbooks"), db.has_table("SongBook"));
     if !whole && !one {
@@ -243,40 +319,31 @@ fn database_songs<R: Read + Seek>(source: R) -> Result<Vec<Fields>, Option<Songb
     let books = if whole { db.rows("Songbooks", &["id", "name"]) } else { db.rows("SongBook", &["title"]) };
     let books = books.map_err(unreadable)?;
     // The songbooks' names by id, to find a song's by its songbook_id as `=` has it for two
-    // columns of whole numbers: nothing equals nothing, and a number never equals text.
-    let mut names_by_id: HashMap<Id, Vec<&Value>> = HashMap::new();
+    // columns of whole numbers: nothing equals nothing, and a number never equals text. Of
+    // songbooks sharing an id, the first is the song's.
+    let mut names_by_id: HashMap<Id, &Value> = HashMap::new();
     for book in &books {
         if let ([id, name], true) = (book.values.as_slice(), whole)
             && let Some(id) = Id::of(id)
         {
-            names_by_id.entry(id).or_default().push(name);
+            names_by_id.entry(id).or_insert(name);
         }
     }
     let first_title = books.first().and_then(|book| book.values.first()).cloned().unwrap_or(Value::Null);
+    let mut tally = Tally::new(bounds);
     let mut fields: Vec<Fields> = Vec::new();
     for song in songs {
         let mut values = song.values.into_iter();
         let mut next = || values.next().unwrap_or(Value::Null);
         let (number, title, words, music, text) = (next(), next(), next(), next(), next());
-        if !whole {
-            fields.push([number, title, words, music, text, first_title.clone()]);
-            continue;
-        }
-        // Once with each songbook of that id (there is one, where ids are the rows' numbers),
-        // or once with no songbook.
-        let names = Id::of(&next()).and_then(|id| names_by_id.get(&id)).map_or(&[][..], Vec::as_slice);
-        // Songbooks sharing an id (never, where ids are the rows' numbers) can't multiply the
-        // songs past the limit.
-        if fields.len() + names.len() > MOST_SONGS {
-            return Err(unreadable("it has more songs than any songbook".to_owned()));
-        }
-        if names.is_empty() {
-            fields.push([number, title, words, music, text, Value::Null]);
-            continue;
-        }
-        for name in names {
-            fields.push([number.clone(), title.clone(), words.clone(), music.clone(), text.clone(), (*name).clone()]);
-        }
+        let book = if whole {
+            Id::of(&next()).and_then(|id| names_by_id.get(&id)).map_or(Value::Null, |name| (*name).clone())
+        } else {
+            first_title.clone()
+        };
+        let song = [number, title, words, music, text, book];
+        tally.count(&song).map_err(Some)?;
+        fields.push(song);
     }
     let text = |a: &str, b: &str| db.text_order(a, b);
     fields.sort_by(|[a_number, .., a_book], [b_number, .., b_book]| {
@@ -612,6 +679,40 @@ mod tests {
         assert_eq!(song.title, "2. Druhá píseň");
         assert_eq!(song.copyright.author, "Jana / Petr");
         assert_eq!(words(&song)[1], ("Refrén".to_owned(), "Zpívej, zpívej".to_owned()));
+    }
+
+    #[test]
+    fn songbooks_sharing_an_id_give_a_song_once_with_the_first_of_them() {
+        // A song with one songbook and a thousand more rows sharing its id came a thousand times
+        // over (a 120 KB zip came to 400 MB of words); it comes once, with the first.
+        let songs = read(include_bytes!("../tests/songbooks/shared.sqlite")).unwrap();
+        let shared: Vec<&SongbookSong> = songs.iter().filter(|song| song.title == "In two songbooks").collect();
+        assert_eq!(shared.len(), 1);
+        assert_eq!(shared[0].book.as_deref(), Some("Second of the same id"));
+    }
+
+    #[test]
+    fn a_file_past_its_bounds_is_refused_however_it_gets_there() {
+        let within = |bytes: &[u8], bounds| read_songbook_within(std::io::Cursor::new(bytes), bounds);
+        let refused = |read: Result<Vec<SongbookSong>, SongbookProblem>| matches!(read, Err(SongbookProblem::Unreadable(why)) if why.ends_with("than any songbook"));
+        let database: &[u8] = include_bytes!("../tests/songbooks/database.sqlite");
+        let text = TEXT_SONGBOOK.as_bytes();
+        for bytes in [database, text] {
+            assert!(within(bytes, Bounds::NORMAL).is_ok());
+            assert!(refused(within(bytes, Bounds { songs: 2, ..Bounds::NORMAL })));
+            assert!(refused(within(bytes, Bounds { bytes: 100, ..Bounds::NORMAL })));
+            assert!(refused(within(bytes, Bounds { lines: 5, ..Bounds::NORMAL })));
+        }
+        // A songbook's name is counted with each song that carries it: a 10 KB name on 100
+        // songs is a megabyte, from a file of 13 KB.
+        let mut long = format!("##1\n##{}\n##\n", "N".repeat(10_000));
+        for n in 1..=100 {
+            long.push_str(&format!("{n}#$#Song {n}#$#0#$##$##$##$#Verse 1@%Line {n}\n"));
+        }
+        assert_eq!(within(long.as_bytes(), Bounds::NORMAL).unwrap().len(), 100);
+        assert!(refused(within(long.as_bytes(), Bounds { bytes: 512 * 1024, ..Bounds::NORMAL })));
+        // Lines end as the songs' words are read: at a line feed, a return, or both together.
+        assert_eq!([lines_in("a"), lines_in("a\nb"), lines_in("a\r\nb\rc\n")], [1, 2, 4]);
     }
 
     #[test]
