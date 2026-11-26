@@ -257,6 +257,7 @@ impl<P: Purpose> Dialogs<P> {
         applog::event("dialog", &format!("{} opened", purpose.name()));
         self.open = Some(Open { id, purpose, since: Instant::now(), drawn });
         let deliver = self.deliver.clone();
+        let _stall = crate::stall::inside(crate::stall::Doing::Dialog);
         self.shows.show(window, parent, Box::new(move |answer| deliver(Answered { id, answer })));
     }
 

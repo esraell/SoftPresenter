@@ -86,6 +86,7 @@ mod song_ids;
 mod songbooks;
 mod stage;
 mod stage_editor;
+mod stall;
 mod studio;
 mod sweep;
 mod system_language;
@@ -5015,6 +5016,7 @@ impl App {
     /// waits for the sheet to ask, and the notices (and the command line's job) say how it went:
     /// installed, or why not. The sheet asking is there to see, so the list says nothing of it.
     fn finish_bible_work(&mut self) {
+        let _stall = stall::inside(stall::Doing::Bible);
         while let Ok(BibleWork { job, result, kind }) = self.bible_rx.try_recv() {
             let mut sheet = false;
             let said = match result {
@@ -5083,6 +5085,7 @@ impl App {
     /// Ok(true) when it was added, Ok(false) when it was in the bin already; the error says
     /// why it couldn't be.
     fn add_media_file(&mut self, path: &std::path::Path) -> Result<bool, String> {
+        let _stall = stall::inside(stall::Doing::Media);
         // A file already in the bin isn't added twice; it joins the playlist shown, if any. One a
         // followed folder brought in counts from now on as added by hand, so it stays in the bin
         // when it leaves the folder.
@@ -7372,6 +7375,7 @@ impl App {
     /// isn't added again (it still goes into the library or playlist named). The window's
     /// notice says what happened.
     fn import_songs_to(&mut self, paths: &[PathBuf], to: &SongsTo) -> Imported {
+        let _stall = stall::inside(stall::Doing::Importing);
         let started = Instant::now();
         let mut done = Imported::default();
         // PDFs, presentation files and folders of pictures become slides, made on threads of
@@ -9517,6 +9521,7 @@ impl App {
 
     /// Draws one frame of the home window and returns what the operator asked for.
     fn draw_home(&mut self) -> Vec<Command> {
+        let _stall = stall::inside(stall::Doing::Drawing);
         let settling = self.follow_interface_size();
         // Undo and Redo are drawn greyed when the history has nothing to take back.
         self.note_show_history(false);
@@ -11286,6 +11291,9 @@ impl ApplicationHandler<AppEvent> for App {
         if self.running.is_some() {
             return;
         }
+        // The step is let go before the work (locals drop last first), so it is counted in it.
+        let _stall = stall::busy();
+        let _starting = stall::inside(stall::Doing::Starting);
         match self.start(el) {
             Ok(Some(mut running)) => {
                 // The Bible page and the small choices are as they were left.
@@ -11491,11 +11499,13 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn user_event(&mut self, el: &ActiveEventLoop, event: AppEvent) {
         let _busy = reports::stats::BusyGuard::new(reports::stats::Who::Ui);
+        let _stall = stall::busy();
         repaints::event(|| format!("the app was told {}", event.name()));
         let id = match event {
             AppEvent::Menu(id) => id,
             // A command from `softpresenter ctl`: done now, and its outcome sent back.
             AppEvent::Control(incoming) => {
+                let _stall = stall::inside(stall::Doing::Command);
                 // An AI assistant's, through `sp mcp`: checked against Settings › Integrations ›
                 // AI assistants and `mcp::policy` first (which never lets a wait through).
                 if incoming.request.mcp.is_some() {
@@ -11512,6 +11522,7 @@ impl ApplicationHandler<AppEvent> for App {
                 return;
             }
             AppEvent::Remote(asked) => {
+                let _stall = stall::inside(stall::Doing::Command);
                 self.remote_event(el, asked);
                 return;
             }
@@ -11665,6 +11676,7 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let _busy = reports::stats::BusyGuard::new(reports::stats::Who::Ui);
+        let _stall = stall::busy();
         repaints::event(|| {
             let which = match self.running.as_ref() {
                 Some(running) if running.home_window.id() == id => "the operator's window",
@@ -12150,6 +12162,7 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
         let _busy = reports::stats::BusyGuard::new(reports::stats::Who::Ui);
+        let _stall = stall::busy();
         self.reports_tick();
         // Quitting, waiting for the library's writer to write what it holds, or for Canva Sync
         // to keep a sign-in it is refreshing: looked at again shortly (their threads also wake
@@ -12886,6 +12899,8 @@ fn main() -> ExitCode {
     }
     app.bin_started = Some((Instant::now(), app.show.media().len()));
     start_steps::mark("app made");
+    // The log says when the window's thread is held up, and with what.
+    stall::watch();
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("The window system stopped: {e}");
         return ExitCode::FAILURE;

@@ -245,6 +245,7 @@ impl Writer {
 
     /// Waits until everything handed over is done.
     pub fn drain(&self) {
+        let _stall = crate::stall::inside(crate::stall::Doing::Saving);
         let mut state = self.shared.lock();
         while self.thread.is_some() && (!state.queue.is_empty() || state.busy.is_some()) {
             state = self.shared.wait(state);
@@ -254,6 +255,7 @@ impl Writer {
     /// Writes a file's waiting saves before anything else, and waits for them (and for one of it
     /// being written now): for reading the file straight after.
     pub fn flush(&self, path: &Path) {
+        let _stall = crate::stall::inside(crate::stall::Doing::Saving);
         let mut state = self.shared.lock();
         let names = |task: &Task| matches!(task, Task::Save { save, .. } if save.path == path);
         let (mut first, rest): (VecDeque<Task>, VecDeque<Task>) = state.queue.drain(..).partition(names);
