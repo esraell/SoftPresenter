@@ -51,6 +51,13 @@ pub enum Command {
     Last,
     Clear(Layer),
     ClearAll,
+    /// Takes the live slide's words off the screens. The slide stays live, and its background
+    /// with it. Show Again, or any slide put on screen (this one too), brings the words back; a
+    /// clear takes the slide off.
+    HideWords,
+    /// Shows hidden words again. With nothing live, puts back the slide the last clear took off,
+    /// if no slide has gone up since and it is still there.
+    ShowAgain,
     SetOutputEnabled(bool),
 }
 
@@ -77,6 +84,12 @@ pub struct Show {
     step: Option<usize>,
     /// How many of the live slide's click builds have been set going.
     build_step: usize,
+    /// The live slide is up without its words; see [`Show::words_hidden`].
+    words_hidden: bool,
+    /// The id of the slide the last clear took off, until a slide goes up. The cursor stays on
+    /// it (following it through edits); Show Again puts it back only while the slide there still
+    /// has this id, so a song or passage put in its place never shows a slide never shown.
+    taken_off: Option<sp_model::Uuid>,
     media: Vec<MediaItem>,
     live_media: Option<usize>,
     output_enabled: bool,
@@ -101,6 +114,8 @@ impl Show {
             cursor: None,
             step: None,
             build_step: 0,
+            words_hidden: false,
+            taken_off: None,
             media: Vec::new(),
             live_media: None,
             output_enabled: true,
@@ -125,6 +140,11 @@ impl Show {
 
     pub fn live(&self) -> Option<SlideRef> {
         self.live
+    }
+
+    /// The live slide is up without its words (Hide the Words). Never true with nothing live.
+    pub fn words_hidden(&self) -> bool {
+        self.words_hidden
     }
 
     /// The last slide that was live. Kept after a clear so `Next` can continue from it.
@@ -329,6 +349,7 @@ impl Show {
             Some(live) if live.presentation == index => {
                 if live.slide >= count {
                     self.live = None;
+                    self.words_hidden = false;
                 }
                 Changes { slides: true, ..Changes::default() }
             }
@@ -358,7 +379,10 @@ impl Show {
         if let (Some(found), Some(live)) = (live_at, self.live.as_mut().filter(|live| live.presentation == index)) {
             match found {
                 Some(slide) => live.slide = slide,
-                None => self.live = None,
+                None => {
+                    self.live = None;
+                    self.words_hidden = false;
+                }
             }
         }
         if let (Some(found), Some(cursor)) = (cursor_at, self.cursor.as_mut().filter(|c| c.presentation == index)) {
@@ -421,6 +445,7 @@ impl Show {
         };
         let was = self.live;
         shift(&mut self.live);
+        self.words_hidden &= self.live.is_some();
         shift(&mut self.cursor);
         if self.cursor.is_some_and(|c| c.presentation == presentation) {
             self.refind_step();
@@ -442,15 +467,16 @@ impl Show {
                 let slide = self.order(presentation).get(step).copied();
                 self.go_to(slide.map(|slide| (SlideRef { presentation, slide }, Some(step))))
             }
-            // A slide with builds waiting for a click sets the next one going first.
+            // A slide with builds waiting for a click sets the next one going first (and shows
+            // its words, if they were hidden).
             Command::Next if self.builds_left() => {
                 self.build_step += 1;
-                Changes { builds: true, ..Changes::default() }
+                Changes { builds: true, slides: std::mem::take(&mut self.words_hidden), ..Changes::default() }
             }
             Command::Next => self.go_to(self.next_target()),
             Command::Previous if self.live.is_some() && self.build_step > 0 => {
                 self.build_step -= 1;
-                Changes { builds: true, ..Changes::default() }
+                Changes { builds: true, slides: std::mem::take(&mut self.words_hidden), ..Changes::default() }
             }
             Command::Previous => self.go_to(self.previous_target()),
             Command::First => self.go_to(self.edge_of_selected(false)),
@@ -462,14 +488,24 @@ impl Show {
                 }
                 Changes::default()
             }
-            Command::Clear(Layer::Slides) => Changes { slides: self.live.take().is_some(), ..Changes::default() },
+            Command::Clear(Layer::Slides) => Changes { slides: self.take_slide_off(), ..Changes::default() },
             Command::Clear(Layer::Media) => Changes { media: self.live_media.take().is_some(), ..Changes::default() },
-            Command::ClearAll => Changes {
-                slides: self.live.take().is_some(),
-                media: self.live_media.take().is_some(),
-                ..Changes::default()
-            },
+            Command::ClearAll => {
+                Changes { slides: self.take_slide_off(), media: self.live_media.take().is_some(), ..Changes::default() }
+            }
             Command::Clear(_) => Changes::default(),
+            Command::HideWords => {
+                if self.live.is_none() || self.words_hidden {
+                    return Changes::default();
+                }
+                self.words_hidden = true;
+                Changes { slides: true, ..Changes::default() }
+            }
+            Command::ShowAgain if self.words_hidden => {
+                self.words_hidden = false;
+                Changes { slides: true, ..Changes::default() }
+            }
+            Command::ShowAgain => self.show_again(),
             Command::SetOutputEnabled(enabled) => {
                 let changed = enabled != self.output_enabled;
                 self.output_enabled = enabled;
@@ -484,7 +520,8 @@ impl Show {
 
     /// Makes `target` live if it names a real slide that is not disabled, at the place in the
     /// play order given (or the one found for it). A slide already live only moves its place:
-    /// what is on screen doesn't change.
+    /// what is on screen doesn't change, unless its words were hidden, which come back. A slide
+    /// going up forgets the one a clear took off.
     fn go_to(&mut self, target: Option<(SlideRef, Option<usize>)>) -> Changes {
         let Some((target, step)) = target else {
             return Changes::default();
@@ -494,14 +531,39 @@ impl Show {
         }
         let step = step.or_else(|| self.step_of(target));
         self.step = step;
+        let unhidden = std::mem::take(&mut self.words_hidden);
         if self.live == Some(target) {
             self.cursor = Some(target);
-            return Changes::default();
+            return Changes { slides: unhidden, ..Changes::default() };
         }
         self.live = Some(target);
         self.cursor = Some(target);
         self.build_step = 0;
+        self.taken_off = None;
         Changes { slides: true, ..Changes::default() }
+    }
+
+    /// Takes the live slide off the screen (its words hidden or not), and keeps its id for Show
+    /// Again. True when there was one; a clear with nothing up keeps the last one taken off.
+    fn take_slide_off(&mut self) -> bool {
+        self.words_hidden = false;
+        let Some(off) = self.live.take() else { return false };
+        self.taken_off = self.slide_id(off);
+        true
+    }
+
+    /// Puts back the slide the last clear took off, where the cursor has followed it, if it is
+    /// still there and can be shown; otherwise nothing, and it is forgotten either way. Next then
+    /// carries on from it.
+    fn show_again(&mut self) -> Changes {
+        let Some(id) = self.taken_off.take() else { return Changes::default() };
+        let back = self.cursor.filter(|at| self.live.is_none() && self.slide_id(*at) == Some(id));
+        self.go_to(back.map(|at| (at, None)))
+    }
+
+    /// The id of the slide at a place, if there is one.
+    fn slide_id(&self, at: SlideRef) -> Option<sp_model::Uuid> {
+        self.presentations.get(at.presentation)?.slide(at.slide).map(|(_, slide)| slide.id)
     }
 
     /// False for a slide that has been disabled: it stays in its song but is never shown.

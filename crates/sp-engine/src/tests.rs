@@ -87,6 +87,171 @@ fn clear_then_next_continues() {
 }
 
 #[test]
+fn hide_words_keeps_the_slide_live_and_next_shows_the_words_on_the_next() {
+    let mut s = show();
+    assert_eq!(s.apply(Command::HideWords), Changes::default(), "nothing live, nothing to hide");
+    assert!(!s.words_hidden());
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+    assert!(s.apply(Command::HideWords).slides);
+    assert_eq!(s.live(), at(0, 0), "the slide stays live, and its background with it");
+    assert!(s.words_hidden());
+    assert_eq!(s.apply(Command::HideWords), Changes::default(), "a second Hide the Words does nothing");
+    assert!(s.words_hidden());
+    assert!(s.apply(Command::Next).slides);
+    assert_eq!(s.live(), at(0, 1));
+    assert!(!s.words_hidden(), "the next slide comes with its words");
+}
+
+#[test]
+fn hidden_words_come_back_with_any_slide_put_on_screen_and_go_with_the_slide() {
+    fn hide(s: &mut Show) {
+        s.apply(Command::HideWords);
+        assert!(s.words_hidden());
+    }
+    let mut s = show();
+    // Next on the last slide keeps it, and brings its words back.
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 }));
+    hide(&mut s);
+    assert!(s.apply(Command::Next).slides);
+    assert_eq!((s.live(), s.words_hidden()), (at(0, 2), false));
+    // So does clicking the slide on screen, and Previous goes back with the words.
+    hide(&mut s);
+    assert!(s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 })).slides);
+    assert!(!s.words_hidden());
+    hide(&mut s);
+    s.apply(Command::Previous);
+    assert_eq!((s.live(), s.words_hidden()), (at(0, 1), false));
+    // A command that puts no slide up, or is refused, leaves them hidden.
+    hide(&mut s);
+    assert_eq!(s.apply(Command::GoTo(SlideRef { presentation: 5, slide: 0 })), Changes::default());
+    s.apply(Command::Select(1));
+    s.apply(Command::Clear(Layer::Media));
+    assert_eq!((s.live(), s.words_hidden()), (at(0, 1), true));
+    // A clear takes the slide off, and the hiding with it; Show Again puts it back with its words.
+    assert!(s.apply(Command::Clear(Layer::Slides)).slides);
+    assert!(!s.words_hidden());
+    assert!(s.apply(Command::ShowAgain).slides);
+    assert_eq!((s.live(), s.words_hidden()), (at(0, 1), false));
+    hide(&mut s);
+    assert!(s.apply(Command::ClearAll).slides);
+    assert!(!s.words_hidden());
+    // The slide taken away by an edit: the words are never hidden with nothing live.
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 }));
+    hide(&mut s);
+    s.replace_presentation(0, Arc::new(parse_song_text("One", "A\n")));
+    assert_eq!((s.live(), s.words_hidden()), (None, false));
+    s.apply(Command::GoTo(SlideRef { presentation: 1, slide: 1 }));
+    hide(&mut s);
+    s.slides_shifted(1, 1, false);
+    assert_eq!((s.live(), s.words_hidden()), (None, false));
+    let mut s = show();
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 1 }));
+    hide(&mut s);
+    let without_b = Arc::new(s.presentations()[0].without_slide(1).unwrap());
+    s.replace_presentation_following(0, without_b);
+    assert_eq!((s.live(), s.words_hidden()), (None, false));
+    // A click build left: Next sets it going, and the words come back with it.
+    let mut song = parse_song_text("Song", "A\n\nB\n");
+    let click = sp_model::Build { on_click: true, ..sp_model::Build::of(sp_model::BuildEffect::Dissolve) };
+    song.groups[0].slides[0].objects[0].build_in = Some(click);
+    let mut s = Show::new(vec![Arc::new(song)]);
+    s.apply(Command::Next);
+    hide(&mut s);
+    let changes = s.apply(Command::Next);
+    assert!(changes.builds && changes.slides);
+    assert_eq!((s.live(), s.build_step(), s.words_hidden()), (at(0, 0), 1, false));
+}
+
+#[test]
+fn show_again_brings_back_hidden_words_or_the_slide_a_clear_took() {
+    let mut s = show();
+    assert_eq!(s.apply(Command::ShowAgain), Changes::default(), "nothing has been shown");
+    assert_eq!(s.live(), None);
+    // Hidden words come back; with the words showing, it does nothing.
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+    s.apply(Command::HideWords);
+    assert!(s.apply(Command::ShowAgain).slides);
+    assert_eq!((s.live(), s.words_hidden()), (at(0, 0), false));
+    assert_eq!(s.apply(Command::ShowAgain), Changes::default());
+    // A cleared slide goes back up, and Next carries on from it.
+    s.apply(Command::Clear(Layer::Slides));
+    assert!(s.apply(Command::ShowAgain).slides);
+    assert_eq!(s.live(), at(0, 0));
+    s.apply(Command::Next);
+    assert_eq!(s.live(), at(0, 1));
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+    s.apply(Command::ClearAll);
+    assert!(s.apply(Command::ShowAgain).slides);
+    assert_eq!(s.live(), at(0, 0));
+    // Once it is back, another Show Again does nothing.
+    assert_eq!(s.apply(Command::ShowAgain), Changes::default());
+    // Another slide up and cleared since: that later slide comes back. A clear with nothing
+    // up, or a picture shown meanwhile, doesn't change which.
+    s.add_media(picture("a.png"));
+    s.apply(Command::Clear(Layer::Slides));
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 }));
+    s.apply(Command::Clear(Layer::Slides));
+    s.apply(Command::Clear(Layer::Slides));
+    s.apply(Command::ShowMedia(0));
+    assert!(s.apply(Command::ShowAgain).slides);
+    assert_eq!((s.live(), s.live_media()), (at(0, 2), Some(0)));
+    // In an arrangement, the same chorus comes back, and Next goes on from it.
+    let mut s = arranged();
+    s.apply(Command::GoToStep { presentation: 0, step: 1 });
+    s.apply(Command::ClearAll);
+    s.apply(Command::ShowAgain);
+    assert_eq!((s.live(), s.position()), (at(0, 1), Some((1, 4))));
+    s.apply(Command::Next);
+    assert_eq!(s.live(), at(0, 2), "Verse 2, after the first chorus");
+}
+
+#[test]
+fn show_again_after_the_slides_changed_shows_nothing_wrong() {
+    // The song cleared changed to a shorter one (the call the app makes when a song changes):
+    // its slide is gone, so nothing goes up.
+    let mut s = show();
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 }));
+    s.apply(Command::Clear(Layer::Slides));
+    s.replace_presentation(0, Arc::new(parse_song_text("One", "A\n")));
+    assert_eq!(s.apply(Command::ShowAgain), Changes::default());
+    assert_eq!(s.live(), None);
+    // Another song, or Bible passage, in its place, as long: its slide there was never shown.
+    let mut s = show();
+    let before = s.presentations()[0].clone();
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 1 }));
+    s.apply(Command::Clear(Layer::Slides));
+    s.replace_presentation(0, Arc::new(parse_song_text("Other", "X\n\nY\n\nZ\n")));
+    assert_eq!(s.apply(Command::ShowAgain), Changes::default());
+    assert_eq!(s.live(), None);
+    // That Show Again let go of it: the first song back in its place shows nothing either.
+    s.replace_presentation(0, before.clone());
+    assert_eq!(s.apply(Command::ShowAgain), Changes::default());
+    // A slide taken out before it: the same slide goes back, at its new place.
+    let mut s = Show::new(vec![before.clone()]);
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 1 }));
+    s.apply(Command::Clear(Layer::Slides));
+    s.replace_presentation_following(0, Arc::new(before.without_slide(0).unwrap()));
+    assert!(s.apply(Command::ShowAgain).slides);
+    assert_eq!(s.live(), at(0, 0));
+    assert_eq!(s.live_slide().unwrap().1.objects[0].as_text(), Some("B"));
+    // The slide itself taken out, or switched off: nothing goes up.
+    let mut s = Show::new(vec![before.clone()]);
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 1 }));
+    s.apply(Command::Clear(Layer::Slides));
+    s.replace_presentation_following(0, Arc::new(before.without_slide(1).unwrap()));
+    assert_eq!(s.apply(Command::ShowAgain), Changes::default());
+    assert_eq!(s.live(), None);
+    let mut s = Show::new(vec![before.clone()]);
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 1 }));
+    s.apply(Command::Clear(Layer::Slides));
+    let mut off = (*before).clone();
+    off.groups[0].slides[1].enabled = false;
+    s.replace_presentation(0, Arc::new(off));
+    assert_eq!(s.apply(Command::ShowAgain), Changes::default());
+    assert_eq!(s.live(), None);
+}
+
+#[test]
 fn clear_on_the_last_slide_then_next_shows_it_again() {
     let mut s = show();
     s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 }));
@@ -174,7 +339,16 @@ fn output_toggle() {
 #[test]
 fn empty_show_never_panics() {
     let mut s = Show::new(vec![]);
-    for c in [Command::Next, Command::Previous, Command::First, Command::Last, Command::ClearAll, Command::Select(0)] {
+    for c in [
+        Command::Next,
+        Command::Previous,
+        Command::First,
+        Command::Last,
+        Command::ClearAll,
+        Command::Select(0),
+        Command::HideWords,
+        Command::ShowAgain,
+    ] {
         assert_eq!(s.apply(c), Changes::default());
     }
 }
