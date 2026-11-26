@@ -551,6 +551,53 @@ fn starts_answers_and_quits_cleanly() {
     run.sp(&["status"]).ok.then(|| panic!("a copy still answers after quitting{}", run.context()));
 }
 
+/// The operator's window's surface is set up again at the window's size whenever the two differ,
+/// which waits for the GPU to come idle and is lost when the screens' thread hands in work at
+/// that moment. A lost set-up left the window drawing for its own size onto a surface of the
+/// size before, which the GPU refused on every frame from then on (seen on Windows, where a
+/// new window takes its size a moment after it opens). The testing aid starts the surface
+/// smaller than the window and loses the next twenty set-ups: more than a new window's first
+/// events bring (it is told its size a few times, and each time set its surface up again, which
+/// hid a lost set-up on a Mac).
+#[test]
+fn a_window_whose_surface_set_up_is_lost_draws_nothing_wrong_and_follows_its_size_after() {
+    let Some(run) = Run::new("a_window_whose_surface_set_up_is_lost_draws_nothing_wrong_and_follows_its_size_after")
+    else {
+        return;
+    };
+    let copy = run.start(&[("SOFTPRESENTER_SURFACE_RACE", "20")]);
+    // Something to draw, until the set-ups are all lost, one has worked and a frame was drawn.
+    let said = |what: &str| run.log().contains(what);
+    let began = Instant::now();
+    let (followed, drew) = loop {
+        copy.ok(&["go", "Sample song"]);
+        copy.ok(&["next"]);
+        copy.ok(&["clear", "all"]);
+        let followed = said("Testing aid: the operator's window's surface follows its window again");
+        let drew = said("Testing aid: the operator's window was drawn at");
+        // A window that is given no picture (below) still sets its surface up; a little longer
+        // is waited for its first frame.
+        let within = if followed { Duration::from_secs(5) } else { Duration::from_secs(60) };
+        if drew || began.elapsed() > within {
+            break (followed, drew);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let quitted = copy.quit();
+    let lost = quitted.log.matches("Testing aid: a set-up of the operator's window's surface was lost").count();
+    assert_eq!(lost, 20, "the twenty set-ups were lost, each tried again at the next frame{}", run.context());
+    assert!(followed, "the surface was set up at the window's size in the end{}", run.context());
+    quitted.assert_clean(&run);
+    if !drew {
+        // A Mac gives a window covered by others no picture to draw into, and a quiet copy's
+        // windows open behind everything.
+        say_skipped(
+            "the frames after a lost set-up",
+            "the copy's window was given no picture to draw into (covered, or the display is asleep)",
+        );
+    }
+}
+
 #[test]
 fn a_run_that_was_closed_from_outside_is_said_once_at_the_next_start() {
     let Some(run) = Run::new("a_run_that_was_closed_from_outside_is_said_once_at_the_next_start") else { return };

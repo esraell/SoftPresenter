@@ -1302,7 +1302,9 @@ fn slow_present(asked: &str, name: &str) -> Option<Duration> {
 /// the GPU to come idle: work the other thread hands in at that moment makes it fail ("Failed to
 /// wait for GPU to come idle"), mostly as the app starts. That is only a race, so it is tried
 /// again a few times, a moment apart, and if it still loses, the next frame tries again; it is
-/// written as an event, not a problem.
+/// written as an event, not a problem. A set-up that lost leaves the surface as it was, at the
+/// size before, so whoever calls must not draw for the new size until this says it worked: the
+/// screens keep `Target::configured`, the operator's windows `surface_setup::SetUp`.
 pub(crate) fn configure(
     device: &wgpu::Device,
     surface: &wgpu::Surface<'static>,

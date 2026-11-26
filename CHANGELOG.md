@@ -5,6 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- The operator's window (and Screens and Settings) could stop being drawn at its own size after its size changed while the screens were busy drawing, until it was resized again; the log then filled with graphics errors. It now catches up with its size by itself.
 - On Windows, the questions with three answers showed Yes, No and Cancel instead of their own words: Import a Library Folder's "A Folder…" and "Files…", a song pack's "Replace", "Keep Both" and "Skip", and Export's "Include Videos" and "Leave Them Out". They show their own words now.
 - A SoftProjector songbook kept as text that was cut short while it was copied or downloaded (it ends part way through a song) used to come in quietly, its last song's words cut off. It now comes in without that song, and a notice says the file was cut short and the songs after it are missing.
 - While a window for choosing files was open (Add in the media bin or the Audio tab, Import, Export, Install from File…), SoftPresenter stood still until it was closed: a video dragged from that window onto the media bin came in only once the window was closed, and the phone remote and other commands waited. SoftPresenter now goes on while it is open, and what you drag from it comes in at once. On Windows, clicking Add again while it is open brings it back in front.

@@ -88,6 +88,7 @@ mod stage;
 mod stage_editor;
 mod stall;
 mod studio;
+mod surface_setup;
 mod sweep;
 mod system_language;
 mod theme_cli;
@@ -342,7 +343,8 @@ fn open_panel_window(
         alpha_mode: wgpu::CompositeAlphaMode::Auto,
         view_formats: vec![],
     };
-    surface.configure(&running.gpu.device, &config);
+    let set_up =
+        surface_setup::SetUp::new(config, |config| surface_setup::set_up(&running.gpu.device, &surface, config));
     let ctx = egui::Context::default();
     studio::apply_style(&ctx);
     let state = egui_winit::State::new(
@@ -358,7 +360,7 @@ fn open_panel_window(
         kind,
         window,
         surface,
-        config,
+        set_up,
         ctx,
         state,
         renderer,
@@ -1756,7 +1758,9 @@ fn capture(
 struct UiTarget<'a> {
     window: &'a Window,
     surface: &'a wgpu::Surface<'static>,
-    config: &'a wgpu::SurfaceConfiguration,
+    /// How the surface is set up. A frame is drawn only while it is set up at the size the
+    /// frame is made for (see `surface_setup`).
+    set_up: &'a mut surface_setup::SetUp,
     renderer: &'a mut egui_wgpu::Renderer,
     ctx: &'a egui::Context,
     label: &'static str,
@@ -1772,7 +1776,7 @@ fn paint_ui(
     target: UiTarget<'_>,
     mut full: egui::FullOutput,
 ) -> (Vec<egui::ClippedPrimitive>, egui_wgpu::ScreenDescriptor, repaints::PaintTimes) {
-    let UiTarget { window, surface, config, renderer, ctx, label, offscreen } = target;
+    let UiTarget { window, surface, set_up, renderer, ctx, label, offscreen } = target;
     let mut times = repaints::PaintTimes::default();
     let mut step = Instant::now();
     let mut lap = |into: &mut Duration| {
@@ -1788,22 +1792,32 @@ fn paint_ui(
         }
     }
     let screen = egui_wgpu::ScreenDescriptor {
-        size_in_pixels: offscreen.unwrap_or([config.width, config.height]),
+        size_in_pixels: offscreen.unwrap_or([set_up.size().0, set_up.size().1]),
         pixels_per_point: full.pixels_per_point,
     };
     let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     let extra = renderer.update_buffers(&gpu.device, &gpu.queue, &mut encoder, &jobs, &screen);
     lap(&mut times.upload);
-    let next = offscreen.is_none().then(|| output::next_texture(surface));
+    // A surface whose last set-up was lost still has the size before (or none): nothing is
+    // drawn into it, and it is set up again before the next frame.
+    // (Whoever draws the window has set its next drawing a frame from now, so the set-up is
+    // tried again then: no sooner, as each try waits for the GPU the screens draw with.)
+    let next = (offscreen.is_none() && set_up.drawable()).then(|| output::next_texture(surface));
     lap(&mut times.acquire);
     let frame = match next {
-        // Drawn off the window: only into the capture's own picture.
+        // Drawn off the window (only into the capture's own picture), or not set up.
         None => None,
         Some(Some(wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame))) => {
             Some(frame)
         }
         Some(Some(wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost) | None) => {
-            output::configure(&gpu.device, surface, config);
+            set_up.again(|config| surface_setup::set_up(&gpu.device, surface, config));
+            window.request_redraw();
+            None
+        }
+        // The surface says its set-up is not valid.
+        Some(Some(wgpu::CurrentSurfaceTexture::Validation)) => {
+            set_up.lost();
             window.request_redraw();
             None
         }
@@ -1833,6 +1847,7 @@ fn paint_ui(
         lap(&mut times.submit);
         gpu.queue.present(frame);
         lap(&mut times.present);
+        surface_setup::race_aid_drew(screen.size_in_pixels);
     } else {
         // No frame to draw into (the window is hidden or covered). The interface's data for
         // this frame has already been handed to the GPU queue, and it stays in memory until
@@ -1894,7 +1909,8 @@ struct PanelWindow {
     kind: Panel,
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
-    config: wgpu::SurfaceConfiguration,
+    /// How its surface is set up (see `surface_setup`).
+    set_up: surface_setup::SetUp,
     ctx: egui::Context,
     state: egui_winit::State,
     renderer: egui_wgpu::Renderer,
@@ -1910,7 +1926,8 @@ struct PanelWindow {
 struct Running {
     home_window: repaints::HomeWindow,
     home_surface: wgpu::Surface<'static>,
-    home_config: wgpu::SurfaceConfiguration,
+    /// How the home window's surface is set up (see `surface_setup`).
+    home_set_up: surface_setup::SetUp,
     /// A new size for the home window while its edge is being dragged, and when it last changed.
     /// Setting a window's drawing surface to a new size waits for everything the GPU is doing,
     /// the screens' pictures included, so it is done once the size has settled, never on each
@@ -2514,6 +2531,12 @@ impl App {
         let output = OutputHandle::spawn(gpu.device.clone(), gpu.queue.clone(), self.theme.clone(), waker)?;
 
         let size = home_window.inner_size();
+        // Testing aid: SOFTPRESENTER_SURFACE_RACE (see `surface_setup::race_aid_asked`).
+        let size = if surface_setup::race_aid_asked() > 0 {
+            winit::dpi::PhysicalSize::new(size.width / 2, size.height / 2)
+        } else {
+            size
+        };
         let home_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: home_format,
@@ -2525,7 +2548,8 @@ impl App {
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
         };
-        home_surface.configure(&gpu.device, &home_config);
+        let home_set_up =
+            surface_setup::SetUp::new(home_config, |config| surface_setup::set_up(&gpu.device, &home_surface, config));
 
         let egui_ctx = egui::Context::default();
         studio::apply_style(&egui_ctx);
@@ -2559,7 +2583,7 @@ impl App {
         Ok(Some(Running {
             home_window: repaints::HomeWindow::new(home_window),
             home_surface,
-            home_config,
+            home_set_up,
             home_resize: None,
             home_resize_held_back: false,
             screen_windows: Vec::new(),
@@ -9427,7 +9451,7 @@ impl App {
         let Some(running) = self.running.as_mut() else { return };
         let frames = running.frames;
         let inner = running.home_window.inner_size();
-        let config = (running.home_config.width, running.home_config.height);
+        let config = running.home_set_up.size();
         let Ok(mut guard) = AID.lock() else { return };
         // Starts after the first few frames, once the window has settled.
         let aid = guard.get_or_insert(Aid { step: 0, at: Instant::now(), drawn: 0, matching: 0 });
@@ -9571,7 +9595,7 @@ impl App {
         let Running {
             home_window,
             home_surface,
-            home_config,
+            home_set_up,
             home_resize,
             home_resize_held_back,
             gpu,
@@ -9607,22 +9631,21 @@ impl App {
         // The surface always follows the window. A size the window took without a resize being
         // handled (moved onto the work area as it opened, on a slow computer) left egui drawing
         // for one size onto a surface of another, which the GPU refuses on every frame; the
-        // surface is set up again at once, as for a size that has settled.
+        // surface is set up again at once, as for a size that has settled. So is one whose last
+        // set-up was lost to work the screens' thread handed the GPU at that moment: it still
+        // has the size before, and nothing is drawn into it until a set-up works (see
+        // `surface_setup`).
         let inner = home_window.inner_size();
-        if home_resize.is_none()
-            && inner.width > 0
-            && inner.height > 0
-            && (inner.width, inner.height) != (home_config.width, home_config.height)
-        {
+        if home_resize.is_none() && home_set_up.behind((inner.width, inner.height)) {
             *home_resize = Some((inner, Instant::now().checked_sub(SETTLE).unwrap_or_else(Instant::now)));
         }
         if let Some((size, changed)) = *home_resize {
             let settled = changed.elapsed() >= SETTLE;
             if !*home_resize_held_back || settled {
                 let configuring = Instant::now();
-                home_config.width = size.width;
-                home_config.height = size.height;
-                output::configure(&gpu.device, home_surface, home_config);
+                home_set_up.follow((size.width, size.height), |config| {
+                    surface_setup::set_up(&gpu.device, home_surface, config)
+                });
                 if settled {
                     *home_resize_held_back = false;
                 } else if configuring.elapsed() > LIVE_RESIZE_WAIT {
@@ -9631,7 +9654,7 @@ impl App {
                 *home_resize = None;
             } else {
                 let points = home_window.scale_factor() as f32 * egui_ctx.zoom_factor();
-                let (w, h) = (home_config.width as f32 / points, home_config.height as f32 / points);
+                let (w, h) = (home_set_up.size().0 as f32 / points, home_set_up.size().1 as f32 / points);
                 raw_input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w, h)));
                 home_window.request_redraw();
             }
@@ -9785,6 +9808,9 @@ impl App {
         // An animation is drawn at most a frame a screen refresh apart. A window macOS isn't
         // showing does not wait for the screen, and would otherwise be drawn thousands of times
         // a second while the preview fades.
+        // A surface whose set-up was lost is set up again at the next drawing, a frame from
+        // now: as often as a drag of the window's edge sets it up, and no more.
+        let delay = if home_set_up.drawable() { delay } else { Duration::ZERO };
         let delay = delay.max(FRAME);
         // Testing aid: redraw continuously, to check that memory stays flat under load.
         let delay = if std::env::var_os("SOFTPRESENTER_STRESS").is_some() { Duration::ZERO } else { delay };
@@ -9793,7 +9819,7 @@ impl App {
         let target = UiTarget {
             window: home_window,
             surface: home_surface,
-            config: home_config,
+            set_up: home_set_up,
             renderer: egui_renderer,
             ctx: egui_ctx,
             label: "home window",
@@ -10336,7 +10362,7 @@ impl App {
                 }
             }
             if running.frames >= CAPTURE_AT && waited && !self.capture_done {
-                match capture(gpu, egui_renderer, &jobs, &screen, home_config.format, path) {
+                match capture(gpu, egui_renderer, &jobs, &screen, home_set_up.config().format, path) {
                     Ok(()) => println!("saved {}", path.display()),
                     Err(e) => {
                         eprintln!("Could not save the picture: {e}");
@@ -10396,6 +10422,11 @@ impl App {
             return Vec::new();
         };
         let settling = follow_panel_zoom(panel, home_state.zoom_now);
+        // The surface follows the window, and one whose last set-up was lost is set up again
+        // (see `surface_setup`); until that works nothing is drawn into it.
+        let inner = panel.window.inner_size();
+        let (surface, device) = (&panel.surface, &gpu.device);
+        panel.set_up.follow((inner.width, inner.height), |config| surface_setup::set_up(device, surface, config));
         let raw_input = panel.state.take_egui_input(&panel.window);
         let mut commands = Vec::new();
         let kind = panel.kind;
@@ -10406,11 +10437,13 @@ impl App {
         panel.state.handle_platform_output(&panel.window, std::mem::take(&mut full.platform_output));
         let delay = full.viewport_output.get(&egui::ViewportId::ROOT).map_or(Duration::MAX, |v| v.repaint_delay);
         let delay = settling.map_or(delay, |wait| delay.min(wait));
+        // A surface whose set-up was lost is set up again at the next drawing, a frame from now.
+        let delay = if panel.set_up.drawable() { delay } else { Duration::ZERO };
         panel.next_repaint = Instant::now().checked_add(delay.max(FRAME));
         let target = UiTarget {
             window: &panel.window,
             surface: &panel.surface,
-            config: &panel.config,
+            set_up: &mut panel.set_up,
             renderer: &mut panel.renderer,
             ctx: &panel.ctx,
             label: "panel window",
@@ -10426,8 +10459,14 @@ impl App {
         };
         if let Some(path) = &self.options.capture_home
             && panel.frames >= 2
-            && let Err(e) =
-                capture(gpu, &panel.renderer, &jobs, &screen, panel.config.format, &path.with_extension(ending))
+            && let Err(e) = capture(
+                gpu,
+                &panel.renderer,
+                &jobs,
+                &screen,
+                panel.set_up.config().format,
+                &path.with_extension(ending),
+            )
         {
             eprintln!("Could not save the {} window: {e}", kind.title());
         }
@@ -11803,12 +11842,8 @@ impl ApplicationHandler<AppEvent> for App {
                     running.panels.remove(at);
                     running.home_window.request_redraw();
                 }
-                WindowEvent::Resized(size) => {
-                    if size.width > 0 && size.height > 0 {
-                        panel.config.width = size.width;
-                        panel.config.height = size.height;
-                        output::configure(&running.gpu.device, &panel.surface, &panel.config);
-                    }
+                // Its surface takes the new size before the next frame (`draw_panel`).
+                WindowEvent::Resized(_) => {
                     panel.window.request_redraw();
                 }
                 WindowEvent::RedrawRequested => {
