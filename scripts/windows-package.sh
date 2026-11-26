@@ -17,13 +17,25 @@ target=x86_64-pc-windows-gnu
 root=target/windows-package
 folder=$root/SoftPresenter-Windows
 
-RUSTFLAGS="--remap-path-prefix=$HOME=~" cargo build --release --target "$target" -p sp-app
+# The program is built in a folder of its own outside the home folder. The import libraries the
+# linker makes for Windows' DLLs are named after the folder they are made in, and those names stay
+# in the program ("_head__Users_<name>_…"), where --remap-path-prefix doesn't reach them. The
+# folder must be this user's own (made private here), or the build stops. Each checkout has its
+# own (named by a hash of where it is, which says nothing of the path), as two must never share one.
+build=${SOFTPRESENTER_WINDOWS_BUILD:-/private/tmp/softpresenter-windows-build-$(id -u)-$(pwd | shasum | cut -c1-8)}
+mkdir -p "$build"
+chmod 700 "$build"
+if [ "$(stat -f %u "$build")" != "$(id -u)" ]; then
+    echo "error: $build belongs to another user; set SOFTPRESENTER_WINDOWS_BUILD to a folder of your own" >&2
+    exit 1
+fi
+RUSTFLAGS="--remap-path-prefix=$HOME=~" CARGO_TARGET_DIR="$build" cargo build --release --target "$target" -p sp-app
 scripts/build-ffmpeg.sh windows
 
 rm -rf "$folder" "$root/SoftPresenter-Windows.zip"
 mkdir -p "$folder/Backgrounds" "$folder/Licences"
 # The program's own name for itself isn't relied on; it is called what people will see.
-cp "target/$target/release/softpresenter.exe" "$folder/SoftPresenter.exe"
+cp "$build/$target/release/softpresenter.exe" "$folder/SoftPresenter.exe"
 cp target/ffmpeg-windows/bin/ffmpeg.exe target/ffmpeg-windows/bin/ffprobe.exe "$folder/"
 cp assets/backgrounds/*.jpg assets/backgrounds/*.mp4 "$folder/Backgrounds/"
 
@@ -94,9 +106,11 @@ TEXT
 sed 's/$/\r/' "$folder/READ ME.txt" >"$folder/READ ME.crlf"
 mv "$folder/READ ME.crlf" "$folder/READ ME.txt"
 
-# A package that has this computer's home folder written into it must not leave.
+# A package that has this computer's home folder written into it must not leave: as a path, or
+# with its slashes made underscores, as names made from a path are.
+home_named=$(printf %s "$HOME" | tr / _)
 for file in SoftPresenter.exe ffmpeg.exe ffprobe.exe; do
-    count=$(strings "$folder/$file" | grep -c "$HOME" || true)
+    count=$(strings "$folder/$file" | grep -c -e "$HOME" -e "$home_named" || true)
     echo "home folder in $file: $count"
     if [ "$count" != 0 ]; then
         echo "error: $file has a folder of this computer written into it" >&2
