@@ -147,6 +147,17 @@ fn spaced_in(ctx: &egui::Context, text: &str, font: FontId, ink: Color32, spacin
     ctx.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
+/// [`spaced`] on one line at most `room` wide: words that are wider are cut short with "…"
+/// after the last letter that fits, never in the middle of one, and the galley says so
+/// (`elided`), so the whole of them can be shown on hover.
+fn spaced_within(ui: &egui::Ui, text: &str, font: FontId, ink: Color32, spacing: f32, room: f32) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::default();
+    let format = egui::TextFormat { font_id: font, color: ink, extra_letter_spacing: spacing, ..Default::default() };
+    job.append(text, 0.0, format);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(room.max(0.0));
+    ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
+}
+
 /// The words of a place with a fixed room (a layer key, a bar's one line): the language's usual
 /// words when they fit in `room`, otherwise their short form (`key.short` in the table), so
 /// nothing shrinks and nothing ends in "...". `capitals` sets them in capitals, as the small
@@ -2754,7 +2765,8 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         let ink = if state.chooser_open { TEXT_DIM } else { TEXT };
         let clip = Rect::from_min_max(pos2(row.min.x + 32.0, row.min.y), pos2(chevron.min.x - 8.0, row.max.y));
         // All Songs is the app's own words, so in a language where they are long it has a short
-        // form; a library or playlist is a name of content and is cut to fit.
+        // form; a library or playlist is a name of content and is cut short with "…" to fit,
+        // and shown whole on hover.
         let title = if !state.playlist_open
             && state.library_shown.and_then(|id| state.libraries.iter().find(|library| library.id == id)).is_none()
         {
@@ -2762,13 +2774,15 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         } else {
             source_name(state)
         };
-        let galley = spaced(ui, &title, semibold(19.0), ink, -0.38);
+        let galley = spaced_within(ui, &title, semibold(19.0), ink, -0.38, clip.width());
+        let cut = galley.elided;
         ui.painter().with_clip_rect(clip).galley(pos2(clip.min.x, middle - galley.size().y / 2.0), galley, ink);
         if crate::keys::tags_shown(state) {
             let tag_at = Rect::from_min_max(pos2(chevron.min.x - 30.0, name.rect.min.y + 6.0), chevron.max);
             crate::keys::corner_tag(ui.painter(), tag_at, &crate::keys::with_modifier("P"));
         }
         let hint = crate::keys::hint(t("left.choose", "Choose a playlist or a library"), "P", false);
+        let hint = if cut { format!("{title}\n{hint}") } else { hint };
         if name.on_hover_text(hint).clicked() {
             state.chooser_open = !state.chooser_open;
         }
@@ -5333,12 +5347,7 @@ fn next_line(ui: &egui::Ui, state: &mut HomeState, rect: Rect) {
         *readout = readout.union(rect);
     }
     let Some(words) = state.next_line.as_deref() else { return };
-    let mut job = egui::text::LayoutJob::single_section(
-        words.to_uppercase(),
-        egui::TextFormat { font_id: fixed(12.0), color: TEXT_FAINT, extra_letter_spacing: 0.7, ..Default::default() },
-    );
-    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width());
-    let line = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
+    let line = spaced_within(ui, &words.to_uppercase(), fixed(12.0), TEXT_FAINT, 0.7, rect.width());
     let cut = line.elided;
     ui.painter().galley(pos2(rect.min.x, rect.center().y - line.size().y / 2.0), line, TEXT_FAINT);
     let response = ui.interact(rect, ui.scope_id().with("next line"), Sense::hover());
@@ -5468,18 +5477,6 @@ fn preview_block(
     // A key refused is said under the readout (see `notices::paint_cue`).
     state.notices.readout = Some(readout);
     let at = show.live();
-    // A click on it goes to the slide on screen: opens its item and brings the slide into view
-    // (the menu bar's Go to the Slide on Screen, for every system).
-    if at.is_some() {
-        let go = ui.interact(readout, ui.scope_id().with("readout go"), Sense::click());
-        if go
-            .on_hover_text(t("right.preview.go_live", "Go to the slide on screen"))
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .clicked()
-        {
-            state.menu_asked = Some(crate::menubar::Action::ShowLiveSong);
-        }
-    }
     let song = at.and_then(|at| show.presentations().get(at.presentation));
     // The place in the song's play order, which an arrangement can make longer.
     let place = match (show.position(), at, song) {
@@ -5525,18 +5522,26 @@ fn preview_block(
     let painter = ui.painter().with_clip_rect(words);
     let label = fixed(12.0);
     // What shows, bright, then whose it is, dim: the slide's group and its song, or the
-    // announcements and what plays there.
-    let what_and_whose = |what: &str, whose: &str| {
-        let what = spaced(ui, &what.to_uppercase(), fixed_semibold(12.0), TEXT, 0.7);
-        let after = pos2(words.min.x + what.size().x, first_y);
-        painter.galley(pos2(words.min.x, first_y - what.size().y / 2.0), what, TEXT);
-        let whose = spaced(ui, &format!(" \u{b7} {}", whose.to_uppercase()), label.clone(), SCREEN_DIM, 0.7);
-        painter.galley(pos2(after.x, first_y - whose.size().y / 2.0), whose, SCREEN_DIM);
+    // announcements and what plays there. Too long for the room, they are cut short with "…"
+    // (whose it is in what room the first leaves), and the whole line is given back to show on
+    // hover.
+    let what_and_whose = |what: &str, whose: &str| -> Option<String> {
+        let room = words.width();
+        let shown = spaced_within(ui, &what.to_uppercase(), fixed_semibold(12.0), TEXT, 0.7, room);
+        let (wide, mut cut) = (shown.size().x, shown.elided);
+        painter.galley(pos2(words.min.x, first_y - shown.size().y / 2.0), shown, TEXT);
+        let after = format!(" \u{b7} {}", whose.to_uppercase());
+        if !cut {
+            let shown = spaced_within(ui, &after, label.clone(), SCREEN_DIM, 0.7, room - wide);
+            cut = shown.elided;
+            painter.galley(pos2(words.min.x + wide, first_y - shown.size().y / 2.0), shown, SCREEN_DIM);
+        }
+        cut.then(|| format!("{what} \u{b7} {whose}"))
     };
-    match (at, song, &state.announcement_live) {
+    let whole = match (at, song, &state.announcement_live) {
         (Some(at), Some(song), _) => {
             let group = song.slides().nth(at.slide).map(|(group, _)| group.name.as_str()).unwrap_or_default();
-            what_and_whose(group, &song.title);
+            what_and_whose(group, &song.title)
         }
         // With no slide on screen, the announcements are what the audience sees: the song, or the
         // picture or video on now (by its name in the media strip, a media playlist's too).
@@ -5544,7 +5549,7 @@ fn preview_block(
             let item =
                 state.announcement_media.as_ref().and_then(|shown| show.media().iter().find(|m| m.id == shown.item));
             let playing = item.map_or_else(|| playing.clone(), |item| crate::media::label(&item.name, show.media()));
-            what_and_whose(t("right.preview.announcements", "Announcements"), &playing);
+            what_and_whose(t("right.preview.announcements", "Announcements"), &playing)
         }
         _ => {
             let words_now = if anything_shows {
@@ -5554,7 +5559,21 @@ fn preview_block(
             };
             let line = spaced(ui, &words_now.to_uppercase(), label.clone(), SCREEN_DIM, 0.7);
             painter.galley(pos2(words.min.x, first_y - line.size().y / 2.0), line, SCREEN_DIM);
+            None
         }
+    };
+    // A click on it goes to the slide on screen: opens its item and brings the slide into view
+    // (the menu bar's Go to the Slide on Screen, for every system).
+    let id = ui.scope_id().with("readout go");
+    if at.is_some() {
+        let go_live = t("right.preview.go_live", "Go to the slide on screen");
+        let hint = whole.map_or_else(|| go_live.to_owned(), |whole| format!("{whole}\n{go_live}"));
+        let go = ui.interact(readout, id, Sense::click());
+        if go.on_hover_text(hint).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            state.menu_asked = Some(crate::menubar::Action::ShowLiveSong);
+        }
+    } else if let Some(whole) = whole {
+        ui.interact(readout, id, Sense::hover()).on_hover_text(whole);
     }
     if let Some(second) = second {
         let line = spaced(ui, &second, label, SCREEN_DIM, 0.7);
@@ -8026,6 +8045,90 @@ pub mod tests {
         assert!(!words.iter().any(|w| w == "Clear"), "the Announce key clears it, not a key of its own: {words:?}");
         assert_eq!(state.announcement_video_request, Some(VideoRequest::TogglePause), "asked of its own player");
         assert_eq!(state.video_request, None, "not of the media layer's");
+    }
+
+    #[test]
+    fn a_long_library_name_and_song_in_the_readout_end_in_an_ellipsis_and_show_whole_on_hover() {
+        // Every line a frame drew: its words in full, as drawn (one cut short ends in "…"), and
+        // where.
+        fn lines(output: egui::FullOutput) -> Vec<(String, String, Rect)> {
+            fn walk(shape: &egui::Shape, into: &mut Vec<(String, String, Rect)>) {
+                match shape {
+                    egui::Shape::Text(text) => into.push((
+                        text.galley.text().to_owned(),
+                        text.galley.rows.iter().map(|row| row.text()).collect(),
+                        text.visual_bounding_rect(),
+                    )),
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                    _ => {}
+                }
+            }
+            let mut into = Vec::new();
+            output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut into));
+            output.drop_without_applying_deltas();
+            into
+        }
+        // The left column's heading: a library's name too long for it.
+        let long = "Songs for the Evening Service and Every Sunday Morning";
+        let show = three_songs();
+        let mut state = state_with_a_library(true);
+        state.libraries[0].name = long.to_owned();
+        let ctx = styled();
+        ctx.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let frame = |state: &mut HomeState, events: Vec<Event>| {
+            lines(drawn(&ctx, events, |ui| library(ui, &show, state, &mut Vec::new())))
+        };
+        let drawn_lines = frame(&mut state, vec![]);
+        let (_, heading, place) = drawn_lines.iter().find(|(whole, ..)| whole == long).expect("the name").clone();
+        let kept =
+            heading.strip_suffix('\u{2026}').unwrap_or_else(|| panic!("cut short with an ellipsis: {heading:?}"));
+        assert!(
+            long.starts_with(kept) && kept.len() > 8 && kept.len() < long.len(),
+            "after whole letters: {heading:?}"
+        );
+        // Hovered, the whole name shows, over what a click does.
+        let choose = crate::keys::hint("Choose a playlist or a library", "P", false);
+        let hovered =
+            (0..3).flat_map(|_| frame(&mut state, vec![Event::PointerMoved(place.center())])).collect::<Vec<_>>();
+        assert!(hovered.iter().any(|(whole, ..)| *whole == format!("{long}\n{choose}")), "{hovered:?}");
+        // A name that fits is as it was: whole, and its hover only says what a click does.
+        state.libraries[0].name = "Hymns".to_owned();
+        let drawn_lines = frame(&mut state, vec![]);
+        assert!(drawn_lines.iter().any(|(whole, shown, _)| whole == "Hymns" && shown == "Hymns"), "{drawn_lines:?}");
+        let hovered =
+            (0..3).flat_map(|_| frame(&mut state, vec![Event::PointerMoved(place.center())])).collect::<Vec<_>>();
+        assert!(hovered.iter().any(|(whole, ..)| *whole == choose), "{hovered:?}");
+        assert!(!hovered.iter().any(|(whole, ..)| whole.starts_with("Hymns\n")), "{hovered:?}");
+
+        // The readout under the preview: the slide's group, then a song too long for the room.
+        let title = "The Long Road Home Through the Quiet Valley";
+        let mut show = Show::new(vec![Arc::new(sp_model::parse_song_text(title, "One\n\nTwo\n"))]);
+        show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        let group = show.presentations()[0].slides().next().map(|(group, _)| group.name.clone()).expect("a group");
+        let mut state = HomeState::default();
+        let words = preview_frames(&show, &mut state, &[vec![]]);
+        let whose = words.iter().find(|w| w.starts_with(" \u{b7} THE LONG")).expect("the song's name");
+        assert!(whose.ends_with('\u{2026}') && !whose.contains("VALLEY"), "cut short with an ellipsis: {whose:?}");
+        assert!(words.iter().any(|w| *w == group.to_uppercase()), "the group whole: {words:?}");
+        // Resting the pointer on it says the whole of it, over what a click does.
+        let over = pos2(200.0, 263.0);
+        let mut frames = vec![vec![Event::PointerMoved(over)]];
+        frames.extend((0..9).map(|_| vec![]));
+        let words = preview_frames(&show, &mut state, &frames);
+        let said = format!("{group} \u{b7} {title}");
+        assert!(
+            words.iter().any(|w| w.starts_with(&said) && w.ends_with("Go to the slide on screen")),
+            "{said:?} on hover: {words:?}"
+        );
+        // A short one fits: whole, with no ellipsis, and its hover only says what a click does.
+        let show = {
+            let mut show = Show::new(vec![Arc::new(sp_model::parse_song_text("Evening", "One\n\nTwo\n"))]);
+            show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+            show
+        };
+        let words = preview_frames(&show, &mut state, &frames);
+        assert!(words.iter().any(|w| w == " \u{b7} EVENING"), "{words:?}");
+        assert!(words.iter().any(|w| w == "Go to the slide on screen"), "{words:?}");
     }
 
     #[test]
