@@ -5,6 +5,12 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.9.0-dev.22 — 25 November 2026 (development build, Windows only)
+
+- On Windows, a video said FFmpeg wasn't on the computer when SoftPresenter.exe was run on its own (from the Desktop, say), away from the FFmpeg that comes beside it. SoftPresenter now also looks for FFmpeg in your own SoftPresenter folder (%LOCALAPPDATA%\SoftPresenter\ffmpeg) and on the search path, and its log says where it looked.
+- The number on the notices button sits in the middle of its circle; on Windows it sat high.
 - The pages of Settings › Integrations (VoxLive, Canva Sync and TimelyChurch) are laid out in the same cards and rows as the rest of Settings: what the service shows first (VoxLive's screens, Canva Sync's sync, TimelyChurch's upcoming services), then the presentation or the connection, then the account. What the hints said only under the pointer is written on the page, and Canva Sync's pages are a strip of numbered pictures with the divider ringed. Nothing they do has changed.
 
 ## 0.9.0-dev.21 — 25 November 2026 (development build)
