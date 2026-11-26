@@ -1025,6 +1025,39 @@ mod tests {
         assert_eq!(tap.mixed.next(), None, "every sample was taken from the mixer");
     }
 
+    /// Runs `work`, and gives with what it returns how late, at the most, a timed wait of
+    /// `wait` (on a channel, as the mix's thread waits) woke on another thread meanwhile: how
+    /// late this computer wakes such a wait now, and so the mix's thread's. How late depends
+    /// on how long the wait is, so the wait is the mix's.
+    fn with_latest_wake<T>(wait: Duration, work: impl FnOnce() -> T) -> (T, Duration) {
+        let done = Arc::new(AtomicBool::new(false));
+        let theirs = done.clone();
+        let waiting = std::thread::spawn(move || {
+            let (_keep, never) = channel::<()>();
+            let mut latest = Duration::ZERO;
+            while !theirs.load(Ordering::Relaxed) {
+                let began = Instant::now();
+                let _ = never.recv_timeout(wait);
+                latest = latest.max(began.elapsed().saturating_sub(wait));
+            }
+            latest
+        });
+        let done_with = work();
+        done.store(true, Ordering::Relaxed);
+        (done_with, waiting.join().unwrap_or_default())
+    }
+
+    /// Says that a part of a test was not judged here and why, where it is seen though the test
+    /// passes (straight to the standard error, which the test harness doesn't hold back), and
+    /// on GitHub as a notice on the run.
+    fn say_skipped(what: &str, why: &str) {
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stderr(), "sp-video: skipped {what}: {why}");
+        if std::env::var_os("GITHUB_ACTIONS").is_some() {
+            let _ = writeln!(std::io::stdout(), "::notice title=Timing not judged::{what}: {why}");
+        }
+    }
+
     struct Heard {
         on: Arc<AtomicBool>,
         blocks: Sender<(Vec<f32>, SystemTime)>,
@@ -1052,37 +1085,82 @@ mod tests {
         feed.push(RATE, 1, Instant::now(), [0.5; 480].into_iter());
         assert!(heard.recv_timeout(ms(100)).is_err());
         // Switched on: blocks come, steadily, silent until something plays.
+        let block = Duration::from_secs_f64(BLOCK as f64 / f64::from(RATE));
+        let switched_on = SystemTime::now();
         on.store(true, Ordering::Relaxed);
         let (first, first_at) = heard.recv_timeout(ms(2000)).unwrap();
+        let came = SystemTime::now();
         assert!(Feed::wanted());
-        // Its time is the computer's clock's, a moment ago.
-        let ago = SystemTime::now().duration_since(first_at).unwrap_or(Duration::MAX);
-        assert!(ago < ms(500), "{ago:?}");
+        // Its time is the computer's clock's, when its first sample was heard: after it was
+        // switched on, and a block's time before it came (it goes once its sound has been
+        // heard), however late the thread woke to send it. (A couple of milliseconds for the
+        // clock's own steps.)
+        assert!(first_at + ms(2) >= switched_on, "its time {first_at:?} is before it was switched on, {switched_on:?}");
+        assert!(
+            first_at + block <= came + ms(2),
+            "its time {first_at:?} is less than a block before it came, {came:?}"
+        );
         assert_eq!(first.len(), BLOCK * 2);
         assert!(first.iter().all(|sample| *sample == 0.0));
-        let began = Instant::now();
-        let mut before = first_at;
-        for _ in 0..25 {
-            let (_, at) = heard.recv_timeout(ms(500)).unwrap();
-            // Each block's time is 20 ms on from the one before, however the thread ran.
-            let step = at.duration_since(before).unwrap_or_default();
-            assert!(step > ms(15) && step < ms(25), "{step:?}");
-            before = at;
+        // A thread held up longer than this gives up what it missed (`Mix::block`, and
+        // `a_mix_held_up_gives_up_what_it_missed_rather_than_send_it_late`).
+        let behind = Duration::from_secs_f64(BEHIND / f64::from(RATE));
+        let ((gave_up, took), late) = with_latest_wake(block, || {
+            let began = Instant::now();
+            let mut before = first_at;
+            let mut gave_up = 0;
+            for _ in 0..25 {
+                let (_, at) = heard.recv_timeout(ms(2000)).unwrap();
+                // Each block's time is 20 ms on from the one before, however late the thread
+                // woke to send it (the blocks due then go at once, one after another); unless
+                // it was held up past `behind`, when the next is the block of a moment ago.
+                // Never anything between.
+                let step = at.duration_since(before).unwrap_or_default();
+                if step >= behind {
+                    gave_up += 1;
+                } else {
+                    assert!(step > ms(15) && step < ms(25), "{step:?}");
+                }
+                before = at;
+            }
+            (gave_up, began.elapsed())
+        });
+        // 25 blocks are half a second of sound, and none goes before its sound has been heard.
+        assert!(took > ms(400), "{took:?}");
+        // Where the thread wakes in time they come at its pace, none given up. Each wake is a
+        // timed wait of up to a block's time, and a block is given up only when one wakes more
+        // than `behind` less a block late: where a wait of a block's time wakes over half that
+        // late (on GitHub's virtual Macs up to 150 ms), the pace is not the mix's doing, and
+        // isn't judged.
+        let paced = took < ms(1500) && gave_up == 0;
+        if !paced && late > (behind - block) / 2 {
+            say_skipped(
+                "listeners_are_handed_the_mix_while_they_want_it_and_nothing_is_copied_while_none_does: the pace",
+                &format!(
+                    "25 blocks took {took:.0?}, {gave_up} of them after a hold-up given up, the thread's waits waking late here (a wait of {block:.0?} woke up to {late:.0?} late)"
+                ),
+            );
+        } else {
+            assert!(
+                paced,
+                "25 blocks took {took:?}, {gave_up} given up (a wait of {block:?} woke up to {late:?} late here)"
+            );
         }
-        // 25 blocks are half a second of sound, in about half a second.
-        let took = began.elapsed();
-        assert!(took > ms(400) && took < ms(1500), "{took:?}");
-        // What is handed over is heard, at its loudness.
+        // What is handed over is heard, at its loudness: half a second of it, so that a
+        // hold-up given up meanwhile can't take all of it.
         feed.set_gain(0.5);
-        feed.push(RATE, 1, Instant::now() + ms(50), [0.5; 4800].into_iter());
-        let sounded = (0..50).any(|_| heard.recv_timeout(ms(500)).unwrap().0.contains(&0.25));
+        feed.push(RATE, 1, Instant::now() + ms(50), [0.5; 24_000].into_iter());
+        let sounded = (0..100).any(|_| heard.recv_timeout(ms(2000)).unwrap().0.contains(&0.25));
         assert!(sounded);
-        // Switched off again: the blocks stop.
+        // Switched off again: once the thread has seen it, the blocks stop.
         on.store(false, Ordering::Relaxed);
-        std::thread::sleep(ms(100));
+        let began = Instant::now();
+        while Feed::wanted() {
+            assert!(began.elapsed() < ms(5000), "the mix's thread never saw nobody wants it");
+            std::thread::sleep(ms(10));
+        }
         while heard.try_recv().is_ok() {}
         assert!(heard.recv_timeout(ms(200)).is_err());
-        assert!(!Feed::wanted());
         drop(listening);
     }
 }
