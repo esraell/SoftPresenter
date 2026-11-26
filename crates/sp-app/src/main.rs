@@ -2295,6 +2295,23 @@ impl App {
             Arc::new(el.create_window(home_attrs).map_err(|e| format!("Could not open the home window: {e}"))?);
         start_steps::mark("window made");
         applog::event("start", &format!("steps: {}", start_steps::said()));
+        // Where the videos' FFmpeg is, or where it was looked for: a tester's copy said FFmpeg
+        // wasn't on the computer, from a folder the log couldn't name.
+        match sp_video::ffmpeg_program() {
+            Some(found) => applog::event("video", &format!("FFmpeg: {}", found.display())),
+            None => {
+                let places = sp_video::ffmpeg_places();
+                let first = places.first().and_then(|place| place.parent()).map(|dir| dir.display().to_string());
+                applog::event(
+                    "video",
+                    &format!(
+                        "FFmpeg was not found: not beside the program ({}), nor in the {} other places looked in",
+                        first.unwrap_or_default(),
+                        places.len().saturating_sub(1)
+                    ),
+                );
+            }
+        }
         // The frame is known now: if the guess at it left the window off the work area, move it.
         if let (Some(work), Ok(at)) = (work, home_window.outer_position()) {
             let size = home_window.outer_size();

@@ -78,6 +78,12 @@ pub fn ffmpeg_program() -> Option<std::path::PathBuf> {
     ffmpeg::tool("ffmpeg")
 }
 
+/// Where FFmpeg is looked for, in order (see `ffmpeg::places`), for the log to say when none is
+/// found.
+pub fn ffmpeg_places() -> Vec<std::path::PathBuf> {
+    ffmpeg::places("ffmpeg")
+}
+
 /// What FFmpeg's probe says a video is: its width, its height and its pictures a second. Runs a
 /// program and waits for it: never on a thread that draws.
 pub fn video_summary(path: &Path) -> Option<(u32, u32, f64)> {

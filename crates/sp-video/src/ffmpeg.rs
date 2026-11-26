@@ -49,16 +49,34 @@ const HARDWARE: Option<&str> = if cfg!(target_os = "macos") {
 /// Where an FFmpeg program is: in the app, then where Homebrew and others put it. An app opened
 /// from the Finder isn't given the shell's search path, so the places are named in full.
 pub fn tool(name: &str) -> Option<PathBuf> {
+    places(name).into_iter().find(|place| place.is_file())
+}
+
+/// The places an FFmpeg program is looked for, in order. First beside the app's own program (and
+/// in a Mac app's Resources), where the app's own FFmpeg is. Then, on Windows, the user's own
+/// `%LOCALAPPDATA%\SoftPresenter\ffmpeg` and the folders on the search path: a tester's copy was
+/// started from a folder without the app's FFmpeg in it, and a video it played said FFmpeg
+/// wasn't on the computer. Elsewhere, where Homebrew and the system put it.
+pub fn places(name: &str) -> Vec<PathBuf> {
     let file = if cfg!(windows) { format!("{name}.exe") } else { name.to_owned() };
     let mut places: Vec<PathBuf> = Vec::new();
     if let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
         places.push(dir.join(&file));
         places.push(dir.join("../Resources").join(&file));
     }
-    for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
-        places.push(Path::new(dir).join(&file));
+    if cfg!(windows) {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            places.push(PathBuf::from(local).join("SoftPresenter").join("ffmpeg").join(&file));
+        }
+        if let Some(path) = std::env::var_os("PATH") {
+            places.extend(std::env::split_paths(&path).filter(|dir| dir.is_absolute()).map(|dir| dir.join(&file)));
+        }
+    } else {
+        for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
+            places.push(Path::new(dir).join(&file));
+        }
     }
-    places.into_iter().find(|place| place.is_file())
+    places
 }
 
 fn shown_name(path: &Path) -> String {
