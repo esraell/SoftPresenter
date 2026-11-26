@@ -84,6 +84,10 @@ struct Importing {
     /// Songs that came in, by source, and those the library had already.
     came: Vec<usize>,
     left_out: usize,
+    /// Where the songs that came in now are in the library, and how many were read again after
+    /// one of them had come in (found in two sources, or twice in one).
+    brought_at: HashSet<usize>,
+    twice: usize,
     problems: Vec<String>,
     /// How many songs pass through (new and here), and how many have.
     expected: usize,
@@ -129,6 +133,7 @@ fn listing(card: &find_songs::Card, ended: Ended) -> (String, serde_json::Value)
                 "songs": source.songs,
                 "new": source.fresh(),
                 "here": source.here,
+                "twice": source.twice,
                 "why": source.why,
                 "ticked": card.ticked.get(at).copied().unwrap_or(false),
             }));
@@ -308,6 +313,8 @@ impl crate::App {
             done: crate::Imported::default(),
             came: vec![0; sources.len()],
             left_out: 0,
+            brought_at: HashSet::new(),
+            twice: 0,
             problems: Vec::new(),
             expected: sources.iter().map(|source| source.songs).sum(),
             taken: 0,
@@ -386,6 +393,7 @@ impl crate::App {
             {
                 let library = importing.names.get(at).cloned();
                 let before = importing.done.titles.len();
+                let landed = importing.done.landed.len();
                 self.take_song(
                     song,
                     &path,
@@ -396,8 +404,14 @@ impl crate::App {
                     true,
                     &mut importing.done,
                 );
+                // Where it landed tells a song that came in now (from another source, or earlier
+                // in this one) from one the library had before.
+                let at_now = importing.done.landed.get(landed).copied();
                 if importing.done.titles.len() > before {
                     importing.came[at] += 1;
+                    importing.brought_at.extend(at_now);
+                } else if at_now.is_some_and(|index| importing.brought_at.contains(&index)) {
+                    importing.twice += 1;
                 } else {
                     importing.left_out += 1;
                 }
@@ -428,14 +442,16 @@ impl crate::App {
             came: importing.done.titles.len(),
             from: importing.names.iter().cloned().zip(importing.came.iter().copied()).collect(),
             left_out: importing.left_out,
+            twice: importing.twice,
         };
         crate::applog::event(
             "find",
             &format!(
-                "brought in {} songs from {} sources ({} in the library already) in {} ms",
+                "brought in {} songs from {} sources ({} in the library already, {} found twice) in {} ms",
                 brought.came,
                 brought.from.len(),
                 brought.left_out,
+                brought.twice,
                 importing.began.elapsed().as_millis()
             ),
         );

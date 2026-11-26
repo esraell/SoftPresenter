@@ -277,6 +277,8 @@ pub struct Source {
     pub songs: usize,
     /// How many of them the library has already.
     pub here: usize,
+    /// How many of them are in it twice over (or more): each such song comes in once.
+    pub twice: usize,
     /// Why it couldn't be read: the importer's own reason.
     pub why: Option<String>,
     /// Its songs new to the library, by their import key's hash, so songs new in two sources
@@ -336,12 +338,14 @@ impl Known {
 }
 
 /// A dry run's count of songs read for an import (each with the file it came from), against the
-/// library and against one another (a song twice in a source comes in once): how many, how many
-/// are here already, and the new ones' hashes. Only the hashes are kept, never the songs.
+/// library and against one another: how many, how many are here already, how many are a song
+/// before them over again (it comes in once), and the new ones' hashes. Only the hashes are
+/// kept, never the songs.
 #[derive(Default)]
 struct Counted {
     all: usize,
     here: usize,
+    twice: usize,
     seen: HashSet<u64>,
     new: Vec<u64>,
 }
@@ -351,8 +355,10 @@ impl Counted {
         let song = load::as_imported(song, path);
         let hash = key_hash(&load::import_key(&song));
         self.all += 1;
-        if known.keys.contains(&hash) || known.ids.contains(&song.id) || !self.seen.insert(hash) {
+        if known.keys.contains(&hash) || known.ids.contains(&song.id) {
             self.here += 1;
+        } else if !self.seen.insert(hash) {
+            self.twice += 1;
         } else {
             self.new.push(hash);
         }
@@ -755,6 +761,7 @@ impl<'a> Walk<'a> {
                     read: Read::Nothing,
                     songs: 0,
                     here: 0,
+                    twice: 0,
                     why: Some(not_allowed(&e)),
                     new: Vec::new(),
                 }))),
@@ -898,6 +905,7 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
         read: Read::Songbook { file: path.to_owned(), book },
         songs: 0,
         here: 0,
+        twice: 0,
         why: None,
         new: Vec::new(),
     };
@@ -922,6 +930,7 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
             .map(|(name, counted)| Source {
                 songs: counted.all,
                 here: counted.here,
+                twice: counted.twice,
                 new: counted.new,
                 ..base(name.clone().unwrap_or_else(|| stem.clone()), name)
             })
@@ -981,7 +990,7 @@ fn folder_source(
     if readable.is_empty() {
         return Ok(None);
     }
-    let (songs, here, new) = (counted.all, counted.here, counted.new);
+    let Counted { all: songs, here, twice, new, .. } = counted;
     // A folder inside a place is named by itself, and is in the place's folders above it; a
     // place's own folder is named by the place and is in it.
     let (name, place) = match at.parts.split_last() {
@@ -996,6 +1005,7 @@ fn folder_source(
         read: Read::Files(readable),
         songs,
         here,
+        twice,
         why: None,
         new,
     }))
@@ -1040,8 +1050,8 @@ pub fn read_again(source: &Source) -> (Vec<(Presentation, PathBuf)>, Vec<String>
 }
 
 /// A row's words, in the language set: its name, the line under it ("Library · from
-/// SoftProjector · Downloads · 7 songs"), and what it says at its right ("7 new · 2 already here", "Everything here is
-/// already in your library", "Couldn't be read: …").
+/// SoftProjector · Downloads · 7 songs"), and what it says at its right ("7 new · 2 already here
+/// · 1 found twice", "Everything here is already in your library", "Couldn't be read: …").
 pub fn row_words(source: &Source) -> (String, String, String) {
     let place = match source.kind {
         Kind::Songbook if source.place.place == PlaceName::Usual(Usual::SoftProjector) => {
@@ -1078,28 +1088,37 @@ pub fn row_words(source: &Source) -> (String, String, String) {
     } else if source.fresh() == 0 {
         t("settings.find.all_here", "Everything here is already in your library").to_owned()
     } else {
-        let new = tn("settings.find.new", source.fresh() as u64, "{n} new", "{n} new", &[]);
-        if source.here == 0 {
-            new
-        } else {
+        let mut counts = tn("settings.find.new", source.fresh() as u64, "{n} new", "{n} new", &[]);
+        if source.here > 0 {
             let here = tn("settings.find.here", source.here as u64, "{n} already here", "{n} already here", &[]);
-            tf("settings.find.new_and_here", "{new} \u{b7} {here}", &[("new", &new), ("here", &here)])
+            counts = tf("settings.find.new_and_here", "{new} \u{b7} {here}", &[("new", &counts), ("here", &here)]);
         }
+        if source.twice > 0 {
+            let twice = tn("settings.find.twice", source.twice as u64, "{n} found twice", "{n} found twice", &[]);
+            counts = tf("settings.find.new_and_here", "{new} \u{b7} {here}", &[("new", &counts), ("here", &twice)]);
+        }
+        counts
     };
     (name, line, right)
 }
 
 /// What came of an import, in the language set: the sentence in three pieces, the middle one
 /// (how many songs came in) for the card to set in bold. "**7 songs came in**: Zpěvník pro
-/// zkoušku (7). 2 already in your library were left out."
+/// zkoušku (7). 2 already in your library were left out. 7 found in more than one place came
+/// in once." A source none came in from isn't named.
 pub fn brought_words(brought: &Brought) -> [String; 3] {
     let came = tn("settings.find.came", brought.came as u64, "{n} song came in", "{n} songs came in", &[]);
     let list: Vec<String> = brought
         .from
         .iter()
+        .filter(|(_, n)| *n > 0)
         .map(|(name, n)| tf("settings.find.came_from", "{name} ({n})", &[("name", name), ("n", &count(*n as u64))]))
         .collect();
-    let sentence = tf("settings.find.done", "{came}: {list}.", &[("came", &came), ("list", &list.join(", "))]);
+    let sentence = if list.is_empty() {
+        format!("{came}.")
+    } else {
+        tf("settings.find.done", "{came}: {list}.", &[("came", &came), ("list", &list.join(", "))])
+    };
     let left = (brought.left_out > 0).then(|| {
         tn(
             "settings.find.left_out",
@@ -1109,7 +1128,18 @@ pub fn brought_words(brought: &Brought) -> [String; 3] {
             &[],
         )
     });
-    let left = left.map_or_else(String::new, |left| format!(" {left}"));
+    // Songs in two of the sources ticked, or twice in one, came in once: they were never in the
+    // library before.
+    let twice = (brought.twice > 0).then(|| {
+        tn(
+            "settings.find.came_once",
+            brought.twice as u64,
+            "{n} found in more than one place came in once.",
+            "{n} found in more than one place came in once.",
+            &[],
+        )
+    });
+    let left: String = [left, twice].into_iter().flatten().map(|words| format!(" {words}")).collect();
     match sentence.find(&came) {
         Some(at) => [sentence[..at].to_owned(), came.clone(), format!("{}{left}", &sentence[at + came.len()..])],
         None => [format!("{sentence}{left}"), String::new(), String::new()],
@@ -1148,6 +1178,9 @@ pub struct Brought {
     pub from: Vec<(String, usize)>,
     /// The songs left out, the library having them already.
     pub left_out: usize,
+    /// The songs read again after one of them had come in (found in two of the sources, or
+    /// twice in one): it came in once.
+    pub twice: usize,
 }
 
 /// The card's state, kept with the window's (`HomeState::find_songs`); the search and the import
@@ -1434,6 +1467,44 @@ pub(crate) mod tests {
         // A thread that ended without saying how went wrong: the search failed, never finished.
         drop(tx);
         assert!(matches!(other.said().as_slice(), [Found::Done(Ended::Failed)]));
+    }
+
+    #[test]
+    fn a_song_twice_in_one_source_is_counted_once_and_said() {
+        // Two files of one song (its title and words) and another: three songs, two new, one
+        // found twice, and nothing "already here" (the library has neither).
+        let tree = Tree::new("twice");
+        tree.write("Songs/Morning Light.cho", song_text("Morning Light").as_bytes());
+        tree.write("Songs/Morning Light copy.cho", song_text("Morning Light").as_bytes());
+        tree.write("Songs/River Song.cho", song_text("River Song").as_bytes());
+        let found = search(at(&tree, &["Songs"]), Library::default(), Vec::new());
+        assert_eq!(found.len(), 1, "{found:#?}");
+        let songs = &found[0];
+        assert_eq!((songs.songs, songs.fresh(), songs.here, songs.twice), (3, 2, 0, 1), "{songs:#?}");
+        assert_eq!(row_words(songs).2, "2 new \u{b7} 1 found twice");
+        // A song here already and found twice is here, not twice.
+        let river = load::import_file(&tree.0.join("Songs/River Song.cho")).unwrap();
+        let library = Library {
+            songs: vec![Arc::new(load::as_imported(river, Path::new("River Song.cho")))],
+            ..Library::default()
+        };
+        tree.write("Songs/River Song copy.cho", song_text("River Song").as_bytes());
+        let found = search(at(&tree, &["Songs"]), library, Vec::new());
+        let songs = &found[0];
+        assert_eq!((songs.songs, songs.fresh(), songs.here, songs.twice), (4, 1, 2, 1), "{songs:#?}");
+        assert_eq!(row_words(songs).2, "1 new \u{b7} 2 already here \u{b7} 1 found twice");
+        // What came of an import names only the sources songs came in from, and says the songs
+        // found in more than one place came in once.
+        let brought = Brought {
+            came: 7,
+            from: vec![("Zkouška".to_owned(), 7), ("Zkouška".to_owned(), 0)],
+            left_out: 0,
+            twice: 7,
+        };
+        assert_eq!(
+            brought_words(&brought).concat(),
+            "7 songs came in: Zkouška (7). 7 found in more than one place came in once."
+        );
     }
 
     #[test]

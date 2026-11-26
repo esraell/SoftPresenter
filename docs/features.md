@@ -332,7 +332,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   only its new songs (a song already here stays where it is), read on a thread of its own and
   taken in a few milliseconds at a time, with a bar, so neither the window nor the screens wait;
   a notice and the card say how many came in, from which, and how many were left out. Two ticked
-  copies of one songbook count their songs once. `sp songs find [--in FOLDER]…` lists the same,
+  copies of one songbook count their songs once, and so does a source with a song twice in it
+  ("2 new · 1 found twice"); what came in says those came in once ("7 found in more than one
+  place came in once"), never that they were in the library already. `sp songs find [--in FOLDER]…` lists the same,
   numbered, and `sp songs find --import N…|NAME` brings them in (at the computer only).
 - **Bringing a library across from ProPresenter 7.** File › Import Songs › A Library Folder… opens
   its Libraries folder; choose song documents, one library, or the folder of all of them. Each folder becomes a

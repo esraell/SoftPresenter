@@ -1371,9 +1371,15 @@ fn songs_found_on_the_computer_are_listed_and_only_their_new_songs_come_in() {
     // A source that can't be read can't be brought in.
     let number = |row: &Value| row["number"].as_u64().expect("a number").to_string();
     copy.refused(&["songs", "find", "--import", &number(&broken)], "couldn't be read");
-    // Bringing in the first songbook brings its seven songs, into a library of its name.
-    let brought = copy.ok(&["songs", "find", "--import", &number(&first)]);
-    assert!(brought.text.starts_with("7 songs came in: Zpěvník pro zkoušku (7)."), "{}", brought.text);
+    // Bringing in the songbook and its copy together brings its seven songs once, into a
+    // library of its name; the copy's are the songs just brought, never "already in your
+    // library".
+    let brought = copy.ok(&["songs", "find", "--import", &number(&first), &number(&copied)]);
+    assert_eq!(
+        brought.text, "7 songs came in: Zpěvník pro zkoušku (7). 7 found in more than one place came in once.",
+        "{}",
+        brought.text
+    );
     assert_eq!(songs_now(), before + 7);
     let libraries = copy.ok(&["libraries"]).data;
     let library = libraries.as_array().into_iter().flatten().find(|l| l["name"] == "Zpěvník pro zkoušku");

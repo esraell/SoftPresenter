@@ -317,6 +317,7 @@ mod tests {
             read: Read::Nothing,
             songs,
             here,
+            twice: 0,
             why: None,
             new: (0..songs.saturating_sub(here) as u64).map(|n| n + songs as u64 * 1000).collect(),
         }
@@ -332,7 +333,8 @@ mod tests {
         vec![
             source("Zpěvník pro zkoušku", Kind::Songbook, (Usual::SoftProjector, &[]), 3301, 13),
             source("Youth Songs", Kind::Library, (Usual::Documents, &["Worship"]), 214, 16),
-            source("Christmas 2025", Kind::SongFiles, (Usual::Downloads, &[]), 32, 0),
+            // Two of its songs are there twice over.
+            Source { songs: 34, twice: 2, ..source("Christmas 2025", Kind::SongFiles, (Usual::Downloads, &[]), 32, 0) },
             source("Hymns", Kind::SongFiles, (Usual::Desktop, &[]), 48, 48),
             broken,
         ]
@@ -356,6 +358,7 @@ mod tests {
                 came: 3518,
                 from: vec![("Zpěvník pro zkoušku".to_owned(), 3288), ("Youth Songs".to_owned(), 198)],
                 left_out: 29,
+                twice: 4,
             });
         }
         state
@@ -435,7 +438,8 @@ mod tests {
                 &[
                     "5 SONGBOOKS AND LIBRARIES FOUND",
                     "3,288 new \u{b7} 13 already here",
-                    "32 new",
+                    "32 new \u{b7} 2 found twice",
+                    "Song files \u{b7} Downloads \u{b7} 34 songs",
                     "Everything here is already in your library",
                     "Couldn\u{2019}t be read: the file is cut short or damaged",
                     "Library \u{b7} from SoftProjector \u{b7} 3,301 songs",
@@ -480,7 +484,7 @@ mod tests {
         let words = brought_words(state_in(Phase::Done).find_songs.brought.as_ref().unwrap()).concat();
         assert_eq!(
             words,
-            "3,518 songs came in: Zpěvník pro zkoušku (3,288), Youth Songs (198). 29 already in your library were left out."
+            "3,518 songs came in: Zpěvník pro zkoušku (3,288), Youth Songs (198). 29 already in your library were left out. 4 found in more than one place came in once."
         );
     }
 

@@ -246,6 +246,8 @@
   "settings.find.came_from": "{name} ({n})",
   "settings.find.done": "{came}: {list}.",
   "settings.find.left_out": ["{n} que ya estaba en tu biblioteca se dejó fuera.", "{n} que ya estaban en tu biblioteca se dejaron fuera."],
+  "settings.find.came_once": ["{n} encontrada en más de un sitio entró una sola vez.", "{n} encontradas en más de un sitio entraron una sola vez."],
+  "settings.find.twice": ["{n} repetida", "{n} repetidas"],
   "settings.find.busy": "Se están trayendo canciones; vuelve a buscar cuando hayan entrado.",
   "settings.find.not_started": "No se pudo empezar a buscar: {error}",
   "settings.find.importing_already": "Ya se están trayendo canciones.",
