@@ -7,6 +7,9 @@ use crate::i18n::{t, tf};
 use sp_model::bounded_zip::{ZipLimits, ZipRefusal};
 use sp_model::{LARGEST_PRO_FILE, Presentation, decode_text, from_json, import_song_text, read_pro_file, rtf_to_text};
 
+mod reasons;
+pub use reasons::{Why, words as reason_words};
+
 /// The song shown when the program is started without any files.
 pub const SAMPLE_SONG: &str = include_str!("../../../samples/sample-song.txt");
 
@@ -139,11 +142,7 @@ fn import_zipped_songbooks(
             "{name} has no SoftProjector songbook in it that SoftPresenter can read.",
             &[("name", name)],
         ),
-        why: t(
-            "notices.import.why.zip_no_songbook",
-            "it has no SoftProjector songbook in it that SoftPresenter can read",
-        )
-        .to_owned(),
+        why: Why::NoSongbookInZip,
     };
     let (mut zip, books) = songbooks_in_zip(path).filter(|(_, books)| !books.is_empty()).ok_or_else(not_songbook)?;
     let (mut came, mut cautions) = (0, Vec::new());
@@ -167,19 +166,16 @@ fn import_zipped_songbooks(
                     "{name} unpacks to more than any songbook, so it wasn't read.",
                     &[("name", &inside)],
                 ),
-                why: t("notices.import.why.zip_too_much", "it unpacks to more than any songbook").to_owned(),
+                why: Why::ZipTooMuch,
             }),
-            Err(_) => {
-                let damaged = t("notices.import.zip_damaged", "the zip is damaged");
-                Err(Refused {
-                    said: tf(
-                        "notices.import.unreadable",
-                        "{name} could not be read ({error}).",
-                        &[("name", &inside), ("error", damaged)],
-                    ),
-                    why: damaged.to_owned(),
-                })
-            }
+            Err(_) => Err(Refused {
+                said: tf(
+                    "notices.import.unreadable",
+                    "{name} could not be read ({error}).",
+                    &[("name", &inside), ("error", &Why::ZipDamaged.words())],
+                ),
+                why: Why::ZipDamaged,
+            }),
         };
         match read {
             Ok(given) => came += given,
@@ -190,9 +186,9 @@ fn import_zipped_songbooks(
         }
     }
     // Nothing came in: what went wrong is the answer.
-    if came == 0 && !cautions.is_empty() {
+    if let (0, Some(why)) = (came, first_why) {
         let said: Vec<String> = cautions.into_iter().map(|caution| caution.said).collect();
-        return Err(Refused { said: said.join(" "), why: first_why.unwrap_or_default() });
+        return Err(Refused { said: said.join(" "), why });
     }
     Ok(cautions)
 }
@@ -214,11 +210,11 @@ type EachSong<'a> = &'a mut dyn FnMut(Presentation, Option<String>);
 
 /// Why a file of many songs gave none: the sentence an import says of it, which names the
 /// file, and the reason alone, for a place that names the file already (Settings › Song files'
-/// "Couldn't be read: {why}").
+/// "Couldn't be read: {why}"), kept as what it is until it is said.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Refused {
     pub said: String,
-    pub why: String,
+    pub why: Why,
 }
 
 /// What a file of many songs gave: each song with the name of its songbook, and anything the
@@ -263,7 +259,7 @@ pub fn read_songbook_file_each(path: &Path, until: &dyn Fn() -> bool, each: Each
             "{name} could not be found ({error}).",
             &[("name", &name), ("error", &e.to_string())],
         ),
-        why: e.to_string(),
+        why: Why::System(e.to_string()),
     })?;
     let mut cautions = Vec::new();
     songbook_songs(file, &name, until, each, &mut cautions)?;
@@ -289,21 +285,23 @@ fn songbook_songs<R: std::io::Read + std::io::Seek>(
                 "{name} isn't a SoftProjector songbook SoftPresenter can read.",
                 &[("name", name)],
             ),
-            why: t("notices.import.why.not_songbook", "it isn't a SoftProjector songbook SoftPresenter can read")
-                .to_owned(),
+            why: Why::NotSongbook,
         },
         SongbookProblem::NoSongs => Refused {
             said: tf("notices.import.no_songs", "{name} has no songs in it.", &[("name", name)]),
-            why: t("notices.import.why.no_songs", "it has no songs in it").to_owned(),
+            why: Why::NoSongs,
         },
-        SongbookProblem::Unreadable(why) => Refused {
-            said: tf(
-                "notices.import.unreadable",
-                "{name} could not be read ({error}).",
-                &[("name", name), ("error", &why)],
-            ),
-            why,
-        },
+        SongbookProblem::Unreadable(reason) => {
+            let why = Why::Reader(reason);
+            Refused {
+                said: tf(
+                    "notices.import.unreadable",
+                    "{name} could not be read ({error}).",
+                    &[("name", name), ("error", &why.words())],
+                ),
+                why,
+            }
+        }
     })?;
     // A text songbook that ends part way through a song was cut short as it was copied or
     // downloaded: that song is left out, and those after it are missing.
@@ -482,7 +480,7 @@ pub fn import_file(path: &Path) -> Result<Presentation, String> {
     let title = if stem.trim().is_empty() { t("left.untitled", "Untitled").to_owned() } else { stem.clone() };
     let read = || std::fs::read(path).map_err(|e| unreadable(&e.to_string()));
     let song = if pro {
-        read_pro_file(&read()?, &stem).map_err(|reason| unreadable(&reason))?
+        read_pro_file(&read()?, &stem).map_err(|reason| unreadable(&reason_words(&reason)))?
     } else {
         let text = if has_extension(path, RICH_TEXT_ENDING) {
             rtf_to_text(&read()?)
@@ -575,7 +573,7 @@ pub fn read_song_file(path: &Path) -> Result<Presentation, String> {
         return Err(t("notices.import.too_large_file", "too large to be a song file").to_owned());
     }
     let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    from_json(&text)
+    from_json(&text).map_err(|reason| reason_words(&reason))
 }
 
 /// True for a SoftPresenter song file, of either extension.
@@ -827,6 +825,47 @@ mod tests {
                 .contains("Cut.sps could not be read (the file is cut short")
         );
         assert!(problem(&dir.0.join("Gone.sps")).contains("Gone.sps could not be found"));
+    }
+
+    #[test]
+    fn a_damaged_songbook_or_document_is_refused_in_the_language_set_and_logged_in_english() {
+        use crate::i18n::{Language, english_of, with_language};
+        use sp_model::songbook_examples::SONGBOOK;
+        let dir = TempDir::new("damaged-es");
+        // File › Import says the refusal of a file alone as the import gives it.
+        let book = dir.write("Roto.sps", &SONGBOOK[..5 * 1024]);
+        let said = with_language(Language::Spanish, || import_songbook(&book).err().unwrap());
+        assert_eq!(
+            said,
+            "No se pudo leer Roto.sps (el archivo está incompleto o dañado (una fila es más larga que el archivo))."
+        );
+        let english = "Roto.sps could not be read (the file is cut short or damaged (a row is longer than the file)).";
+        assert_eq!(english_of(&said), english, "the log's words");
+        assert_eq!(
+            crate::applog::file_kind::noted(&said, Some("5 KB, SQLite")),
+            "Roto.sps could not be read (the file is cut short or damaged (a row is longer than the file)) (5 KB, SQLite)"
+        );
+        // The reason alone, for Settings › Song files, is kept as what it is.
+        let refused = read_songbook_file(&book).err().unwrap();
+        assert_eq!(refused.why, Why::Reader(sp_model::Reason::RowLongerThanFile));
+        assert_eq!(refused.why.english(), "the file is cut short or damaged (a row is longer than the file)");
+        // A song document that isn't one.
+        let document = dir.write("Roto.pro", &[0x0B]);
+        let said = with_language(Language::Spanish, || import_file(&document).err().unwrap());
+        assert_eq!(said, "No se pudo leer Roto.pro (el archivo está dañado o no es un documento de canción).");
+        assert_eq!(english_of(&said), "Roto.pro could not be read (the file is damaged or isn't a song document).");
+        // A song file a newer SoftPresenter made.
+        let newer = format!(r#"{{"format":"softpresenter-presentation","version":{}}}"#, sp_model::FORMAT_VERSION + 1);
+        let song = dir.write("Nueva.sppres", newer.as_bytes());
+        let said = with_language(Language::Russian, || read_song_file(&song).err().unwrap());
+        assert_eq!(
+            said,
+            format!(
+                "файл песни сделан более новой версией SoftPresenter (формат {}; эта версия читает до {})",
+                sp_model::FORMAT_VERSION + 1,
+                sp_model::FORMAT_VERSION
+            )
+        );
     }
 
     #[test]

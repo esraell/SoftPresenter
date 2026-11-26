@@ -11,8 +11,9 @@ const SONGBOOK: &[u8] = include_bytes!("../../tests/songbooks/songbook.sps");
 const UTF16_LE: &[u8] = include_bytes!("../../tests/songbooks/utf16le.sps");
 const UTF16_BE: &[u8] = include_bytes!("../../tests/songbooks/utf16be.sps");
 
+/// Opens a database, with the reason a refusal gives in English.
 fn open(bytes: &[u8]) -> Result<Database<Cursor<&[u8]>>, String> {
-    Database::open(Cursor::new(bytes), Limits::NORMAL)
+    Database::open(Cursor::new(bytes), Limits::NORMAL).map_err(|why| why.to_string())
 }
 
 fn text_of(value: &Value) -> &str {
@@ -52,8 +53,8 @@ fn a_database_sqlite_made_gives_its_tables_columns_and_rows() {
     // A column added after a row was written reads as nothing there, and as written after.
     assert_eq!(songs[0].values[4], Value::Null);
     assert_eq!(songs.last().unwrap().values[4], Value::Text("y".to_owned()));
-    assert!(db.rows("Songs", &["no_such"]).unwrap_err().contains("no column no_such"));
-    assert!(db.rows("Nothing", &["a"]).unwrap_err().contains("no table Nothing"));
+    assert!(db.rows("Songs", &["no_such"]).unwrap_err().to_string().contains("no column no_such"));
+    assert!(db.rows("Nothing", &["a"]).unwrap_err().to_string().contains("no table Nothing"));
 }
 
 #[test]
@@ -65,7 +66,7 @@ fn only_as_much_of_a_row_is_read_as_the_columns_asked_for_need() {
     let songs = db.rows("Songs", &["number", "song_text"]).unwrap();
     assert_eq!(songs.len(), 7);
     assert_eq!(text_of(&songs[6].values[1]).chars().count(), 6143);
-    assert!(db.rows("Songs", &["background"]).unwrap_err().contains("more than any songbook"));
+    assert!(db.rows("Songs", &["background"]).unwrap_err().to_string().contains("more than any songbook"));
     let mut db = open(SONGBOOK).unwrap();
     let pictures = db.rows("Songs", &["background"]).unwrap();
     assert_eq!(pictures[6].values[0], Value::Blob(vec![0; 5000]));
@@ -273,7 +274,7 @@ fn with_overflow() -> (Vec<u8>, String) {
 }
 
 fn read(file: &[u8]) -> Result<Vec<Row>, String> {
-    open(file)?.rows("t", &["a", "b"])
+    open(file)?.rows("t", &["a", "b"]).map_err(|why| why.to_string())
 }
 
 #[test]
@@ -362,7 +363,7 @@ fn the_rows_own_number_stands_for_an_integer_primary_key() {
         ("CREATE TABLE t ()", "can follow"),
         ("", "can follow"),
     ] {
-        assert!(columns(sql).unwrap_err().contains(why), "{sql}");
+        assert!(columns(sql).unwrap_err().to_string().contains(why), "{sql}");
     }
     // In a file: the value kept is nothing, and the row's number is read in its place.
     let make = PLAIN;
@@ -384,7 +385,7 @@ fn the_rows_own_number_stands_for_an_integer_primary_key() {
     file.extend(page(make, 3, &[], None));
     let mut db = open(&file).unwrap();
     assert_eq!(db.rows("t", &["a"]).unwrap()[0].values, [word("kept")]);
-    assert!(db.rows("w", &["a"]).unwrap_err().contains("WITHOUT ROWID"));
+    assert!(db.rows("w", &["a"]).unwrap_err().to_string().contains("WITHOUT ROWID"));
 }
 
 // ---- Damaged on purpose ----
@@ -598,7 +599,11 @@ fn a_rows_list_of_values_that_is_wrong_is_refused() {
 fn the_limits_hold() {
     let rows: Vec<Vec<Value>> = (0..20).map(|n| vec![word("row"), Value::Integer(n)]).collect();
     let file = one_table(PLAIN, &rows);
-    let with = |limits: Limits| Database::open(Cursor::new(&file[..]), limits).and_then(|mut db| db.rows("t", &["a"]));
+    let with = |limits: Limits| {
+        Database::open(Cursor::new(&file[..]), limits)
+            .and_then(|mut db| db.rows("t", &["a"]))
+            .map_err(|why| why.to_string())
+    };
     assert_eq!(with(Limits::NORMAL).unwrap().len(), 20);
     assert_eq!(with(Limits { rows: 20, ..Limits::NORMAL }).unwrap().len(), 20);
     assert!(with(Limits { rows: 19, ..Limits::NORMAL }).unwrap_err().contains("more rows"));
@@ -631,7 +636,7 @@ fn read_everything(file: &[u8]) {
         let Ok(columns) = db.column_names(&table) else { continue };
         let columns: Vec<&str> = columns.iter().map(String::as_str).collect();
         if let Err(why) = db.rows(&table, &columns) {
-            assert!(why.len() > 10, "{why}");
+            assert!(why.to_string().len() > 10, "{why}");
         }
     }
 }

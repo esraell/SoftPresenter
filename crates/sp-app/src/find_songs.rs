@@ -281,8 +281,8 @@ pub struct Source {
     pub here: usize,
     /// How many of them are in it twice over (or more): each such song comes in once.
     pub twice: usize,
-    /// Why it couldn't be read: the importer's own reason.
-    pub why: Option<String>,
+    /// Why it couldn't be read: the importer's own reason, said when it is shown.
+    pub why: Option<load::Why>,
     /// What the operator should know of one that can be read, in a few words under its row: that
     /// it was copied while SoftProjector had it open, or ends part way through a song (the
     /// importer's own cautions, `load::Caution`), or that more of its song files are in the
@@ -935,18 +935,11 @@ impl<'a> Walk<'a> {
 }
 
 /// Why a place couldn't be looked in, in the card's words.
-fn not_allowed(e: &std::io::Error) -> String {
+fn not_allowed(e: &std::io::Error) -> load::Why {
     if e.kind() == std::io::ErrorKind::PermissionDenied {
-        if cfg!(target_os = "macos") {
-            return t(
-                "settings.find.denied.mac",
-                "SoftPresenter isn\u{2019}t allowed to look there. Allow it in System Settings \u{203a} Privacy & Security \u{203a} Files and Folders",
-            )
-            .to_owned();
-        }
-        return t("settings.find.denied", "SoftPresenter isn\u{2019}t allowed to look there").to_owned();
+        return load::Why::NotAllowed;
     }
-    e.to_string()
+    load::Why::System(e.to_string())
 }
 
 /// Whether a folder is passed over by its name: another program's store, a cache, or a bundle.
@@ -1156,10 +1149,17 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
                 .collect())
         }
         Err(refused) if listed_unread(path) => {
+            crate::applog::event("find", &unread_line(&file_name, &refused.why));
             Ok(vec![Source { why: Some(refused.why), read: Read::Nothing, ..base(file_name, None) }])
         }
         Err(_) => Ok(Vec::new()),
     }
+}
+
+/// What the log says of a songbook found that couldn't be read: in English, whatever the
+/// window speaks.
+fn unread_line(file_name: &str, why: &load::Why) -> String {
+    format!("{file_name} couldn't be read: {}", why.english())
 }
 
 /// What the rows of a file of `count` songbooks say of it, first to last: what is about the
@@ -1359,7 +1359,7 @@ pub fn row_words(source: &Source) -> (String, String, String) {
         }
     };
     let right = if let Some(why) = &source.why {
-        tf("settings.find.unreadable", "Couldn\u{2019}t be read: {why}", &[("why", why)])
+        tf("settings.find.unreadable", "Couldn\u{2019}t be read: {why}", &[("why", &why.words())])
     } else if source.cloud {
         t("settings.find.cloud", "In the cloud, not on this computer").to_owned()
     } else if source.fresh() == 0 {
@@ -1696,15 +1696,41 @@ pub(crate) mod tests {
         assert_eq!((hymns.kind, hymns.songs, hymns.here), (Kind::SongFiles, 3, 0), "the shopping list is no song");
         let broken = row("Broken.sps", "Downloads");
         assert_eq!(broken.kind, Kind::Songbook);
-        assert!(
-            broken.why.as_deref().is_some_and(|why| why.starts_with("the file is cut short or damaged")),
-            "{broken:?}"
-        );
+        assert_eq!(broken.why, Some(load::Why::Reader(sp_model::Reason::RowLongerThanFile)), "{broken:?}");
         assert!(!broken.can_import());
         // Nothing else: not the hidden folder, not a note alone, not SoftPresenter's library.
         assert_eq!(found.len(), 4, "{found:#?}");
         assert!(found.iter().all(|source| !source.path.starts_with(tree.0.join("Documents/.hidden"))));
         assert!(found.iter().all(|source| !source.path.starts_with(tree.0.join("Documents/SoftPresenter"))));
+    }
+
+    #[test]
+    fn a_songbook_that_couldnt_be_read_is_said_in_the_language_set_and_in_english_for_sp_and_the_log() {
+        use crate::i18n::{Language, with_language};
+        let tree = tree("ru");
+        let found = search(at(&tree, &["Downloads"]), Library::default(), Vec::new());
+        let broken = found.iter().find(|source| source.name == "Broken.sps").expect("the damaged songbook");
+        // Found on the search's own thread, said in the window's language when it is drawn.
+        let (name, line, right) = with_language(Language::Russian, || row_words(broken));
+        assert_eq!(name, "Broken.sps");
+        assert_eq!(
+            line, "Библиотека \u{b7} из SoftProjector \u{b7} Downloads",
+            "Downloads is the folder's own name here"
+        );
+        assert_eq!(right, "Не удалось прочитать: файл обрезан или повреждён (одна из записей длиннее всего файла)");
+        assert!(!right.chars().any(|c| c.is_ascii_alphabetic()), "{right}");
+        // The log's line says it in English, whatever the window speaks.
+        let logged = with_language(Language::Russian, || unread_line(&name, broken.why.as_ref().unwrap()));
+        assert_eq!(
+            logged,
+            "Broken.sps couldn't be read: the file is cut short or damaged (a row is longer than the file)"
+        );
+        // So does `sp`'s listing.
+        let english = with_language(Language::English, || row_words(broken));
+        assert_eq!(
+            english.2,
+            "Couldn\u{2019}t be read: the file is cut short or damaged (a row is longer than the file)"
+        );
     }
 
     #[test]
@@ -1916,7 +1942,7 @@ pub(crate) mod tests {
             found.iter().filter(|source| source.place.place == PlaceName::Folder("Downloads".to_owned())).collect();
         assert_eq!(downloads.len(), 1, "{found:#?}");
         let hymns = downloads[0];
-        assert_eq!((hymns.name.as_str(), hymns.cloud, hymns.why.as_deref()), ("Hymns (cloud).sps", true, None));
+        assert_eq!((hymns.name.as_str(), hymns.cloud, hymns.why.as_ref()), ("Hymns (cloud).sps", true, None));
         assert!(!hymns.can_import());
         let (_, line, right) = row_words(hymns);
         assert_eq!(

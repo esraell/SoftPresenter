@@ -596,7 +596,9 @@ pub fn open(path: &Path, staging: &Path) -> Result<Opened, String> {
                     )),
                 }
             }
-            Entry::Song => match read_words(&mut entry).and_then(|text| sp_model::from_json(&text)) {
+            Entry::Song => match read_words(&mut entry)
+                .and_then(|text| sp_model::from_json(&text).map_err(|why| crate::load::reason_words(&why)))
+            {
                 Ok(song) if opened.songs.iter().any(|have| have.id == song.id) => {
                     opened.ignored.push(tf(
                         "notices.pack.second_copy",

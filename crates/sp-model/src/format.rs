@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::reason::Reason;
 use crate::types::Presentation;
 
 /// The value of `"format"` in every presentation file.
@@ -59,25 +60,22 @@ pub fn to_json(presentation: &Presentation) -> String {
     text
 }
 
-/// Reads a presentation from a JSON document. The error is a plain sentence for the operator.
-pub fn from_json(text: &str) -> Result<Presentation, String> {
-    let value: serde_json::Value =
-        serde_json::from_str(text).map_err(|e| format!("this is not a SoftPresenter song file ({e})"))?;
+/// Reads a presentation from a JSON document. The error says why not, for the operator.
+pub fn from_json(text: &str) -> Result<Presentation, Reason> {
+    let value: serde_json::Value = serde_json::from_str(text).map_err(|e| Reason::NotJson(e.to_string()))?;
     if !matches!(value.get("format").and_then(|f| f.as_str()), Some(FORMAT_NAME | OLD_FORMAT_NAME)) {
-        return Err("this is not a SoftPresenter song file".to_owned());
+        return Err(Reason::NotSongFile);
     }
     let version = value.get("version").and_then(serde_json::Value::as_u64).unwrap_or(0);
     if version == 0 {
-        return Err("the song file does not say which version it is".to_owned());
+        return Err(Reason::NoVersion);
     }
     if version > u64::from(FORMAT_VERSION) {
-        return Err(format!(
-            "the song file was made by a newer SoftPresenter (format {version}; this one reads up to {FORMAT_VERSION})"
-        ));
+        return Err(Reason::NewerSongFile { version, reads: FORMAT_VERSION });
     }
     serde_json::from_value::<File>(value)
         .map(|file| file.presentation)
-        .map_err(|e| format!("the song file is damaged ({e})"))
+        .map_err(|e| Reason::SongFileDamaged(e.to_string()))
 }
 
 #[cfg(test)]
@@ -182,7 +180,7 @@ mod tests {
     fn a_newer_file_is_refused_not_half_read() {
         let newer = format!(r#""version": {}"#, FORMAT_VERSION + 1);
         let text = to_json(&song()).replace(r#""version": 1"#, &newer);
-        assert!(from_json(&text).unwrap_err().contains("newer SoftPresenter"));
+        assert!(from_json(&text).unwrap_err().to_string().contains("newer SoftPresenter"));
     }
 
     #[test]
@@ -273,11 +271,11 @@ mod tests {
 
     #[test]
     fn other_files_are_refused_in_plain_words() {
-        assert!(from_json("Light rises\n").unwrap_err().contains("not a SoftPresenter song file"));
-        assert!(from_json(r#"{"title":"T"}"#).unwrap_err().contains("not a SoftPresenter song file"));
-        assert!(from_json(r#"{"format":"softpresenter-presentation"}"#).unwrap_err().contains("which version"));
+        assert!(from_json("Light rises\n").unwrap_err().to_string().contains("not a SoftPresenter song file"));
+        assert_eq!(from_json(r#"{"title":"T"}"#).unwrap_err().to_string(), "this is not a SoftPresenter song file");
+        assert_eq!(from_json(r#"{"format":"softpresenter-presentation"}"#).unwrap_err(), Reason::NoVersion);
         let damaged = r#"{"format":"softpresenter-presentation","version":1,"title":5}"#;
-        assert!(from_json(damaged).unwrap_err().contains("damaged"));
+        assert!(from_json(damaged).unwrap_err().to_string().contains("damaged"));
     }
 
     #[test]

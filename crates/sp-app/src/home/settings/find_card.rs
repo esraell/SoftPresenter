@@ -402,7 +402,7 @@ mod tests {
     /// files all here, and a database that couldn't be read.
     fn sample() -> Vec<Source> {
         let broken = Source {
-            why: Some("the file is cut short or damaged".to_owned()),
+            why: Some(crate::load::Why::Reader(sp_model::Reason::RowLongerThanFile)),
             ..source("spData.sqlite", Kind::Songbook, (Usual::Downloads, &["old laptop"]), 0, 0)
         };
         // Copied while SoftProjector had it open.
@@ -541,7 +541,7 @@ mod tests {
                     "32 new \u{b7} 2 found twice",
                     "Song files \u{b7} Downloads \u{b7} 34\u{a0}songs",
                     "Everything here is already in your library",
-                    "Couldn\u{2019}t be read: the file is cut short or damaged",
+                    "Couldn\u{2019}t be read: the file is cut short or damaged (a row is longer than the file)",
                     "Library \u{b7} from SoftProjector \u{b7} 3,301\u{a0}songs",
                     "Copied while it was open in SoftProjector: its latest changes may be missing",
                     "Library \u{b7} Documents \u{203a} Worship \u{b7} 214\u{a0}songs",

@@ -143,7 +143,7 @@ fn listing(card: &find_songs::Card, ended: Ended) -> (String, serde_json::Value)
                 "new": source.fresh(),
                 "here": source.here,
                 "twice": source.twice,
-                "why": source.why,
+                "why": source.why.as_ref().map(crate::load::Why::words),
                 "caution": source.caution,
                 "cloud": source.cloud,
                 "ticked": card.ticked.get(at).copied().unwrap_or(false),
@@ -666,7 +666,7 @@ impl crate::App {
         for at in &places {
             let source = &card.sources[*at];
             if let Some(why) = &source.why {
-                return Err(format!("{} couldn't be read: {why}", names[*at]));
+                return Err(format!("{} couldn't be read: {}", names[*at], why.english()));
             }
             if source.fresh() == 0 {
                 return Err(format!("{}: everything here is already in your library.", names[*at]));

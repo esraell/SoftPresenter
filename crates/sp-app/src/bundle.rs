@@ -116,9 +116,7 @@ pub fn read_words(path: &Path) -> Result<Presentation, String> {
     let found = entries(&mut zip, &name, &Limits::NORMAL)?;
     let (at, entry) = &found.songs[0];
     let bytes = read_song(&mut zip, *at, Limits::NORMAL.song).map_err(|why| song_problem(&name, &why))?;
-    sp_model::read_pro_file(&bytes, &title_of(entry)).map_err(|why| {
-        tf("notices.import.unreadable", "{name} could not be read ({error}).", &[("name", &name), ("error", &why)])
-    })
+    sp_model::read_pro_file(&bytes, &title_of(entry)).map_err(|why| song_problem(&name, &SongProblem::Document(why)))
 }
 
 pub fn open_with(path: &Path, staging: &Path, limits: &Limits) -> Result<Opened, String> {
@@ -131,22 +129,25 @@ pub fn open_with(path: &Path, staging: &Path, limits: &Limits) -> Result<Opened,
     let (mut documents, mut unread, mut read) = (Vec::new(), Vec::new(), 0u64);
     for (at, entry) in &songs {
         let cap = limits.song.min(limits.all_songs.saturating_sub(read));
-        let document = read_song(&mut zip, *at, cap)
-            .map_err(|why| if cap < limits.song && why == TOO_LARGE { TOO_MANY_WORDS.to_owned() } else { why })
-            .and_then(|bytes| {
-                read += bytes.len() as u64;
-                sp_model::read_pro_document(&bytes, &title_of(entry))
-            });
+        let document =
+            read_song(&mut zip, *at, cap)
+                .map_err(|why| {
+                    if cap < limits.song && why == SongProblem::TooLarge { SongProblem::TooManyWords } else { why }
+                })
+                .and_then(|bytes| {
+                    read += bytes.len() as u64;
+                    sp_model::read_pro_document(&bytes, &title_of(entry)).map_err(SongProblem::Document)
+                });
         match document {
             Ok(document) => documents.push(document),
             Err(why) if only => return Err(song_problem(&name, &why)),
-            Err(why) if why == TOO_LARGE || why == TOO_MANY_WORDS => {
-                unread.push(format!("{} ({})", shown(file_part(entry)), why_shown(&why)));
+            Err(why @ (SongProblem::TooLarge | SongProblem::TooManyWords)) => {
+                unread.push(format!("{} ({})", shown(file_part(entry)), why.words()));
             }
             Err(why) => unread.push(tf(
                 "notices.bundle.unread_entry",
                 "{name} (could not be read: {error})",
-                &[("name", &shown(file_part(entry))), ("error", &why)],
+                &[("name", &shown(file_part(entry))), ("error", &why.words())],
             )),
         }
     }
@@ -217,30 +218,42 @@ pub fn open_with(path: &Path, staging: &Path, limits: &Limits) -> Result<Opened,
     Ok(opened)
 }
 
-/// Why a song in a bundle wasn't read: larger than a song is, or (`TOO_MANY_WORDS`) past the
-/// cap on all the bundle's songs together.
-const TOO_LARGE: &str = "too large to be a song";
-const TOO_MANY_WORDS: &str = "the bundle's songs are too large together";
+/// Why a song in a bundle wasn't read.
+#[derive(Debug, PartialEq)]
+enum SongProblem {
+    /// Larger than a song is.
+    TooLarge,
+    /// Past the cap on all the bundle's songs together.
+    TooManyWords,
+    /// The zip couldn't give it: the zip reader's own words.
+    Zip(String),
+    /// What the song document's reader said.
+    Document(sp_model::Reason),
+}
 
-/// Why a song wasn't read, as the window says it: [`TOO_LARGE`] and [`TOO_MANY_WORDS`] in the
-/// language set, anything else as it is.
-fn why_shown(why: &str) -> String {
-    match why {
-        TOO_LARGE => t("notices.bundle.too_large", "too large to be a song").to_owned(),
-        TOO_MANY_WORDS => t("notices.bundle.too_many_words", "the bundle's songs are too large together").to_owned(),
-        other => other.to_owned(),
+impl SongProblem {
+    /// As the window says it, in the language set.
+    fn words(&self) -> String {
+        match self {
+            SongProblem::TooLarge => t("notices.bundle.too_large", "too large to be a song").to_owned(),
+            SongProblem::TooManyWords => {
+                t("notices.bundle.too_many_words", "the bundle's songs are too large together").to_owned()
+            }
+            SongProblem::Zip(said) => said.clone(),
+            SongProblem::Document(reason) => crate::load::reason_words(reason),
+        }
     }
 }
 
 /// What is said when a bundle's only song can't be read.
-fn song_problem(name: &str, why: &str) -> String {
-    if why == TOO_LARGE {
+fn song_problem(name: &str, why: &SongProblem) -> String {
+    if *why == SongProblem::TooLarge {
         tf("notices.bundle.song_too_large", "{name}: its song is too large to be a song.", &[("name", name)])
     } else {
         tf(
             "notices.import.unreadable",
             "{name} could not be read ({error}).",
-            &[("name", name), ("error", &why_shown(why))],
+            &[("name", name), ("error", &why.words())],
         )
     }
 }
@@ -476,13 +489,13 @@ fn entries(zip: &mut Zip, name: &str, limits: &Limits) -> Result<Entries, String
 }
 
 /// A song document's bytes: at most `cap`, whatever the entry says. The error says why not
-/// (`TOO_LARGE` when it is larger).
-fn read_song(zip: &mut Zip, at: usize, cap: u64) -> Result<Vec<u8>, String> {
-    let mut entry = zip.by_index(at).map_err(|e| e.to_string())?;
+/// (`TooLarge` when it is larger).
+fn read_song(zip: &mut Zip, at: usize, cap: u64) -> Result<Vec<u8>, SongProblem> {
+    let mut entry = zip.by_index(at).map_err(|e| SongProblem::Zip(e.to_string()))?;
     let mut bytes = Vec::new();
-    entry.by_ref().take(cap.saturating_add(1)).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    entry.by_ref().take(cap.saturating_add(1)).read_to_end(&mut bytes).map_err(|e| SongProblem::Zip(e.to_string()))?;
     if bytes.len() as u64 > cap {
-        return Err(TOO_LARGE.to_owned());
+        return Err(SongProblem::TooLarge);
     }
     Ok(bytes)
 }

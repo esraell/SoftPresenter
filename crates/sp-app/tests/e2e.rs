@@ -1905,6 +1905,21 @@ fn songs_found_on_the_computer_are_listed_and_only_their_new_songs_come_in() {
     let libraries = copy.ok(&["libraries"]).data;
     let library = libraries.as_array().into_iter().flatten().find(|l| l["name"] == "Hymns");
     assert_eq!(library.and_then(|l| l["songs"].as_u64()), Some(2), "{libraries}");
+    // With the window in Russian, `sp` and the log still say in English why the damaged one
+    // couldn't be read (the window's own words are checked in find_songs' tests).
+    copy.ok(&["settings", "set", "language=ru"]);
+    let russian = copy.ok(&["songs", "find"]);
+    let rows = russian.data["sources"].as_array().cloned().unwrap_or_default();
+    let broken = row(&rows, "Broken.sps", "Downloads");
+    let why = "the file is cut short or damaged (a row is longer than the file)";
+    assert_eq!(broken["why"].as_str(), Some(why), "{}", russian.text);
+    assert!(russian.text.contains(&format!("be read: {why}")), "{}", russian.text);
+    let log = run.log();
+    let said: Vec<&str> = log.lines().filter(|line| line.contains("[find] Broken.sps")).collect();
+    assert!(said.len() >= 2, "a line each time it was found: {log}");
+    for line in said {
+        assert!(line.ends_with(&format!("Broken.sps couldn't be read: {why}")), "{line}");
+    }
     copy.quit().assert_clean(&run);
 }
 

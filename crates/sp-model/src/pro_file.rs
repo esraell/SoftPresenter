@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    Arrangement, Copyright, Group, Object, Presentation, Role, Slide, Uuid, group_color, rtf::rtf_largest_font,
+    Arrangement, Copyright, Group, Object, Presentation, Reason, Role, Slide, Uuid, group_color, rtf::rtf_largest_font,
     rtf_to_text,
 };
 
@@ -39,14 +39,14 @@ struct Fields<'a> {
     at: usize,
 }
 
-const DAMAGED: &str = "the file is damaged or isn't a song document";
+const DAMAGED: Reason = Reason::DocumentDamaged;
 
 impl<'a> Fields<'a> {
     fn of(bytes: &'a [u8]) -> Fields<'a> {
         Fields { bytes, at: 0 }
     }
 
-    fn varint(&mut self) -> Result<u64, &'static str> {
+    fn varint(&mut self) -> Result<u64, Reason> {
         let mut value = 0u64;
         for shift in (0..64).step_by(7) {
             let byte = *self.bytes.get(self.at).ok_or(DAMAGED)?;
@@ -61,7 +61,7 @@ impl<'a> Fields<'a> {
 }
 
 impl<'a> Iterator for Fields<'a> {
-    type Item = Result<(u64, Value<'a>), &'static str>;
+    type Item = Result<(u64, Value<'a>), Reason>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.at >= self.bytes.len() {
@@ -115,7 +115,7 @@ fn number_of(value: &Value) -> u64 {
 }
 
 /// The text of the first field with this number in a message (a UUID message's string, say).
-fn first_text(message: &[u8], field: u64) -> Result<String, &'static str> {
+fn first_text(message: &[u8], field: u64) -> Result<String, Reason> {
     for read in Fields::of(message) {
         let (number, value) = read?;
         if number == field {
@@ -168,11 +168,11 @@ pub struct ProDocument {
 /// as first typed (comma and all), a name garbled long ago, or another song's. The document's
 /// own name is used when the file gives none. A document with pictures or videos but no words is refused, as its
 /// slides would come across empty.
-pub fn read_pro_file(bytes: &[u8], file_title: &str) -> Result<Presentation, String> {
+pub fn read_pro_file(bytes: &[u8], file_title: &str) -> Result<Presentation, Reason> {
     let document = read_pro_document(bytes, file_title)?;
     let has_words = |slide: &Slide| slide.objects.iter().any(|o| o.as_text().is_some_and(|t| !t.trim().is_empty()));
     if !document.song.groups.iter().flat_map(|g| &g.slides).any(has_words) {
-        return Err("it has pictures or videos but no words, and those don't come across yet".to_owned());
+        return Err(Reason::OnlyPictures);
     }
     Ok(document.song)
 }
@@ -180,14 +180,14 @@ pub fn read_pro_file(bytes: &[u8], file_title: &str) -> Result<Presentation, Str
 /// Reads a song from a `.pro` document with the pictures and videos its slides show, for a
 /// bundle that carries their files, named as [`read_pro_file`] names it. A document with
 /// neither words nor pictures is refused.
-pub fn read_pro_document(bytes: &[u8], file_title: &str) -> Result<ProDocument, String> {
+pub fn read_pro_document(bytes: &[u8], file_title: &str) -> Result<ProDocument, Reason> {
     if bytes.len() > LARGEST_PRO_FILE {
-        return Err("the file is too large to be a song".to_owned());
+        return Err(Reason::DocumentTooLarge);
     }
-    read(bytes, file_title).map_err(str::to_owned)
+    read(bytes, file_title)
 }
 
-fn read(bytes: &[u8], file_title: &str) -> Result<ProDocument, &'static str> {
+fn read(bytes: &[u8], file_title: &str) -> Result<ProDocument, Reason> {
     let mut name = String::new();
     let mut selected = String::new();
     let mut arrangements: Vec<(String, String, Vec<String>)> = Vec::new();
@@ -307,11 +307,11 @@ fn read(bytes: &[u8], file_title: &str) -> Result<ProDocument, &'static str> {
         song_arrangements.push(arrangement);
     }
     if song_groups.is_empty() {
-        return Err("it has no slides in it, or isn't a song document");
+        return Err(Reason::NoSlides);
     }
     let has_words = |slide: &Slide| slide.objects.iter().any(|o| o.as_text().is_some_and(|t| !t.trim().is_empty()));
     if media.is_empty() && !song_groups.iter().flat_map(|g| &g.slides).any(has_words) {
-        return Err("it has no words or pictures in it, or isn't a song document");
+        return Err(Reason::NoWordsOrPictures);
     }
     let own_name = [name.trim(), ccli_title.trim()].into_iter().find(|t| !t.is_empty()).unwrap_or_default().to_owned();
     let file_title = file_title.trim();
@@ -447,7 +447,7 @@ fn is_reference(text: &str) -> bool {
 }
 
 /// One slide (a cue) and its id.
-fn read_cue(message: &[u8]) -> Result<(String, Cue), &'static str> {
+fn read_cue(message: &[u8]) -> Result<(String, Cue), Reason> {
     let mut id = String::new();
     let mut cue = Cue::default();
     for read in Fields::of(message) {
@@ -464,7 +464,7 @@ fn read_cue(message: &[u8]) -> Result<(String, Cue), &'static str> {
 /// The parts of a cue's action that make a slide: the slide's words and notes, and its label,
 /// or the picture or video it shows (the first, if it has several). Only a slide's own label
 /// is kept: a picture's or a video's action is labelled with its file name.
-fn read_action(message: &[u8], cue: &mut Cue) -> Result<(), &'static str> {
+fn read_action(message: &[u8], cue: &mut Cue) -> Result<(), Reason> {
     let mut label = String::new();
     let mut is_slide = false;
     for read in Fields::of(message) {
@@ -491,7 +491,7 @@ fn read_action(message: &[u8], cue: &mut Cue) -> Result<(), &'static str> {
 
 /// A media action's picture or video: where its file is, and whether a video plays again when
 /// it ends. `None` for a sound, a live camera or anything else.
-fn read_media(message: &[u8]) -> Result<Option<ProMedia>, &'static str> {
+fn read_media(message: &[u8]) -> Result<Option<ProMedia>, Reason> {
     let (mut names, mut kind) = (Vec::new(), None);
     for read in Fields::of(message) {
         match read? {
@@ -525,7 +525,7 @@ fn read_media(message: &[u8]) -> Result<Option<ProMedia>, &'static str> {
 
 /// The names an address gives its file: the address itself, its path from a known folder,
 /// and a path relative to the document, in that order (any may be empty).
-fn url_names(message: &[u8]) -> Result<Vec<String>, &'static str> {
+fn url_names(message: &[u8]) -> Result<Vec<String>, Reason> {
     let (mut address, mut local, mut relative) = (String::new(), String::new(), String::new());
     for read in Fields::of(message) {
         match read? {
@@ -538,7 +538,7 @@ fn url_names(message: &[u8]) -> Result<Vec<String>, &'static str> {
     Ok(vec![address, local, relative])
 }
 
-fn read_presentation_slide(message: &[u8], cue: &mut Cue) -> Result<(), &'static str> {
+fn read_presentation_slide(message: &[u8], cue: &mut Cue) -> Result<(), Reason> {
     for read in Fields::of(message) {
         match read? {
             (1, base) => {
@@ -564,7 +564,7 @@ fn read_presentation_slide(message: &[u8], cue: &mut Cue) -> Result<(), &'static
 
 /// The words of one element on a slide, and its largest type, when it is a text box that isn't
 /// hidden.
-fn element_words(message: &[u8]) -> Result<Option<(String, Option<u32>)>, &'static str> {
+fn element_words(message: &[u8]) -> Result<Option<(String, Option<u32>)>, Reason> {
     for read in Fields::of(message) {
         if let (1, graphics) = read? {
             let (mut hidden, mut rtf) = (false, None);
@@ -582,7 +582,7 @@ fn element_words(message: &[u8]) -> Result<Option<(String, Option<u32>)>, &'stat
 }
 
 /// The bytes of the first field with this number in a message.
-fn first_bytes(message: &[u8], field: u64) -> Result<&[u8], &'static str> {
+fn first_bytes(message: &[u8], field: u64) -> Result<&[u8], Reason> {
     for read in Fields::of(message) {
         let (number, value) = read?;
         if number == field {
@@ -869,7 +869,7 @@ mod tests {
         let doc = [field(12, &group("g", "", &["a"])), field(13, &with_picture)].concat();
         assert_eq!(read_pro_file(&doc, "x").unwrap().groups[0].slides[0].label, None);
         let empty = [field(12, &group("g", "", &["b"])), field(13, &cue("b", &[r"{\rtf1 }"], "", true))].concat();
-        assert!(read_pro_file(&empty, "x").unwrap_err().contains("no words"));
+        assert_eq!(read_pro_file(&empty, "x").unwrap_err(), Reason::NoWordsOrPictures);
     }
 
     #[test]
@@ -915,7 +915,7 @@ mod tests {
         ]
         .concat();
         assert_eq!(read_pro_document(&doc, "x").unwrap().media.len(), 1);
-        assert!(read_pro_file(&doc, "x").unwrap_err().contains("no words"));
+        assert_eq!(read_pro_file(&doc, "x").unwrap_err(), Reason::OnlyPictures);
         // A sound is not a picture: a slide that plays one shows nothing.
         let element = [field(1, &uuid("m")), field(2, &field(1, b"Bell.mp3"))].concat();
         let sound = [number(9, 2), field(20, &[field(5, &element), field(8, &[])].concat())].concat();
@@ -932,5 +932,9 @@ mod tests {
         assert!(read_pro_file(&[0x0A, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F], "x").is_err(), "a length past the end");
         assert!(read_pro_file(&[0x0B], "x").is_err(), "an old group field");
         assert!(read_pro_file(b"plain text, not a document", "x").is_err());
+        assert_eq!(
+            read_pro_file(&[0x0B], "x").unwrap_err().to_string(),
+            "the file is damaged or isn't a song document"
+        );
     }
 }

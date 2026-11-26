@@ -9,7 +9,7 @@
 //! number of any size, a number with a fraction, text, bytes). A column declared
 //! `INTEGER PRIMARY KEY` is the row's own number, as SQLite has it.
 //!
-//! What it refuses, with a sentence saying so: a `WITHOUT ROWID` table and a virtual table
+//! What it refuses, with a [`Reason`] saying why: a `WITHOUT ROWID` table and a virtual table
 //! (their rows are kept another way), a table with computed columns, and a file made for a
 //! newer SQLite than the format described. It leaves alone: indexes, free pages, and a journal
 //! or write-ahead log beside the file (only the main file is read, so changes not yet moved
@@ -20,10 +20,12 @@
 //! visited twice in one walk (so a tree or a chain of overflow pages that loops, or shares
 //! pages, is refused), a tree is at most [`DEEPEST`] levels, and the pages visited, the rows and
 //! the bytes kept are bounded by [`Limits`]. Nothing here panics whatever the file holds; every
-//! error is a sentence.
+//! error is a [`Reason`], which the app says in the language set and the log in English.
 
 use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom};
+
+use crate::reason::{Damage, Reason};
 
 /// How an SQLite file starts.
 const MAGIC: &[u8; 16] = b"SQLite format 3\0";
@@ -91,7 +93,7 @@ struct Column {
 struct Table {
     name: String,
     /// The page its tree starts at, and its columns; or why it can't be read.
-    shape: Result<(u32, Vec<Column>), String>,
+    shape: Result<(u32, Vec<Column>), Reason>,
 }
 
 /// An SQLite database file, open for reading tables.
@@ -135,12 +137,6 @@ fn varint(bytes: &[u8], at: usize) -> Option<(u64, usize)> {
     None
 }
 
-const DAMAGED: &str = "the database is damaged";
-
-fn damaged(what: &str) -> String {
-    format!("{DAMAGED} ({what})")
-}
-
 /// One page of a table's tree, part way through being gone over.
 struct Frame {
     page: Vec<u8>,
@@ -175,26 +171,23 @@ struct Walk<'a, R> {
 
 impl<R: Read + Seek> Walk<'_, R> {
     /// Reads a page, once: a page asked for again is a loop, or two rows sharing their bytes.
-    fn page(&mut self, number: u32) -> Result<Vec<u8>, String> {
+    fn page(&mut self, number: u32) -> Result<Vec<u8>, Reason> {
         if number == 0 || number > self.db.pages {
-            return Err(format!(
-                "the file is cut short or damaged (it points to page {number}, and has {} pages)",
-                self.db.pages
-            ));
+            return Err(Reason::PastTheEnd { page: number, pages: self.db.pages });
         }
         if !self.visited.insert(number) {
-            return Err(damaged(&format!("page {number} is used twice")));
+            return Err(Reason::Damaged(Damage::PageUsedTwice(number)));
         }
         if self.visited.len() > self.db.limits.pages {
-            return Err("the database is larger than any songbook".to_owned());
+            return Err(Reason::TooManyPages);
         }
         self.db.read_page(number)
     }
 
     /// Starts on a page of the tree: the page a table starts at, or one a page above points to.
-    fn enter(&mut self, number: u32) -> Result<(), String> {
+    fn enter(&mut self, number: u32) -> Result<(), Reason> {
         if self.stack.len() >= DEEPEST {
-            return Err(damaged("its pages are nested too deep"));
+            return Err(Reason::Damaged(Damage::NestedTooDeep));
         }
         let page = self.page(number)?;
         let header = if number == 1 { 100 } else { 0 };
@@ -203,29 +196,29 @@ impl<R: Read + Seek> Walk<'_, R> {
         let leaf = match kind {
             13 => true,
             5 => false,
-            2 | 10 => return Err("its rows are kept as an index, which isn't read".to_owned()),
-            _ => return Err(damaged(&format!("page {number} isn't part of a table"))),
+            2 | 10 => return Err(Reason::IndexRows),
+            _ => return Err(Reason::Damaged(Damage::NotTablePage(number))),
         };
-        let cells = be16(&page, header + 3).ok_or_else(|| damaged("a page is too short"))?;
+        let cells = be16(&page, header + 3).ok_or(Reason::Damaged(Damage::PageTooShort))?;
         let cells_end = header + if leaf { 8 } else { 12 } + 2 * cells;
         if cells_end > usable {
-            return Err(damaged(&format!("page {number} lists more rows than fit on it")));
+            return Err(Reason::Damaged(Damage::TooManyCells(number)));
         }
         self.stack.push(Frame { page, header, cells_end, cells, next: 0, leaf });
         Ok(())
     }
 
     /// The next row of the table, or `None` after the last.
-    fn next(&mut self) -> Result<Option<Cell>, String> {
+    fn next(&mut self) -> Result<Option<Cell>, Reason> {
         loop {
             let usable = self.db.usable;
             let length = self.db.length;
             let Some(frame) = self.stack.last_mut() else { return Ok(None) };
             let at = frame.next;
             frame.next += 1;
-            let bad = || damaged("a row lies outside its page");
+            let bad = || Reason::Damaged(Damage::RowOutsidePage);
             // Where the cell is: its place is in the list after the page's header.
-            let cell_at = |frame: &Frame| -> Result<usize, String> {
+            let cell_at = |frame: &Frame| -> Result<usize, Reason> {
                 let list = frame.header + if frame.leaf { 8 } else { 12 };
                 let place = be16(&frame.page, list + 2 * at).ok_or_else(bad)?;
                 if place < frame.cells_end || place >= usable { Err(bad()) } else { Ok(place) }
@@ -240,7 +233,7 @@ impl<R: Read + Seek> Walk<'_, R> {
                 let (rowid, after) = varint(page, after).ok_or_else(bad)?;
                 // A row can't be longer than the file it is in.
                 if row_length > length {
-                    return Err("the file is cut short or damaged (a row is longer than the file)".to_owned());
+                    return Err(Reason::RowLongerThanFile);
                 }
                 let here = on_its_page(row_length, usable as u64);
                 let end = after.checked_add(here).ok_or_else(bad)?;
@@ -263,25 +256,25 @@ impl<R: Read + Seek> Walk<'_, R> {
             }
             .ok_or_else(bad)?;
             if child == 1 {
-                return Err(damaged("a table points back to the first page"));
+                return Err(Reason::Damaged(Damage::PointsToFirstPage));
             }
             self.enter(child)?;
         }
     }
 
     /// Counts bytes of rows read, up to the limit.
-    fn count(&mut self, bytes: u64) -> Result<(), String> {
+    fn count(&mut self, bytes: u64) -> Result<(), Reason> {
         self.read = self.read.saturating_add(bytes);
         if self.read > self.db.limits.bytes {
-            return Err("the database holds more than any songbook".to_owned());
+            return Err(Reason::TooMuch);
         }
         Ok(())
     }
 
     /// Reads on along the row's overflow pages until its first `need` bytes are in hand.
-    fn fetch(&mut self, cell: &mut Cell, need: u64) -> Result<(), String> {
+    fn fetch(&mut self, cell: &mut Cell, need: u64) -> Result<(), Reason> {
         if need > cell.length {
-            return Err(damaged("a value runs past the end of its row"));
+            return Err(Reason::Damaged(Damage::ValuePastRow));
         }
         let have = cell.data.len() as u64;
         if need <= have {
@@ -291,15 +284,15 @@ impl<R: Read + Seek> Walk<'_, R> {
         let usable = self.db.usable;
         while (cell.data.len() as u64) < need {
             if cell.overflow == 0 {
-                return Err(damaged("a row ends before its values do"));
+                return Err(Reason::Damaged(Damage::RowEndsEarly));
             }
             if cell.overflow == 1 {
-                return Err(damaged("a row runs on into the first page"));
+                return Err(Reason::Damaged(Damage::RowIntoFirstPage));
             }
             let page = self.page(cell.overflow)?;
             let left = cell.length - cell.data.len() as u64;
             let take = left.min(usable as u64 - 4) as usize;
-            let more = page.get(4..4 + take).ok_or_else(|| damaged("a page is too short"))?;
+            let more = page.get(4..4 + take).ok_or(Reason::Damaged(Damage::PageTooShort))?;
             cell.data.extend_from_slice(more);
             cell.overflow = be32(&page, 0).unwrap_or(0);
         }
@@ -307,8 +300,8 @@ impl<R: Read + Seek> Walk<'_, R> {
     }
 
     /// The values of the columns at `wanted` (their places in the table) of one row.
-    fn values(&mut self, cell: &mut Cell, wanted: &[(usize, bool)]) -> Result<Vec<Value>, String> {
-        let bad = || damaged("a row's list of values is wrong");
+    fn values(&mut self, cell: &mut Cell, wanted: &[(usize, bool)]) -> Result<Vec<Value>, Reason> {
+        let bad = || Reason::Damaged(Damage::ValueList);
         self.count(cell.data.len() as u64)?;
         // The row starts with the length of its list of kinds, then the kind of each value.
         let (list_length, first) = varint(&cell.data, 0).ok_or_else(bad)?;
@@ -331,7 +324,7 @@ impl<R: Read + Seek> Walk<'_, R> {
                 4 => 4,
                 5 => 6,
                 6 | 7 => 8,
-                10 | 11 => return Err(damaged("a value is of a kind no database file holds")),
+                10 | 11 => return Err(Reason::Damaged(Damage::UnknownKind)),
                 kind => (kind - 12) / 2,
             };
             for (slot, (wanted_place, _)) in found.iter_mut().zip(wanted) {
@@ -405,42 +398,42 @@ fn text(bytes: &[u8], encoding: Encoding) -> String {
 
 impl<R: Read + Seek> Database<R> {
     /// Opens a database: checks its header and reads its list of tables.
-    pub fn open(mut source: R, limits: Limits) -> Result<Self, String> {
-        let unreadable = |e: std::io::Error| format!("it could not be read ({e})");
+    pub fn open(mut source: R, limits: Limits) -> Result<Self, Reason> {
+        let unreadable = |e: std::io::Error| Reason::NotRead(e.to_string());
         let length = source.seek(SeekFrom::End(0)).map_err(unreadable)?;
         source.seek(SeekFrom::Start(0)).map_err(unreadable)?;
         let mut header = Vec::with_capacity(100);
         source.by_ref().take(100).read_to_end(&mut header).map_err(unreadable)?;
         if !is_database(&header) {
-            return Err("it isn't an SQLite database".to_owned());
+            return Err(Reason::NotDatabase);
         }
         if header.len() < 100 {
-            return Err("the file is cut short (it ends inside its header)".to_owned());
+            return Err(Reason::EndsInHeader);
         }
         let page_size = match be16(&header, 16) {
             Some(1) => 65536,
             Some(size) if (512..=32768).contains(&size) && size.is_power_of_two() => size,
-            _ => return Err(damaged("its page size isn't one a database has")),
+            _ => return Err(Reason::Damaged(Damage::PageSize)),
         };
         // A file made for a later kind of SQLite file than 1 (plain) or 2 (with a write-ahead log).
         if header.get(19).is_some_and(|version| *version > 2) {
-            return Err("it was made for a newer SQLite than SoftPresenter reads".to_owned());
+            return Err(Reason::NewerSqlite);
         }
         // How much of a row stays on its page is worked out from these three, which never vary.
         if header.get(21..24) != Some(&[64, 32, 32]) {
-            return Err(damaged("its header isn't one a database has"));
+            return Err(Reason::Damaged(Damage::Header));
         }
         let kept_back = header.get(20).map_or(0, |b| usize::from(*b));
         let usable = page_size - kept_back;
         if usable < 480 {
-            return Err(damaged("its pages have no room for rows"));
+            return Err(Reason::Damaged(Damage::NoRoomForRows));
         }
         let encoding = match be32(&header, 56) {
             // A database nothing was ever put in says 0.
             Some(0 | 1) => Encoding::Utf8,
             Some(2) => Encoding::Utf16Le,
             Some(3) => Encoding::Utf16Be,
-            _ => return Err(damaged("its text is in an encoding no database has")),
+            _ => return Err(Reason::Damaged(Damage::Encoding)),
         };
         let pages = u32::try_from(length / page_size as u64).unwrap_or(u32::MAX);
         let mut db = Database { source, page_size, usable, pages, length, encoding, limits, tables: Vec::new() };
@@ -448,8 +441,8 @@ impl<R: Read + Seek> Database<R> {
         Ok(db)
     }
 
-    fn read_page(&mut self, number: u32) -> Result<Vec<u8>, String> {
-        let unreadable = |e: std::io::Error| format!("it could not be read ({e})");
+    fn read_page(&mut self, number: u32) -> Result<Vec<u8>, Reason> {
+        let unreadable = |e: std::io::Error| Reason::NotRead(e.to_string());
         let start = u64::from(number.saturating_sub(1)) * self.page_size as u64;
         self.source.seek(SeekFrom::Start(start)).map_err(unreadable)?;
         let mut page = vec![0_u8; self.page_size];
@@ -458,14 +451,14 @@ impl<R: Read + Seek> Database<R> {
     }
 
     /// Goes through the rows of the tree starting at `root`, reading the columns at `wanted`.
-    fn walk(&mut self, root: u32, wanted: &[(usize, bool)]) -> Result<Vec<Row>, String> {
+    fn walk(&mut self, root: u32, wanted: &[(usize, bool)]) -> Result<Vec<Row>, Reason> {
         let most = self.limits.rows;
         let mut walk = Walk { db: self, visited: HashSet::new(), stack: Vec::new(), read: 0 };
         walk.enter(root)?;
         let mut rows = Vec::new();
         while let Some(mut cell) = walk.next()? {
             if rows.len() >= most {
-                return Err("the database has more rows than any songbook".to_owned());
+                return Err(Reason::TooManyRows);
             }
             let values = walk.values(&mut cell, wanted)?;
             rows.push(Row { rowid: cell.rowid, values });
@@ -475,9 +468,9 @@ impl<R: Read + Seek> Database<R> {
 
     /// The file's list of what it holds, kept as a table of its own starting on page 1: each
     /// table's name, the page it starts at, and the statement that made it (for its columns).
-    fn read_tables(&mut self) -> Result<Vec<Table>, String> {
+    fn read_tables(&mut self) -> Result<Vec<Table>, Reason> {
         if self.pages == 0 {
-            return Err("the file is cut short (it ends inside its first page)".to_owned());
+            return Err(Reason::EndsInFirstPage);
         }
         let listed = self.walk(1, &[(0, false), (1, false), (3, false), (4, false)])?;
         let pages = self.pages;
@@ -488,10 +481,10 @@ impl<R: Read + Seek> Database<R> {
                     let shape = match (root, sql) {
                         (Value::Integer(root), Value::Text(sql)) => match u32::try_from(*root) {
                             Ok(root) if root >= 2 && root <= pages => columns(sql).map(|columns| (root, columns)),
-                            Ok(0) => Err("it is a virtual table, which isn't read".to_owned()),
-                            _ => Err(damaged("a table starts on a page the file doesn't have")),
+                            Ok(0) => Err(Reason::VirtualTable),
+                            _ => Err(Reason::Damaged(Damage::TableOutsideFile)),
                         },
-                        _ => Err("it is a virtual table, which isn't read".to_owned()),
+                        _ => Err(Reason::VirtualTable),
                     };
                     Some(Table { name: name.clone(), shape })
                 }
@@ -531,30 +524,35 @@ impl<R: Read + Seek> Database<R> {
     }
 
     /// The names of a table's columns, in order.
-    pub fn column_names(&self, table: &str) -> Result<Vec<String>, String> {
-        let found = self.table(table).ok_or_else(|| format!("it has no table {table}"))?;
-        let (_, columns) = found.shape.as_ref().map_err(|why| format!("table {table} can't be read: {why}"))?;
+    pub fn column_names(&self, table: &str) -> Result<Vec<String>, Reason> {
+        let found = self.table(table).ok_or_else(|| Reason::NoTable(table.to_owned()))?;
+        let (_, columns) = found.shape.as_ref().map_err(|why| unreadable_table(table, why))?;
         Ok(columns.iter().map(|column| column.name.clone()).collect())
     }
 
     /// Every row of a table, in the table's own order (by the rows' numbers), with the values
     /// of the columns named, in the order named. Names are matched without regard to the case
     /// of English letters, as SQLite matches them.
-    pub fn rows(&mut self, table: &str, columns: &[&str]) -> Result<Vec<Row>, String> {
-        let found = self.table(table).ok_or_else(|| format!("it has no table {table}"))?;
-        let (root, all) = found.shape.as_ref().map_err(|why| format!("table {table} can't be read: {why}"))?;
+    pub fn rows(&mut self, table: &str, columns: &[&str]) -> Result<Vec<Row>, Reason> {
+        let found = self.table(table).ok_or_else(|| Reason::NoTable(table.to_owned()))?;
+        let (root, all) = found.shape.as_ref().map_err(|why| unreadable_table(table, why))?;
         let wanted = columns
             .iter()
             .map(|name| {
                 all.iter()
                     .position(|column| column.name.eq_ignore_ascii_case(name))
                     .and_then(|place| Some((place, all.get(place)?.is_rowid)))
-                    .ok_or_else(|| format!("table {table} has no column {name}"))
+                    .ok_or_else(|| Reason::NoColumn { table: table.to_owned(), column: (*name).to_owned() })
             })
             .collect::<Result<Vec<_>, _>>()?;
         let root = *root;
         self.walk(root, &wanted)
     }
+}
+
+/// A table that can't be read, and why.
+fn unreadable_table(table: &str, why: &Reason) -> Reason {
+    Reason::Table { table: table.to_owned(), why: Box::new(why.clone()) }
 }
 
 /// One piece of a `CREATE TABLE` statement.
@@ -631,11 +629,11 @@ fn pieces(sql: &str) -> Vec<Piece> {
 
 /// A table's columns, from the statement that made the table: their names in order, and which
 /// one, if any, is the row's own number.
-fn columns(sql: &str) -> Result<Vec<Column>, String> {
-    let unclear = || "how it was made isn't a statement SoftPresenter can follow".to_owned();
+fn columns(sql: &str) -> Result<Vec<Column>, Reason> {
+    let unclear = || Reason::UnclearTable;
     let pieces = pieces(sql);
     if pieces.iter().take(3).any(|piece| piece.is("VIRTUAL")) {
-        return Err("it is a virtual table, which isn't read".to_owned());
+        return Err(Reason::VirtualTable);
     }
     let open = pieces.iter().position(|piece| *piece == Piece::Sign('(')).ok_or_else(unclear)?;
     // The definitions between the brackets, split at the commas that aren't inside brackets.
@@ -662,7 +660,7 @@ fn columns(sql: &str) -> Result<Vec<Column>, String> {
     let close = close.ok_or_else(unclear)?;
     let after = pieces.get(close + 1..).unwrap_or(&[]);
     if after.windows(2).any(|pair| matches!(pair, [a, b] if a.is("WITHOUT") && b.is("ROWID"))) {
-        return Err("it is a WITHOUT ROWID table, which isn't read".to_owned());
+        return Err(Reason::WithoutRowid);
     }
     const CONSTRAINTS: [&str; 10] =
         ["CONSTRAINT", "PRIMARY", "NOT", "NULL", "UNIQUE", "CHECK", "DEFAULT", "COLLATE", "REFERENCES", "GENERATED"];
@@ -712,7 +710,7 @@ fn columns(sql: &str) -> Result<Vec<Column>, String> {
             })
             .collect();
         if outside.iter().any(|piece| piece.is("GENERATED") || piece.is("AS")) {
-            return Err("it has computed columns, which aren't read".to_owned());
+            return Err(Reason::ComputedColumns);
         }
         // `INTEGER PRIMARY KEY` is the row's own number; with DESC after it, SQLite keeps the
         // value in the row like any other.
@@ -721,7 +719,7 @@ fn columns(sql: &str) -> Result<Vec<Column>, String> {
             whole_number && key.is_some_and(|key| !outside.get(key + 2).is_some_and(|piece| piece.is("DESC")));
         columns.push((Column { name: name.clone(), is_rowid }, whole_number));
         if columns.len() > MOST_COLUMNS {
-            return Err("it has more columns than any table".to_owned());
+            return Err(Reason::TooManyColumns);
         }
     }
     if columns.is_empty() {

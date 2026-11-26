@@ -10,6 +10,7 @@ mod import;
 mod link;
 mod names;
 mod pro_file;
+mod reason;
 mod rtf;
 mod softprojector;
 mod song_text;
@@ -34,6 +35,10 @@ pub use names::{repair_garbled, zip_entry_name};
 #[doc(hidden)]
 pub use pro_file::example as pro_example;
 pub use pro_file::{LARGEST_PRO_FILE, ProDocument, ProMedia, read_pro_document, read_pro_file};
+#[cfg(any(test, feature = "test-documents"))]
+#[doc(hidden)]
+pub use reason::one_of_each as reasons_one_of_each;
+pub use reason::{Damage, Reason};
 pub use rtf::rtf_to_text;
 pub use softprojector::{
     SongbookProblem, SongbookRead, SongbookSong, from_softprojector, read_songbook, read_songbook_whole,

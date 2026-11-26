@@ -139,9 +139,11 @@ when something fails (NDI's, the DeckLink driver's and a video file's reasons, s
 come), and the few errors said at startup before the language is known (the home window can't
 open, no graphics device).
 Where another crate's words are drawn in the window, sp-app says them from the crate's own values
-(`screens::decklink_driver_words`, `screens::decklink_format_words`, `screens::ndi_not_installed`)
-or hands the crate its words (`sp_render::set_ndi_tag_words`), so the crate and `sp` keep their
-English.
+(`screens::decklink_driver_words`, `screens::decklink_format_words`, `screens::ndi_not_installed`,
+and `load::reason_words` for why a song reader refused a file, an `sp_model::Reason` whose
+`Display` is the English) or hands the crate its words (`sp_render::set_ndi_tag_words`), so the
+crate and `sp` keep their English. What the system or a library says inside such a reason (a file
+the system couldn't read, the JSON or zip reader's own words) is shown as it comes.
 
 When you finish an area, add its file name to `SPANISH_DONE` in `i18n.rs`, so a string wrapped
 later without its Spanish fails the tests. Russian is held to the same list (`RUSSIAN_DONE` is

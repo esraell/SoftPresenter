@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 
 use crate::chorus_after::{CHORUS_AFTER_EACH_VERSE, Part, sung_order};
+use crate::reason::Reason;
 use crate::sqlite_read::{Database, Limits, Value, is_database};
 use crate::{Arrangement, Copyright, Group, Object, Presentation, Role, Slide, Uuid, group_color};
 
@@ -51,8 +52,8 @@ pub enum SongbookProblem {
     NotSongbook,
     /// A songbook with no songs in it.
     NoSongs,
-    /// A songbook that could not be read; why, as the end of a sentence.
-    Unreadable(String),
+    /// A songbook that could not be read, and why.
+    Unreadable(Reason),
 }
 
 /// A song's values on the way in, as the database has them: number, title, words, music, text
@@ -73,7 +74,7 @@ pub fn read_songbook_whole<R: Read + Seek>(source: R) -> Result<SongbookRead, So
 
 /// [`read_songbook_whole`], within these bounds.
 fn read_songbook_within<R: Read + Seek>(mut source: R, bounds: Bounds) -> Result<SongbookRead, SongbookProblem> {
-    let unreadable = |e: std::io::Error| SongbookProblem::Unreadable(format!("it could not be read ({e})"));
+    let unreadable = |e: std::io::Error| SongbookProblem::Unreadable(Reason::NotRead(e.to_string()));
     let mut head = Vec::new();
     source.by_ref().take(16).read_to_end(&mut head).map_err(unreadable)?;
     // A database cut short is refused by its reader, which finds the pages it points to missing.
@@ -86,15 +87,13 @@ fn read_songbook_within<R: Read + Seek>(mut source: R, bounds: Bounds) -> Result
         let whole = String::from_utf8_lossy(&bytes);
         let whole = whole.strip_prefix('\u{feff}').unwrap_or(&whole);
         if whole.starts_with("<?xml") && whole.contains("spSongBook") {
-            return Err(SongbookProblem::Unreadable(
-                "it is a songbook saved as XML, which SoftPresenter doesn't read yet".to_owned(),
-            ));
+            return Err(SongbookProblem::Unreadable(Reason::XmlSongbook));
         }
         if !whole.starts_with("##") {
             return Err(SongbookProblem::NotSongbook);
         }
         if bytes.len() as u64 > LARGEST_TEXT_SONGBOOK {
-            return Err(SongbookProblem::Unreadable("it is larger than any songbook".to_owned()));
+            return Err(SongbookProblem::Unreadable(Reason::TextTooLarge));
         }
         text_songs(whole, bounds)?
     };
@@ -253,13 +252,13 @@ impl Tally {
         };
         self.parts += parts;
         if parts > self.bounds.song_parts {
-            return Err(SongbookProblem::Unreadable("it has a song longer than any song".to_owned()));
+            return Err(SongbookProblem::Unreadable(Reason::SongTooLong));
         }
         if self.songs > self.bounds.songs {
-            return Err(SongbookProblem::Unreadable("it has more songs than any songbook".to_owned()));
+            return Err(SongbookProblem::Unreadable(Reason::TooManySongs));
         }
         if self.bytes > self.bounds.bytes || self.parts > self.bounds.parts {
-            return Err(SongbookProblem::Unreadable("it is larger than any songbook".to_owned()));
+            return Err(SongbookProblem::Unreadable(Reason::TextTooLarge));
         }
         Ok(())
     }
@@ -346,7 +345,7 @@ fn sort_order(a: &Value, b: &Value, text: &impl Fn(&str, &str) -> Ordering) -> O
 ///
 /// `Err(None)` is a database that is neither.
 fn database_songs<R: Read + Seek>(source: R, bounds: Bounds) -> Result<Vec<Fields>, Option<SongbookProblem>> {
-    let unreadable = |why: String| Some(SongbookProblem::Unreadable(why));
+    let unreadable = |why: Reason| Some(SongbookProblem::Unreadable(why));
     let limits = Limits { rows: bounds.songs, bytes: bounds.bytes as u64, ..Limits::NORMAL };
     let mut db = Database::open(source, limits).map_err(unreadable)?;
     let (whole, one) = (db.has_table("Songbooks"), db.has_table("SongBook"));
@@ -759,7 +758,20 @@ mod tests {
     fn a_file_past_its_bounds_is_refused_however_it_gets_there() {
         let within =
             |bytes: &[u8], bounds| read_songbook_within(std::io::Cursor::new(bytes), bounds).map(|read| read.songs);
-        let refused = |read: Result<Vec<SongbookSong>, SongbookProblem>| matches!(read, Err(SongbookProblem::Unreadable(why)) if why.ends_with("than any songbook") || why.ends_with("than any song"));
+        // Refused as larger than any songbook (or song), by the songbook's reader or the database's.
+        let refused = |read: Result<Vec<SongbookSong>, SongbookProblem>| {
+            matches!(
+                read,
+                Err(SongbookProblem::Unreadable(
+                    Reason::TextTooLarge
+                        | Reason::TooManySongs
+                        | Reason::SongTooLong
+                        | Reason::TooManyRows
+                        | Reason::TooMuch
+                        | Reason::TooManyPages
+                ))
+            )
+        };
         let database: &[u8] = include_bytes!("../tests/songbooks/database.sqlite");
         let text = TEXT_SONGBOOK.as_bytes();
         for bytes in [database, text] {
@@ -802,11 +814,16 @@ mod tests {
         assert_eq!(read(empty), Err(SongbookProblem::NoSongs));
         let whole = include_bytes!("../tests/songbooks/songbook.sps");
         let cut = &whole[..5 * 1024];
-        let why = "the file is cut short or damaged (a row is longer than the file)".to_owned();
-        assert_eq!(read(cut), Err(SongbookProblem::Unreadable(why)));
+        assert_eq!(read(cut), Err(SongbookProblem::Unreadable(Reason::RowLongerThanFile)));
+        assert_eq!(
+            Reason::RowLongerThanFile.to_string(),
+            "the file is cut short or damaged (a row is longer than the file)"
+        );
         // A songbook whose songs have lost a column the import needs.
         let narrow = include_bytes!("../tests/songbooks/narrow.sps");
-        assert!(matches!(read(narrow), Err(SongbookProblem::Unreadable(why)) if why.contains("no column song_text")));
+        let lost = Reason::NoColumn { table: "Songs".to_owned(), column: "song_text".to_owned() };
+        assert_eq!(read(narrow), Err(SongbookProblem::Unreadable(lost.clone())));
+        assert_eq!(lost.to_string(), "table Songs has no column song_text");
     }
 
     /// A songbook kept as text, written for this test: a song a line, out of order, one with
@@ -847,7 +864,7 @@ mod tests {
         assert_eq!(read("##1\n##Empty\n##\n".as_bytes()), Err(SongbookProblem::NoSongs));
         assert_eq!(read(b"##"), Err(SongbookProblem::NoSongs));
         let xml = b"<?xml version=\"1.0\"?><spSongBook version=\"2.0\"></spSongBook>";
-        assert!(matches!(read(xml), Err(SongbookProblem::Unreadable(why)) if why.contains("XML")));
+        assert_eq!(read(xml), Err(SongbookProblem::Unreadable(Reason::XmlSongbook)));
         assert_eq!(read(b"#$#@$@%"), Err(SongbookProblem::NotSongbook));
         // Bytes that aren't text, and separators with nothing between, are read without harm.
         let odd = b"##\xff\xfe\n##\n##\n#$##$##$##$##$##$#\n1#$#\xff#$##$##$##$##$#@$@$@%@%\n";
