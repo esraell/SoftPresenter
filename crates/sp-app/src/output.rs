@@ -1301,8 +1301,10 @@ fn slow_present(asked: &str, name: &str) -> Option<Duration> {
 /// The operator's window and the screens share one device, and setting a surface up waits for
 /// the GPU to come idle: work the other thread hands in at that moment makes it fail ("Failed to
 /// wait for GPU to come idle"), mostly as the app starts. That is only a race, so it is tried
-/// again a few times, a moment apart, and if it still loses, the next frame tries again; it is
-/// written as an event, not a problem. A set-up that lost leaves the surface as it was, at the
+/// again a few times, a moment apart, and if it still loses, a later frame tries again; it is
+/// written as an event, not a problem. (A graphics device that was lost is not caught here:
+/// the graphics library keeps that error back, so this says the set-up worked, and the surface
+/// then gives no picture.) A set-up that lost leaves the surface as it was, at the
 /// size before, so whoever calls must not draw for the new size until this says it worked: the
 /// screens keep `Target::configured`, the operator's windows `surface_setup::SetUp`.
 pub(crate) fn configure(
@@ -1326,11 +1328,46 @@ pub(crate) fn configure(
                 "A window's surface met other work on the GPU as it was set up; trying again",
             );
         } else {
-            crate::applog::problem("output", &format!("A screen's window could not be set up yet: {error}"));
+            set_up_problem(&error.to_string());
         }
         return false;
     }
     false
+}
+
+/// Says that a window's surface could not be set up, and why. A set-up that keeps failing the
+/// same way (a window larger than a surface may be, a graphics device that was lost) is tried
+/// again and again: it is said once, then once a minute with how many times it came since.
+fn set_up_problem(error: &str) {
+    static SAID: std::sync::Mutex<Vec<(String, u32, Instant)>> = std::sync::Mutex::new(Vec::new());
+    let Ok(mut said) = SAID.lock() else { return };
+    if let Some(repeated) = said_again(&mut said, error, Instant::now()) {
+        let again = if repeated > 0 { format!(" ({repeated} more times in the last minute)") } else { String::new() };
+        crate::applog::problem("output", &format!("A window's surface could not be set up yet{again}: {error}"));
+    }
+}
+
+/// Notes that `message` came at `now`. Says whether to write it: the first time, and then once
+/// a minute, with how many times it came since it was last written. Other messages in between
+/// don't make it news again. (No more than a few kinds are ever kept.)
+pub(crate) fn said_again(said: &mut Vec<(String, u32, Instant)>, message: &str, now: Instant) -> Option<u32> {
+    match said.iter_mut().find(|(text, _, _)| text == message) {
+        Some((_, again, at)) if now.saturating_duration_since(*at) < Duration::from_secs(60) => {
+            *again += 1;
+            None
+        }
+        Some((_, again, at)) => {
+            *at = now;
+            Some(std::mem::take(again))
+        }
+        None => {
+            if said.len() >= 16 {
+                said.remove(0);
+            }
+            said.push((message.to_owned(), 0, now));
+            Some(0)
+        }
+    }
 }
 
 struct Output {
@@ -4633,6 +4670,25 @@ fn capture_wanted() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_problem_that_keeps_coming_is_said_once_then_once_a_minute_with_its_count() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let mut said = Vec::new();
+        assert_eq!(said_again(&mut said, "too large", at(0)), Some(0));
+        // Sixty times a second for a minute, with another problem coming turn about: neither
+        // makes the other news again.
+        assert_eq!(said_again(&mut said, "refused", at(1)), Some(0));
+        let mut written = 0;
+        for frame in 1..3600 {
+            written += u32::from(said_again(&mut said, "too large", at(frame * 16)).is_some());
+            written += u32::from(said_again(&mut said, "refused", at(frame * 16 + 1)).is_some());
+        }
+        assert_eq!(written, 0);
+        assert_eq!(said_again(&mut said, "too large", at(60_000)), Some(3599));
+        assert_eq!(said_again(&mut said, "too large", at(60_016)), None);
+    }
 
     #[test]
     fn a_screen_switched_off_sends_its_background_only() {

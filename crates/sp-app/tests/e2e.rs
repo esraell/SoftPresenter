@@ -555,40 +555,68 @@ fn starts_answers_and_quits_cleanly() {
 /// which waits for the GPU to come idle and is lost when the screens' thread hands in work at
 /// that moment. A lost set-up left the window drawing for its own size onto a surface of the
 /// size before, which the GPU refused on every frame from then on (seen on Windows, where a
-/// new window takes its size a moment after it opens). The testing aid starts the surface
-/// smaller than the window and loses the next twenty set-ups: more than a new window's first
+/// new window takes its size a moment after it opens). The testing aid starts the surface at
+/// half the window's size and loses the next eight set-ups: more than a new window's first
 /// events bring (it is told its size a few times, and each time set its surface up again, which
-/// hid a lost set-up on a Mac).
+/// hid a lost set-up on a Mac). Each is tried again later, the wait doubling, about three
+/// seconds in all.
+///
+/// What it shows everywhere: every lost set-up was tried again, the surface ended at the
+/// window's size (not the half it began at), and nothing the GPU refused was drawn meanwhile.
+/// What it shows only where the window is given pictures (not on a Mac whose quiet copy is
+/// covered or whose display sleeps, which it says): frames drawn after it, at that size.
 #[test]
 fn a_window_whose_surface_set_up_is_lost_draws_nothing_wrong_and_follows_its_size_after() {
     let Some(run) = Run::new("a_window_whose_surface_set_up_is_lost_draws_nothing_wrong_and_follows_its_size_after")
     else {
         return;
     };
-    let copy = run.start(&[("SOFTPRESENTER_SURFACE_RACE", "20")]);
+    const FOLLOWS: &str = "Testing aid: the operator's window's surface follows its window again, at ";
+    const DREW: &str = "Testing aid: the operator's window was drawn at ";
+    let copy = run.start(&[("SOFTPRESENTER_SURFACE_RACE", "8")]);
     // Something to draw, until the set-ups are all lost, one has worked and a frame was drawn.
     let said = |what: &str| run.log().contains(what);
     let began = Instant::now();
-    let (followed, drew) = loop {
+    let mut followed_at = None;
+    let drew = loop {
         copy.ok(&["go", "Sample song"]);
         copy.ok(&["next"]);
         copy.ok(&["clear", "all"]);
-        let followed = said("Testing aid: the operator's window's surface follows its window again");
-        let drew = said("Testing aid: the operator's window was drawn at");
-        // A window that is given no picture (below) still sets its surface up; a little longer
-        // is waited for its first frame.
-        let within = if followed { Duration::from_secs(5) } else { Duration::from_secs(60) };
-        if drew || began.elapsed() > within {
-            break (followed, drew);
+        if followed_at.is_none() && said(FOLLOWS) {
+            followed_at = Some(Instant::now());
+        }
+        // A window that is given no picture (below) still sets its surface up; its first frame
+        // is waited for a little longer than that.
+        let over = match followed_at {
+            Some(at) => at.elapsed() > Duration::from_secs(5),
+            None => began.elapsed() > Duration::from_secs(60),
+        };
+        if said(DREW) || over {
+            break said(DREW);
         }
         std::thread::sleep(Duration::from_millis(100));
     };
     let quitted = copy.quit();
-    let lost = quitted.log.matches("Testing aid: a set-up of the operator's window's surface was lost").count();
-    assert_eq!(lost, 20, "the twenty set-ups were lost, each tried again at the next frame{}", run.context());
-    assert!(followed, "the surface was set up at the window's size in the end{}", run.context());
+    let log = &quitted.log;
+    let lost = log.matches("Testing aid: a set-up of the operator's window's surface was lost").count();
+    assert_eq!(lost, 8, "the eight set-ups were lost, each tried again later{}", run.context());
+    // "1440x806" after `before` in the first log line that has it.
+    let size_after = |before: &str| -> Option<(u32, u32)> {
+        let rest = log.split_once(before)?.1;
+        let (w, rest) = rest.split_once('x')?;
+        let h: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        Some((w.parse().ok()?, h.parse().ok()?))
+    };
+    let began_at = size_after("Testing aid: the operator's window's surface starts at ");
+    let window = size_after(", half its window's ");
+    let followed = size_after(FOLLOWS);
+    assert!(began_at.is_some() && window.is_some(), "the aid said the sizes it began with{}", run.context());
+    assert_ne!(began_at, window, "the surface began smaller than its window{}", run.context());
+    assert_eq!(followed, window, "the surface was set up at the window's size in the end{}", run.context());
     quitted.assert_clean(&run);
-    if !drew {
+    if drew {
+        assert_eq!(size_after(DREW), window, "the frames after were drawn at the window's size{}", run.context());
+    } else {
         // A Mac gives a window covered by others no picture to draw into, and a quiet copy's
         // windows open behind everything.
         say_skipped(

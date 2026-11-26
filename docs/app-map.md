@@ -494,8 +494,14 @@ The operator's window, Screens and Settings are drawn with the interface toolkit
 each, which is set up again whenever its window has another size. Setting a surface up waits for
 the GPU to come idle and is lost when the screens' thread hands in work at that moment; the
 surface then still has the size before. `surface_setup.rs` keeps whether the last set-up worked:
-a window is drawn only while its surface is set up at the size the frame is made for, and a lost
-set-up is tried again before the next frame (testing aid: `SOFTPRESENTER_SURFACE_RACE=<n>`).
+a window is drawn only while its surface is set up at the size the frame is made for, and a set-up
+that was lost, or a surface that refuses its picture, is tried again at a later drawing: a frame
+on at the soonest, each failure in a row doubling the wait up to a second, since a try waits for
+the GPU the screens draw with. A window larger than the device's largest texture has its surface
+at that size and is stretched. A set-up that keeps failing the same way is written in the log
+once, then once a minute with its count, as graphics errors are (`output::said_again`); a
+graphics device that is lost is said once (`[gpu]`) and is not made again: nothing is drawn until
+the app is started again (testing aid: `SOFTPRESENTER_SURFACE_RACE=<n>`).
 
 A screen window's next picture to draw into is asked for on a thread of the window's own
 (`output/next_picture.rs`). The window system lends a window a few pictures and takes each back
