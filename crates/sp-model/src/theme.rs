@@ -430,17 +430,23 @@ fn usual_line_height() -> f32 {
 }
 
 /// One layout of a theme: a set of named boxes, each with its place and its look, and any other
-/// objects (shapes, pictures, videos) drawn behind the words on every slide that uses it. A
-/// slide is drawn with one template.
+/// objects (shapes, pictures, videos) drawn behind the words on every slide that uses it, or in
+/// front of them. A slide is drawn with one template.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThemeTemplate {
     /// Stays the same when the template is renamed. Slides that ask for a template name it by this.
     pub id: Uuid,
     pub name: String,
     pub boxes: Vec<BoxStyle>,
-    /// Shapes, pictures and videos, in order from the back, behind the slide's own objects.
+    /// Shapes, pictures and videos, in order from the back, behind the slide's own objects (but
+    /// for those `in_front` names).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub objects: Vec<Object>,
+    /// Which of `objects` are drawn in front of the slide's words instead of behind them, by
+    /// their ids: those the Theme Editor's Objects list has above the text boxes. Empty, as in
+    /// themes from before, every one is behind the words; an id no object has is passed over.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub in_front: Vec<Uuid>,
     /// Whether a song's slide may be drawn with it: among these, the theme picks the one that
     /// suits what is on the slide. Every template is, until it is told otherwise.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
@@ -582,6 +588,7 @@ impl From<ThemeOnDisk> for Theme {
                     name: first.unwrap_or_else(|| "Two languages".to_owned()),
                     boxes: file.boxes,
                     objects: Vec::new(),
+                    in_front: Vec::new(),
                     songs: true,
                     bible: false,
                 },
@@ -590,6 +597,7 @@ impl From<ThemeOnDisk> for Theme {
                     name: second.unwrap_or_else(|| "One language".to_owned()),
                     boxes: alone,
                     objects: Vec::new(),
+                    in_front: Vec::new(),
                     songs: true,
                     bible: false,
                 },
@@ -688,15 +696,21 @@ impl ThemeTemplate {
         (2..).map(|n| Role(format!("{}-{n}", base.0))).find(|role| !taken(role)).unwrap_or(base)
     }
 
-    /// The template as a slide the editor can work on: its shapes, pictures and videos, then a
-    /// text box for each of its boxes, saying `sample` (the app's sample words, "Text" in
-    /// English: a template's boxes keep no words of their own, so they are never saved),
-    /// carrying the box's whole look, place and name.
+    /// Its shapes, pictures and videos drawn behind the slide's words (`in_front` false), or
+    /// those drawn in front of them, in order from the back.
+    pub fn objects_on(&self, in_front: bool) -> impl Iterator<Item = &Object> {
+        self.objects.iter().filter(move |object| self.in_front.contains(&object.id) == in_front)
+    }
+
+    /// The template as a slide the editor can work on: its shapes, pictures and videos behind
+    /// the words, then a text box for each of its boxes, saying `sample` (the app's sample
+    /// words, "Text" in English: a template's boxes keep no words of their own, so they are
+    /// never saved), carrying the box's whole look, place and name, then those in front of the
+    /// words.
     pub fn as_slide(&self, sample: &str) -> Slide {
-        // Its other objects first, at the back, as they are drawn; then its boxes.
+        // In the order they are drawn, from the back.
         let objects = self
-            .objects
-            .iter()
+            .objects_on(false)
             .cloned()
             .chain(self.boxes.iter().map(|style| {
                 let mut object = Object::text(style.role.clone(), sample);
@@ -707,6 +721,7 @@ impl ThemeTemplate {
                 }
                 object
             }))
+            .chain(self.objects_on(true).cloned())
             .collect();
         let mut slide = Slide::new(objects);
         slide.template = Some(self.id);
@@ -716,13 +731,14 @@ impl ThemeTemplate {
     /// The template with its boxes and objects replaced by what the editor made of that slide.
     /// Each text box becomes a box of the template, keeping its role (or taking one from its
     /// name if it is new), its place, its look and its name; two boxes cannot share a role (the
-    /// first on the slide keeps it). Shapes, pictures and videos are kept as they are, in order.
+    /// first on the slide keeps it). Shapes, pictures and videos are kept as they are, in order:
+    /// behind the words, or in front of them if a text box is behind them on the slide.
     pub fn with_slide(&self, slide: &Slide) -> ThemeTemplate {
         let mut boxes: Vec<BoxStyle> = Vec::new();
-        let mut objects: Vec<Object> = Vec::new();
+        let (mut objects, mut front): (Vec<Object>, Vec<Object>) = (Vec::new(), Vec::new());
         for object in &slide.objects {
             let ObjectKind::Text { style, .. } = &object.kind else {
-                objects.push(object.clone());
+                if boxes.is_empty() { &mut objects } else { &mut front }.push(object.clone());
                 continue;
             };
             let role = object.role.clone().unwrap_or_else(|| role_from_name(&object.name));
@@ -746,7 +762,17 @@ impl ThemeTemplate {
             look.role = role;
             boxes.push(look);
         }
-        ThemeTemplate { id: self.id, name: self.name.clone(), boxes, objects, songs: self.songs, bible: self.bible }
+        let in_front = front.iter().map(|object| object.id).collect();
+        objects.extend(front);
+        ThemeTemplate {
+            id: self.id,
+            name: self.name.clone(),
+            boxes,
+            objects,
+            in_front,
+            songs: self.songs,
+            bible: self.bible,
+        }
     }
 }
 
@@ -837,6 +863,7 @@ impl Theme {
                     name: two.to_owned(),
                     boxes: vec![main, translation, reference.clone()],
                     objects: Vec::new(),
+                    in_front: Vec::new(),
                     songs: true,
                     bible: false,
                 },
@@ -845,6 +872,7 @@ impl Theme {
                     name: one.to_owned(),
                     boxes: vec![main_alone, reference],
                     objects: Vec::new(),
+                    in_front: Vec::new(),
                     songs: true,
                     bible: false,
                 },
@@ -1052,11 +1080,12 @@ impl Theme {
         let name = (templates.len() + 1..).map(|n| format!("Template {n}")).find(|name| !taken(name));
         let boxes = templates.get(index).map(|t| t.boxes.clone()).unwrap_or_default();
         let objects = templates.get(index).map(|t| t.objects.clone()).unwrap_or_default();
+        let in_front = templates.get(index).map(|t| t.in_front.clone()).unwrap_or_default();
         // The copy is for songs if its original is; it is never also the Bible template.
         let songs = templates.get(index).is_none_or(|t| t.songs);
         let at = (index + 1).min(templates.len());
         let name = name.unwrap_or_default();
-        templates.insert(at, ThemeTemplate { id: Uuid::new_v4(), name, boxes, objects, songs, bible: false });
+        templates.insert(at, ThemeTemplate { id: Uuid::new_v4(), name, boxes, objects, in_front, songs, bible: false });
         Some(at)
     }
 
@@ -1608,6 +1637,43 @@ mod tests {
         // Names come back when the template is opened again.
         let names: Vec<String> = edited.as_slide("Text").objects.iter().map(|o| o.name.clone()).collect();
         assert_eq!(names, ["English", "Translation", "Reference", "Notes", "Notes"]);
+    }
+
+    #[test]
+    fn a_layouts_shape_with_a_text_box_behind_it_is_kept_in_front_of_the_words() {
+        let theme = Theme::builtin();
+        let (band, logo) = (Object::shape(crate::Shape::Rectangle), Object::shape(crate::Shape::Ellipse));
+        // From the back: the band, the three boxes, the logo.
+        let mut slide = theme.templates[0].as_slide("Text");
+        slide.objects.insert(0, band.clone());
+        slide.objects.push(logo.clone());
+        let edited = theme.templates[0].with_slide(&slide);
+        assert_eq!(edited.objects.iter().map(|o| o.id).collect::<Vec<_>>(), [band.id, logo.id]);
+        assert_eq!(edited.in_front, [logo.id]);
+        assert_eq!(edited.objects_on(false).map(|o| o.id).collect::<Vec<_>>(), [band.id]);
+        assert_eq!(edited.objects_on(true).map(|o| o.id).collect::<Vec<_>>(), [logo.id]);
+        // Back in the editor, in the same order, and saved again unchanged.
+        let again = edited.as_slide("Text");
+        let ids: Vec<Uuid> = again.objects.iter().map(|o| o.id).collect();
+        assert_eq!((ids[0], ids[4], ids.len()), (band.id, logo.id, 5));
+        assert_eq!(edited.with_slide(&again), edited);
+        // Between two boxes is in front of the words too: a box is behind it.
+        slide.objects.swap(2, 4);
+        assert_eq!(theme.templates[0].with_slide(&slide).in_front, [logo.id]);
+        // With no box behind it, it goes behind the words again.
+        let behind = Slide::new(vec![logo.clone(), Object::text(Role::primary(), "Text")]);
+        assert!(edited.with_slide(&behind).in_front.is_empty());
+        // Written to a file and read back the same; a theme with none in front writes nothing
+        // new, and an id no object has draws nothing.
+        let mut saved = theme.clone();
+        saved.templates[0] = edited.clone();
+        assert_eq!(Theme::from_json(&saved.to_json()), Ok(saved.clone()));
+        assert!(!theme.to_json().contains("in_front"));
+        saved.templates[0].in_front.push(Uuid::from_u128(5));
+        assert_eq!(saved.templates[0].objects_on(true).count(), 1);
+        // A copy of the template keeps its shapes where they were.
+        let at = saved.add_template(0);
+        assert_eq!(saved.templates[at].objects_on(true).map(|o| o.id).collect::<Vec<_>>(), [logo.id]);
     }
 
     #[test]

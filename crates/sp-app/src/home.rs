@@ -1786,8 +1786,7 @@ impl ThemeEdit {
     pub fn show(&mut self, version: Option<sp_model::Uuid>, template: usize) -> Option<EditDraft> {
         self.version = version.filter(|id| self.theme.has_version(*id));
         self.template = template.min(self.templates().len().saturating_sub(1));
-        self.open_template()
-            .map(|opened| EditDraft::of_slide(opened.as_slide(crate::editor::sample_words()), self.template))
+        self.open_template().map(|opened| EditDraft::of_template(opened, self.template))
     }
 }
 
@@ -3188,20 +3187,25 @@ fn edit_view(
                     let mut start_rename = None;
                     let extend = ui.input(|input| input.modifiers.shift || input.modifiers.command);
                     // Rows can be dragged up and down: the order is front to back.
-                    let mut rows: Vec<(sp_model::Uuid, Rect)> = Vec::new();
-                    let mut dragging = None;
-                    let mut dropped = None;
+                    let (mut rows, mut ids): (Vec<Rect>, Vec<sp_model::Uuid>) = (Vec::new(), Vec::new());
+                    let (mut dragging, mut dropped, mut carried) = (None, None, String::new());
                     for object in draft.slide.objects.iter().rev() {
                         let selected = draft.is_selected(object.id);
                         let (row, response) =
                             ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click_and_drag());
-                        rows.push((object.id, row));
+                        let shown = if theme_mode || stage_mode {
+                            crate::editor::object_name(object)
+                        } else {
+                            listed_name(object)
+                        };
                         if response.dragged() {
-                            dragging = Some(object.id);
+                            (dragging, carried) = (Some(rows.len()), shown.clone());
                         }
-                        if response.drag_stopped() {
-                            dropped = Some(object.id);
+                        if crate::studio::drag_let_go(&response) {
+                            dropped = Some(rows.len());
                         }
+                        rows.push(row);
+                        ids.push(object.id);
                         if selected {
                             ui.painter().rect_filled(row, 0.0, EDIT_SELECTED);
                         } else if response.hovered() {
@@ -3255,11 +3259,6 @@ fn edit_view(
                                 rename_done = Some(Some((object.id, name.clone())));
                             }
                         } else {
-                            let shown = if theme_mode || stage_mode {
-                                crate::editor::object_name(object)
-                            } else {
-                                listed_name(object)
-                            };
                             ui.painter().with_clip_rect(name_area).text(
                                 row.left_center() + vec2(32.0, 0.0),
                                 Align2::LEFT_CENTER,
@@ -3368,22 +3367,17 @@ fn edit_view(
                             }
                         });
                     }
-                    // Where a dragged row would land: a line between the rows, and on
-                    // release the object moves there in the stack.
-                    let pointer_y = ui.input(|input| input.pointer.interact_pos()).map(|at| at.y);
-                    let slot = pointer_y.map(|y| rows.iter().filter(|(_, row)| row.center().y < y).count());
-                    if let (Some(_), Some(slot)) = (dragging, slot) {
-                        let y = rows
-                            .get(slot)
-                            .map_or_else(|| rows.last().map_or(0.0, |(_, row)| row.max.y), |(_, row)| row.min.y);
-                        let (left, right) = rows.first().map_or((0.0, 0.0), |(_, row)| (row.min.x, row.max.x));
-                        ui.painter().line_segment(
-                            [pos2(left + 6.0, y), pos2(right - 6.0, y)],
-                            Stroke::new(2.0, crate::studio::ACCENT),
-                        );
-                    }
-                    if let (Some(id), Some(slot)) = (dropped, slot) {
-                        draft.move_in_stack(id, slot);
+                    // A row being dragged goes faint, its name follows the pointer, and an ink
+                    // line shows where it would land, as in the other lists; let go there, the
+                    // object moves there in the stack, one undo step. On a theme's layout the line
+                    // shows the nearest place it may go (`EditDraft::stack_slot`).
+                    let held = dragging.or(dropped);
+                    let moving: Vec<usize> = held.into_iter().collect();
+                    let id = held.and_then(|at| ids.get(at).copied());
+                    let snap = |slot| id.map_or(slot, |id| draft.stack_slot(id, slot));
+                    let let_go = list_drag_snapped(ui, &rows, (dragging, dropped), &moving, &carried, snap);
+                    if let (Some(id), Some(_), Some(y)) = (id, dropped, let_go) {
+                        draft.move_in_stack(id, crate::studio::drop_slot(&rows, y));
                     }
                     if let Some((id, ask)) = asked {
                         if matches!(ask, Ask::Delete) {
@@ -4011,8 +4005,12 @@ fn edit_view(
                         object.role = Some(role);
                     }
                     // A layout's shapes, pictures and videos are drawn behind the words on its
-                    // slides, so the editor keeps them behind its text boxes too.
-                    draft.slide.objects.sort_by_key(is_text);
+                    // slides or in front of them, so the editor keeps each behind all its text
+                    // boxes or in front of them all; a new one starts behind them. Undo and Redo
+                    // put back what was.
+                    let stepped = draft.stepped;
+                    let known: Vec<sp_model::Uuid> = template.objects.iter().map(|object| object.id).collect();
+                    draft.keep_layers(|id| !stepped && !known.contains(&id));
                     *template = template.with_slide(&draft.slide);
                     edit.changed = true;
                 }
@@ -9273,6 +9271,19 @@ pub(crate) fn list_drag(
     moving: &[usize],
     words: &str,
 ) -> Option<f32> {
+    list_drag_snapped(ui, rows, held, moving, words, |slot| slot)
+}
+
+/// As [`list_drag`], for a list whose rows may not go everywhere: the ink line shows the place
+/// `snap` gives for the one under the pointer (the nearest place the row may go).
+pub(crate) fn list_drag_snapped(
+    ui: &mut egui::Ui,
+    rows: &[Rect],
+    held: (Option<usize>, Option<usize>),
+    moving: &[usize],
+    words: &str,
+    snap: impl Fn(usize) -> usize,
+) -> Option<f32> {
     let (dragging, dropped) = held;
     let across = rows.first().map(|row| row.x_range().expand(10.0));
     let down = ui.clip_rect().y_range();
@@ -9281,7 +9292,7 @@ pub(crate) fn list_drag(
         .filter(|pointer| across.is_some_and(|across| across.contains(pointer.x)) && down.contains(pointer.y));
     if dragging.is_some() {
         if let Some(pointer) = pointer {
-            let slot = crate::studio::drop_slot(rows, pointer.y);
+            let slot = snap(crate::studio::drop_slot(rows, pointer.y));
             crate::studio::paint_rows_moving(ui.painter(), rows, |at| moving.contains(&at), slot, crate::studio::PANEL);
         }
         crate::studio::paint_carried(ui.ctx(), words.trim());
@@ -10628,6 +10639,128 @@ mod tests {
             Event::Key { key: Key::Z, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::COMMAND };
         frame_events(&ctx, &show, &mut state, vec![undo], 1.0);
         assert_eq!((state.song_undo, state.edit_redo.as_slice()), (Some(false), &[EditStep::Deleted][..]));
+    }
+
+    /// Where the Objects list (at the foot of the left column) draws the names of the objects
+    /// `on` the slide being edited, top to bottom.
+    fn object_rows(texts: &[(String, Rect)], on: &HomeState) -> Vec<(String, egui::Pos2)> {
+        let names: Vec<String> = on.editing.iter().flat_map(|draft| &draft.slide.objects).map(listed_name).collect();
+        let mut rows: Vec<(String, egui::Pos2)> = texts
+            .iter()
+            .filter(|(name, at)| at.min.x < 300.0 && at.min.y > 650.0 && names.contains(name))
+            .map(|(name, at)| (name.clone(), at.center()))
+            .collect();
+        rows.sort_by(|a, b| a.1.y.total_cmp(&b.1.y));
+        rows
+    }
+
+    /// Drags the Objects list's row named `from` to the upper half of the row named `onto` (or
+    /// its lower half, `below`), as a person does, and returns the list's names after.
+    fn drag_object_row(
+        (ctx, show, state): (&egui::Context, &Show, &mut HomeState),
+        from: &str,
+        onto: &str,
+        below: bool,
+        time: &mut f64,
+    ) -> Vec<String> {
+        let texts = frame_texts(ctx, show, state, vec![], *time);
+        let rows = object_rows(&texts, state);
+        let place = |name: &str| rows.iter().find(|(n, _)| n == name).map(|(_, at)| *at).expect(name);
+        let to = place(onto) + vec2(0.0, if below { 6.0 } else { -6.0 });
+        for events in crate::studio::tests::drag_frames(place(from), to) {
+            *time += 0.1;
+            frame_texts(ctx, show, state, events, *time);
+        }
+        let texts = frame_texts(ctx, show, state, vec![], *time);
+        object_rows(&texts, state).into_iter().map(|(name, _)| name).collect()
+    }
+
+    fn command_z(shift: bool) -> Event {
+        let modifiers = if shift { Modifiers::COMMAND | Modifiers::SHIFT } else { Modifiers::COMMAND };
+        Event::Key { key: Key::Z, physical_key: None, pressed: true, repeat: false, modifiers }
+    }
+
+    /// The owner's report: a rectangle added to a theme's layout and dragged above its text
+    /// boxes in the Objects list stayed under them. It goes in front of the words now, in the
+    /// theme too (as its slides draw it), and back behind them by a drag, Send Backward or Undo.
+    #[test]
+    fn a_shape_dragged_above_the_text_boxes_in_the_theme_editor_goes_in_front_of_the_words() {
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let theme = Theme::builtin();
+        let draft = EditDraft::of_template(&theme.templates[0], 0);
+        let mut state =
+            HomeState { theme_edit: Some(ThemeEdit::of(0, theme)), editing: Some(draft), ..HomeState::default() };
+        let template = |state: &HomeState| state.theme_edit.as_ref().expect("editing").theme.templates[0].clone();
+        let mut time = 0.1;
+        // A new rectangle starts behind the words, at the foot of the list.
+        state.edit_request = Some(EditRequest::AddShape(sp_model::Shape::Rectangle));
+        frame_texts(&ctx, &show, &mut state, vec![], time);
+        let rect = state.editing.as_ref().and_then(|draft| draft.selected).expect("the rectangle is picked");
+        assert_eq!((template(&state).objects.len(), template(&state).in_front.len()), (1, 0));
+        let texts = frame_texts(&ctx, &show, &mut state, vec![], time);
+        let names = object_rows(&texts, &state);
+        let names: Vec<&str> = names.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["Reference", "Translation", "Main", "Rectangle"]);
+        // Dragged above the top box at once (one undo step of its own, though just added): on
+        // top in the list and the draft, and in front of the words in the theme.
+        let names = drag_object_row((&ctx, &show, &mut state), "Rectangle", "Reference", false, &mut time);
+        assert_eq!(names, ["Rectangle", "Reference", "Translation", "Main"]);
+        let draft = state.editing.as_ref().expect("still editing");
+        assert_eq!(draft.slide.objects.last().map(|o| o.id), Some(rect));
+        assert_eq!(template(&state).in_front, [rect]);
+        assert_eq!(template(&state).as_slide("Text").objects.last().map(|o| o.id), Some(rect));
+        assert!(state.theme_edit.as_ref().is_some_and(|edit| edit.changed), "the app takes the theme");
+        // Let go between two text boxes, nearer the top: in front of them all, as it is drawn.
+        let names = drag_object_row((&ctx, &show, &mut state), "Rectangle", "Translation", false, &mut time);
+        assert_eq!(names, ["Rectangle", "Reference", "Translation", "Main"]);
+        // A text box stays among the text boxes, however high it is dragged.
+        let names = drag_object_row((&ctx, &show, &mut state), "Main", "Rectangle", false, &mut time);
+        assert_eq!(names, ["Rectangle", "Main", "Reference", "Translation"]);
+        // Undo takes the box back down, then the rectangle back behind the words, then away.
+        frame_texts(&ctx, &show, &mut state, vec![command_z(false)], time + 0.1);
+        assert_eq!(template(&state).in_front, [rect]);
+        assert_eq!(template(&state).boxes.last().map(|b| b.role.clone()), Some(sp_model::Role::reference()));
+        frame_texts(&ctx, &show, &mut state, vec![command_z(false)], time + 0.2);
+        assert!(template(&state).in_front.is_empty(), "behind the words again");
+        assert_eq!(template(&state).objects.len(), 1);
+        frame_texts(&ctx, &show, &mut state, vec![command_z(false)], time + 0.3);
+        assert!(template(&state).objects.is_empty(), "the rectangle is gone");
+        // Redo brings it back where it was, and in front again.
+        frame_texts(&ctx, &show, &mut state, vec![command_z(true)], time + 0.4);
+        frame_texts(&ctx, &show, &mut state, vec![command_z(true)], time + 0.5);
+        assert_eq!(template(&state).in_front, [rect]);
+        // Send Backward takes it past all the text boxes at once, and Bring Forward back.
+        let draft = state.editing.as_mut().expect("still editing");
+        draft.select_only(Some(rect));
+        state.edit_request = Some(EditRequest::SendBackward);
+        frame_texts(&ctx, &show, &mut state, vec![], time + 0.6);
+        assert!(template(&state).in_front.is_empty());
+        assert_eq!(state.editing.as_ref().and_then(|draft| draft.slide.objects.first()).map(|o| o.id), Some(rect));
+        state.edit_request = Some(EditRequest::BringForward);
+        frame_texts(&ctx, &show, &mut state, vec![], time + 0.7);
+        assert_eq!(template(&state).in_front, [rect]);
+    }
+
+    /// The song editor's Objects list is dragged the same way, with no rule about text boxes:
+    /// a shape goes between the main language and the translation, one undo step.
+    #[test]
+    fn a_row_dragged_in_the_slide_editors_objects_list_moves_that_object() {
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let editing = EditDraft::of(&show, SlideRef { presentation: 0, slide: 0 });
+        let mut state = HomeState { editing, ..HomeState::default() };
+        let mut time = 0.1;
+        let draft = state.editing.as_mut().expect("editing");
+        let text = draft.slide.objects[0].id;
+        draft.add_shape(sp_model::Shape::Rectangle);
+        let rect = draft.selected.expect("the rectangle is picked");
+        // From the top of the list (in front) to under the words.
+        let names = drag_object_row((&ctx, &show, &mut state), "Rectangle", "Words", true, &mut time);
+        assert_eq!(names.last().map(String::as_str), Some("Rectangle"));
+        let ids = |state: &HomeState| state.editing.as_ref().map(|d| d.slide.objects.iter().map(|o| o.id).collect());
+        assert_eq!(ids(&state), Some(vec![rect, text]));
+        assert_eq!(state.pending_edit.as_ref().map(|(_, slide)| slide.objects[0].id), Some(rect), "the song takes it");
+        frame_texts(&ctx, &show, &mut state, vec![command_z(false)], time + 0.1);
+        assert_eq!(ids(&state), Some(vec![text, rect]), "Undo puts it back in front");
     }
 
     /// Runs one frame of the home view with these events, and returns each piece of text it drew,

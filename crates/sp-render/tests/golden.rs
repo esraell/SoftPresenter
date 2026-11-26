@@ -802,6 +802,32 @@ fn a_layouts_shapes_are_drawn_behind_the_words_of_its_slides() {
     assert_eq!(saved.boxes, theme.templates[0].boxes);
 }
 
+/// A layout's shape kept in front of the words (dragged above the text boxes in the Theme
+/// Editor's Objects list) is drawn over them on every slide that uses the layout; behind them,
+/// the words show over it.
+#[test]
+fn a_layouts_shape_in_front_of_the_words_covers_them() {
+    let (w, h) = (320, 180);
+    let mut theme = Theme::builtin();
+    // A green block over the middle of the main box, where its words are.
+    let mut block = Object::shape(sp_model::Shape::Rectangle);
+    block.frame = Some(sp_model::SlideRect { x: 0.0, y: 0.0, w: 1920.0, h: 1080.0 });
+    block.fill = Some(sp_model::Rgba::rgb(0, 200, 0));
+    for template in &mut theme.templates {
+        template.objects = vec![block.clone()];
+    }
+    let words = "WWWWWWWWWWWWWWWWWWWW\nWWWWWWWWWWWWWWWWWWWW";
+    let song = slide(words, None);
+    let white = |pixels: &[u8]| pixels.chunks(4).filter(|p| p[0] > 200 && p[1] > 200 && p[2] > 200).count();
+    let behind = render_with(Some(&song), &theme, w, h);
+    assert!(white(&behind) > 100, "behind the block, the words show: {}", white(&behind));
+    for template in &mut theme.templates {
+        template.in_front = vec![block.id];
+    }
+    let in_front = render_with(Some(&song), &theme, w, h);
+    assert_eq!(white(&in_front), 0, "in front, the block covers them");
+}
+
 /// The scene of a picture behind an empty slide, filling it.
 fn media_scene(media: &sp_render::Picture, w: u32, h: u32) -> sp_render::vello::Scene {
     let layers = sp_render::Layers {

@@ -134,6 +134,11 @@ fn contains(frame: SlideRect, rotation: f32, point: (f32, f32)) -> bool {
     x >= frame.x && x <= frame.x + frame.w && y >= frame.y && y <= frame.y + frame.h
 }
 
+/// A text box, which on a theme's layout is one of its boxes for the words.
+fn is_text(object: &Object) -> bool {
+    matches!(object.kind, ObjectKind::Text { .. })
+}
+
 /// The topmost object under a point, in slide units.
 pub fn object_at(slide: &Slide, theme: &Theme, point: (f32, f32)) -> Option<Uuid> {
     // Clicks pass through objects that are hidden or locked to whatever is behind them.
@@ -437,6 +442,11 @@ pub struct EditDraft {
     /// True where several objects may share a role, as on a stage layout (two clocks): a copy
     /// keeps its original's. Elsewhere a copy belongs to no theme box.
     pub keeps_roles: bool,
+    /// True on a theme's layout ([`EditDraft::of_template`]): its shapes, pictures and videos are
+    /// either behind all its text boxes or in front of them all, as its slides draw them (the
+    /// words there are the slide's own), so they move past the text boxes all at once, and a text
+    /// box stays among the text boxes.
+    pub layered: bool,
 }
 
 /// What a look set for the whole box means for the words: a setting the controls changed from
@@ -542,6 +552,7 @@ impl EditDraft {
             last_recorded: f64::NEG_INFINITY,
             stepped: false,
             keeps_roles: false,
+            layered: false,
         })
     }
 
@@ -572,7 +583,13 @@ impl EditDraft {
             last_recorded: f64::NEG_INFINITY,
             stepped: false,
             keeps_roles: false,
+            layered: false,
         }
+    }
+
+    /// A draft of one of a theme's layouts, as the Theme Editor works on it (see `layered`).
+    pub fn of_template(template: &sp_model::ThemeTemplate, which: usize) -> EditDraft {
+        EditDraft { layered: true, ..EditDraft::of_slide(template.as_slide(sample_words()), which) }
     }
 
     pub fn selected_object(&self) -> Option<&Object> {
@@ -929,21 +946,67 @@ impl EditDraft {
         }
     }
 
-    /// Moves the selected object one place up (`true`) or down the stack. Returns true if it moved.
     /// Moves an object to a place in the Objects list, which runs from the front of the slide to
-    /// the back: `slot` is how many rows of the list will be above it. Returns true if it moved.
+    /// the back: `slot` is how many rows of the list will be above it (on a theme's layout, the
+    /// nearest place it may go: see [`stack_slot`](Self::stack_slot)). One undo step. Returns
+    /// true if it moved.
     pub fn move_in_stack(&mut self, id: Uuid, slot: usize) -> bool {
+        let slot = self.stack_slot(id, slot);
         let mut list: Vec<Object> = self.slide.objects.iter().rev().cloned().collect();
         let Some(from) = list.iter().position(|object| object.id == id) else { return false };
         let to = if slot > from { slot - 1 } else { slot }.min(list.len() - 1);
         if to == from {
             return false;
         }
+        self.record();
         let object = list.remove(from);
         list.insert(to, object);
         list.reverse();
         self.slide.objects = list;
         true
+    }
+
+    /// Where in the Objects list an object taken to `slot` (how many rows will be above it)
+    /// goes. Anywhere, but on a theme's layout (`layered`): a text box among the text boxes, and
+    /// a shape, picture or video above them all (in front of the words) or below them all, at
+    /// whichever is nearer.
+    pub fn stack_slot(&self, id: Uuid, slot: usize) -> usize {
+        let list: Vec<&Object> = self.slide.objects.iter().rev().collect();
+        let (Some(first), Some(last)) = (list.iter().position(|o| is_text(o)), list.iter().rposition(|o| is_text(o)))
+        else {
+            return slot;
+        };
+        match list.iter().find(|object| object.id == id) {
+            Some(_) if !self.layered => slot,
+            Some(object) if is_text(object) => slot.clamp(first, last + 1),
+            Some(_) if slot > first && slot <= last => {
+                if slot - first <= last + 1 - slot {
+                    first
+                } else {
+                    last + 1
+                }
+            }
+            _ => slot,
+        }
+    }
+
+    /// On a theme's layout, puts the objects in the order its template keeps them (see
+    /// `layered`): the shapes, pictures and videos behind the words, the text boxes, then those
+    /// in front of the words, which are those with a text box behind them. One `is_new` says the
+    /// layout hasn't had yet (just added or pasted) starts behind the words, as before.
+    pub fn keep_layers(&mut self, is_new: impl Fn(Uuid) -> bool) {
+        let first_text = self.slide.objects.iter().position(is_text);
+        let (mut behind, mut texts, mut front) = (Vec::new(), Vec::new(), Vec::new());
+        for (at, object) in std::mem::take(&mut self.slide.objects).into_iter().enumerate() {
+            if is_text(&object) {
+                texts.push(object);
+            } else if first_text.is_some_and(|first| at > first) && !is_new(object.id) {
+                front.push(object);
+            } else {
+                behind.push(object);
+            }
+        }
+        self.slide.objects = behind.into_iter().chain(texts).chain(front).collect();
     }
 
     /// Changes the look of every selected text object the same way. Each keeps only what differs
@@ -1145,12 +1208,28 @@ impl EditDraft {
         changed
     }
 
+    /// Moves the selected object one place up (`true`) or down the stack. On a theme's layout
+    /// (`layered`) a shape, picture or video next to the text boxes goes past them all, and a
+    /// text box goes no further than they do. Returns true if it moved.
     pub fn restack(&mut self, forward: bool) -> bool {
         let Some(id) = self.selected else { return false };
-        let Some(index) = self.slide.objects.iter().position(|o| o.id == id) else { return false };
+        let objects = &self.slide.objects;
+        let Some(index) = objects.iter().position(|o| o.id == id) else { return false };
         let target = if forward { index + 1 } else { index.wrapping_sub(1) };
-        if target >= self.slide.objects.len() {
+        if target >= objects.len() {
             return false;
+        }
+        if self.layered && is_text(&objects[index]) != is_text(&objects[target]) {
+            if is_text(&objects[index]) {
+                return false;
+            }
+            // The far side of the text boxes: after the last of them, or before the first.
+            let to = if forward { objects.iter().rposition(is_text) } else { objects.iter().position(is_text) };
+            let Some(to) = to else { return false };
+            self.record();
+            let object = self.slide.objects.remove(index);
+            self.slide.objects.insert(to, object);
+            return true;
         }
         self.record();
         self.slide.objects.swap(index, target);
@@ -1637,6 +1716,63 @@ mod tests {
         assert!(!d.move_in_stack(back, 1));
         assert!(d.move_in_stack(back, 2));
         assert_eq!(names(&d), ["o1", "o0"]);
+        // Each move is a step of its own.
+        assert_eq!(d.undo_depth(), 2);
+    }
+
+    #[test]
+    fn on_a_themes_layout_a_shape_goes_past_the_text_boxes_all_at_once() {
+        let theme = Theme::builtin();
+        let mut d = EditDraft::of_template(&theme.templates[0], 0);
+        assert!(d.layered);
+        let names = |d: &EditDraft| d.slide.objects.iter().rev().map(|o| o.name.clone()).collect::<Vec<_>>();
+        // A new shape, behind the words as the theme keeps it.
+        d.add_shape(sp_model::Shape::Rectangle);
+        let shape = d.selected.expect("picked");
+        d.keep_layers(|id| id == shape);
+        assert_eq!(names(&d), ["Reference", "Translation", "Main", "Rectangle"]);
+        // In the list: between two boxes is nearest the top or the bottom of them; a box can't
+        // leave them.
+        assert_eq!((d.stack_slot(shape, 1), d.stack_slot(shape, 2), d.stack_slot(shape, 4)), (0, 3, 4));
+        let main = d.slide.objects[1].id;
+        assert_eq!((d.stack_slot(main, 0), d.stack_slot(main, 4)), (0, 3));
+        assert!(d.move_in_stack(shape, 1));
+        assert_eq!(names(&d), ["Rectangle", "Reference", "Translation", "Main"]);
+        assert!(d.move_in_stack(main, 0), "to the top of the boxes");
+        assert_eq!(names(&d), ["Rectangle", "Main", "Reference", "Translation"]);
+        // Bring Forward and Send Backward: past every box at once, and a box no further.
+        d.select_only(Some(main));
+        assert!(!d.restack(true), "the shape is in front of it");
+        d.select_only(Some(shape));
+        assert!(d.restack(false));
+        assert_eq!(names(&d), ["Main", "Reference", "Translation", "Rectangle"]);
+        assert!(!d.restack(false), "at the back");
+        assert!(d.restack(true));
+        assert_eq!(names(&d).first().map(String::as_str), Some("Rectangle"));
+        // To the back and to the front, likewise; a box to the front of the boxes only.
+        assert!(d.move_to_end_of_stack(false));
+        assert_eq!(names(&d).last().map(String::as_str), Some("Rectangle"));
+        d.select_only(Some(main));
+        assert!(d.move_to_end_of_stack(false));
+        assert_eq!(names(&d), ["Reference", "Translation", "Main", "Rectangle"]);
+        // A shape with a box behind it is in front of the words; a new one starts behind them.
+        let mut logo = sp_model::Object::shape(sp_model::Shape::Ellipse);
+        logo.name = "Logo".to_owned();
+        let logo_id = logo.id;
+        d.slide.objects.insert(2, logo);
+        d.keep_layers(|_| false);
+        assert_eq!(names(&d), ["Logo", "Reference", "Translation", "Main", "Rectangle"]);
+        assert_eq!(d.slide.objects.last().map(|o| o.id), Some(logo_id));
+        let mut star = sp_model::Object::shape(sp_model::Shape::Star);
+        star.name = "Star".to_owned();
+        let star_id = star.id;
+        d.slide.objects.push(star);
+        d.keep_layers(|id| id == star_id);
+        assert_eq!(names(&d), ["Logo", "Reference", "Translation", "Main", "Star", "Rectangle"]);
+        // A song's slide has no such rule.
+        let song = draft();
+        let back = song.slide.objects[0].id;
+        assert_eq!(song.stack_slot(back, 1), 1);
     }
 
     #[test]

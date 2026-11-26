@@ -8596,11 +8596,7 @@ impl App {
             return;
         };
         let edit = home::ThemeEdit::of(index, theme.clone());
-        running.home_state.editing = edit
-            .theme
-            .templates
-            .first()
-            .map(|first| EditDraft::of_slide(first.as_slide(crate::editor::sample_words()), 0));
+        running.home_state.editing = edit.theme.templates.first().map(|first| EditDraft::of_template(first, 0));
         running.home_state.theme_edit = Some(edit);
         running.home_state.bible_open = false;
         running.canvas_for = None;

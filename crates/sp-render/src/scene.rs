@@ -168,11 +168,15 @@ fn paint_over(
     let to_target = Affine::translate((x, y)) * Affine::scale(w / f64::from(SLIDE_WIDTH));
     let mut overflow = false;
     if let Some(slide) = layers.slide {
-        // The layout's own shapes, pictures and videos, behind the slide's words.
-        if let Some(behind) = layout_objects(slide, theme) {
+        // The layout's own shapes, pictures and videos, behind the slide's words, and those it
+        // puts in front of them.
+        if let Some(behind) = layout_layer(slide, theme, false) {
             draw_objects(scene, fonts, to_target, &behind, theme, layers.time);
         }
         overflow |= draw_objects(scene, fonts, to_target, slide, theme, layers.time);
+        if let Some(front) = layout_layer(slide, theme, true) {
+            draw_objects(scene, fonts, to_target, &front, theme, layers.time);
+        }
     }
     if let Some((announcement, own_theme)) = layers.announcement {
         // Its theme's background covers what is under it, as an announcement takes the screen.
@@ -180,10 +184,13 @@ fn paint_over(
             let slide_area = Rect::new(0.0, 0.0, f64::from(SLIDE_WIDTH), f64::from(SLIDE_HEIGHT));
             scene.fill(Fill::NonZero, to_target, color(background), None, &slide_area);
         }
-        if let Some(behind) = layout_objects(announcement, own_theme) {
+        if let Some(behind) = layout_layer(announcement, own_theme, false) {
             draw_objects(scene, fonts, to_target, &behind, own_theme, layers.time);
         }
         draw_objects(scene, fonts, to_target, announcement, own_theme, layers.time);
+        if let Some(front) = layout_layer(announcement, own_theme, true) {
+            draw_objects(scene, fonts, to_target, &front, own_theme, layers.time);
+        }
     }
     if let Some(overlay) = layers.overlay {
         draw_objects(scene, fonts, to_target, overlay, theme, layers.time);
@@ -204,14 +211,25 @@ fn paint_over(
     overflow
 }
 
-/// The shapes, pictures and videos a slide's layout puts behind its words, as a slide to draw;
+/// The shapes, pictures and videos a slide's layout puts behind its words and in front of them,
+/// as a slide (for what they show: the videos to play, the web pages and NDI sources to take);
 /// any the slide has itself (as the slide the theme editor works on does) are left out, so
 /// they are drawn once. `None` when there are none.
 pub fn layout_objects(slide: &Slide, theme: &Theme) -> Option<Slide> {
+    layout_slide(slide, theme, None)
+}
+
+/// Those of [`layout_objects`] drawn behind the slide's words, or (`in_front`) over them.
+fn layout_layer(slide: &Slide, theme: &Theme, in_front: bool) -> Option<Slide> {
+    layout_slide(slide, theme, Some(in_front))
+}
+
+fn layout_slide(slide: &Slide, theme: &Theme, in_front: Option<bool>) -> Option<Slide> {
     let template = theme.template_for(slide)?;
     let objects: Vec<Object> = template
         .objects
         .iter()
+        .filter(|object| in_front.is_none_or(|front| template.in_front.contains(&object.id) == front))
         .filter(|object| !object.hidden && !slide.objects.iter().any(|own| own.id == object.id))
         .cloned()
         .collect();
@@ -1479,6 +1497,23 @@ mod tests {
 
     fn overflows(slide: &Slide) -> bool {
         build_scene(&mut Fonts::new(), Some(slide), &Theme::builtin(), 1920, 1080).overflow
+    }
+
+    #[test]
+    fn a_layouts_shapes_are_drawn_behind_the_words_or_in_front_as_its_template_keeps_them() {
+        let mut theme = Theme::builtin();
+        let (band, logo) = (Object::shape(sp_model::Shape::Rectangle), Object::shape(sp_model::Shape::Ellipse));
+        theme.templates[0].objects = vec![band.clone(), logo.clone()];
+        theme.templates[0].in_front = vec![logo.id];
+        let song = slide("Words", Some("Слова"));
+        let ids = |layer: Option<Slide>| layer.map(|s| s.objects.iter().map(|o| o.id).collect::<Vec<_>>());
+        assert_eq!(ids(layout_layer(&song, &theme, false)), Some(vec![band.id]));
+        assert_eq!(ids(layout_layer(&song, &theme, true)), Some(vec![logo.id]));
+        // Every one of them, for what they show.
+        assert_eq!(ids(layout_objects(&song, &theme)), Some(vec![band.id, logo.id]));
+        // None kept in front: none drawn there.
+        theme.templates[0].in_front.clear();
+        assert_eq!(ids(layout_layer(&song, &theme, true)), None);
     }
 
     #[test]

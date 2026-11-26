@@ -1494,7 +1494,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - The theme editor works as the song editor does: Add Text, Shapes, Media… and pictures or
   videos dragged from the Finder. A template's shapes, pictures and videos (a logo, a bar, a
   moving background) are drawn behind the words on every slide that uses it, and a video in
-  one plays while such a slide is on screen.
+  one plays while such a slide is on screen. Dragged above the text boxes in the Objects list
+  (or moved there with Bring Forward or Bring to Front), one is drawn in front of the words
+  instead, on every such slide: a shape, picture or video sits behind all the text boxes or in
+  front of them all, since the words on a slide are the slide's own, so the list's ink line
+  shows the nearer of the two, and Bring Forward and Send Backward take it past all the boxes
+  at once. A new one starts behind the words.
 - Templates can be added, duplicated, renamed and deleted. Changes save as you make them.
 - A theme can have a background colour and a picture behind all its slides (shown while no
   media is on), set when no box is selected in the theme editor.

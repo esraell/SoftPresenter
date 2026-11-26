@@ -110,6 +110,7 @@ pub fn builtin_layouts() -> Vec<ThemeTemplate> {
     [
         ThemeTemplate {
             objects: Vec::new(),
+            in_front: Vec::new(),
             songs: true,
             bible: false,
             id: id(2),
@@ -128,6 +129,7 @@ pub fn builtin_layouts() -> Vec<ThemeTemplate> {
         },
         ThemeTemplate {
             objects: Vec::new(),
+            in_front: Vec::new(),
             songs: true,
             bible: false,
             id: id(3),
@@ -140,6 +142,7 @@ pub fn builtin_layouts() -> Vec<ThemeTemplate> {
         },
         ThemeTemplate {
             objects: Vec::new(),
+            in_front: Vec::new(),
             songs: true,
             bible: false,
             id: id(4),
@@ -154,6 +157,7 @@ pub fn builtin_layouts() -> Vec<ThemeTemplate> {
         },
         ThemeTemplate {
             objects: Vec::new(),
+            in_front: Vec::new(),
             songs: true,
             bible: false,
             id: id(5),
@@ -839,6 +843,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: "All".to_owned(),
             objects: Vec::new(),
+            in_front: Vec::new(),
             songs: true,
             bible: false,
             boxes: ITEMS

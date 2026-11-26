@@ -209,7 +209,10 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   reach it (see Keys in the Edit view).
 - **Themes** (Edit › Themes; View › Themes, Control-T and `sp view themes` open it): the same canvas, tools and inspector, editing a theme's
   layouts (templates). A layout's text boxes say where each kind of words goes; its shapes,
-  pictures and videos are drawn behind the words on every slide that uses it. The left column
+  pictures and videos are drawn behind the words on every slide that uses it, or in front of
+  them when the Objects list has them above the text boxes (`ThemeTemplate::in_front`; the
+  editor's draft is `EditDraft::of_template`, whose `stack_slot` and `restack` keep them above
+  or below all the boxes). The left column
   is in the slides view's look (`studio::section_head`, `plain_row`, `picture_actions`,
   `picture_card`): THEME with + and the themes as rows (MAIN on the main one; a right-click
   for Make It the Main Theme, Use On, Rename…, Duplicate, Delete…); then TEMPLATES with a
