@@ -123,6 +123,9 @@ fn listing(card: &find_songs::Card, ended: Ended) -> (String, serde_json::Value)
         for (at, source) in card.sources.iter().enumerate() {
             let (name, line, count) = find_songs::row_words(source);
             text.push_str(&format!("\n  {:>2}  {name}  \u{2014}  {line}  \u{2014}  {}", at + 1, count.to_lowercase()));
+            if let Some(caution) = &source.caution {
+                text.push_str(&format!("\n      {caution}"));
+            }
             rows.push(serde_json::json!({
                 "number": at + 1,
                 "name": name,
@@ -135,6 +138,7 @@ fn listing(card: &find_songs::Card, ended: Ended) -> (String, serde_json::Value)
                 "here": source.here,
                 "twice": source.twice,
                 "why": source.why,
+                "caution": source.caution,
                 "ticked": card.ticked.get(at).copied().unwrap_or(false),
             }));
         }

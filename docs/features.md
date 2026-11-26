@@ -293,7 +293,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   and songbooks in one database sharing an id (SoftProjector's never do) give a song once, with
   the first of them, so a small file made to can't fill the computer's memory. A database copied while SoftProjector had it open, with
   changes still waiting in a `-wal` or `-journal` file beside it, comes in from the database
-  alone, with a line saying its latest changes may be missing. Songbooks are passed around
+  alone, with a line saying its latest changes may be missing. A songbook kept as text that ends
+  part way through a song (SoftProjector writes each song's line with the same parts, so the
+  last line has fewer, as a file cut short while it was copied or downloaded does) comes in
+  without that song, with a line saying so; one cut just at a line's end can't be told from a
+  whole one. Songbooks are passed around
   zipped, and a `.zip` that holds any (`.sps` or `.sqlite`, in folders or not) comes in the same
   ways without being unpacked first: every songbook in it is imported, one that can't be read
   is named with the reason while the others still come in, and a zip with no songbook in it is
@@ -326,7 +330,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   stopped search's thread to end, so two never look at once. A search that ended before it had
   looked everywhere (stopped, out of time, past its files, or gone wrong) says which over what it
   found, and `sp` says so too. A source with nothing new is
-  dimmed and unticked, so is one that can't be read, with the importer's reason in amber, and a
+  dimmed and unticked, so is one that can't be read, with the importer's reason in amber; one
+  copied while SoftProjector had it open, or cut short, says so under its line in amber and can
+  still be ticked; and a
   place the computer won't let it look in is a row saying so. Nothing comes in until Import:
   each ticked source then comes in through the import's own path, as a library of its name with
   only its new songs (a song already here stays where it is), read on a thread of its own and

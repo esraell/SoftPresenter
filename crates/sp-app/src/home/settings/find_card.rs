@@ -242,10 +242,11 @@ fn foot(ui: &mut egui::Ui, lead: &str, keys: &[Key]) -> Option<usize> {
 const COUNTS_SHARE: f32 = 0.45;
 
 /// A row for a source found: its tick box, its name, what and where it is and how many songs,
-/// and at its right how many are new and already here (in the fixed-width face), that
-/// everything is here, or why it couldn't be read (in amber). One with nothing new, or that
-/// couldn't be read, is dimmed and can't be ticked. `can_tick`: the rows can be ticked now
-/// (once the search has ended). True when it was clicked to tick or untick it.
+/// under them what the operator should know of it (in amber), and at its right how many are new
+/// and already here (in the fixed-width face), that everything is here, or why it couldn't be
+/// read (in amber). One with nothing new, or that couldn't be read, is dimmed and can't be
+/// ticked. `can_tick`: the rows can be ticked now (once the search has ended). True when it was
+/// clicked to tick or untick it.
 fn source_row(ui: &mut egui::Ui, source: &Source, ticked: bool, can_tick: bool) -> bool {
     let width = ui.available_width();
     let usable = source.can_import();
@@ -269,7 +270,12 @@ fn source_row(ui: &mut egui::Ui, source: &Source, ticked: bool, can_tick: bool) 
     let text_room = if beside { width - 30.0 - right_galley.size().x - 12.0 } else { width - 30.0 };
     let name_galley = parts::lines(ui, &name, semibold(13.5), name_ink, text_room, 18.0);
     let line_galley = parts::lines(ui, &line, FontId::proportional(12.0), TEXT_DIM, text_room, 16.0);
-    let words_height = name_galley.size().y + 2.0 + line_galley.size().y;
+    let caution_galley = source
+        .caution
+        .as_ref()
+        .map(|caution| parts::lines(ui, caution, FontId::proportional(12.0), CARE, text_room, 16.0));
+    let caution_height = caution_galley.as_ref().map_or(0.0, |galley| 2.0 + galley.size().y);
+    let words_height = name_galley.size().y + 2.0 + line_galley.size().y + caution_height;
     let inner =
         if beside { words_height.max(right_galley.size().y) } else { words_height + 4.0 + right_galley.size().y };
     let sense = if clickable { Sense::click() } else { Sense::hover() };
@@ -286,8 +292,12 @@ fn source_row(ui: &mut egui::Ui, source: &Source, ticked: bool, can_tick: bool) 
     let left = place.min.x + 30.0;
     let top = place.min.y + 11.0 + if beside { (inner - words_height) / 2.0 } else { 0.0 };
     let name_height = name_galley.size().y;
+    let line_height = line_galley.size().y;
     painter.galley(pos2(left, top), name_galley, name_ink);
     painter.galley(pos2(left, top + name_height + 2.0), line_galley, TEXT_DIM);
+    if let Some(caution) = caution_galley {
+        painter.galley(pos2(left, top + name_height + 2.0 + line_height + 2.0), caution, CARE);
+    }
     let right_at: Pos2 = if beside {
         pos2(place.max.x - right_galley.size().x, middle - right_galley.size().y / 2.0)
     } else {
@@ -319,6 +329,7 @@ mod tests {
             here,
             twice: 0,
             why: None,
+            caution: None,
             new: (0..songs.saturating_sub(here) as u64).map(|n| n + songs as u64 * 1000).collect(),
         }
     }
@@ -330,8 +341,17 @@ mod tests {
             why: Some("the file is cut short or damaged".to_owned()),
             ..source("spData.sqlite", Kind::Songbook, (Usual::Downloads, &["old laptop"]), 0, 0)
         };
+        // Copied while SoftProjector had it open.
+        let open = crate::i18n::tf(
+            "notices.import.songbook_unsaved",
+            "{name} was still open in SoftProjector when it was copied, so its latest changes may be missing. Close SoftProjector and import it again to be sure.",
+            &[("name", "spData.sqlite")],
+        );
         vec![
-            source("Zpěvník pro zkoušku", Kind::Songbook, (Usual::SoftProjector, &[]), 3301, 13),
+            Source {
+                caution: Some(open),
+                ..source("Zpěvník pro zkoušku", Kind::Songbook, (Usual::SoftProjector, &[]), 3301, 13)
+            },
             source("Youth Songs", Kind::Library, (Usual::Documents, &["Worship"]), 214, 16),
             // Two of its songs are there twice over.
             Source { songs: 34, twice: 2, ..source("Christmas 2025", Kind::SongFiles, (Usual::Downloads, &[]), 32, 0) },
@@ -443,6 +463,7 @@ mod tests {
                     "Everything here is already in your library",
                     "Couldn\u{2019}t be read: the file is cut short or damaged",
                     "Library \u{b7} from SoftProjector \u{b7} 3,301 songs",
+                    "spData.sqlite was still open in SoftProjector when it was copied, so its latest changes may be missing. Close SoftProjector and import it again to be sure.",
                     "Library \u{b7} Documents \u{203a} Worship \u{b7} 214 songs",
                     "Library \u{b7} from SoftProjector \u{b7} Downloads \u{203a} old laptop",
                 ],

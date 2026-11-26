@@ -76,6 +76,7 @@
   "notices.import.zip_too_much": "{name} після розпакування займає більше за будь-який збірник, тому його не прочитано.",
   "notices.import.zip_damaged": "zip пошкоджено",
   "notices.import.songbook_unsaved": "{name} ще був відкритий у SoftProjector під час копіювання, тож останніх змін може бракувати. Закрийте SoftProjector й імпортуйте його ще раз, щоб напевно.",
+  "notices.import.songbook_cut_short": "{name}: збірник уривається посеред пісні, як файл, обірваний під час копіювання чи завантаження. Цю пісню не додано, а пісень після неї в ньому немає.",
   "notices.import.no_songs": "{name} не містить пісень.",
   "notices.import.unreadable": "Не вдалося прочитати {name} ({error}).",
   "notices.import.the_file": "Файл",

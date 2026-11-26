@@ -76,6 +76,7 @@
   "notices.import.zip_too_much": "{name}: в распакованном виде больше любого сборника, поэтому не прочитан.",
   "notices.import.zip_damaged": "zip-архив повреждён",
   "notices.import.songbook_unsaved": "{name}: сборник был ещё открыт в SoftProjector, когда его копировали, поэтому последних изменений может не быть. Закройте SoftProjector и импортируйте его снова, чтобы наверняка.",
+  "notices.import.songbook_cut_short": "{name}: сборник обрывается посреди песни, как файл, оборванный при копировании или скачивании. Эта песня не добавлена, а песен после неё в нём нет.",
   "notices.import.no_songs": "{name}: внутри нет песен.",
   "notices.import.unreadable": "{name}: не удалось прочитать ({error}).",
   "notices.import.the_file": "Файл",

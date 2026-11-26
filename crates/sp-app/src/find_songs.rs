@@ -281,6 +281,9 @@ pub struct Source {
     pub twice: usize,
     /// Why it couldn't be read: the importer's own reason.
     pub why: Option<String>,
+    /// What the operator should know of one that can be read: that it was copied while
+    /// SoftProjector had it open, or ends part way through a song (the importer's own words).
+    pub caution: Option<String>,
     /// Its songs new to the library, by their import key's hash, so songs new in two sources
     /// ticked together are counted once.
     pub new: Vec<u64>,
@@ -763,6 +766,7 @@ impl<'a> Walk<'a> {
                     here: 0,
                     twice: 0,
                     why: Some(not_allowed(&e)),
+                    caution: None,
                     new: Vec::new(),
                 }))),
             }
@@ -907,6 +911,7 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
         here: 0,
         twice: 0,
         why: None,
+        caution: None,
         new: Vec::new(),
     };
     // Each songbook in it, in the order its songs come (looked up by name: a database may name
@@ -925,16 +930,21 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
         return Err(Cut);
     }
     match read {
-        Ok(_) => Ok(books
-            .into_iter()
-            .map(|(name, counted)| Source {
-                songs: counted.all,
-                here: counted.here,
-                twice: counted.twice,
-                new: counted.new,
-                ..base(name.clone().unwrap_or_else(|| stem.clone()), name)
-            })
-            .collect()),
+        // Each of its songbooks' rows says what the operator should know of the file.
+        Ok(cautions) => {
+            let caution = (!cautions.is_empty()).then(|| cautions.join(" "));
+            Ok(books
+                .into_iter()
+                .map(|(name, counted)| Source {
+                    songs: counted.all,
+                    here: counted.here,
+                    twice: counted.twice,
+                    new: counted.new,
+                    caution: caution.clone(),
+                    ..base(name.clone().unwrap_or_else(|| stem.clone()), name)
+                })
+                .collect())
+        }
         Err(refused) if listed_unread(path) => {
             Ok(vec![Source { why: Some(refused.why), read: Read::Nothing, ..base(file_name, None) }])
         }
@@ -1007,6 +1017,7 @@ fn folder_source(
         here,
         twice,
         why: None,
+        caution: None,
         new,
     }))
 }
@@ -1467,6 +1478,30 @@ pub(crate) mod tests {
         // A thread that ended without saying how went wrong: the search failed, never finished.
         drop(tx);
         assert!(matches!(other.said().as_slice(), [Found::Done(Ended::Failed)]));
+    }
+
+    #[test]
+    fn a_songbook_copied_while_open_or_cut_short_says_so_in_its_row() {
+        let tree = Tree::new("cautions");
+        tree.write("Old laptop/spData.sqlite", sp_model::songbook_examples::DATABASE);
+        tree.write("Old laptop/spData.sqlite-wal", b"changes not yet in the database");
+        // A text songbook in SoftProjector's layout, cut part way through its third song.
+        let lines: Vec<String> = (1..=3)
+            .map(|n| format!("{n}#$#Song {n}#$#0#$##$##$##$#Verse 1@%Line {n} for the test#$##$#left#$#"))
+            .collect();
+        let whole = format!("##4\n##Cut book\n##\n{}", lines.join("\n"));
+        tree.write("Downloads/Cut.sps", &whole.as_bytes()[..whole.len() - 12]);
+        let found = search(at(&tree, &["Old laptop", "Downloads"]), Library::default(), Vec::new());
+        let open: Vec<&Source> = found.iter().filter(|source| source.path.ends_with("spData.sqlite")).collect();
+        assert!(!open.is_empty());
+        for source in open {
+            let caution = source.caution.as_deref().unwrap_or_default();
+            assert!(caution.contains("latest changes may be missing"), "{}: {caution}", source.name);
+            assert!(source.can_import(), "it can still be brought in");
+        }
+        let cut = found.iter().find(|source| source.name == "Cut book").unwrap();
+        assert_eq!(cut.songs, 2, "the song it ends in is left out");
+        assert!(cut.caution.as_deref().unwrap_or_default().contains("ends part way through a song"), "{cut:#?}");
     }
 
     #[test]

@@ -35,7 +35,9 @@ pub use names::{repair_garbled, zip_entry_name};
 pub use pro_file::example as pro_example;
 pub use pro_file::{LARGEST_PRO_FILE, ProDocument, ProMedia, read_pro_document, read_pro_file};
 pub use rtf::rtf_to_text;
-pub use softprojector::{SongbookProblem, SongbookSong, from_softprojector, read_songbook};
+pub use softprojector::{
+    SongbookProblem, SongbookRead, SongbookSong, from_softprojector, read_songbook, read_songbook_whole,
+};
 /// Small songbooks made for tests (`tests/songbooks`), for other crates' tests.
 #[cfg(any(test, feature = "test-documents"))]
 #[doc(hidden)]

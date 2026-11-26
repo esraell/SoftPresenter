@@ -76,6 +76,7 @@
   "notices.import.zip_too_much": "{name} ocupa descomprimido más que cualquier cancionero, así que no se leyó.",
   "notices.import.zip_damaged": "el zip está dañado",
   "notices.import.songbook_unsaved": "{name} seguía abierto en SoftProjector cuando se copió, así que pueden faltar sus últimos cambios. Cierra SoftProjector e impórtalo de nuevo para estar seguro.",
+  "notices.import.songbook_cut_short": "{name} termina a mitad de una canción, como un archivo que se cortó al copiarlo o descargarlo: esa canción se dejó fuera, y faltan las que vinieran después.",
   "notices.import.no_songs": "{name} no contiene canciones.",
   "notices.import.unreadable": "No se pudo leer {name} ({error}).",
   "notices.import.the_file": "El archivo",

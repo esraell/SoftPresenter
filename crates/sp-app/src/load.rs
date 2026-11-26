@@ -159,7 +159,7 @@ fn import_zipped_songbooks(
         let read = match sp_model::bounded_zip::read_entry(&mut zip, at, room.min(SONGBOOK_ZIP.entry)) {
             Ok(bytes) => {
                 room -= bytes.len() as u64;
-                songbook_songs(std::io::Cursor::new(bytes), &inside, until, &mut *each)
+                songbook_songs(std::io::Cursor::new(bytes), &inside, until, &mut *each, &mut cautions)
             }
             Err(ZipRefusal::UnpacksTooMuch) => Err(Refused {
                 said: tf(
@@ -252,21 +252,24 @@ pub fn read_songbook_file_each(path: &Path, until: &dyn Fn() -> bool, each: Each
         ),
         why: e.to_string(),
     })?;
-    songbook_songs(file, &name, until, each)?;
-    Ok(unsaved_changes(path, &name).into_iter().collect())
+    let mut cautions = Vec::new();
+    songbook_songs(file, &name, until, each, &mut cautions)?;
+    cautions.extend(unsaved_changes(path, &name));
+    Ok(cautions)
 }
 
 /// The songs of one songbook, as presentations, handed to `each` one by one; how many.
-/// `name` is the file's, for what is said of it. Each song is made into a presentation only
-/// while `until` says to go on.
+/// `name` is the file's, for what is said of it, and anything the operator should know of it
+/// goes into `cautions`. Each song is made into a presentation only while `until` says to go on.
 fn songbook_songs<R: std::io::Read + std::io::Seek>(
     source: R,
     name: &str,
     until: &dyn Fn() -> bool,
     each: EachSong,
+    cautions: &mut Vec<String>,
 ) -> Result<usize, Refused> {
     use sp_model::SongbookProblem;
-    let songs = sp_model::read_songbook(source).map_err(|problem| match problem {
+    let read = sp_model::read_songbook_whole(source).map_err(|problem| match problem {
         SongbookProblem::NotSongbook => Refused {
             said: tf(
                 "notices.import.not_songbook",
@@ -289,8 +292,17 @@ fn songbook_songs<R: std::io::Read + std::io::Seek>(
             why,
         },
     })?;
+    // A text songbook that ends part way through a song was cut short as it was copied or
+    // downloaded: that song is left out, and those after it are missing.
+    if read.cut_short {
+        cautions.push(tf(
+            "notices.import.songbook_cut_short",
+            "{name} ends part way through a song, as a file cut short while it was copied or downloaded does: that song was left out, and any after it are missing.",
+            &[("name", name)],
+        ));
+    }
     let mut given = 0;
-    for song in songs {
+    for song in read.songs {
         if until() {
             break;
         }

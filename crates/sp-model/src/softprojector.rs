@@ -36,6 +36,14 @@ pub struct SongbookSong {
     pub book: Option<String>,
 }
 
+/// The songs of a songbook file, and whether it ends part way through a song, as a file cut
+/// short while it was copied or downloaded does (the song it ends in is left out).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SongbookRead {
+    pub songs: Vec<SongbookSong>,
+    pub cut_short: bool,
+}
+
 /// Why a file gave no songs.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SongbookProblem {
@@ -55,16 +63,22 @@ type Fields = [Value; 6];
 /// told apart by how the file starts. They come in the songbooks' order by name and, within a songbook, by number; songs
 /// with the same number stay in the order they were kept in.
 pub fn read_songbook<R: Read + Seek>(source: R) -> Result<Vec<SongbookSong>, SongbookProblem> {
+    read_songbook_whole(source).map(|read| read.songs)
+}
+
+/// [`read_songbook`], saying too whether the file ends part way through a song.
+pub fn read_songbook_whole<R: Read + Seek>(source: R) -> Result<SongbookRead, SongbookProblem> {
     read_songbook_within(source, Bounds::NORMAL)
 }
 
-/// [`read_songbook`], within these bounds.
-fn read_songbook_within<R: Read + Seek>(mut source: R, bounds: Bounds) -> Result<Vec<SongbookSong>, SongbookProblem> {
+/// [`read_songbook_whole`], within these bounds.
+fn read_songbook_within<R: Read + Seek>(mut source: R, bounds: Bounds) -> Result<SongbookRead, SongbookProblem> {
     let unreadable = |e: std::io::Error| SongbookProblem::Unreadable(format!("it could not be read ({e})"));
     let mut head = Vec::new();
     source.by_ref().take(16).read_to_end(&mut head).map_err(unreadable)?;
-    let fields = if is_database(&head) {
-        database_songs(source, bounds).map_err(|problem| problem.unwrap_or(SongbookProblem::NotSongbook))?
+    // A database cut short is refused by its reader, which finds the pages it points to missing.
+    let (fields, cut_short) = if is_database(&head) {
+        (database_songs(source, bounds).map_err(|problem| problem.unwrap_or(SongbookProblem::NotSongbook))?, false)
     } else {
         source.seek(SeekFrom::Start(0)).map_err(unreadable)?;
         let mut bytes = Vec::new();
@@ -92,7 +106,7 @@ fn read_songbook_within<R: Read + Seek>(mut source: R, bounds: Bounds) -> Result
         Value::Text(text) => text,
         _ => String::new(),
     };
-    Ok(fields
+    let songs = fields
         .into_iter()
         .map(|[number, title, by_words, by_music, text, book]| SongbookSong {
             number: match number {
@@ -106,7 +120,8 @@ fn read_songbook_within<R: Read + Seek>(mut source: R, bounds: Bounds) -> Result
             text: words(text),
             book: Some(words(book)).filter(|book| !book.trim().is_empty()),
         })
-        .collect())
+        .collect();
+    Ok(SongbookRead { songs, cut_short })
 }
 
 /// The largest songbook kept as text that is read (the largest there is has four megabytes).
@@ -119,15 +134,25 @@ const LARGEST_TEXT_SONGBOOK: u64 = 64 * 1024 * 1024;
 /// text, in which `@$` ends a verse and `@%` ends a line. A line with fewer parts is no song.
 /// They come in the order of their numbers, as they would out of the database SoftProjector
 /// puts them in.
-fn text_songs(whole: &str, bounds: Bounds) -> Result<Vec<Fields>, SongbookProblem> {
+///
+/// SoftProjector writes each song's line with the same parts (ten, the last empty) and nothing
+/// after the last line, so a last line with fewer parts than the file's songs have is one cut
+/// short, as a file copied or downloaded part way ends: that song is left out, and the file is
+/// said to be cut short (true with the songs). A file cut just at a line's end can't be told
+/// from a whole one.
+fn text_songs(whole: &str, bounds: Bounds) -> Result<(Vec<Fields>, bool), SongbookProblem> {
     let mut lines = whole.split('\n');
     let _code = lines.next();
     let book = lines.next().unwrap_or("").replace('#', "").trim().to_owned();
     let _note = lines.next();
+    let lines: Vec<&str> = lines.map(|line| line.trim_end_matches('\r')).collect();
+    let cut_short = ends_part_way(&lines);
+    let whole_lines = if cut_short { lines.len() - 1 } else { lines.len() };
     let mut tally = Tally::new(bounds);
-    let mut fields = lines
+    let mut fields = lines[..whole_lines]
+        .iter()
         .filter_map(|line| {
-            let parts: Vec<&str> = line.trim_end_matches('\r').split("#$#").collect();
+            let parts: Vec<&str> = line.split("#$#").collect();
             let [number, title, _category, _tune, words, music, text, ..] = parts.as_slice() else { return None };
             // Each verse's lines, then an empty line before the next: the same text, to the
             // letter, as SoftProjector's own databases hold for these songbooks.
@@ -149,7 +174,25 @@ fn text_songs(whole: &str, bounds: Bounds) -> Result<Vec<Fields>, SongbookProble
         .map(|song| tally.count(&song).map(|()| song))
         .collect::<Result<Vec<Fields>, SongbookProblem>>()?;
     fields.sort_by(|[a, ..], [b, ..]| sort_order(a, b, &|a: &str, b: &str| a.cmp(b)));
-    Ok(fields)
+    Ok((fields, cut_short))
+}
+
+/// Whether a text songbook's lines (after its three of `##`) end part way through a song: the
+/// last line with anything on it has fewer parts than most of the file's songs have. A file with
+/// one song can't tell.
+fn ends_part_way(lines: &[&str]) -> bool {
+    let parts = |line: &str| line.split("#$#").count();
+    let Some(last) = lines.iter().rposition(|line| !line.trim().is_empty()) else { return false };
+    // How many parts the songs before it have, and how often.
+    let mut counts: HashMap<usize, usize> = HashMap::new();
+    for line in &lines[..last] {
+        let n = parts(line);
+        if n >= 7 {
+            *counts.entry(n).or_default() += 1;
+        }
+    }
+    let usual = counts.into_iter().max_by_key(|(n, often)| (*often, *n)).map(|(n, _)| n);
+    usual.is_some_and(|usual| parts(lines[last]) < usual)
 }
 
 /// The most songs one file may give: many times the largest songbook, and few enough that a
@@ -714,7 +757,8 @@ mod tests {
 
     #[test]
     fn a_file_past_its_bounds_is_refused_however_it_gets_there() {
-        let within = |bytes: &[u8], bounds| read_songbook_within(std::io::Cursor::new(bytes), bounds);
+        let within =
+            |bytes: &[u8], bounds| read_songbook_within(std::io::Cursor::new(bytes), bounds).map(|read| read.songs);
         let refused = |read: Result<Vec<SongbookSong>, SongbookProblem>| matches!(read, Err(SongbookProblem::Unreadable(why)) if why.ends_with("than any songbook") || why.ends_with("than any song"));
         let database: &[u8] = include_bytes!("../tests/songbooks/database.sqlite");
         let text = TEXT_SONGBOOK.as_bytes();
@@ -810,6 +854,42 @@ mod tests {
         let songs = read(odd).unwrap();
         assert_eq!(songs.len(), 2);
         assert!(songs.iter().all(|song| song.text.is_empty() && song.book.is_none()));
+    }
+
+    #[test]
+    fn a_text_songbook_cut_short_leaves_out_the_song_it_ends_in_and_says_so() {
+        // Written in SoftProjector's own layout: ten parts to a song's line, the last empty,
+        // and nothing after the last line.
+        let lines: Vec<String> = (1..=12)
+            .map(|n| format!("{n}#$#Song {n}#$#0#$##$#Ann#$##$#Verse 1@%Line {n}@$Chorus@%Again {n}#$##$#left#$#"))
+            .collect();
+        let whole = format!("##4\n##Cut\n##A note\n{}", lines.join("\n"));
+        let read = |text: &str| read_songbook_whole(std::io::Cursor::new(text.as_bytes()));
+        let full = read(&whole).unwrap();
+        assert_eq!((full.songs.len(), full.cut_short), (12, false));
+        // Cut anywhere after the first song: a cut at a line's end can't be told from a whole
+        // file; every other cut is caught, and no song read has words cut short.
+        let after_first = whole.find("Again 1#$#").unwrap();
+        let after_first = after_first + whole[after_first..].find('\n').unwrap() + 1;
+        let (mut caught, mut at_line_ends) = (0, 0);
+        for cut in after_first..whole.len() {
+            let part = &whole[..cut];
+            let got = read(part).unwrap();
+            assert!(got.songs.iter().all(|song| full.songs.contains(song)), "cut at {cut}: {:?}", got.songs);
+            // Just before or after a line's end, every song read is whole, and none is missing
+            // from what is there.
+            if part.ends_with('\n') || whole[cut..].starts_with('\n') {
+                at_line_ends += 1;
+                assert!(!got.cut_short);
+            } else {
+                assert!(got.cut_short, "a cut at {cut} isn't caught: {:?}", &part[part.len() - 20..]);
+                caught += 1;
+            }
+        }
+        assert_eq!(at_line_ends, 21);
+        assert_eq!(caught, whole.len() - after_first - at_line_ends, "every other cut is caught");
+        // The layout this module's other tests write (songs of seven to eleven parts) is whole.
+        assert!(!read(TEXT_SONGBOOK).unwrap().cut_short);
     }
 
     #[test]
