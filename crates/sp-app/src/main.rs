@@ -772,6 +772,7 @@ impl AppEvent {
             AppEvent::Canva => "Canva",
             AppEvent::CatalogDone => "CatalogDone",
             AppEvent::SongbookDone => "SongbookDone",
+            AppEvent::FindSongs => "FindSongs",
             AppEvent::Saved => "Saved",
             AppEvent::UpdateChecked => "UpdateChecked",
             AppEvent::FfmpegFetch => "FfmpegFetch",
