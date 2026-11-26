@@ -1992,16 +1992,19 @@ fn run(
                     // and is taken down before the program goes (see `NdiOutput::stop`). The
                     // sound stops being handed to them first.
                     output.ndi_sound.clear();
-                    for (_, ndi) in output.ndi.drain(..) {
-                        let (name, stopping) = (ndi.name().to_owned(), Instant::now());
-                        ndi.stop();
-                        crate::applog::event(
-                            "ndi",
-                            &format!(
-                                "NDI \"{name}\" was stopped before closing, in {:.0} ms",
-                                stopping.elapsed().as_secs_f64() * 1000.0
-                            ),
-                        );
+                    let stopping = Instant::now();
+                    let (names, sources): (Vec<String>, Vec<NdiOutput>) =
+                        output.ndi.drain(..).map(|(_, ndi)| (ndi.name().to_owned(), ndi)).unzip();
+                    if !sources.is_empty() {
+                        // Together, two seconds at most in all, however many there are.
+                        NdiOutput::stop_all(sources);
+                        let took = stopping.elapsed().as_secs_f64() * 1000.0;
+                        for name in names {
+                            crate::applog::event(
+                                "ndi",
+                                &format!("NDI \"{name}\" was stopped before closing, in {took:.0} ms"),
+                            );
+                        }
                     }
                     return;
                 }

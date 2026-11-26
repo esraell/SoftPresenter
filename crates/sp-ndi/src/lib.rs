@@ -110,6 +110,15 @@ pub const DOWNLOAD_URL: &str = "https://ndi.video/";
 /// its next turn.
 const RESEND_GRACE: u32 = 1;
 
+/// How often a source whose NDI runtime can't count its receivers sends its picture again:
+/// once a second, as every source did before. Such a source can't know whether anybody
+/// watches, so it sends all the time, and at its full rate it would compress thirty pictures a
+/// second for good on a computer where perhaps nobody is looking (a sixth of a processor,
+/// measured). New pictures still go at once, so a fade or a video is as steady as on any
+/// source; only a slide that stays is sent less often, as it always was there. (Every NDI
+/// runtime from version 4 on counts its receivers.)
+const UNCOUNTED_EVERY: Duration = Duration::from_millis(1000);
+
 /// How often a source asks NDI how many receivers it has. A receiver that connects to a source
 /// nobody was watching gets its first picture within about this time.
 const COUNT_EVERY: Duration = Duration::from_millis(1000);
@@ -632,7 +641,7 @@ pub struct NdiOutput {
     ended: Receiver<()>,
 }
 
-/// The longest [`NdiOutput::stop`] waits for a source's thread: a picture being sent (paced to
+/// The longest [`NdiOutput::stop`] and [`NdiOutput::stop_all`] wait for the sources' threads: a picture being sent (paced to
 /// the frame rate) and the source being taken down are far shorter; one still starting NDI,
 /// or tried again for its name, could be longer, and is left behind.
 const STOP_WITHIN: Duration = Duration::from_secs(2);
@@ -644,9 +653,22 @@ impl NdiOutput {
     /// inside NDI crashes as it goes (one quit in three did, with a receiver connected).
     /// Never for the thread drawing the screens while they are in use, which must not wait on
     /// NDI: dropping the output stops it without waiting.
-    pub fn stop(mut self) {
-        self.tx = None;
-        let _ = self.ended.recv_timeout(STOP_WITHIN);
+    pub fn stop(self) {
+        NdiOutput::stop_all([self]);
+    }
+
+    /// Stops several sources as [`NdiOutput::stop`] stops one, all at once: every one is told
+    /// to stop first, and then they are waited for together, [`STOP_WITHIN`] at most in all.
+    /// (One after another, each could take that long.)
+    pub fn stop_all(sources: impl IntoIterator<Item = NdiOutput>) {
+        let mut sources: Vec<NdiOutput> = sources.into_iter().collect();
+        for source in &mut sources {
+            source.tx = None;
+        }
+        let until = Instant::now() + STOP_WITHIN;
+        for source in &sources {
+            let _ = source.ended.recv_timeout(until.saturating_duration_since(Instant::now()));
+        }
     }
 
     /// Starts an NDI source with this name, at the usual rate. Never waits for NDI: the source starts on its own
@@ -1567,14 +1589,15 @@ impl Gate {
         if !self.watched() || !(self.fresh || now >= self.next_resend) {
             return None;
         }
+        let every = self.again_every();
         let picture = self.current.as_mut()?;
         let fresh = std::mem::take(&mut self.fresh);
         // Sent again, it keeps to its turns: the next is one picture's time after this turn,
         // not after this send returns (compressing the picture takes a few milliseconds, which
         // would stretch every turn and send 25 pictures a second for 30).
         // (One held up past its next turn starts its turns again from now.)
-        let turn = self.next_resend + self.frame;
-        self.next_resend = if fresh || turn <= now { now + self.frame } else { turn };
+        let turn = self.next_resend + every;
+        self.next_resend = if fresh || turn <= now { now + every } else { turn };
         self.given = Some((picture.width, picture.height, picture.sent.alpha()));
         Some((picture, fresh))
     }
@@ -1585,7 +1608,13 @@ impl Gate {
     /// longer (see [`RESEND_GRACE`]).
     fn sent_new(&mut self, ended: Instant, more_coming: bool) {
         let grace = if more_coming { self.frame * RESEND_GRACE } else { Duration::ZERO };
-        self.next_resend = ended + self.frame + grace;
+        self.next_resend = ended + self.again_every().max(self.frame + grace);
+    }
+
+    /// How often the current picture is sent again: at the source's rate while receivers are
+    /// counted, and once a second when the runtime can't count them ([`UNCOUNTED_EVERY`]).
+    fn again_every(&self) -> Duration {
+        if self.receivers.is_none() { self.frame.max(UNCOUNTED_EVERY) } else { self.frame }
     }
 }
 
@@ -2927,5 +2956,76 @@ mod tests {
         output.stop();
         assert!(!sending.load(Ordering::Relaxed) && gone.load(Ordering::Relaxed), "still inside the source");
         assert!(began.elapsed() < Duration::from_secs(1), "waited {:?}", began.elapsed());
+    }
+
+    #[test]
+    fn a_source_that_cannot_count_its_receivers_sends_a_slide_that_stays_once_a_second() {
+        let t = Instant::now();
+        let frame = Rate::R29_97.frame();
+        let due = |gate: &mut Gate, at: Instant| gate.picture_due(at).map(|(picture, fresh)| (picture.width, fresh));
+        let mut gate = Gate::at(t, frame);
+        gate.counted(t, None);
+        // A new picture goes at once, and the next new one too, a picture's time later.
+        gate.picture(picture(1));
+        assert_eq!(due(&mut gate, t), Some((1, true)));
+        gate.sent_new(t, true);
+        gate.picture(picture(2));
+        assert_eq!(due(&mut gate, t + frame), Some((2, true)));
+        gate.sent_new(t + frame, false);
+        // Nothing new: not again at the next turn, as for a source that knows it is watched,
+        // but a second later, and each second after that.
+        assert!(due(&mut gate, t + 3 * frame).is_none());
+        assert!(due(&mut gate, t + frame + SECOND - Duration::from_millis(1)).is_none());
+        assert_eq!(due(&mut gate, t + frame + SECOND), Some((2, false)));
+        assert!(due(&mut gate, t + frame + SECOND + 3 * frame).is_none());
+        assert_eq!(due(&mut gate, t + frame + 2 * SECOND), Some((2, false)));
+        // Once its receivers can be counted, it keeps the source's rate.
+        gate.counted(t + frame + 2 * SECOND, Some(1));
+        assert_eq!(due(&mut gate, t + frame + 3 * SECOND), Some((2, false)));
+        assert_eq!(due(&mut gate, t + 2 * frame + 3 * SECOND), Some((2, false)));
+    }
+
+    #[test]
+    fn sources_stopped_together_are_waited_for_together() {
+        // Three stand-ins that each take 300 ms over a picture.
+        struct Slow(Arc<AtomicU32>);
+        impl Sink for Slow {
+            fn receivers(&self) -> Option<u32> {
+                Some(1)
+            }
+            fn send(&self, _: u32, _: u32, _: &[u8], _: bool) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            fn sound(&self, _: &[f32], _: std::time::SystemTime) {}
+        }
+        impl Drop for Slow {
+            fn drop(&mut self) {
+                self.0.fetch_add(1000, Ordering::Relaxed);
+            }
+        }
+        let seen = Arc::new(AtomicU32::new(0));
+        let quiet: Log = Arc::new(|_: &str, _: bool| {});
+        let sources: Vec<NdiOutput> = (0..3)
+            .map(|_| {
+                let theirs = seen.clone();
+                spawn("SoftPresenter test", Rate::default(), move |_| Ok(Slow(theirs)), || {}, quiet.clone(), MINUTE)
+                    .unwrap()
+            })
+            .collect();
+        for source in &sources {
+            source.show(2, 1, vec![9; 8], Sent::Opaque);
+        }
+        let began = Instant::now();
+        while seen.load(Ordering::Relaxed) % 1000 < 3 {
+            assert!(began.elapsed() < PATIENCE, "not every source sent");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // All three are part-way through a picture: gone in about one picture's 300 ms, not three.
+        let began = Instant::now();
+        NdiOutput::stop_all(sources);
+        let took = began.elapsed();
+        assert_eq!(seen.load(Ordering::Relaxed) / 1000, 3, "every source was let go");
+        assert!(took < Duration::from_millis(550), "waited {took:?}");
     }
 }

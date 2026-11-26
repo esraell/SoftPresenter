@@ -21,9 +21,8 @@
 //! at 24 or 30 Hz) must not make theirs late. Such a window is then passed over more often,
 //! and shown its picture the moment its next one comes, as often as its display takes them.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use sp_render::wgpu;
@@ -126,7 +125,16 @@ struct Asker<T> {
     /// One has been asked for and hasn't come.
     asked: bool,
     /// The asker stopped waiting for the one asked for: the thread says when it has come.
-    tell: Arc<AtomicBool>,
+    ///
+    /// Behind a lock, not an atomic flag, for the moment both sides act at once. The asker sets
+    /// this and then looks once more for what was asked; the thread gives it and then looks at
+    /// this. Each writes one thing and then reads the other's, and with atomics alone (short of
+    /// a full barrier on both sides) each may read the other's old value: the asker finds
+    /// nothing, the thread sees nobody to tell, and a window passed over is never shown the
+    /// picture it is owed. With the asker's write and look under the lock, and the thread's
+    /// look under it too, one of them comes first: if the thread's look is first it gave before
+    /// the asker's look, which then finds it; if the asker's is first, the thread sees this set.
+    tell: Arc<Mutex<bool>>,
 }
 
 impl<T: Send + 'static> Asker<T> {
@@ -137,7 +145,7 @@ impl<T: Send + 'static> Asker<T> {
         let (asks, asked) = channel::<()>();
         let (give, given) = channel();
         let theirs = ask.clone();
-        let tell = Arc::new(AtomicBool::new(false));
+        let tell = Arc::new(Mutex::new(false));
         let told = tell.clone();
         let started = std::thread::Builder::new().name(name.to_owned()).spawn(move || {
             for () in asked {
@@ -145,8 +153,9 @@ impl<T: Send + 'static> Asker<T> {
                     return;
                 }
                 // Looked at after it is given: an asker that stops waiting at this very moment
-                // either finds it (it looks once more after saying so) or is told.
-                if told.swap(false, Ordering::AcqRel) {
+                // either finds it (it looks once more after saying so) or is told (see `tell`).
+                let tell = std::mem::take(&mut *told.lock().unwrap_or_else(PoisonError::into_inner));
+                if tell {
                     came();
                 }
             }
@@ -183,15 +192,17 @@ impl<T: Send + 'static> Asker<T> {
             Ok(came) => {
                 self.asked = false;
                 // Taken here: nobody need be told of it, if it was looked for before.
-                self.tell.store(false, Ordering::Release);
+                *self.tell.lock().unwrap_or_else(PoisonError::into_inner) = false;
                 Some(came)
             }
             Err(RecvTimeoutError::Timeout) => {
                 // Not waited for any longer: the thread is to say when it comes. It may have
                 // come this instant, before the thread could see that: looked for once more.
-                self.tell.store(true, Ordering::Release);
+                let mut tell = self.tell.lock().unwrap_or_else(PoisonError::into_inner);
+                *tell = true;
                 let came = given.try_recv().ok()?;
-                self.tell.store(false, Ordering::Release);
+                *tell = false;
+                drop(tell);
                 self.asked = false;
                 Some(came)
             }

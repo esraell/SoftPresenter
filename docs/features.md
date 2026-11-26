@@ -1788,7 +1788,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   recorder is never left waiting for the next change, and one that joins has its picture
   within a picture's time. It used to send a slide that stays once a second. Sending it again
   costs the computer some work for each watched screen (NDI compresses every picture), and
-  nothing while nobody watches.
+  nothing while nobody watches. With an NDI too old to count who is watching, a slide that
+  stays is still sent once a second (the screen can't know anybody is there, and would
+  otherwise work at full rate for good); its fades and videos go out as steadily as any.
+- **Quitting never cuts an NDI screen off mid-picture.** As the app closes, each NDI screen
+  finishes the picture it is sending and is taken down, all of them together, within two
+  seconds at most, before the program ends. On a Mac this, and everything else Quit does
+  (saving what was just changed, writing every file still to be written), also happens when
+  the app is ended from the Dock, or by logging out, restarting or shutting down; before, those
+  ended it on the spot.
 - **The log says how each NDI screen's pictures went out.** Once a minute, for each NDI screen,
   as for each DeckLink output: the pictures sent (and how many a second, against the rate it
   says it sends), sent again, late, skipped, the longest gap between them while a video plays, not

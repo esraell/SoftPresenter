@@ -20,6 +20,25 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSNumber, NSObjectProtocol, NSString};
 
+/// Testing aid (SOFTPRESENTER_TERMINATE_AFTER): asks the app to terminate the way the Dock's
+/// Quit, a log-out, a restart and a shut-down do (`-[NSApplication terminate:]`), at the run
+/// loop's next turn, so it comes as theirs does, between two events and not inside one being
+/// handled. The system then tells the app it will terminate and ends the program itself; the
+/// app's own Quit never goes this way. False off the main thread, where nothing is asked.
+pub fn terminate_app() -> bool {
+    let Some(mtm) = MainThreadMarker::new() else { return false };
+    let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+    let nobody: *const AnyObject = std::ptr::null();
+    // SAFETY: `performSelector:withObject:afterDelay:` is NSObject's own, sent on the main
+    // thread to the shared application, which lives as long as the program; `terminate:` takes
+    // one object, its sender, which may be nil.
+    unsafe {
+        let _: () =
+            objc2::msg_send![&*app, performSelector: objc2::sel!(terminate:), withObject: nobody, afterDelay: 0.0f64];
+    }
+    true
+}
+
 /// The window level of a screen's window: `kCGMainMenuWindowLevel` (24) plus one. That is above
 /// the menu bar and the Dock (20) on the display it covers, so neither shows through, yet below
 /// pop-up menus, the screen saver and the system's own security dialogs, which must always be

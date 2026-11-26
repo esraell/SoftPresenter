@@ -2333,6 +2333,11 @@ struct App {
     home_timing: applog::Timing,
     /// When quitting began, while it waits for Canva Sync to keep a sign-in it is refreshing.
     quitting: Option<Instant>,
+    /// Testing aid: SOFTPRESENTER_TERMINATE_AFTER has been acted on (see `about_to_wait`).
+    #[cfg(target_os = "macos")]
+    terminate_asked: bool,
+    /// The app's leaving has been done, by its own Quit or by `leave_at_once`: never twice.
+    left: bool,
 }
 
 impl App {
@@ -11212,24 +11217,66 @@ impl App {
         }
     }
 
+    /// What a quit does at once, however it came: what was changed is handed to be saved, and
+    /// the screens close (their NDI sources stopped, see `NdiOutput::stop`).
+    fn begin_quit(&mut self) {
+        self.save_unsaved();
+        self.keep_held_aside();
+        // A sync under way is stopped, and the screens close first: nothing waits in front of
+        // the audience.
+        self.canva.stop();
+        if let Some(output) = self.running.as_mut().and_then(|r| r.output.take()) {
+            output.shutdown();
+        }
+        if let Some((_, mut player)) = self.video.take() {
+            say_video_pace(&mut player, true);
+        }
+        self.announcing = None;
+        self.quitting = Some(Instant::now());
+        // The last anonymous report, if reports are on, goes from its own thread while the
+        // rest of the leaving is done.
+        reports::quit_begin();
+    }
+
+    /// The app is being ended without its own Quit having finished: on a Mac, by the Dock's
+    /// Quit, a log-out, a restart or a shut-down, where macOS says the app will terminate and
+    /// then ends the program itself, with no more turns of the event loop. Everything the
+    /// app's Quit does is done here, now, waiting where it must (the system waits for this to
+    /// return): what was changed is saved and every file handed to the library's writer is
+    /// written, the screens' thread ends with its NDI sources stopped (a program that ended
+    /// while one was sending crashed as it went), the helpers leave, the control socket goes
+    /// and the run is noted as ended. Without it none of that happened: the last second's
+    /// changes were lost, and the next start said the app had not quit. A Canva sign-in being
+    /// refreshed this very moment is not waited for, and the last anonymous report goes if it
+    /// has time. Once only, whichever way the app goes.
+    fn leave_at_once(&mut self) {
+        self.left = true;
+        let began = Instant::now();
+        if self.quitting.is_none() {
+            self.begin_quit();
+        }
+        self.finish_saves();
+        self.writer.drain();
+        self.finish_saves();
+        self.canva.shut_down();
+        self.remove_replaced_canva_videos();
+        self.mirror.quit();
+        if let Ok(mut listening) = self._control.lock() {
+            listening.take();
+        }
+        applog::event(
+            "quit",
+            &format!(
+                "The system ended the app without its Quit: saved and stopped first, in {:.0} ms",
+                began.elapsed().as_secs_f64() * 1000.0
+            ),
+        );
+        applog::last_run::ended();
+    }
+
     fn quit(&mut self, el: &ActiveEventLoop) {
         if self.quitting.is_none() {
-            self.save_unsaved();
-            self.keep_held_aside();
-            // A sync under way is stopped, and the screens close first: nothing waits in front of
-            // the audience.
-            self.canva.stop();
-            if let Some(output) = self.running.as_mut().and_then(|r| r.output.take()) {
-                output.shutdown();
-            }
-            if let Some((_, mut player)) = self.video.take() {
-                say_video_pace(&mut player, true);
-            }
-            self.announcing = None;
-            self.quitting = Some(Instant::now());
-            // The last anonymous report, if reports are on, goes from its own thread while the
-            // rest of the leaving is done.
-            reports::quit_begin();
+            self.begin_quit();
         }
         // Every file handed to the library's writer is written before the app goes (a big import
         // on a slow disk can take minutes), here in the event loop, so the window still answers.
@@ -11283,6 +11330,8 @@ impl App {
         if !reports::quit_done() {
             return;
         }
+        // All done: nothing is left for `exiting` to do.
+        self.left = true;
         el.exit();
     }
 }
@@ -12156,8 +12205,14 @@ impl ApplicationHandler<AppEvent> for App {
     /// Wayland objects from the event loop's connection and destroys them when the clipboard
     /// is dropped; dropped after `run_app` returns, the connection is gone and that thread
     /// crashed the process on every quit (exit 139).
-    #[cfg(target_os = "linux")]
+    ///
+    /// On every system this is also where an end that did not come through the app's own Quit is
+    /// caught (see `leave_at_once`): its Quit leaves nothing to do here.
     fn exiting(&mut self, _el: &ActiveEventLoop) {
+        if !self.left {
+            self.leave_at_once();
+        }
+        #[cfg(target_os = "linux")]
         drop(self.running.take());
     }
 
@@ -12165,6 +12220,22 @@ impl ApplicationHandler<AppEvent> for App {
         let _busy = reports::stats::BusyGuard::new(reports::stats::Who::Ui);
         let _stall = stall::busy();
         self.reports_tick();
+        // Testing aid: SOFTPRESENTER_TERMINATE_AFTER=<seconds> has macOS terminate the app that
+        // many seconds after it started, the way the Dock's Quit, a log-out, a restart and a
+        // shut-down do (never through the app's own Quit), so that what the app does then can
+        // be tried without a pointer. On a Mac only; looked at each time the loop waits (once a
+        // second at least).
+        #[cfg(target_os = "macos")]
+        if !self.terminate_asked
+            && std::env::var("SOFTPRESENTER_TERMINATE_AFTER")
+                .ok()
+                .and_then(|s| s.trim().parse::<f32>().ok())
+                .is_some_and(|after| self.started.elapsed().as_secs_f32() >= after)
+        {
+            self.terminate_asked = true;
+            applog::event("quit", "Testing aid: asking macOS to terminate the app, as the Dock's Quit does");
+            sp_video::terminate_app();
+        }
         // Quitting, waiting for the library's writer to write what it holds, or for Canva Sync
         // to keep a sign-in it is refreshing: looked at again shortly (their threads also wake
         // the loop when they are done), and nothing else is run.
@@ -12855,6 +12926,9 @@ fn main() -> ExitCode {
         capture_done: false,
         home_timing: applog::Timing::new("operator window drawings"),
         quitting: None,
+        #[cfg(target_os = "macos")]
+        terminate_asked: false,
+        left: false,
     };
     // The pictures that were in the media bin last time, then any named on the command line.
     start_steps::mark("app filled in");

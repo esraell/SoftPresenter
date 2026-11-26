@@ -40,6 +40,7 @@ pub mod sound;
 #[cfg(target_os = "macos")]
 pub use mac::{
     DisplayWatch, GpuImport, GpuNext, cover_display, display_names, home_folder, pdf_draw, pdf_sizes, picture,
+    terminate_app,
 };
 
 #[cfg(not(target_os = "macos"))]

@@ -3,7 +3,7 @@
 mod cover;
 mod gpu;
 mod tap;
-pub use cover::{DisplayWatch, cover_display};
+pub use cover::{DisplayWatch, cover_display, terminate_app};
 pub use gpu::{GpuImport, GpuNext};
 
 use std::path::Path;

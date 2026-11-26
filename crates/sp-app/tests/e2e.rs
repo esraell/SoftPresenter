@@ -339,6 +339,16 @@ impl Copy<'_> {
         Quitted { status, log: self.run.log(), stderr: std::fs::read_to_string(&self.err).unwrap_or_default() }
     }
 
+    /// Waits for a copy that ends without being asked through `sp` (the system ends it).
+    #[cfg(target_os = "macos")]
+    fn ended_within(mut self, within: Duration) -> Quitted {
+        let status = self.wait_exit(within).unwrap_or_else(|| {
+            self.kill();
+            panic!("the copy hadn't ended after {within:?}; it was killed{}", self.run.context())
+        });
+        Quitted { status, log: self.run.log(), stderr: std::fs::read_to_string(&self.err).unwrap_or_default() }
+    }
+
     fn wait_exit(&mut self, within: Duration) -> Option<ExitStatus> {
         if let Some(status) = self.exit {
             return Some(status);
@@ -914,6 +924,37 @@ fn quitting_while_an_ndi_screen_is_watched_stops_its_source_first_every_time() {
         let stopped = this_start.lines().filter(|line| line.contains("was stopped before closing")).count();
         assert_eq!(stopped, 1, "quit {quit}: the source was not stopped before the copy closed{}", run.context());
     }
+}
+
+/// On a Mac, the Dock's Quit, a log-out, a restart and a shut-down end the app without its own
+/// Quit: macOS says it will terminate, and ends the program. The app must do then what its Quit
+/// does: save what was changed a moment before, and stop its NDI sources before the program
+/// goes (one still sending as the program ended crashed it).
+#[cfg(target_os = "macos")]
+#[test]
+fn terminated_by_the_system_the_app_saves_and_stops_its_ndi_sources_as_its_own_quit_does() {
+    let name = "terminated_by_the_system_the_app_saves_and_stops_its_ndi_sources_as_its_own_quit_does";
+    let Some(run) = Run::new(name) else { return };
+    let file = run.file("Hill Road.txt");
+    let words = song_text(&[("Verse 1", "Morning light on the hill"), ("Chorus", "Sing out, the day is new")]);
+    std::fs::write(&file, words).expect("the song's file");
+    let began = Instant::now();
+    let copy = run.start(&[
+        ("SOFTPRESENTER_NDI", "Terminated"),
+        ("SOFTPRESENTER_PRETEND_NDI", "1"),
+        ("SOFTPRESENTER_TERMINATE_AFTER", "6"),
+    ]);
+    copy.ok(&["song", "import", &file.to_string_lossy()]);
+    copy.ok(&["go", "Hill Road"]);
+    // Words changed a moment before the system ends the app.
+    std::thread::sleep(Duration::from_millis(5300).saturating_sub(began.elapsed()));
+    copy.ok(&["slide", "text", "Hill Road", "2", "Sing out, the day is here"]);
+    let ended = copy.ended_within(Duration::from_secs(30));
+    ended.assert_clean(&run);
+    assert!(ended.log.contains("asking macOS to terminate the app"), "the switch was not taken{}", run.context());
+    assert!(ended.log.contains("was stopped before closing"), "the NDI source was still running{}", run.context());
+    let saved = song_file_with(&run.data, "Morning light on the hill").expect("the song's file in Songs");
+    assert!(saved.contains("Sing out, the day is here"), "the changed words were not saved: {saved}");
 }
 
 #[test]
