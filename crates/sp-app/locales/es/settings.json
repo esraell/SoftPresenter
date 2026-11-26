@@ -96,6 +96,7 @@
     "{n} persona",
     "{n} personas"
   ],
+  "settings.state.people.short": ["{n} pers.", "{n} pers."],
   "settings.on": "Sí",
   "settings.off": "No",
   "settings.copyright.title": "Línea de derechos de autor",

@@ -54,6 +54,32 @@ pub fn one_line(ui: &egui::Ui, text: &str, font: FontId, ink: Color32, wrap: f32
 /// A page's card: the well with its title, a line in small capitals beside it saying what it is
 /// for, and `aside` in the same capitals at its right end; `add` draws what it holds.
 pub fn card(ui: &mut egui::Ui, title: &str, about: &str, aside: Option<&str>, add: impl FnOnce(&mut egui::Ui)) {
+    framed(ui, |ui| card_head(ui, title, about, aside), add);
+}
+
+/// A card as [`card`] whose heading ends in a small key at the right (Forget All, say) in place
+/// of an aside, when `key` names one. True when it was clicked.
+pub fn card_with_key(
+    ui: &mut egui::Ui,
+    title: &str,
+    about: &str,
+    key: Option<&str>,
+    add: impl FnOnce(&mut egui::Ui),
+) -> bool {
+    let mut clicked = false;
+    framed(
+        ui,
+        |ui| match key {
+            Some(words) => clicked = keyed_head(ui, title, about, words),
+            None => card_head(ui, title, about, None),
+        },
+        add,
+    );
+    clicked
+}
+
+/// A card's block, its head, then what it holds.
+fn framed(ui: &mut egui::Ui, head: impl FnOnce(&mut egui::Ui), add: impl FnOnce(&mut egui::Ui)) {
     let width = ui.available_width();
     Frame::new()
         .fill(CARD)
@@ -63,11 +89,35 @@ pub fn card(ui: &mut egui::Ui, title: &str, about: &str, aside: Option<&str>, ad
             ui.set_width(width - 36.0);
             // Every room in a card is the design's own, with nothing added between.
             ui.spacing_mut().item_spacing.y = 0.0;
-            card_head(ui, title, about, aside);
+            head(ui);
             add(ui);
         });
     // 14 between cards, as the design has, whatever the page puts between what it holds.
     ui.add_space((14.0 - ui.spacing().item_spacing.y).max(0.0));
+}
+
+/// A card's head with a small key (24 high, the design's small button) at its right end, in the
+/// middle of the title's line; its line wraps in what the title and the key leave.
+fn keyed_head(ui: &mut egui::Ui, title: &str, about: &str, key: &str) -> bool {
+    let width = ui.available_width();
+    let title = lines(ui, title, semibold(15.0), TEXT, f32::INFINITY, TITLE_LINE);
+    let font = FontId::proportional(11.5);
+    let key_size = vec2(widest(ui, &[key], &font) + 18.0, 24.0);
+    let room = (width - title.size().x - key_size.x - 2.0 * HEAD_BETWEEN).max(60.0);
+    let about = words(ui, &about.to_uppercase(), fixed(CAPS), TEXT_FAINT, CAPS_SPACING, room);
+    let height = title.size().y.max(about.size().y + 2.0).max(key_size.y);
+    let (place, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    let title_height = title.size().y;
+    let about_at = pos2(place.min.x + title.size().x + HEAD_BETWEEN, place.min.y + 2.0);
+    ui.painter().galley(place.min, title, TEXT);
+    ui.painter().galley(about_at, about, TEXT_FAINT);
+    let at = Rect::from_min_size(
+        pos2(place.max.x - key_size.x, place.min.y + ((title_height - key_size.y) / 2.0).max(0.0)),
+        key_size,
+    );
+    let clicked = flat_button(ui, at, ui.scope_id().with(("card key", key)), key, font, Flat::Plain, true).clicked();
+    ui.add_space(8.0);
+    clicked
 }
 
 /// A card's head: its title in 15, then its line in small capitals, and its aside at the right
@@ -125,9 +175,32 @@ fn card_head(ui: &mut egui::Ui, title: &str, about: &str, aside: Option<&str>) {
 /// and a control `control` large at the right, both in the middle of the row's height. `draw`
 /// draws the control in the place given.
 pub fn row(ui: &mut egui::Ui, label: &str, note: &str, control: egui::Vec2, draw: impl FnOnce(&mut egui::Ui, Rect)) {
+    inked_row(ui, label, TEXT, note, control, draw);
+}
+
+/// A row as [`row`] that can't be used yet: its name faint, and its note saying why. The design
+/// dims such a row rather than hide it, so nothing jumps.
+pub fn row_greyed(
+    ui: &mut egui::Ui,
+    label: &str,
+    why: &str,
+    control: egui::Vec2,
+    draw: impl FnOnce(&mut egui::Ui, Rect),
+) {
+    inked_row(ui, label, TEXT_FAINT, why, control, draw);
+}
+
+fn inked_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    ink: Color32,
+    note: &str,
+    control: egui::Vec2,
+    draw: impl FnOnce(&mut egui::Ui, Rect),
+) {
     let width = ui.available_width();
     let room = (width - control.x - 16.0).max(80.0);
-    let label = lines(ui, label, semibold(13.0), TEXT, room, LINE_HEIGHT);
+    let label = lines(ui, label, semibold(13.0), ink, room, LINE_HEIGHT);
     let note = (!note.is_empty()).then(|| lines(ui, note, FontId::proportional(12.5), TEXT_FAINT, room, LINE_HEIGHT));
     let text = label.size().y + note.as_ref().map_or(0.0, |note| note.size().y);
     let inner = text.max(control.y);
@@ -135,7 +208,7 @@ pub fn row(ui: &mut egui::Ui, label: &str, note: &str, control: egui::Vec2, draw
     ui.painter().hline(place.x_range(), place.min.y + 0.5, Stroke::new(1.0, LINE));
     let top = place.min.y + 12.0 + (inner - text) / 2.0;
     let label_height = label.size().y;
-    ui.painter().galley(pos2(place.min.x, top), label, TEXT);
+    ui.painter().galley(pos2(place.min.x, top), label, ink);
     if let Some(note) = note {
         ui.painter().galley(pos2(place.min.x, top + label_height), note, TEXT_FAINT);
     }

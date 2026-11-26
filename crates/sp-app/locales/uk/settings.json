@@ -153,6 +153,7 @@
   "settings.state.connected": ["{n} підключено", "{n} підключено", "{n} підключено"],
   "settings.state.connected.short": ["{n} увімк.", "{n} увімк.", "{n} увімк."],
   "settings.state.people": ["{n} людина", "{n} людини", "{n} людей"],
+  "settings.state.people.short": ["{n} ос.", "{n} ос.", "{n} ос."],
   "settings.state.screens": "увімкнено {on} з {all}",
   "settings.state.screens.short": "{on}/{all} увімк.",
   "settings.title": "Налаштування",

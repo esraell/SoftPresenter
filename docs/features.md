@@ -2041,6 +2041,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   to the captions from a verse is at once, with no reload.
 
 ## Remote Control
+- **Settings › Phone remote** is four cards in the look of the rest of Settings, every hint a
+  line on the page: **Remote Control** (Turn on Remote Control, greyed with "Set a password
+  first" until there is one; while on, Open with the address in the fixed-width face and Copy,
+  the address by figures under it, on a line of its own where the window is too narrow; and,
+  folded under **Port and certificate**, the port with Use, the key fingerprint in two lines and
+  Make a New Certificate); **Password** (Set or Not set yet: once set, one row with Change
+  Password…, which opens the two fields with Cancel and Change Password; with none, the two
+  fields and Set Password; a saved password too short to be safe, in amber, and wrong ones tried
+  in the last hour, amber from three); **Connected now**; and **Devices remembered**.
 - **Run the show from another device** on the church's network: a computer, tablet or phone
   opens the address Settings › Phone remote shows (`https://` the computer's address and the
   port, 4316 unless changed; 1024 up) and signs in with a password of at least ten characters.
@@ -2101,7 +2110,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   and name are answered (not another name pointed at it), and
   only pages served from it may sign in or connect. The pane lists the pages connected (device,
   address, since) with Disconnect, and the devices remembered (from their browser: "Safari on an
-  iPad"; first and last seen, address) with Forget and Forget All; Forget, and a new password,
+  iPad"; first and last seen, address) with Forget and Forget All (at the card's heading, once
+  there are two or more); Forget, and a new password,
   close their pages at once, and a device not seen for 180 days is forgotten. A web page on a
   slide can never go on to plain http on this computer (only a test's stand-in opened there
   can). `sp remote` does the same from the command line.

@@ -90,6 +90,7 @@
   "settings.state.ai.run": "Ведёт экраны",
   "settings.state.ai.run.short": "Экраны",
   "settings.state.people": ["{n} человек", "{n} человека", "{n} человек"],
+  "settings.state.people.short": ["{n} чел.", "{n} чел.", "{n} чел."],
   "settings.on": "Вкл.",
   "settings.off": "Выкл.",
   "settings.copyright.title": "Строка авторских прав",

@@ -994,6 +994,8 @@ pub struct View {
     pub hashing: bool,
     pub password: String,
     pub password_again: String,
+    /// Change Password… was chosen: the two fields show, with Cancel, until it is set or cancelled.
+    pub changing: bool,
     pub devices: Vec<auth::Device>,
     pub pages: Vec<server::Page>,
     /// Wrong passwords in the last hour.

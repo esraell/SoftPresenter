@@ -101,6 +101,8 @@ impl Pane {
             "general" | "copyright" => Some(Pane::Slides),
             "key mappings" => Some(Pane::Keys),
             "remote control" | "remote" => Some(Pane::PhoneRemote),
+            // Phone remote with Port and certificate folded out (`remote::pane`).
+            "remote more" => Some(Pane::PhoneRemote),
             "mirror" | "phone" => Some(Pane::PhoneScreens),
             "mcp" | "ai" => Some(Pane::AiAssistants),
             "cli" => Some(Pane::CommandLine),
@@ -193,7 +195,11 @@ fn readout(pane: Pane, state: &HomeState, show: &Show) -> Option<Readout> {
         }
         Pane::PhoneRemote if state.remote.on => {
             let n = state.remote.pages.len() as u64;
-            Some(Readout::of(tn("settings.state.people", n, "{n} person", "{n} people", &[]), true))
+            Some(Readout {
+                words: tn("settings.state.people", n, "{n} person", "{n} people", &[]),
+                short: tn("settings.state.people.short", n, "{n} on", "{n} on", &[]),
+                lit: true,
+            })
         }
         Pane::PhoneRemote => Some(off()),
         _ => None,
@@ -345,18 +351,22 @@ fn list_row(ui: &mut egui::Ui, row: Rect, pane: Pane, state: &HomeState, show: &
     if let Some(Readout { words, short, lit }) = readout(pane, state, show) {
         let caps = if chosen { fixed_semibold(11.0) } else { fixed(11.0) };
         let room = right - name_at - name_wide - 8.0 - if lit { 15.0 } else { 0.0 };
-        let fits = spaced(ui, &words.to_uppercase(), caps.clone(), TEXT_FAINT, 0.44).size().x <= room;
-        let words = if fits { words } else { short };
-        let drawn = paint_spaced(
-            ui,
-            pos2(right, row.center().y),
-            Align2::RIGHT_CENTER,
-            &words.to_uppercase(),
-            caps,
-            TEXT_FAINT,
-            0.44,
-        );
-        right = drawn.min.x - 8.0;
+        let fits = |words: &str| spaced(ui, &words.to_uppercase(), caps.clone(), TEXT_FAINT, 0.44).size().x <= room;
+        // Where not even the short form fits beside the name, the name is whole and a lit row
+        // keeps only its light.
+        let words = if fits(&words) { Some(words) } else { (fits(&short) || !lit).then_some(short) };
+        if let Some(words) = words {
+            let drawn = paint_spaced(
+                ui,
+                pos2(right, row.center().y),
+                Align2::RIGHT_CENTER,
+                &words.to_uppercase(),
+                caps,
+                TEXT_FAINT,
+                0.44,
+            );
+            right = drawn.min.x - 8.0;
+        }
         if lit {
             paint_light(ui.painter(), pos2(right - 3.5, row.center().y), Some(READY));
             right -= 7.0 + 8.0;
