@@ -448,15 +448,32 @@ pub fn needs_missing_ffmpeg(path: &Path) -> bool {
     is_video(path) && !system && !sp_video::ffmpeg_found()
 }
 
-/// How to get FFmpeg on this system, for the end of a sentence about a video that needs it.
-pub fn ffmpeg_advice() -> &'static str {
-    if cfg!(target_os = "macos") {
-        t("media.ffmpeg.mac", "MP4 and MOV videos play without it.")
+/// How to get FFmpeg on this system, for the end of a sentence about a video that needs it;
+/// while the app is fetching its own (Windows, `ffmpeg_fetch`), that it is.
+pub fn ffmpeg_advice() -> String {
+    if crate::ffmpeg_fetch::under_way() {
+        tf(
+            "media.ffmpeg.fetching",
+            "SoftPresenter is getting it now ({size}).",
+            &[("size", &crate::ffmpeg_fetch::planned_size())],
+        )
+    } else if cfg!(target_os = "macos") {
+        t("media.ffmpeg.mac", "MP4 and MOV videos play without it.").to_owned()
     } else if cfg!(windows) {
-        t("media.ffmpeg.windows", "Put ffmpeg.exe in the same folder as the program.")
+        t("media.ffmpeg.windows", "Put ffmpeg.exe in the same folder as the program.").to_owned()
     } else {
-        t("media.ffmpeg.linux", "Install FFmpeg (for example: sudo apt install ffmpeg).")
+        t("media.ffmpeg.linux", "Install FFmpeg (for example: sudo apt install ffmpeg).").to_owned()
     }
+}
+
+/// The end of the sentence about a video the operator added while FFmpeg was missing, kept to be
+/// added once the app has fetched it.
+pub fn ffmpeg_advice_kept() -> String {
+    tf(
+        "media.ffmpeg.fetching_add",
+        "SoftPresenter is getting it now ({size}), and puts the video in the media bin once it is ready.",
+        &[("size", &crate::ffmpeg_fetch::planned_size())],
+    )
 }
 
 /// Reads and decodes a picture file for the screens (no larger than [`screen_side`]); for a

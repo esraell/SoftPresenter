@@ -305,7 +305,7 @@ pub fn address(base: &str, book: &Offered) -> String {
 }
 
 /// True for an address on this computer (a test server).
-fn is_local(address: &str) -> bool {
+pub(crate) fn is_local(address: &str) -> bool {
     ["http://127.0.0.1:", "http://127.0.0.1/", "http://localhost:", "http://localhost/"]
         .iter()
         .any(|start| address.to_ascii_lowercase().starts_with(start))

@@ -356,10 +356,12 @@ impl crate::App {
                     crate::applog::problem("announcements", &problem);
                     // A file just taken out of a followed folder: the layer goes on to what is
                     // left (see `followed`), with nothing to tell the operator.
-                    if !self.gone_from_followed_folder(&item.path)
-                        && let Some(running) = self.running.as_mut()
-                    {
-                        running.home_state.notices.trouble(problem);
+                    if !self.gone_from_followed_folder(&item.path) {
+                        // FFmpeg missing: fetched again where it can be, and said so.
+                        let problem = self.video_problem(&item.path, problem);
+                        if let Some(running) = self.running.as_mut() {
+                            running.home_state.notices.trouble(problem);
+                        }
                     }
                 }
             }

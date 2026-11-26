@@ -618,7 +618,24 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   9.0.2, with its licence and source in the app's Resources), so nothing needs installing; AV1
   plays on Macs whose video hardware decodes it (M3 and later; no Intel Mac). On Windows every video plays
   through FFmpeg, whose LGPL build (`ffmpeg.exe`, `ffprobe.exe`) sits beside the program in the
-  zip `scripts/windows-package.sh` makes; so it does on Linux, through the LGPL FFmpeg the `.deb`
+  zip `scripts/windows-package.sh` makes. Its home, though, is the user's own
+  `%LOCALAPPDATA%\SoftPresenter\ffmpeg`, so it never matters where `SoftPresenter.exe` is (a
+  tester ran it on its own from the Desktop, and no video played): at every start, on a thread
+  of its own, the app checks that folder holds its own FFmpeg 9.0.2 (the SHA-256 of
+  `ffmpeg.exe` and `ffprobe.exe`); where it doesn't, it copies the two programs there from
+  beside the program when they are the app's own (with FFmpeg's licence and the note of its
+  source from `Licences`), with no network; or else fetches the same build, the zip the
+  project's release `ffmpeg-windows-9.0.2` publishes, refused unless it has the size and
+  SHA-256 the app was built with, of which only its five files are unpacked. Once checked, that
+  folder is where FFmpeg is looked for first; then beside the program, then the search path.
+  Nothing is ever written beside the program. The log says "FFmpeg installed at … (copied from
+  the package | fetched)" and which FFmpeg is used. A video added or played while FFmpeg is
+  missing starts a fetch too; the notices say "Getting FFmpeg for videos (23 MB)…", then
+  "FFmpeg is ready: videos play again" (or why not), and a video added meanwhile goes in the
+  media bin once FFmpeg is ready, and the media on screen plays. One at a time; after a failed
+  fetch another is made only when a video is added or at the next start. A test copy never
+  copies or fetches (`SOFTPRESENTER_FFMPEG_FETCH_URL` points one at a server on its own
+  computer). Every video plays through FFmpeg on Linux too, through the LGPL FFmpeg the `.deb`
   package (`scripts/linux-deb.sh`) puts beside the program in `/usr/lib/softpresenter`, used in
   place of any FFmpeg the system has. FFmpeg decodes on the graphics chip where the codec
   allows: the Mac's video hardware, or Direct3D 11's video decoder on Windows; a video it can't

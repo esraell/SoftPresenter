@@ -375,6 +375,14 @@ The command line's socket, while the app runs, is `~/Library/Caches/SoftPresente
 `control/ctl.sock` in a folder `SOFTPRESENTER_DATA` names. On Windows it is
 `%LOCALAPPDATA%\SoftPresenter\control\ctl.sock`.
 
+On Windows, the app's own FFmpeg is kept in `%LOCALAPPDATA%\SoftPresenter\ffmpeg`
+(`ffmpeg.exe`, `ffprobe.exe`, `COPYING.LGPLv2.1`, `LICENSE.md`, `SOURCE.txt`; `ffmpeg_fetch.rs`),
+checked at each start by the programs' SHA-256s, and copied there from beside the program or
+fetched where it isn't the app's own; once checked, the lookup (`sp_video::ffmpeg`) tries it
+first, before the program's own folder. `ffmpeg.part` beside it holds a copy or a fetch under
+way, and is gone once it is over. A test copy with `SOFTPRESENTER_FFMPEG_FETCH_URL` uses
+`ffmpeg/` in its data folder instead.
+
 Private copies of large font files are made in `~/Library/Caches/SoftPresenter/font copies`
 (on Linux, `SoftPresenter/font copies` in the caches folder; with `SOFTPRESENTER_DATA`, `font
 copies` in that folder), a folder only the user may enter. Each copy loses its name as soon as it

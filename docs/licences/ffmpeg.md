@@ -58,9 +58,23 @@ What the LGPL asks, and how the app meets it:
 
 `scripts/windows-package.sh` builds the same FFmpeg 9.0.2 for 64-bit Windows with
 `scripts/build-ffmpeg.sh windows`, cross-compiling on a Mac with the mingw-w64 toolchain, from
-the same source file and checksum. `ffmpeg.exe` and `ffprobe.exe` sit beside `SoftPresenter.exe`,
-which looks there first, and the zip's `Licences` folder holds `COPYING.LGPLv2.1`,
-`FFmpeg-LICENSE.md` and `FFmpeg-SOURCE.txt` (the exact source, checksum and configuration).
+the same source file and checksum. `ffmpeg.exe` and `ffprobe.exe` sit beside `SoftPresenter.exe`
+(which runs its own copy in the user's folder first, below), and the zip's `Licences` folder
+holds `COPYING.LGPLv2.1`, `FFmpeg-LICENSE.md` and `FFmpeg-SOURCE.txt` (the exact source, checksum
+and configuration).
+
+On Windows the app keeps its own copy in the user's `%LOCALAPPDATA%\SoftPresenter\ffmpeg`, so
+it plays videos wherever `SoftPresenter.exe` is (`crates/sp-app/src/ffmpeg_fetch.rs`): at start
+it copies `ffmpeg.exe` and `ffprobe.exe` there from beside the program, with `COPYING.LGPLv2.1`,
+`FFmpeg-LICENSE.md` and `FFmpeg-SOURCE.txt` from `Licences` (as `COPYING.LGPLv2.1`, `LICENSE.md`
+and `SOURCE.txt`), when the programs have the SHA-256s it was built with. Where they aren't beside it, it fetches the same build, published as a zip with the
+project's release `ffmpeg-windows-9.0.2` (`ffmpeg-9.0.2-windows-x86_64.zip`: `ffmpeg/ffmpeg.exe`,
+`ffmpeg/ffprobe.exe`, `ffmpeg/COPYING.LGPLv2.1`, `ffmpeg/LICENSE.md`, `ffmpeg/SOURCE.txt`),
+checked against its size and SHA-256 before it is unpacked. Either way the licence and the note
+of the source stay with the programs. A new FFmpeg build means a new release, and new
+constants in that file (the zip's address, size and SHA-256, and the two programs' SHA-256s,
+which must be those of the programs the package carries, or every new package's first start
+fetches the zip instead of copying).
 
 - **LGPL 2.1 or later,** as on the Mac: no `--enable-gpl`, `--enable-version3` or
   `--enable-nonfree`, `--disable-autodetect`, and the script refuses a build that says otherwise.

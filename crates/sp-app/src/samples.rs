@@ -101,7 +101,7 @@ fn add_unless(
             tf(
                 "media.samples.need_ffmpeg",
                 "The sample pictures are in the media bin already. {videos} needs FFmpeg, which isn't on this computer. {advice}",
-                &[("videos", &video.join(", ")), ("advice", crate::media::ffmpeg_advice())],
+                &[("videos", &video.join(", ")), ("advice", &crate::media::ffmpeg_advice())],
             )
         });
     }

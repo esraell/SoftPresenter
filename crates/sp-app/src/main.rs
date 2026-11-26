@@ -26,6 +26,7 @@ mod convert;
 mod deck;
 mod displays;
 mod editor;
+mod ffmpeg_fetch;
 mod file_drop;
 mod find;
 mod followed;
@@ -724,6 +725,8 @@ enum AppEvent {
     Saved,
     /// Check for Updates has its answer (see `updates`).
     UpdateChecked,
+    /// A fetch of the videos' FFmpeg began or ended (see `ffmpeg_fetch`).
+    FfmpegFetch,
     /// The system says the displays changed (macOS: a display plugged in or out, the main one
     /// changed, a size or the arrangement changed). Only macOS sends it.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -2045,6 +2048,9 @@ struct App {
     bible_jobs: Vec<(u64, String, String)>,
     /// `sp update check`s waiting for the check that is running: their job numbers.
     update_jobs: Vec<u64>,
+    /// What the window has said of fetching the videos' FFmpeg, and the videos added while it
+    /// was missing (see `ffmpeg_fetch`).
+    ffmpeg_fetch: ffmpeg_fetch::Told,
     /// The socket `softpresenter ctl` reaches the app through, while it listens.
     _control: std::sync::Arc<std::sync::Mutex<Option<control::Listening>>>,
     /// `status --wait`s held until something changes or their time is up.
@@ -3049,10 +3055,12 @@ impl App {
                 applog::event("video", &format!("could not open {}: {problem}", item.path.display()));
                 // A file just taken out of a followed folder: the layer goes on to what is left
                 // (see `followed`), with nothing to tell the operator.
-                if !self.gone_from_followed_folder(&item.path)
-                    && let Some(running) = self.running.as_mut()
-                {
-                    running.home_state.notices.trouble(problem);
+                if !self.gone_from_followed_folder(&item.path) {
+                    // FFmpeg missing: fetched again where it can be, and said so.
+                    let problem = self.video_problem(&item.path, problem);
+                    if let Some(running) = self.running.as_mut() {
+                        running.home_state.notices.trouble(problem);
+                    }
                 }
             }
         }
@@ -3124,6 +3132,7 @@ impl App {
                     self.slide_videos.push((file, player));
                 }
                 Err(problem) => {
+                    let problem = self.video_problem(&path, problem);
                     if let Some(running) = self.running.as_mut() {
                         running.home_state.notices.trouble(problem);
                     }
@@ -4969,14 +4978,18 @@ impl App {
             self.save_media_list();
             return Ok(true);
         }
+        // On Windows the app fetches FFmpeg (`ffmpeg_fetch`), and the video is added once it
+        // is ready.
+        let kept = no_ffmpeg && self.ffmpeg_for_added(path);
         // Only the small copy is kept; the full-size picture is read when it goes on screen.
         let result = if already {
             Ok(None)
         } else if no_ffmpeg {
+            let advice = if kept { media::ffmpeg_advice_kept() } else { media::ffmpeg_advice() };
             Err(crate::i18n::tf(
                 "notices.media.needs_ffmpeg",
                 "This video needs FFmpeg to play, and FFmpeg isn't on this computer. {advice}",
-                &[("advice", media::ffmpeg_advice())],
+                &[("advice", &advice)],
             ))
         } else {
             media::load_small(path).map(Some)
@@ -11272,6 +11285,11 @@ impl ApplicationHandler<AppEvent> for App {
                 });
                 running.home_window.request_redraw();
                 self.running = Some(running);
+                // On Windows, FFmpeg's own folder in the user's AppData is checked to hold the
+                // app's FFmpeg, and copied there from beside the program or fetched where it
+                // doesn't, on a thread of its own, wherever the program runs from (never by a
+                // test copy).
+                self.install_ffmpeg_at_start();
                 if start_off {
                     self.apply(vec![Command::SetOutputEnabled(false)]);
                 }
@@ -11369,6 +11387,10 @@ impl ApplicationHandler<AppEvent> for App {
             }
             AppEvent::UpdateChecked => {
                 self.finish_update_check();
+                return;
+            }
+            AppEvent::FfmpegFetch => {
+                self.tick_ffmpeg_fetch();
                 return;
             }
             AppEvent::MediaRead => {
@@ -12259,6 +12281,9 @@ fn main() -> ExitCode {
     applog::start();
     start_steps::mark("log opened");
     reports::start(options.capture_home.is_some());
+    // Whether this copy keeps the videos' FFmpeg in a folder of its own (Windows), worked out
+    // before anything looks for FFmpeg.
+    ffmpeg_fetch::prepare(options.capture_home.is_some() || std::env::var_os("SOFTPRESENTER_QUIET").is_some());
     for done in &moved {
         applog::event("renamed", done);
     }
@@ -12512,6 +12537,7 @@ fn main() -> ExitCode {
         drop_pointer: None,
         bible_jobs: Vec::new(),
         update_jobs: Vec::new(),
+        ffmpeg_fetch: ffmpeg_fetch::Told::default(),
         waiting: Vec::new(),
         mirror: mirror::Mirror::open(quiet_run),
         remote,

@@ -84,6 +84,31 @@ pub fn ffmpeg_places() -> Vec<std::path::PathBuf> {
     ffmpeg::places("ffmpeg")
 }
 
+/// Tells the lookup where the app keeps its own FFmpeg (copied from beside the program, or
+/// fetched), in place of Windows' usual `%LOCALAPPDATA%\SoftPresenter\ffmpeg` (a test copy's
+/// own data folder), before anything looks for FFmpeg. The first one set stays.
+pub fn set_fetched_ffmpeg_folder(folder: PathBuf) {
+    ffmpeg::set_fetched_folder(folder);
+}
+
+/// Tells the lookup the app has checked that its folder holds the app's own FFmpeg, which is
+/// then looked for there first, before beside the program.
+pub fn set_fetched_ffmpeg_checked(checked: bool) {
+    ffmpeg::set_fetched_checked(checked);
+}
+
+/// The places FFmpeg would be looked for, in order, if the app kept its own in `fetched`,
+/// checked or not (for the tests of that folder).
+pub fn ffmpeg_places_with_fetched(fetched: &Path, checked: bool) -> Vec<PathBuf> {
+    ffmpeg::places_with("ffmpeg", Some(fetched), checked)
+}
+
+/// Where FFmpeg would be found if the app kept its own, checked, in `fetched`: the lookup
+/// [`ffmpeg_program`] makes, with that folder in place of the usual one (for the tests).
+pub fn ffmpeg_program_with_fetched(fetched: &Path) -> Option<PathBuf> {
+    ffmpeg_places_with_fetched(fetched, true).into_iter().find(|place| place.is_file())
+}
+
 /// What FFmpeg's probe says a video is: its width, its height and its pictures a second. Runs a
 /// program and waits for it: never on a thread that draws.
 pub fn video_summary(path: &Path) -> Option<(u32, u32, f64)> {

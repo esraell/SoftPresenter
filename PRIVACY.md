@@ -94,7 +94,11 @@ never holds up the screens or the window.
 Other features use the network when you switch them on or ask for them, such as downloading a
 Bible or a free songbook, NDI, Remote Control and phone screens on your own network, VoxLive
 captions and Canva Sync. Each talks to the service it names, and none of them sends the reports
-above. [docs/features.md](docs/features.md) says what each one does.
+above. One thing happens without asking: on Windows, when the app's own copy of FFmpeg (which
+plays videos) isn't in your user folder and can't be copied there from beside the program, the
+app downloads the same FFmpeg from SoftPresenter's own release on GitHub (23 MB, checked before
+it is used); it sends nothing but the request for that file. [docs/features.md](docs/features.md)
+says what each one does.
 
 ## Changes to this page
 

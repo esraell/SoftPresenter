@@ -52,22 +52,71 @@ pub fn tool(name: &str) -> Option<PathBuf> {
     places(name).into_iter().find(|place| place.is_file())
 }
 
+/// The folder the app keeps its own FFmpeg in, when it was told one (a test copy's own, see
+/// [`fetched_folder`]).
+static FETCHED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The app has checked that the folder holds its own FFmpeg (see [`set_fetched_checked`]).
+static CHECKED: AtomicBool = AtomicBool::new(false);
+
+/// Tells the lookup where the app keeps its own FFmpeg, in place of the usual folder: a test
+/// copy keeps it in its own data folder. The first one set stays.
+pub fn set_fetched_folder(folder: PathBuf) {
+    let _ = FETCHED.set(folder);
+}
+
+/// Tells the lookup that the app has checked the folder holds its own FFmpeg (its SHA-256s), so
+/// it is looked in first, before the program's own folder: the app then runs that copy wherever
+/// the program was started from.
+pub fn set_fetched_checked(checked: bool) {
+    CHECKED.store(checked, Ordering::Relaxed);
+}
+
+/// The folder the app keeps its own FFmpeg in on Windows, copied there from beside the program
+/// or fetched (the app's `ffmpeg_fetch`): `%LOCALAPPDATA%\SoftPresenter\ffmpeg`, unless the app
+/// named another; elsewhere only one the app named.
+pub fn fetched_folder() -> Option<PathBuf> {
+    if let Some(folder) = FETCHED.get() {
+        return Some(folder.clone());
+    }
+    if !cfg!(windows) {
+        return None;
+    }
+    std::env::var_os("LOCALAPPDATA")
+        .filter(|local| !local.is_empty())
+        .map(|local| PathBuf::from(local).join("SoftPresenter").join("ffmpeg"))
+}
+
 /// The places an FFmpeg program is looked for, in order. First beside the app's own program (and
-/// in a Mac app's Resources), where the app's own FFmpeg is. Then, on Windows, the user's own
-/// `%LOCALAPPDATA%\SoftPresenter\ffmpeg` and the folders on the search path: a tester's copy was
-/// started from a folder without the app's FFmpeg in it, and a video it played said FFmpeg
-/// wasn't on the computer. Elsewhere, where Homebrew and the system put it.
+/// in a Mac app's Resources), where the app's own FFmpeg is; but once the app has checked that
+/// the folder it keeps its own FFmpeg in ([`fetched_folder`], on Windows
+/// `%LOCALAPPDATA%\SoftPresenter\ffmpeg`) holds it, that folder comes first. Then, on Windows,
+/// the folders on the search path: a tester's copy was started on its own from the Desktop,
+/// without the app's FFmpeg beside it, and a video it played said FFmpeg wasn't on the computer.
+/// Elsewhere, where Homebrew and the system put it.
 pub fn places(name: &str) -> Vec<PathBuf> {
+    places_with(name, fetched_folder().as_deref(), CHECKED.load(Ordering::Relaxed))
+}
+
+/// [`places`], with `fetched` as the folder the app keeps its own FFmpeg in (none: no such
+/// folder), checked to hold it or not. What is kept there is always the Windows build, so the
+/// programs there are looked for by their Windows names on any system (a test fetches on any
+/// system).
+pub fn places_with(name: &str, fetched: Option<&Path>, checked: bool) -> Vec<PathBuf> {
     let file = if cfg!(windows) { format!("{name}.exe") } else { name.to_owned() };
+    let kept = fetched.map(|folder| folder.join(format!("{name}.exe")));
     let mut places: Vec<PathBuf> = Vec::new();
+    if checked {
+        places.extend(kept.clone());
+    }
     if let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) {
         places.push(dir.join(&file));
         places.push(dir.join("../Resources").join(&file));
     }
+    if !checked {
+        places.extend(kept);
+    }
     if cfg!(windows) {
-        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            places.push(PathBuf::from(local).join("SoftPresenter").join("ffmpeg").join(&file));
-        }
         if let Some(path) = std::env::var_os("PATH") {
             places.extend(std::env::split_paths(&path).filter(|dir| dir.is_absolute()).map(|dir| dir.join(&file)));
         }
