@@ -262,9 +262,11 @@ impl<P: Purpose> Dialogs<P> {
     }
 
     /// Takes in an answer: what the window was for and what came of it, or `None` for an
-    /// answer to no window open (which can't happen, but is let go). The next window waiting
-    /// is shown then.
-    pub fn answered(&mut self, answered: Answered, parent: Option<&dyn Parent>, drawn: u32) -> Option<Closed<P>> {
+    /// answer to no window open (which can't happen, but is let go). A window waiting its turn
+    /// isn't shown here: what the answer is for is done first, and may ask for the next window
+    /// of its own (Export's videos question, then where to save), which then goes first. The
+    /// caller shows the next one waiting after ([`Dialogs::show_waiting`]).
+    pub fn answered(&mut self, answered: Answered, drawn: u32) -> Option<Closed<P>> {
         if self.open.as_ref().is_none_or(|open| open.id != answered.id) {
             return None;
         }
@@ -280,10 +282,16 @@ impl<P: Purpose> Dialogs<P> {
                 drawn.wrapping_sub(open.drawn),
             ),
         );
-        if let Some((purpose, window)) = self.waiting.pop_front() {
+        Some(Closed { purpose: open.purpose, answer: answered.answer })
+    }
+
+    /// Shows the next window waiting its turn, if none is open.
+    pub fn show_waiting(&mut self, parent: Option<&dyn Parent>, drawn: u32) {
+        if self.open.is_none()
+            && let Some((purpose, window)) = self.waiting.pop_front()
+        {
             self.show(purpose, window, parent, drawn);
         }
-        Some(Closed { purpose: open.purpose, answer: answered.answer })
     }
 }
 
@@ -306,45 +314,22 @@ impl Shows for System {
             done(Answer::cancelled(&window));
             return;
         };
+        let answering = Answering::new(done, Answer::cancelled(&window));
         let waiting = mac_sheet(window, parent);
-        let started = std::thread::Builder::new().name("file window".to_owned()).spawn(move || {
-            done(wait_for(waiting));
-        });
-        if let Err(problem) = started {
-            applog::event("dialog", &format!("couldn't wait for the window: {problem}"));
-        }
+        on_its_own_thread(answering, move || wait_for(waiting));
     }
 
     #[cfg(not(target_os = "macos"))]
     fn show(&mut self, window: Window, parent: Option<&dyn Parent>, done: Box<dyn FnOnce(Answer) + Send>) {
+        let answering = Answering::new(done, Answer::cancelled(&window));
         #[cfg(windows)]
-        let thread = self.thread.clone();
-        let cancelled = Answer::cancelled(&window);
+        let answering = answering.on_windows_thread(self.thread.clone());
         // Testing aid: SOFTPRESENTER_DIALOG_OWNED=1 gives a file window the app's window as its
         // owner on Windows, as the system's own way has it, to compare: Windows then switches
         // the app's window off while the file window is open (no clicks, no drops on it).
         let owned = cfg!(windows) && std::env::var_os("SOFTPRESENTER_DIALOG_OWNED").is_some();
         let built = Built::new(window, parent.filter(|_| owned));
-        // `done` is kept in a slot the thread takes it from, so it is called once whether the
-        // thread starts or not.
-        let done = Arc::new(std::sync::Mutex::new(Some(done)));
-        let done_there = done.clone();
-        let started = std::thread::Builder::new().name("file window".to_owned()).spawn(move || {
-            #[cfg(windows)]
-            thread.store(sp_winapi::current_thread_id(), std::sync::atomic::Ordering::Relaxed);
-            let answer = built.show();
-            #[cfg(windows)]
-            thread.store(0, std::sync::atomic::Ordering::Relaxed);
-            if let Some(done) = done_there.lock().ok().and_then(|mut done| done.take()) {
-                done(answer);
-            }
-        });
-        if let Err(problem) = started {
-            applog::event("dialog", &format!("couldn't start the window's thread: {problem}"));
-            if let Some(done) = done.lock().ok().and_then(|mut done| done.take()) {
-                done(cancelled);
-            }
-        }
+        on_its_own_thread(answering, move || built.show());
     }
 
     fn bring_forward(&mut self) {
@@ -355,6 +340,83 @@ impl Shows for System {
                 applog::event("dialog", "the open window couldn't be brought forward");
             }
         }
+    }
+}
+
+/// Hands a window's answer back, once: the answer the window gave, or, when the thread showing
+/// it ends without one (the system's window code panicked, or the thread couldn't start), the
+/// answer of a window cancelled. Otherwise the app would wait for that window for ever, and
+/// refuse every other until it was restarted.
+struct Answering {
+    done: Option<Box<dyn FnOnce(Answer) + Send>>,
+    /// What to answer for a window that gave none.
+    cancelled: Option<Answer>,
+    /// Windows' number for the thread showing the window, kept while it shows one (to bring it
+    /// forward).
+    #[cfg(windows)]
+    thread: Option<Arc<std::sync::atomic::AtomicU32>>,
+}
+
+impl Answering {
+    fn new(done: Box<dyn FnOnce(Answer) + Send>, cancelled: Answer) -> Answering {
+        Answering {
+            done: Some(done),
+            cancelled: Some(cancelled),
+            #[cfg(windows)]
+            thread: None,
+        }
+    }
+
+    #[cfg(windows)]
+    fn on_windows_thread(mut self, thread: Arc<std::sync::atomic::AtomicU32>) -> Answering {
+        self.thread = Some(thread);
+        self
+    }
+
+    /// Called on the thread that shows the window, as it begins.
+    fn begun(&self) {
+        #[cfg(windows)]
+        if let Some(thread) = &self.thread {
+            thread.store(sp_winapi::current_thread_id(), std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    fn give(mut self, answer: Answer) {
+        self.answer(answer);
+    }
+
+    fn answer(&mut self, answer: Answer) {
+        #[cfg(windows)]
+        if let Some(thread) = &self.thread {
+            thread.store(0, std::sync::atomic::Ordering::Relaxed);
+        }
+        if let Some(done) = self.done.take() {
+            done(answer);
+        }
+    }
+}
+
+impl Drop for Answering {
+    fn drop(&mut self) {
+        if self.done.is_some() {
+            applog::event("dialog", "the window's thread ended without an answer: taken as cancelled");
+            let cancelled = self.cancelled.take().unwrap_or(Answer::Button(None));
+            self.answer(cancelled);
+        }
+    }
+}
+
+/// Shows a window on a thread of its own (`show` shows it and waits for it), and hands back its
+/// answer. If the thread panics, or can't start (the closure, and `answering` with it, is then
+/// dropped here), `answering` answers as for a window cancelled.
+fn on_its_own_thread(answering: Answering, show: impl FnOnce() -> Answer + Send + 'static) {
+    let started = std::thread::Builder::new().name("file window".to_owned()).spawn(move || {
+        answering.begun();
+        let answer = show();
+        answering.give(answer);
+    });
+    if let Err(problem) = started {
+        applog::event("dialog", &format!("couldn't start the window's thread: {problem}"));
     }
 }
 
@@ -617,8 +679,7 @@ impl crate::App {
     /// Carries out what a window was answered with.
     pub(crate) fn dialog_answered(&mut self, answered: Answered) {
         let Some(running) = self.running.as_ref() else { return };
-        let parent: &dyn Parent = &*running.home_window;
-        let Some(Closed { purpose, answer }) = self.dialogs.answered(answered, Some(parent), running.frames) else {
+        let Some(Closed { purpose, answer }) = self.dialogs.answered(answered, running.frames) else {
             return;
         };
         match purpose {
@@ -694,7 +755,11 @@ impl crate::App {
                 _ => {}
             },
         }
+        // Then a question that waited its turn, unless what was done asked for a window of its
+        // own (that one goes first; the question comes once it closes).
         if let Some(running) = self.running.as_ref() {
+            let parent: &dyn Parent = &*running.home_window;
+            self.dialogs.show_waiting(Some(parent), running.frames);
             running.home_window.request_redraw();
         }
     }
@@ -863,7 +928,7 @@ mod tests {
         let chosen = vec![PathBuf::from("drift.mp4"), PathBuf::from("hills.jpg")];
         stand.answer(0, Answer::Paths(chosen.clone()));
         let answered = answers.recv_timeout(Duration::from_secs(5)).unwrap();
-        let closed = dialogs.answered(answered, None, 25).expect("the window open's answer");
+        let closed = dialogs.answered(answered, 25).expect("the window open's answer");
         assert_eq!(closed.purpose, "add media");
         assert_eq!(closed.answer.paths(), chosen);
         assert!(!dialogs.is_open());
@@ -880,10 +945,44 @@ mod tests {
         assert_eq!(*stand.forward.lock().unwrap(), 2);
         // Once it is closed, another may open.
         stand.answer(0, Answer::Paths(Vec::new()));
-        let closed = dialogs.answered(answers.recv_timeout(Duration::from_secs(5)).unwrap(), None, 9).unwrap();
+        let closed = dialogs.answered(answers.recv_timeout(Duration::from_secs(5)).unwrap(), 9).unwrap();
         assert_eq!(closed.answer, Answer::Paths(Vec::new()));
         assert_eq!(dialogs.ask("add audio", audio, None, 9), Asked::Shown);
         assert_eq!(stand.titles(), ["Add Audio"]);
+    }
+
+    /// A window whose answer asks for the next one (Export's videos question, then where to
+    /// save) gets it, even when a question from the background is waiting: that one comes after.
+    #[test]
+    fn a_follow_up_window_goes_before_a_waiting_question() {
+        let (mut dialogs, stand, answers) = dialogs();
+        let videos = Window::Question(Question {
+            title: "Export Songs".to_owned(),
+            words: "Put the videos in the song pack?".to_owned(),
+            buttons: ["Include Videos".to_owned(), "Leave Them Out".to_owned(), "Cancel".to_owned()],
+        });
+        dialogs.ask("export videos", videos, None, 0);
+        let pack = Window::Question(Question {
+            title: "Import Song Pack".to_owned(),
+            words: "2 songs in the pack are already here.".to_owned(),
+            buttons: ["Replace".to_owned(), "Keep Both".to_owned(), "Skip".to_owned()],
+        });
+        assert_eq!(dialogs.ask_in_turn("pack", pack, None, 1), Asked::Waiting);
+        stand.answer(0, Answer::Button(Some(0)));
+        let closed = dialogs.answered(answers.recv_timeout(Duration::from_secs(5)).unwrap(), 2).unwrap();
+        assert_eq!(closed.purpose, "export videos");
+        // What the answer is for asks where to save: shown now, not refused.
+        let save = Window::Files(Files::new(Choose::Save, "Export Songs"));
+        assert_eq!(dialogs.ask("export to", save, None, 2), Asked::Shown, "the save window was refused");
+        assert_eq!(stand.titles(), ["Export Songs"]);
+        // The question still waits while the save window is open, and comes once it closes.
+        dialogs.show_waiting(None, 3);
+        assert_eq!(stand.titles(), ["Export Songs"]);
+        stand.answer(0, Answer::Paths(vec![PathBuf::from("Sunday.sppack")]));
+        let closed = dialogs.answered(answers.recv_timeout(Duration::from_secs(5)).unwrap(), 4).unwrap();
+        assert_eq!(closed.purpose, "export to");
+        dialogs.show_waiting(None, 4);
+        assert_eq!(stand.titles(), ["Import Song Pack"]);
     }
 
     #[test]
@@ -898,20 +997,39 @@ mod tests {
         assert_eq!(dialogs.ask_in_turn("pack", question, None, 1), Asked::Waiting);
         assert_eq!(stand.titles(), ["Add Pictures and Videos"]);
         stand.answer(0, Answer::Paths(vec![PathBuf::from("hills.jpg")]));
-        let closed = dialogs.answered(answers.recv_timeout(Duration::from_secs(5)).unwrap(), None, 2).unwrap();
+        let closed = dialogs.answered(answers.recv_timeout(Duration::from_secs(5)).unwrap(), 2).unwrap();
         assert_eq!(closed.purpose, "add media");
-        // The question is shown as the file window closes, and answered in its turn.
+        // The question is shown once what the file window was for is done, and answered in its
+        // turn.
+        assert!(stand.titles().is_empty());
+        dialogs.show_waiting(None, 2);
         assert_eq!(stand.titles(), ["Import Song Pack"]);
         stand.answer(0, Answer::Button(Some(1)));
-        let closed = dialogs.answered(answers.recv_timeout(Duration::from_secs(5)).unwrap(), None, 3).unwrap();
+        let closed = dialogs.answered(answers.recv_timeout(Duration::from_secs(5)).unwrap(), 3).unwrap();
         assert_eq!((closed.purpose, closed.answer.button()), ("pack", Some(1)));
         assert!(!dialogs.is_open());
+    }
+
+    /// The system's window code can panic on its thread (rfd's Windows code unwraps a file name
+    /// that isn't whole UTF-16): the app is still answered, as for a window cancelled, so the
+    /// next window can open.
+    #[test]
+    fn a_window_whose_thread_panics_still_answers() {
+        let (tx, rx) = mpsc::channel();
+        let answering = Answering::new(
+            Box::new(move |answer| {
+                let _ = tx.send(answer);
+            }),
+            Answer::Paths(Vec::new()),
+        );
+        on_its_own_thread(answering, || panic!("a file name that isn't whole UTF-16"));
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(Answer::Paths(Vec::new())));
     }
 
     #[test]
     fn an_answer_for_no_window_open_is_let_go() {
         let (mut dialogs, _stand, _answers) = dialogs();
-        assert!(dialogs.answered(Answered { id: 7, answer: Answer::Button(Some(0)) }, None, 0).is_none());
+        assert!(dialogs.answered(Answered { id: 7, answer: Answer::Button(Some(0)) }, 0).is_none());
     }
 
     #[test]
