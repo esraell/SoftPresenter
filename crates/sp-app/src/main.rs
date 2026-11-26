@@ -2090,6 +2090,9 @@ struct App {
     /// When the bin's small copies started being read at the start, and how many there are,
     /// until they all have been (for the log).
     bin_started: Option<(Instant, usize)>,
+    /// Videos added to the bin by hand this run whose picture is still being read by a reader
+    /// (see `add_media_file`): one that can't be read says so as it leaves the bin.
+    added_by_hand: std::collections::HashSet<Uuid>,
     /// Songs changed in the Edit view and not yet written to their files, and when the last
     /// change was made.
     unsaved: Vec<usize>,
@@ -4938,6 +4941,34 @@ impl App {
         // A video that can't play here says so at once, in words for this system. The reply
         // carries no file name (the caller has it); the notice below names it.
         let no_ffmpeg = !already && media::needs_missing_ffmpeg(path);
+        // A video's picture is read by the bin's readers, never here: its still comes from FFmpeg
+        // (on Windows a program of its own, which the computer's virus checker may look over
+        // first), which can take seconds, and the window must not stand still meanwhile (a tester
+        // on Windows saw it freeze when a .mov was dropped on the bin). The tile shows its name
+        // until its picture comes; one that can't be read leaves the bin with a notice.
+        if !already && !no_ffmpeg && media::is_video(path) {
+            let name = path.file_name().map_or_else(|| "Video".to_owned(), |n| n.to_string_lossy().into_owned());
+            let item = MediaItem::new(name, path.to_owned());
+            let id = item.id;
+            self.bin_pictures.read(id, path);
+            self.bin_pictures.read_length(id, path);
+            self.show.add_media(item);
+            self.added_by_hand.insert(id);
+            applog::event("media", &format!("added {} (its picture is read on a reader)", path.display()));
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.drop_hover = false;
+                let state = &mut running.home_state;
+                if let Some(playlist) =
+                    state.media_playlist_shown.and_then(|id| state.media_playlists.iter_mut().find(|p| p.id == id))
+                    && !playlist.has(path)
+                {
+                    playlist.toggle(path);
+                }
+                running.home_window.request_redraw();
+            }
+            self.save_media_list();
+            return Ok(true);
+        }
         // Only the small copy is kept; the full-size picture is read when it goes on screen.
         let result = if already {
             Ok(None)
@@ -5036,6 +5067,7 @@ impl App {
                     }
                 }
                 Arrived::Small(id) => {
+                    self.added_by_hand.remove(&id);
                     // The screens take a new small copy only while it stands in for the full one.
                     if live == Some(id) {
                         refresh |= !self.bin_pictures.screens_have_full();
@@ -5047,6 +5079,14 @@ impl App {
                 Arrived::Length(id, length) => self.note_media_length(id, length),
                 Arrived::Refused(id, problem) => {
                     applog::event("media", &problem);
+                    // A video added by hand this run whose picture can't be read says so as it
+                    // leaves the bin (one in the bin from before leaves quietly, as it did).
+                    if self.added_by_hand.remove(&id)
+                        && self.bin_pictures.small(id).is_none()
+                        && let Some(running) = self.running.as_mut()
+                    {
+                        running.home_state.notices.trouble(problem.clone());
+                    }
                     // An item whose picture was never read (its file is gone, or isn't a picture)
                     // leaves the bin, as such a file was never let in; one read before keeps the
                     // copy it has.
@@ -12485,6 +12525,7 @@ fn main() -> ExitCode {
         decks_resumed: false,
         bin_pictures,
         bin_started: None,
+        added_by_hand: std::collections::HashSet::new(),
         unsaved: Vec::new(),
         history: ShowHistory::default(),
         edit_song: None,

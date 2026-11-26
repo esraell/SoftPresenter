@@ -5,7 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-Nothing yet.
+- Dropping a video on the media bin no longer holds the window still while its picture is read (on Windows it could freeze for seconds): the video's tile comes at once and its picture a moment later. One that can't be read leaves the bin with a notice saying why.
 
 ## 0.9.0-dev.22 — 25 November 2026 (development build, Windows only)
 
