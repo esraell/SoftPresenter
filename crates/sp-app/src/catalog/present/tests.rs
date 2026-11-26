@@ -132,7 +132,12 @@ fn the_fingerprint_ignores_ids_and_the_mark_and_sees_every_edit() {
     edit(&|p| p.loops = true);
     edit(&|p| {
         let id = p.groups[1].id;
-        p.arrangements.push(Arrangement { id: Uuid::new_v4(), name: "Short".to_owned(), groups: vec![id] });
+        p.arrangements.push(Arrangement {
+            id: Uuid::new_v4(),
+            name: "Short".to_owned(),
+            groups: vec![id],
+            auto: false,
+        });
     });
     edit(&|p| p.groups[0].slides[0].label = Some("Opening".to_owned()));
     edit(&|p| p.groups[0].slides[0].set_words("Другие слова", ""));
@@ -143,7 +148,8 @@ fn an_arrangement_is_fingerprinted_by_its_groups_places_not_their_ids() {
     let make = || {
         let mut p = present("ru", "k", &song(), None, 0).song;
         let order = vec![p.groups[1].id, p.groups[0].id];
-        let arrangement = Arrangement { id: Uuid::new_v4(), name: "Chorus first".to_owned(), groups: order };
+        let arrangement =
+            Arrangement { id: Uuid::new_v4(), name: "Chorus first".to_owned(), groups: order, auto: false };
         p.arrangement = Some(arrangement.id);
         p.arrangements.push(arrangement);
         p

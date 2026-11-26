@@ -6,6 +6,9 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 ## Unreleased
 
 - Dropping a video on the media bin no longer holds the window still while its picture is read (on Windows it could freeze for seconds): the video's tile comes at once and its picture a moment later. One that can't be read leaves the bin with a notice saying why.
+- A song whose chorus is written once is sung with the chorus after every verse, as SoftProjector sings it. A song made from pasted words, imported from a text file or a SoftProjector songbook, or whose words are changed in Edit Words, comes with the arrangement "Chorus after each verse", already chosen, so clicking its first slide and pressing Next goes Verse 1, Chorus, Verse 2, Chorus… A later chorus ("[Chorus 1.2]") is sung from where it is written on; inserts, intros and endings are shown where they are. The arrangement keeps up as the song's parts change until you change it yourself. For songs you already have, choose Chorus After Each Verse in the song's Arrangement menu.
+- Words pasted or imported the way SoftProjector writes them (Куплет 1, Припев, Приспів 1.2, Вставка, Слайд, Окончание, "&Куплет" for more of a verse…) now come in with every part named and coloured, as a SoftProjector songbook does; before, some of them ("Вставка", "Слайд", "Припев 1.2", "&Куплет") were taken for words of the part before.
+- A SoftProjector song with a second chorus after a verse played the first chorus and then the second one after that verse; the second now takes the first one's place there and from then on, as SoftProjector sings it.
 
 ## 0.9.0-dev.22 — 25 November 2026 (development build, Windows only)
 

@@ -859,6 +859,12 @@ pub struct Arrangement {
     pub name: String,
     /// The groups, by their ids, in the order they are played.
     pub groups: Vec<Uuid>,
+    /// Made by SoftPresenter to sing the chorus after each verse, and changed by nobody since:
+    /// it follows the song's groups when they change (see `chorus_after.rs`). Changing it by
+    /// hand makes it the operator's, never touched again. Saved only when set, so older builds
+    /// read the file as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto: bool,
 }
 
 /// A piece of an arrangement: a group sung once, or several times running (shown as one pill
@@ -1064,7 +1070,12 @@ impl Presentation {
     pub fn new_arrangement(&self, named: impl Fn(usize) -> String) -> Arrangement {
         let taken = |name: &str| self.arrangements.iter().any(|arrangement| arrangement.name == name);
         let name = (1..).map(named).find(|name| !taken(name)).unwrap_or_default();
-        Arrangement { id: Uuid::new_v4(), name, groups: self.groups.iter().map(|group| group.id).collect() }
+        Arrangement {
+            id: Uuid::new_v4(),
+            name,
+            groups: self.groups.iter().map(|group| group.id).collect(),
+            auto: false,
+        }
     }
 
     /// The slide at a flat index across all groups, in order, with its group.
@@ -1099,7 +1110,9 @@ impl Presentation {
     /// The song rebuilt from its words as text (the song text format: `[Group]` lines, a blank
     /// line between slides, `--` before a translation), as the Reflow editor makes it. A slide
     /// at a place the song already had keeps everything but its words: its looks, label,
-    /// notes, template and shapes. A group named as before keeps its colour.
+    /// notes, template and shapes. A group named as before keeps its colour. The automatic
+    /// arrangement follows the new groups (see [`Presentation::follow_parts_as_text`] for the
+    /// one a song edited as text is given).
     pub fn reflowed(&self, text: &str) -> Presentation {
         let parsed = crate::parse_song_text(&self.title, text);
         let before: Vec<&Slide> = self.slides().map(|(_, slide)| slide).collect();
@@ -1129,7 +1142,7 @@ impl Presentation {
                 index += 1;
             }
         }
-        Presentation {
+        let mut rebuilt = Presentation {
             id: self.id,
             title: self.title.clone(),
             groups,
@@ -1140,7 +1153,9 @@ impl Presentation {
             loops: self.loops,
             transition: self.transition,
             catalog: self.catalog.clone(),
-        }
+        };
+        rebuilt.follow_parts();
+        rebuilt
     }
 
     /// A copy with one slide replaced by an edited version of it. Returns `None` if there is no
@@ -1215,6 +1230,7 @@ impl Presentation {
         for arrangement in &mut copy.arrangements {
             arrangement.groups.retain(|id| !gone.contains(id));
         }
+        copy.follow_parts();
         let mut new_of_old = vec![0; count];
         for (new, old) in order.iter().enumerate() {
             new_of_old[*old] = new;
@@ -1222,13 +1238,15 @@ impl Presentation {
         Some((copy, new_of_old))
     }
 
-    /// A copy without one slide. A group left empty goes too. `None` if there is no such slide.
+    /// A copy without one slide. A group left empty goes too (and the automatic arrangement
+    /// follows). `None` if there is no such slide.
     pub fn without_slide(&self, index: usize) -> Option<Presentation> {
         let (group, at) = self.locate(index)?;
         let mut copy = self.clone();
         copy.groups[group].slides.remove(at);
         if copy.groups[group].slides.is_empty() {
             copy.groups.remove(group);
+            copy.follow_parts();
         }
         Some(copy)
     }
@@ -1298,7 +1316,8 @@ impl Presentation {
 
     /// A copy where a group with this name starts at the slide at `index`: the slide and the
     /// rest of its group become a group of that name, in its colour. A slide that already
-    /// starts its group renames the group. `None` if there is no slide there.
+    /// starts its group renames the group. The automatic arrangement follows the groups. `None`
+    /// if there is no slide there.
     pub fn with_group_starting(&self, index: usize, name: &str) -> Option<Presentation> {
         let (group, at) = self.locate(index)?;
         let mut copy = self.clone();
@@ -1321,6 +1340,7 @@ impl Presentation {
             }
             copy.groups.insert(group + 1, started);
         }
+        copy.follow_parts();
         Some(copy)
     }
 
@@ -1416,8 +1436,12 @@ mod tests {
         };
         let verse = song.groups[0].id;
         let chorus = song.groups[1].id;
-        song.arrangements =
-            vec![Arrangement { id: Uuid::new_v4(), name: "As sung".to_owned(), groups: vec![verse, chorus, verse] }];
+        song.arrangements = vec![Arrangement {
+            id: Uuid::new_v4(),
+            name: "As sung".to_owned(),
+            groups: vec![verse, chorus, verse],
+            auto: false,
+        }];
         let texts = |song: &Presentation| -> Vec<(String, String)> {
             song.groups
                 .iter()
@@ -1594,6 +1618,7 @@ mod arrangement_tests {
             id: Uuid::new_v4(),
             name: "As sung".to_owned(),
             groups: vec![v1, chorus, chorus, chorus, v2, chorus],
+            auto: false,
         };
         song.arrangement = Some(arrangement.id);
         song.arrangements.push(arrangement);

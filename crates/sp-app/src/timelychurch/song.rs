@@ -91,7 +91,7 @@ pub fn make_song(church: &str, song: &Song, most_lines: usize, now: i64) -> Made
             .map(|a| super::plain(&a.name))
             .filter(|name| !name.is_empty() && !is_default_name(name))
             .unwrap_or_else(|| super::SOURCE_NAME.to_owned());
-        vec![Arrangement { id: Uuid::new_v4(), name, groups: sung }]
+        vec![Arrangement { id: Uuid::new_v4(), name, groups: sung, auto: false }]
     };
     let mut title = super::plain(&song.title);
     // A song sung in an arrangement that isn't its default is a song of the library of its own.

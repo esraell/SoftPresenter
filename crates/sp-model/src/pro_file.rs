@@ -299,7 +299,8 @@ fn read(bytes: &[u8], file_title: &str) -> Result<ProDocument, &'static str> {
         if order.is_empty() {
             continue;
         }
-        let arrangement = Arrangement { id: Uuid::new_v4(), name: arrangement_name.clone(), groups: order };
+        let arrangement =
+            Arrangement { id: Uuid::new_v4(), name: arrangement_name.clone(), groups: order, auto: false };
         if !selected.is_empty() && *id == selected {
             chosen = Some(arrangement.id);
         }

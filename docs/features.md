@@ -106,8 +106,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   "Backup before song ids", and a song file copied in the Finder gets an id of its own.
 - **Arrangements**: a song's groups in the order to sing them (Verse 1, Chorus, Verse 2, Chorus…),
   from the Arrangement icon at the right of its header or the arrangement's name at the start
-  of its row (As written, the song's arrangements, New Arrangement, Rename…, Duplicate,
-  Delete). Next and Previous follow it, a group can come more than once, and the stage screens
+  of its row (As written, the song's arrangements, Chorus After Each Verse, New Arrangement,
+  Rename…, Duplicate, Delete). Next and Previous follow it, a group can come more than once, and the stage screens
   show what comes next in it. The row under the song's bar has a pill for each piece in the
   order sung: **a group sung several times running is one pill marked ×2, ×3…** (it is saved
   as the group listed that many times, so files are as before), and while it is on screen the
@@ -119,6 +119,30 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   in the order sung, and only the tile for where the song is lights up; the groups it leaves
   out wait underneath, under "Not in this arrangement", fainter and still there to click.
   Under an arrangement a slide is dragged only among its own group.
+- **The chorus after each verse**, as SoftProjector sings a song. A song made from words pasted
+  into New Song, imported as text (a text file, a lyric file, ChordPro, song text, a
+  SoftProjector songbook), or whose words are changed in Edit Words or by `sp song text`, that
+  has a verse and a chorus comes with the arrangement "Chorus after each verse" (named in the
+  app's language when it is made) and plays it, unless another arrangement was chosen. The
+  rule (`chorus_after.rs`): a chorus is sung where it is written and again after every verse
+  after it; a later chorus, whatever its name or number ("Chorus 2", "[Chorus 1.2]"), takes
+  over from where it is written, in place of the earlier one after the verse just before it;
+  with an insert, an intro or a bridge between the two, the earlier one stays where it is sung
+  and the new one is added after; inserts, slides, intros, endings and bridges are shown where
+  they are, with no chorus after them; a pre-chorus is sung just before the chorus that follows
+  its verse; a part named "&Куплет" or "&Припев" is more of the verse or chorus before. Verses
+  are the groups named Verse, Куплет, Strophe, Verš or Estrofa, choruses Chorus, Припев,
+  Приспів, Refrain, Sbor, Refrén, Coro or Estribillo, with any number. A song whose order
+  doesn't change (its chorus written out after every verse) gets none. The arrangement follows
+  the song's parts as they change (words edited as text, a group started, renamed or emptied in
+  the editor or by `sp`), and goes when the song has no chorus or no verse any more, until it is
+  changed by hand (a pill moved, taken out, added or sung more times, a rename, `sp song
+  arrangement … set`): from then on it is the operator's, never touched, and no second one is
+  made beside it. Other arrangements are never touched. For songs from before, **Chorus After
+  Each Verse** in the Arrangement menu (offered for a song with a verse and a chorus) makes it,
+  or brings it up to date, and chooses it; an "As sung" a SoftProjector import made before is
+  brought up to date rather than a second made. `sp song arrangement SONG chorus-after` does
+  the same.
 - Nineteen transitions: Cut, Dissolve, Fade, Fade Black, Fade White, Push, Move In, Reveal,
   Fly In, Zoom In, Door, Flip, Swap, Wipe, Split, Blinds, Iris, Clock and Checkerboard, with
   their direction and time (0 to 5 seconds), from Cut, Dissolve or Advanced. One is chosen for all slides from the bar under the slides; a song
@@ -130,7 +154,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   video's pictures laid under it, rather than the slide drawn again for each picture.
 - New Song (Command-N, or + over the song list) asks for the song's title and theme, and takes
   its words pasted in (a line in square brackets starts a group, a blank line a new slide; a
-  lyric file pasted in whole gives its sections and details, as an import does).
+  lyric file pasted in whole gives its sections and details, as an import does; a song with a
+  verse and a chorus sings the chorus after each verse, see above).
 - **Importing songs.** File › Import Songs offers them by kind of file (and so does the import
   button over the left column): **A Library Folder…** (each folder in it becomes a library),
   **A Song Bundle…** (`.proBundle` bundles and SoftPresenter's song packs, with their pictures
@@ -142,7 +167,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   languages), the lyric files song services give (title, sections, and a footer whose song
   number, writers and copyright go into the song's details; a church's own licence number is
   never kept), ChordPro (sections from its directives, chords taken out), SoftPresenter's own
-  song text and song files, rich text, and on macOS Word and OpenDocument files.
+  song text and song files, rich text, and on macOS Word and OpenDocument files. Text whose
+  parts start with the names SoftProjector gives them (Куплет, Припев, Приспів, Strophe, Sbor,
+  Refrén, Слайд, Вставка, Вступление, Окончание, Закінчення…, in any case, with or without a
+  colon, numbered "Припев 1.2" too) comes in with every part named and coloured as a
+  SoftProjector songbook's are, and a "&Куплет" or "&Припев" part as more slides of the verse or
+  chorus before; a name that is also a word ("Dia", "Ende", "Slide") starts a part only alone
+  or with a number.
 - **Imported songs are tidied** (every kind above but SoftPresenter's own songs and song packs).
   - **Titles:** a garbled title (UTF-8 read as an older code page and saved that way, such as
     "╨Ñ╨▓╨░╨╗╨░" or "lifeΓÇÖs") is put back, but only when reading it back as bytes gives
@@ -235,7 +266,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   songbook (`.sps`) or a songbook downloaded for it, dropped on the window or chosen in File › Import Songs › Song Files…: each songbook
   becomes a library of its name, each song keeps its number before its title (so "123" still
   finds it), its lyricist and composer, its verses, choruses and other parts as groups (a
-  "&Куплет" part as more slides of its verse), and an arrangement, "As sung", that repeats the
+  "&Куплет" part as more slides of its verse), and the arrangement "Chorus after each verse"
+  (see Arrangements; songs imported before were given it as "As sung"), which repeats the
   chorus after every verse as SoftProjector does. It works the same on a Mac, on Windows and on
   Linux: both are SQLite files, and SoftPresenter reads them itself (`sqlite_read.rs`, written
   from SQLite's published description of the file; nothing on the computer is asked to), never
@@ -1352,7 +1384,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   extent; Zoom (Fit, 25% to 200%, or pinch) with two-finger scrolling around a zoomed slide; and
   Grid, which shows a grid that boxes snap to.
 - **Edit Words** (Control-R, View › Edit Words, Edit Words in a song's menu, or its button beside a song's title): the song's words as text, to type
-  into; the slides are rebuilt from them and keep their looks, labels and notes. Cancel, or
+  into; the slides are rebuilt from them and keep their looks, labels and notes, and a song
+  with a verse and a chorus sings the chorus after each verse (see Arrangements). Cancel, or
   Escape, closes it without keeping what was typed, and clears nothing on the screens.
 - **Cmd+N** makes a new song.
 

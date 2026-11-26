@@ -2304,9 +2304,17 @@ pub fn arrangement_name(n: usize) -> String {
     crate::i18n::tgf("slides.arrangement.numbered", "Arrangement {n}", &[("n", &n.to_string())])
 }
 
+/// The name the arrangement that sings the chorus after each verse is given, in the language
+/// set when it is made (it is the church's from then on, so `sp` prints it as saved); in English
+/// it is [`sp_model::CHORUS_AFTER_EACH_VERSE`].
+pub fn chorus_after_name() -> String {
+    crate::i18n::tg("slides.arrangement.chorus_after.name", "Chorus after each verse").to_owned()
+}
+
 /// The arrangement menu, from the Arrangement button beside a song's title or the arrangement's
-/// name at the start of its row: sing the song as written or in one of its arrangements, make a
-/// new one, rename, duplicate or delete the one in use.
+/// name at the start of its row: sing the song as written or in one of its arrangements, sing
+/// the chorus after each verse (a song with a verse and a chorus), make a new one, rename,
+/// duplicate or delete the one in use.
 fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, button: &egui::Response) {
     let active = song.active_arrangement();
     let named = |arrangement: &sp_model::Arrangement| {
@@ -2339,6 +2347,21 @@ fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, bu
                 }
             }
             ui.separator();
+            if song.chorus_after_each_verse().is_some()
+                && ui
+                    .button(t("slides.arrangement.chorus_after", "Chorus After Each Verse"))
+                    .on_hover_text(t(
+                        "slides.arrangement.chorus_after.hint",
+                        "Sing the chorus again after every verse; the order follows the song's parts until you change it",
+                    ))
+                    .clicked()
+            {
+                let mut sung = song.clone();
+                sung.sing_chorus_after_each_verse(&chorus_after_name());
+                arrangements = sung.arrangements;
+                chosen = sung.arrangement;
+                ui.close();
+            }
             if ui
                 .button(t("slides.arrangement.new", "New Arrangement"))
                 .on_hover_text(t("slides.arrangement.new.hint", "Starts with the groups as written"))
@@ -2364,6 +2387,8 @@ fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, bu
                         id: sp_model::Uuid::new_v4(),
                         name: tf("slides.arrangement.copy", "{name} copy", &[("name", &arrangements[at].name)]),
                         groups: arrangements[at].groups.clone(),
+                        // A copy is the operator's, whatever it was copied from.
+                        auto: false,
                     };
                     chosen = Some(copy.id);
                     arrangements.push(copy);
@@ -2378,9 +2403,32 @@ fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, bu
     if !egui::Popup::is_id_open(&button.ctx, egui::Popup::default_response_id(button)) {
         button.ctx.data_mut(|data| data.remove::<bool>(renaming_id));
     }
+    renamed_by_hand(song, &mut arrangements);
     if chosen != song.arrangement || arrangements != song.arrangements {
         state.arrangement_request = Some((index, arrangements, chosen));
     }
+}
+
+/// Renamed by hand, an arrangement made to follow the song's parts is the operator's from then
+/// on (see [`sp_model::Arrangement::auto`]).
+fn renamed_by_hand(song: &Presentation, arrangements: &mut [sp_model::Arrangement]) {
+    for arrangement in arrangements {
+        if song.arrangements.iter().any(|was| was.id == arrangement.id && was.name != arrangement.name) {
+            arrangement.auto = false;
+        }
+    }
+}
+
+/// The song's arrangements with the one of this id given these groups by hand (a pill moved,
+/// taken out, added or sung more times): it is the operator's from then on, and no longer
+/// follows the song's parts.
+fn changed_by_hand(song: &Presentation, id: Uuid, groups: Vec<Uuid>) -> Vec<sp_model::Arrangement> {
+    let mut arrangements = song.arrangements.clone();
+    if let Some(edited) = arrangements.iter_mut().find(|have| have.id == id) {
+        edited.groups = groups;
+        edited.auto = false;
+    }
+    arrangements
 }
 
 /// Where the parts of a song's arrangement row go, from the row's top left corner: the
@@ -2673,10 +2721,7 @@ fn arrangement_strip(
         }
     });
     if let Some(groups) = groups {
-        let mut arrangements = song.arrangements.clone();
-        if let Some(edited) = arrangements.iter_mut().find(|have| have.id == arrangement.id) {
-            edited.groups = groups;
-        }
+        let arrangements = changed_by_hand(song, arrangement.id, groups);
         state.arrangement_request = Some((index, arrangements, song.arrangement));
     }
 }
@@ -3632,6 +3677,111 @@ mod tests {
         assert!(matches!(items.as_slice(), [Item::Song { title, .. }] if title == "Alpha"), "{items:?}");
     }
 
+    /// The arrangement menu opened on a song, one frame with these events: the words drawn in
+    /// it, and where.
+    fn arrangement_menu_frame(
+        ctx: &egui::Context,
+        song: &Presentation,
+        state: &mut HomeState,
+        time: f64,
+        events: Vec<Event>,
+        open: bool,
+    ) -> Vec<(String, Rect)> {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => into.push((text.galley.text().to_owned(), text.visual_bounding_rect())),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let input = RawInput {
+            time: Some(time),
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0))),
+            events,
+            ..RawInput::default()
+        };
+        let output = ctx.run_ui(input, |ui| {
+            let button = ui.button("Arrangement");
+            if open {
+                egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&button));
+            }
+            arrangement_menu(0, song, state, &button);
+        });
+        let mut words = Vec::new();
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut words));
+        output.drop_without_applying_deltas();
+        words
+    }
+
+    #[test]
+    fn chorus_after_each_verse_in_the_arrangement_menu_makes_the_arrangement_and_chooses_it() {
+        use crate::i18n::{Language, with_language};
+        // A song from before, sung as written: Verse 1, Chorus, Verse 2.
+        let song = parse_song_text("Old", "[Verse 1]\nA\n\n[Chorus]\nB\n\n[Verse 2]\nC\n");
+        let ctx = egui::Context::default();
+        let mut state = HomeState::default();
+        let item = "Chorus After Each Verse";
+        arrangement_menu_frame(&ctx, &song, &mut state, 0.0, Vec::new(), true);
+        let words = arrangement_menu_frame(&ctx, &song, &mut state, 0.1, Vec::new(), false);
+        let place = words.iter().find(|(said, _)| said == item).map(|(_, at)| at.center()).expect("offered");
+        let press = |pressed| Event::PointerButton {
+            pos: place,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        for (at, events) in
+            [vec![Event::PointerMoved(place)], vec![press(true)], vec![press(false)]].into_iter().enumerate()
+        {
+            arrangement_menu_frame(&ctx, &song, &mut state, 0.2 + at as f64 / 10.0, events, false);
+        }
+        let (index, arrangements, chosen) = state.arrangement_request.take().expect("asked for");
+        assert_eq!(index, 0);
+        let [made] = arrangements.as_slice() else { panic!("one made: {arrangements:?}") };
+        assert!(made.auto);
+        assert_eq!(made.name, "Chorus after each verse");
+        assert_eq!(made.name, sp_model::CHORUS_AFTER_EACH_VERSE);
+        let [v1, chorus, v2] = [song.groups[0].id, song.groups[1].id, song.groups[2].id];
+        assert_eq!(made.groups, [v1, chorus, v2, chorus]);
+        assert_eq!(chosen, Some(made.id), "and chosen");
+        // In Russian it is made with its Russian name.
+        assert_eq!(with_language(Language::Russian, chorus_after_name), "Припев после каждого куплета");
+        assert_eq!(with_language(Language::Ukrainian, chorus_after_name), "Приспів після кожного куплету");
+        // A song without a chorus isn't offered it.
+        let verses = parse_song_text("Verses", "[Verse 1]\nA\n\n[Verse 2]\nB\n");
+        let ctx = egui::Context::default();
+        arrangement_menu_frame(&ctx, &verses, &mut state, 0.0, Vec::new(), true);
+        let words = arrangement_menu_frame(&ctx, &verses, &mut state, 0.1, Vec::new(), false);
+        assert!(words.iter().any(|(said, _)| said == "New Arrangement"), "the menu is open: {words:?}");
+        assert!(!words.iter().any(|(said, _)| said == item), "{words:?}");
+    }
+
+    #[test]
+    fn an_arrangement_renamed_or_changed_by_hand_no_longer_follows_the_songs_parts() {
+        let mut song = parse_song_text("Song", "[Verse 1]\nA\n\n[Chorus]\nB\n\n[Verse 2]\nC\n");
+        song.follow_parts_as_text("Chorus after each verse");
+        let made = song.arrangements[0].clone();
+        assert!(made.auto);
+        // A pill taken out (or moved, or sung more times): the operator's from then on.
+        let mut groups = made.groups.clone();
+        groups.pop();
+        let changed = changed_by_hand(&song, made.id, groups.clone());
+        assert_eq!((changed[0].groups.clone(), changed[0].auto), (groups, false));
+        // Renamed in the menu: the same.
+        let mut arrangements = song.arrangements.clone();
+        arrangements[0].name = "Sunday".to_owned();
+        renamed_by_hand(&song, &mut arrangements);
+        assert!(!arrangements[0].auto);
+        // Only chosen, or not renamed: still following.
+        let mut arrangements = song.arrangements.clone();
+        renamed_by_hand(&song, &mut arrangements);
+        assert!(arrangements[0].auto);
+        // And a song whose parts change afterwards leaves it as it was left.
+        song.arrangements = changed;
+        let edited = song.reflowed("[Verse 1]\nA\n\n[Chorus]\nB\n\n[Verse 2]\nC\n\n[Verse 3]\nD\n");
+        assert_eq!(edited.arrangements, song.arrangements);
+    }
+
     #[test]
     fn a_new_arrangement_is_named_in_the_language_set() {
         use crate::i18n::{Language, with_language};
@@ -3685,6 +3835,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: "As sung".to_owned(),
             groups: vec![v1, chorus, chorus, chorus, v2],
+            auto: false,
         };
         song.arrangement = Some(arrangement.id);
         song.arrangements.push(arrangement);

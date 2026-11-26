@@ -571,10 +571,12 @@ fn play_or_skip(copy: &Copy, track: &str, what: &str) -> bool {
 #[test]
 fn a_song_from_text_runs_slide_by_slide_and_each_layer_clears() {
     let Some(run) = Run::new("a_song_from_text_runs_slide_by_slide_and_each_layer_clears") else { return };
+    // Sung as written: its chorus comes after its only verse (a chorus written once before a
+    // second verse is sung after that one too: `a_chorus_written_once_is_sung_after_each_verse`).
     let words = song_text(&[
         ("Verse 1", "Morning light on the hill\nWe walk the quiet road"),
         ("Chorus", "Sing out, the day is new"),
-        ("Verse 2", "Evening comes with gentle rain"),
+        ("Ending", "Evening comes with gentle rain"),
     ]);
     let file = run.file("Hill Road.txt");
     std::fs::write(&file, words).expect("the song's file");
@@ -588,7 +590,7 @@ fn a_song_from_text_runs_slide_by_slide_and_each_layer_clears() {
     assert!(imported.text.contains("Hill Road"), "{}", imported.text);
     let slides = copy.ok(&["slides", "Hill Road"]).data;
     let groups: Vec<&str> = slides.as_array().into_iter().flatten().filter_map(|s| s["group"].as_str()).collect();
-    assert_eq!(groups, ["Verse 1", "Chorus", "Verse 2"], "{slides}");
+    assert_eq!(groups, ["Verse 1", "Chorus", "Ending"], "{slides}");
 
     // Through the song, and back, as the arrow keys, Home and End do.
     copy.ok(&["go", "Hill Road"]);
@@ -779,8 +781,9 @@ fn a_playlist_is_made_and_run_from_item_to_item() {
         assert!(seen.len() < 20, "Next never came to the end: {seen:?}");
     }
     let names: Vec<String> = seen.iter().map(|(song, slide)| format!("{song} {slide}")).collect();
-    assert_eq!(names[..5], ["Alpha 1", "Alpha 2", "Alpha 3", "Delta 1", "Delta 2"], "{names:?}");
-    assert_eq!(names.len(), 7, "the passage's two verses after the songs: {names:?}");
+    // Alpha's chorus, written once, is sung again after its second verse.
+    assert_eq!(names[..6], ["Alpha 1", "Alpha 2", "Alpha 3", "Alpha 2", "Delta 1", "Delta 2"], "{names:?}");
+    assert_eq!(names.len(), 8, "the passage's two verses after the songs: {names:?}");
     let status = copy.status();
     assert_eq!(status["live"]["kind"], "passage", "{status}");
     assert_eq!(status["live"]["item"], 4, "{status}");
@@ -806,6 +809,74 @@ fn a_playlist_is_made_and_run_from_item_to_item() {
     copy.quit().assert_clean(&run);
     let saved = std::fs::read_to_string(run.data.join("services.json")).unwrap_or_default();
     assert!(saved.contains("Evening Test") && saved.contains("John 3:16-17"), "the playlist was saved: {saved}");
+}
+
+/// A song whose chorus is written once, as SoftProjector keeps a song, is sung with it after
+/// each verse: imported, chosen again after As written, followed when its words change as
+/// text, and left alone once it is set by hand.
+#[test]
+fn a_chorus_written_once_is_sung_after_each_verse() {
+    let Some(run) = Run::new("a_chorus_written_once_is_sung_after_each_verse") else { return };
+    // Written for this test.
+    let two = "Куплет 1\nСвет над рекой\n\nПрипев\nДомой, домой\n\nКуплет 2\nВечер настал\n";
+    let file = run.file("River Road.txt");
+    std::fs::write(&file, two).expect("the song");
+    // `song text` takes song text, as Edit Words shows a song's words.
+    let words = [("Куплет 1", "Свет над рекой"), ("Припев", "Домой, домой"), ("Куплет 2", "Вечер настал")];
+    let back = run.file("two verses.txt");
+    std::fs::write(&back, song_text(&words)).expect("the words");
+    let three = run.file("three verses.txt");
+    std::fs::write(&three, song_text(&[words[0], words[1], words[2], ("Куплет 3", "Ночь пришла")])).expect("the words");
+    let copy = run.start(&[]);
+    copy.ok(&["song", "import", &file.to_string_lossy()]);
+    let listed = copy.ok(&["song", "arrangements", "River Road"]);
+    assert!(
+        listed
+            .text
+            .contains("Chorus after each verse (in use, follows the song's parts): Куплет 1, Припев, Куплет 2, Припев"),
+        "{}",
+        listed.text
+    );
+    // Next goes Verse 1, Chorus, Verse 2, Chorus, and then says it is at the end.
+    let sung = |copy: &Copy| {
+        copy.ok(&["go", "River Road"]);
+        let mut seen = vec![copy.live().expect("on screen").1];
+        loop {
+            let next = copy.ok(&["next"]);
+            if next.data["at_end"] == true {
+                break seen;
+            }
+            seen.push(copy.live().expect("on screen").1);
+            assert!(seen.len() < 12, "Next never came to the end: {seen:?}");
+        }
+    };
+    assert_eq!(sung(&copy), [1, 2, 3, 2]);
+    // As written, then Chorus After Each Verse again.
+    copy.ok(&["song", "arrangement", "River Road", "use", "none"]);
+    assert_eq!(sung(&copy), [1, 2, 3]);
+    let said = copy.ok(&["song", "arrangement", "River Road", "chorus-after"]);
+    assert!(said.text.contains("sings the chorus after each verse"), "{}", said.text);
+    assert_eq!(sung(&copy), [1, 2, 3, 2]);
+    // Its words changed as text: the arrangement follows the new verse.
+    copy.ok(&["song", "text", "River Road", &three.to_string_lossy()]);
+    assert_eq!(sung(&copy), [1, 2, 3, 2, 4, 2]);
+    // Set by hand, it is the operator's: changing the words again leaves it as set.
+    copy.ok(&["song", "arrangement", "River Road", "set", "Chorus after each verse", "Куплет 1", "Припев"]);
+    copy.ok(&["song", "text", "River Road", &back.to_string_lossy()]);
+    let listed = copy.ok(&["song", "arrangements", "River Road"]);
+    assert_eq!(listed.data.as_array().map(Vec::len), Some(1), "no second one made: {}", listed.text);
+    assert!(
+        listed.text.lines().any(|line| line == "  Chorus after each verse (in use): Куплет 1, Припев"),
+        "{}",
+        listed.text
+    );
+    // A song with no chorus can't be sung so, and says why.
+    let verses = run.file("Verses Only.txt");
+    std::fs::write(&verses, song_text(&[("Verse 1", "One for a test"), ("Verse 2", "Two for a test")]))
+        .expect("verses");
+    copy.ok(&["song", "import", &verses.to_string_lossy()]);
+    copy.refused(&["song", "arrangement", "Verses Only", "chorus-after"], "has no verse and chorus");
+    copy.quit().assert_clean(&run);
 }
 
 /// The owner's rule for the keys (docs/cli.md, `running.rs`): once another item of the playlist

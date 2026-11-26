@@ -74,21 +74,28 @@ pub const GROUP_KEYS: [(char, &[&str]); 17] = [
 ];
 
 /// The words churches name a song's parts with in the app's languages (Russian, Ukrainian,
-/// Spanish), each with the English the group keys and colours know.
-const PART_WORDS: [(&str, &str); 27] = [
+/// Spanish), and the ones SoftProjector's songs name them with (German and Czech too), each
+/// with the English the group keys and colours know.
+const PART_WORDS: [(&str, &str); 38] = [
     ("куплет", "verse"),
     ("estrofa", "verse"),
     ("verso", "verse"),
+    ("strophe", "verse"),
+    ("verš", "verse"),
     ("припев", "chorus"),
     ("приспів", "chorus"),
     ("coro", "chorus"),
     ("estribillo", "chorus"),
+    ("refrain", "chorus"),
+    ("refrén", "chorus"),
+    ("sbor", "chorus"),
     ("бридж", "bridge"),
     ("брідж", "bridge"),
     ("мост", "bridge"),
     ("міст", "bridge"),
     ("puente", "bridge"),
     ("предприпев", "prechorus"),
+    ("пре-припев", "prechorus"),
     ("передприспів", "prechorus"),
     ("precoro", "prechorus"),
     ("pre-coro", "prechorus"),
@@ -96,11 +103,16 @@ const PART_WORDS: [(&str, &str); 27] = [
     ("вступление", "intro"),
     ("вступ", "intro"),
     ("introducción", "intro"),
+    ("einleitung", "intro"),
+    ("úvod", "intro"),
     ("окончание", "ending"),
     ("концовка", "ending"),
     ("закінчення", "ending"),
     ("кінцівка", "ending"),
     ("final", "ending"),
+    ("ende", "ending"),
+    ("závěr", "ending"),
+    ("konec", "ending"),
     ("кода", "outro"),
     ("coda", "outro"),
 ];
@@ -251,6 +263,14 @@ mod tests {
         assert_eq!(group_color("Припев 2"), group_color("Chorus"));
         assert_eq!(group_color("Куплет"), group_color("Verse 4"));
         assert_eq!(group_color("Бридж"), group_color("Bridge"));
+        // And as SoftProjector's songs name them.
+        assert_eq!(group_color("Strophe 1"), group_color("Verse"));
+        assert_eq!(group_color("Verš 2"), group_color("Verse"));
+        assert_eq!(group_color("Refrén"), group_color("Chorus"));
+        assert_eq!(key_for_group("Sbor"), Some('C'));
+        assert_eq!(key_for_group("Refrain"), Some('C'));
+        assert_eq!(key_for_group("Úvod"), Some('I'));
+        assert_eq!(key_for_group("Závěr"), Some('E'));
     }
 
     #[test]

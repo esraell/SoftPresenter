@@ -10,12 +10,14 @@
 //! "Вставка" (an insert), "Вступление" (an intro), "Окончание" (an ending)…). A block runs to
 //! the next such line and is shown as one slide. A name starting with `&` ("&Куплет") is more
 //! of the verse or chorus before it. SoftProjector sings the chorus after every verse; the song
-//! comes with an arrangement in that order.
+//! comes with an arrangement in that order, "Chorus after each verse", by the rule in
+//! `chorus_after.rs`, which songs made as text follow too.
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 
+use crate::chorus_after::{CHORUS_AFTER_EACH_VERSE, Part, sung_order};
 use crate::sqlite_read::{Database, Limits, Value, is_database};
 use crate::{Arrangement, Copyright, Group, Object, Presentation, Role, Slide, Uuid, group_color};
 
@@ -294,7 +296,7 @@ enum Kind {
 
 const VERSE: [&str; 4] = ["Verse", "Куплет", "Strophe", "Verš"];
 const CHORUS: [&str; 6] = ["Chorus", "Sbor", "Refrain", "Припев", "Приспів", "Refrén"];
-const OTHER: [&str; 22] = [
+const OTHER: [&str; 23] = [
     "Slide",
     "Слайд",
     "Dia",
@@ -312,6 +314,7 @@ const OTHER: [&str; 22] = [
     "Окончание",
     "Закінчення",
     "Ende",
+    "Závěr",
     "Konec",
     "Bridge",
     "Мост",
@@ -365,7 +368,8 @@ pub fn from_softprojector(number: Option<i64>, title: &str, words: &str, music: 
         }
     }
     let mut groups: Vec<Group> = Vec::new();
-    let mut order: Vec<Uuid> = Vec::new();
+    // Each group's kind of part, for the order it is sung in.
+    let mut parts: Vec<Part> = Vec::new();
     let mut chorus: Option<usize> = None;
     let mut last_verse: Option<usize> = None;
     let mut choruses = 0;
@@ -391,34 +395,27 @@ pub fn from_softprojector(number: Option<i64>, title: &str, words: &str, music: 
                     name
                 };
                 groups.push(new_group(&name, slide));
-                let at = groups.len() - 1;
-                // A chorus is sung where it is written, and then after each verse; a new chorus
-                // takes the place of the one before.
-                if order.last() != Some(&groups[at].id) {
-                    order.push(groups[at].id);
-                }
-                chorus = Some(at);
+                parts.push(Part::Chorus);
+                chorus = Some(groups.len() - 1);
             }
             Some((Kind::Verse, _)) => {
                 groups.push(new_group(&name, slide));
-                let at = groups.len() - 1;
-                order.push(groups[at].id);
-                if let Some(chorus) = chorus {
-                    order.push(groups[chorus].id);
-                }
-                last_verse = Some(at);
+                parts.push(Part::Verse);
+                last_verse = Some(groups.len() - 1);
             }
             _ => {
                 groups.push(new_group(&name, slide));
-                order.push(groups[groups.len() - 1].id);
+                parts.push(Part::Other);
             }
         }
     }
-    // A chorus written after the first verse comes after it once, not twice.
-    order.dedup();
+    // A chorus is sung where it is written, and then after each verse, as SoftProjector sings
+    // it (`chorus_after.rs`).
+    let order: Vec<Uuid> = sung_order(&parts).into_iter().map(|at| groups[at].id).collect();
     let plain_order = groups.iter().map(|g| g.id).collect::<Vec<_>>();
-    let (arrangements, arrangement) = if order != plain_order && !order.is_empty() {
-        let arrangement = Arrangement { id: Uuid::new_v4(), name: "As sung".to_owned(), groups: order };
+    let (arrangements, arrangement) = if order != plain_order {
+        let name = CHORUS_AFTER_EACH_VERSE.to_owned();
+        let arrangement = Arrangement { id: Uuid::new_v4(), name, groups: order, auto: true };
         let id = arrangement.id;
         (vec![arrangement], Some(id))
     } else {

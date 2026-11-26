@@ -22,7 +22,7 @@ pub(crate) mod settings;
 mod slides;
 pub use import_sheet::{AskImport, ImportAnswer, SlidesChoice};
 pub use settings::{Pane, settings_ui};
-pub use slides::arrangement_name;
+pub use slides::{arrangement_name, chorus_after_name};
 use slides::{slide_area, slide_grid};
 
 /// The pills that hold toolbar items, and text fields.

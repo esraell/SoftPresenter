@@ -476,7 +476,9 @@ impl crate::App {
             std::path::Path::new(file).file_name().map_or_else(|| file.clone(), |n| n.to_string_lossy().into_owned());
         let bytes = std::fs::read(file).map_err(|e| format!("Could not read {shown}: {e}"))?;
         let text = sp_model::decode_text(&bytes);
-        let song = presentation.reflowed(&text);
+        let mut song = presentation.reflowed(&text);
+        // Words replaced as text: the chorus is sung after each verse, as Edit Words does.
+        song.follow_parts_as_text(&crate::home::chorus_after_name());
         if song.slide_count() == 0 {
             return Err(format!("{shown} has no words in it; {} is unchanged.", presentation.title));
         }

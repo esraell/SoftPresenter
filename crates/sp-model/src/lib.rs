@@ -4,6 +4,7 @@
 mod action;
 pub mod bounded_zip;
 mod build;
+mod chorus_after;
 mod format;
 mod import;
 mod link;
@@ -22,6 +23,7 @@ mod types;
 
 pub use action::{Announced, ClearWhat, ShowAction, TimerDo};
 pub use build::{Build, BuildClock, BuildEffect};
+pub use chorus_after::{AS_SUNG, CHORUS_AFTER_EACH_VERSE, Part, part_of, sung_order};
 pub use format::{FORMAT_VERSION, from_json, to_json};
 pub use import::{
     MOST_LINES, decode_text, import_song_text, section_name, share_out, without_chords, year_and_publisher,

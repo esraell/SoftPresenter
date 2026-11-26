@@ -5533,7 +5533,9 @@ impl App {
     fn handle_reflow(&mut self) {
         let Some((index, text)) = self.running.as_mut().and_then(|r| r.home_state.reflow_done.take()) else { return };
         let Some(song) = self.show.presentations().get(index).cloned() else { return };
-        let rebuilt = song.reflowed(&text);
+        let mut rebuilt = song.reflowed(&text);
+        // Words edited as text: the chorus is sung after each verse (`chorus_after.rs`).
+        rebuilt.follow_parts_as_text(&home::chorus_after_name());
         if rebuilt == *song {
             return;
         }
@@ -7147,6 +7149,8 @@ impl App {
             let mut renamed = (**song).clone();
             renamed.groups[group].color = sp_model::group_color(&name);
             renamed.groups[group].name = name;
+            // The arrangement that sings the chorus after each verse follows the new name.
+            renamed.follow_parts();
             let ids: Vec<Uuid> = renamed.groups[group].slides.iter().map(|slide| slide.id).collect();
             self.history.forget(index);
             self.show.replace_presentation(index, Arc::new(renamed));
@@ -7180,18 +7184,21 @@ impl App {
         let title = asked.title.clone();
         let id = Uuid::new_v4();
         // The words given, made into slides as an imported song's are (a lyric file pasted in
-        // gives its sections and details); with none, one empty slide in a first verse.
-        let parsed = sp_model::import_song_text(&title, &asked.words);
+        // gives its sections and details, and a song with a verse and a chorus sings the chorus
+        // after each verse); with none, one empty slide in a first verse.
+        let mut parsed = sp_model::import_song_text(&title, &asked.words);
+        parsed.name_chorus_after(&home::chorus_after_name());
         let copyright = parsed.copyright.clone();
-        let groups = if parsed.slide_count() > 0 {
-            parsed.groups
+        let (groups, arrangements, arrangement) = if parsed.slide_count() > 0 {
+            (parsed.groups, parsed.arrangements, parsed.arrangement)
         } else {
-            vec![sp_model::Group {
+            let empty = sp_model::Group {
                 id: Uuid::new_v4(),
                 name: "Verse 1".to_owned(),
                 color: sp_model::group_color("Verse 1"),
                 slides: vec![Slide::new(vec![sp_model::Object::text(sp_model::Role::primary(), "")])],
-            }]
+            };
+            (vec![empty], Vec::new(), None)
         };
         let theme = asked.theme.and_then(|at| self.themes.get(at)).map(|theme| theme.id);
         let song = sp_model::Presentation {
@@ -7200,8 +7207,8 @@ impl App {
             groups,
             copyright,
             theme,
-            arrangements: Vec::new(),
-            arrangement: None,
+            arrangements,
+            arrangement,
             loops: false,
             transition: None,
             catalog: None,

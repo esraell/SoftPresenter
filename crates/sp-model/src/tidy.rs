@@ -941,7 +941,7 @@ mod tests {
         let mut song = song_of(vec![deck, slide("Sing it: 2x\nAgain x4", None)]);
         let group = song.groups[0].id;
         song.arrangements =
-            vec![Arrangement { id: Uuid::new_v4(), name: "Short".to_owned(), groups: vec![group, group] }];
+            vec![Arrangement { id: Uuid::new_v4(), name: "Short".to_owned(), groups: vec![group, group], auto: false }];
         song.arrangement = Some(song.arrangements[0].id);
         let tidied = tidy_song(&song, TidyOptions::default());
         assert_eq!(tidied.song, song);

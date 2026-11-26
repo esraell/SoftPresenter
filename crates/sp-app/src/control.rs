@@ -1070,6 +1070,8 @@ Songs, libraries and playlists
   search WORDS                 songs with those words in their title or slides
   song arrangements SONG | song arrangement SONG use NAME|none
   song arrangement SONG set NAME GROUP… | song arrangement SONG delete NAME
+  song arrangement SONG chorus-after   sing the chorus after each verse (made or brought up to
+                               date, and used), as the arrangement menu's Chorus After Each Verse
 
 Song catalog (free songs from Worship Leader App, kept apart from the library)
   catalog                      the languages downloaded: songs, sizes, when fetched and checked

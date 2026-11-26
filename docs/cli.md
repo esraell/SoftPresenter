@@ -595,11 +595,12 @@ names the passage as it was typed, while the screens and the playlist follow the
 | `song new TITLE --words TEXT` | A new song with its words given as song text in one word (quoted, line breaks and all): for a script or an assistant that has the words but no file. Every other word is the title, and the disk is never looked at |
 | `song import FILE… \| FOLDER… [--library NAME\|none]` | Imports songs, as File › Import Songs does (any of its kinds of file; formats below). A folder becomes a library of its name (and each folder in it another), unless `--library` says where its songs go. A song already in the library is skipped |
 | `song text SONG` | Prints the song as song text |
-| `song text SONG FILE` | Replaces the song's words from a song text file, keeping the song (its id, theme, playlist places) and its slides' looks, labels and notes where they still match |
+| `song text SONG FILE` | Replaces the song's words from a song text file, keeping the song (its id, theme, playlist places) and its slides' looks, labels and notes where they still match; a song with a verse and a chorus sings the chorus after each verse, as Edit Words makes it (below) |
 | `song rename SONG to TITLE`, `song duplicate SONG [as TITLE]` | Renames or copies a song (the copy goes just after it in the libraries it is in, and next to it in the window's song list) |
 | `song theme SONG THEME\|main`, `song transition SONG KIND [SECONDS]\|none` | The song's theme; its transition (0 to 5 seconds) |
 | `song info SONG [artist=… author=… publisher=… year=… ccli=…]` | Reads or sets the song's details (a year is four digits, a CCLI number digits) |
-| `song arrangements SONG`, `song arrangement SONG use NAME\|none`, `song arrangement SONG set NAME GROUP…`, `song arrangement SONG delete NAME` | The song's groups in another order; Next follows the one in use |
+| `song arrangements SONG`, `song arrangement SONG use NAME\|none`, `song arrangement SONG set NAME GROUP…`, `song arrangement SONG delete NAME` | The song's groups in another order; Next follows the one in use. `song arrangements` marks the one made to sing the chorus after each verse "follows the song's parts" (`"auto": true` in its JSON) while nobody has changed it; `set` makes it the operator's |
+| `song arrangement SONG chorus-after` | Chorus After Each Verse, as in the window's Arrangement menu: the arrangement that sings the chorus after each verse, as SoftProjector does, made (named in the app's language) or brought up to date, and used. A song without a verse and a chorus is refused |
 | `song delete SONG --yes` | Deletes a song (one made in SoftPresenter goes to the Trash) |
 | `song reload [SONG [--now]]`, `song keep SONG` | [Song files edited outside the app](#song-files-edited-outside-the-app) |
 | `song export …`, `song import FILE.sppack …` | [Song packs](#song-packs) |
@@ -611,8 +612,9 @@ New and imported songs go into the library shown in the song list, and the reply
 **What `song import` reads:** plain text in any common encoding (UTF-8, UTF-16, and the older
 Windows encodings for Russian, Ukrainian and Western languages), with section names such as
 "Verse 1" or "Chorus" on their own lines; song text; lyric files from song services (the
-footer's song number, writers and copyright become the song's details); ChordPro (chords taken
-out); rich text; Word and OpenDocument files; SoftPresenter song files; ProPresenter 7 `.pro`
+footer's song number, writers and copyright become the song's details), and text with the
+names SoftProjector gives a song's parts ("Куплет 1", "Припев 1.2", "&Куплет", "Вставка"…);
+ChordPro (chords taken out); rich text; Word and OpenDocument files; SoftPresenter song files; ProPresenter 7 `.pro`
 documents and `.proBundle` bundles (every song in the bundle, in its order, and the pictures
 and videos their slides show, which go into the media bin, each once; the reply says how many
 pictures and videos came, names any a song shows that the bundle doesn't hold and everything
@@ -647,6 +649,12 @@ else is refused, with the list of what is read.
     River Song: artist “QA Band”, ccli “12345”.
     $ sp song arrangement "Blessed Assurance" set Short "Verse 1" Chorus "Verse 3" Chorus
     Blessed Assurance: arrangement Short: Verse 1, Chorus, Verse 3, Chorus.
+    $ sp song arrangement "Blessed Assurance" chorus-after
+    Blessed Assurance: sings the chorus after each verse, in the arrangement Chorus after each verse: Verse 1, Chorus, Verse 2, Chorus, Verse 3, Chorus.
+    $ sp song arrangements "Blessed Assurance"
+    Blessed Assurance: groups Verse 1, Chorus, Verse 2, Verse 3
+      Short: Verse 1, Chorus, Verse 3, Chorus
+      Chorus after each verse (in use, follows the song's parts): Verse 1, Chorus, Verse 2, Chorus, Verse 3, Chorus
     $ sp song delete "Old Hymn" --yes
     Deleted Old Hymn.
 

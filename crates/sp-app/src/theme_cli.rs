@@ -600,7 +600,8 @@ impl crate::App {
     }
 
     /// `song arrangements SONG`, `song arrangement SONG use NAME|none`, `song arrangement SONG
-    /// set NAME GROUP…`, `song arrangement SONG delete NAME`.
+    /// set NAME GROUP…`, `song arrangement SONG delete NAME`, `song arrangement SONG
+    /// chorus-after`.
     pub(crate) fn ctl_song_arrangement(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
         let result = match word.as_str() {
@@ -625,8 +626,19 @@ impl crate::App {
         for arrangement in &presentation.arrangements {
             let used = presentation.arrangement == Some(arrangement.id);
             let order: Vec<String> = arrangement.groups.iter().map(group_name).collect();
-            lines.push(format!("  {}{}: {}", arrangement.name, if used { " (in use)" } else { "" }, order.join(", ")));
-            data.push(serde_json::json!({"name": arrangement.name, "in_use": used, "groups": order}));
+            // Made to sing the chorus after each verse, and changed by nobody since.
+            let marks: Vec<&str> = [used.then_some("in use"), arrangement.auto.then_some("follows the song's parts")]
+                .into_iter()
+                .flatten()
+                .collect();
+            let marks = if marks.is_empty() { String::new() } else { format!(" ({})", marks.join(", ")) };
+            lines.push(format!("  {}{marks}: {}", arrangement.name, order.join(", ")));
+            data.push(serde_json::json!({
+                "name": arrangement.name,
+                "in_use": used,
+                "auto": arrangement.auto,
+                "groups": order,
+            }));
         }
         if presentation.arrangements.is_empty() {
             lines.push("  no arrangements: the groups play in order".to_owned());
@@ -635,7 +647,7 @@ impl crate::App {
     }
 
     fn song_arrangement(&mut self, words: &[String]) -> Result<Reply, String> {
-        let usage = "song arrangement SONG use NAME|none | song arrangement SONG set NAME GROUP… | song arrangement SONG delete NAME";
+        let usage = "song arrangement SONG use NAME|none | song arrangement SONG set NAME GROUP… | song arrangement SONG delete NAME | song arrangement SONG chorus-after";
         let [song, verb, rest @ ..] = words else { return Err(usage.to_owned()) };
         let at = self.find_song(song)?;
         let presentation = self.show.presentations()[at].clone();
@@ -672,9 +684,13 @@ impl crate::App {
                     order.push(changed.groups[g].id);
                 }
                 match changed.arrangements.iter_mut().find(|a| a.name.eq_ignore_ascii_case(name)) {
-                    Some(have) => have.groups = order,
+                    // Set by hand, it no longer follows the song's parts.
+                    Some(have) => {
+                        have.groups = order;
+                        have.auto = false;
+                    }
                     None => {
-                        let made = Arrangement { id: Uuid::new_v4(), name: name.clone(), groups: order };
+                        let made = Arrangement { id: Uuid::new_v4(), name: name.clone(), groups: order, auto: false };
                         changed.arrangement = Some(made.id);
                         changed.arrangements.push(made);
                     }
@@ -688,6 +704,21 @@ impl crate::App {
                     changed.arrangement = None;
                 }
                 format!("deleted the arrangement {}", gone.name)
+            }
+            // Chorus After Each Verse in the window's arrangement menu.
+            "chorus-after" if rest.is_empty() => {
+                if !changed.sing_chorus_after_each_verse(&crate::home::chorus_after_name()) {
+                    return Err(format!(
+                        "{} has no verse and chorus to sing that way (its groups: {}).",
+                        presentation.title,
+                        presentation.groups.iter().map(|g| g.name.as_str()).collect::<Vec<_>>().join(", ")
+                    ));
+                }
+                let made = changed.active_arrangement().ok_or("The arrangement could not be made.")?;
+                let group_name =
+                    |id: &Uuid| changed.groups.iter().find(|g| g.id == *id).map_or("?", |g| g.name.as_str());
+                let order: Vec<&str> = made.groups.iter().map(group_name).collect();
+                format!("sings the chorus after each verse, in the arrangement {}: {}", made.name, order.join(", "))
             }
             _ => return Err(usage.to_owned()),
         };

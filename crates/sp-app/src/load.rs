@@ -217,7 +217,8 @@ fn songbook_songs<R: std::io::Read + std::io::Seek>(
     Ok(songs
         .into_iter()
         .map(|song| {
-            let made = sp_model::from_softprojector(song.number, &song.title, &song.words, &song.music, &song.text);
+            let mut made = sp_model::from_softprojector(song.number, &song.title, &song.words, &song.music, &song.text);
+            made.name_chorus_after(&crate::home::chorus_after_name());
             (made, song.book)
         })
         .filter(|(song, _)| song.slide_count() > 0)
@@ -379,7 +380,9 @@ pub fn import_file(path: &Path) -> Result<Presentation, String> {
                 &[("name", &name)],
             ));
         }
-        import_song_text(&title, &text)
+        let mut song = import_song_text(&title, &text);
+        song.name_chorus_after(&crate::home::chorus_after_name());
+        song
     };
     if song.slide_count() == 0 {
         return Err(tf("notices.import.no_words", "{name} has no words in it.", &[("name", &name)]));
