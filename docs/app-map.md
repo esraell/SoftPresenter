@@ -420,6 +420,15 @@ sources are switched on (one that could not start included); its "video pictures
 pictures that came in to be shown (videos, and NDI Source boxes), never the pictures sent out
 over NDI.
 
+The video behind the words writes a `[video]` line each minute while it plays, and one for the
+part of a minute it played as it stops (`sp-video`, `pace.rs`, counted where the screens take
+each picture from the player, whichever engine plays it): the pictures its time playing called
+for at its own rate, FFmpeg's decoded, those shown, dropped (a newer one there before the screens
+looked), repeated (a picture's time over one that the picture before stayed up, the next not yet
+taken) and late (taken more than a picture's time after it was due), and the longest gap. On a
+Mac the system's player says each picture's time; FFmpeg's pictures carry theirs from its clock,
+which follows the sound when there is sound.
+
 With `SOFTPRESENTER_LOG_REPAINTS=1` (or a file `log-repaints` in the data folder), `repaints.rs`
 writes two `[repaints]` lines a minute: the operator window's drawings, where each one's time
 went and what asked for it, and how often the loop woke, for what, and which of its clocks it

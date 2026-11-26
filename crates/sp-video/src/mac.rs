@@ -9,7 +9,7 @@ pub use gpu::{GpuImport, GpuNext};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
@@ -102,6 +102,19 @@ fn may_carry_alpha(formats: &[(u32, bool)]) -> bool {
     formats.is_empty() || formats.iter().any(|(codec, flagged)| *flagged || ALPHA_CODECS.contains(codec))
 }
 
+/// The first video track's pictures a second, as the file says (its nominal rate); 0 when it
+/// doesn't say.
+fn nominal_fps(item: &AVPlayerItem) -> f64 {
+    // SAFETY: reads a static the framework defines.
+    let Some(video) = (unsafe { AVMediaTypeVideo }) else { return 0.0 };
+    // The same synchronous reading of the header as `smaller_size`.
+    #[allow(deprecated)]
+    // SAFETY: plain getters on live objects.
+    unsafe {
+        item.asset().tracksWithMediaType(video).firstObject().map_or(0.0, |track| f64::from(track.nominalFrameRate()))
+    }
+}
+
 /// Whether the first video track's format says its pictures may have clear parts (see
 /// [`may_carry_alpha`]).
 fn track_may_carry_alpha(item: &AVPlayerItem) -> bool {
@@ -151,14 +164,21 @@ pub struct Player {
     zero_copy: Arc<AtomicBool>,
     /// A picture taken for the GPU that couldn't be made a texture, kept for the next copy.
     parked: Arc<Mutex<Option<Parked>>>,
+    /// Its pictures a second, and how they reach the screens (see [`crate::pace`]).
+    fps: f64,
+    pace: Arc<crate::pace::Pace>,
     looping: bool,
     ended: bool,
     /// Its sound, tapped for the screens that send sound, when there are any (see `tap`).
     sound: Option<tap::Tapped>,
 }
 
-/// A picture's pixel buffer set aside to be taken next (see [`Frames::next_texture`]).
-struct Parked(Retained<CVPixelBuffer>);
+/// A picture's time in the video, and when it was due on screen (see [`crate::pace`]).
+type Due = Option<(f64, Instant)>;
+
+/// A picture's pixel buffer set aside to be taken next (see [`Frames::next_texture`]), with its
+/// time in the video and when it was due on screen.
+struct Parked(Retained<CVPixelBuffer>, Due);
 
 // SAFETY: a pixel buffer is a Core Foundation object, whose reference count may be changed from
 // any thread, and this one is only put in and taken out of its place, under a lock.
@@ -167,7 +187,7 @@ unsafe impl Send for Parked {}
 impl Player {
     /// Opens a video, paused at its start. Must be called on the main thread. The error is a
     /// sentence for the operator.
-    pub fn open(path: &Path) -> Result<Player, String> {
+    pub fn open(path: &Path, pace: Arc<crate::pace::Pace>) -> Result<Player, String> {
         let mtm = MainThreadMarker::new().ok_or("Videos can only be opened on the main thread.")?;
         let url = file_url(path)?;
         // SAFETY: the URL is a valid file URL; the item is made on the main thread, as it must be.
@@ -212,6 +232,7 @@ impl Player {
         // SAFETY: a plain setter on a live object.
         unsafe { player.setActionAtItemEnd(AVPlayerActionAtItemEnd::None) };
         let zero_copy = Arc::new(AtomicBool::new(!track_may_carry_alpha(&item)));
+        let fps = nominal_fps(&item);
         Ok(Player {
             player,
             item,
@@ -219,6 +240,8 @@ impl Player {
             halved: Arc::default(),
             zero_copy,
             parked: Arc::default(),
+            fps,
+            pace,
             looping: false,
             ended: false,
             sound,
@@ -232,7 +255,13 @@ impl Player {
             halved: self.halved.clone(),
             zero_copy: self.zero_copy.clone(),
             parked: self.parked.clone(),
+            pace: self.pace.clone(),
         }
+    }
+
+    /// Its pictures a second, as the file says (0 when it doesn't).
+    pub fn fps(&self) -> f64 {
+        self.fps
     }
 
     pub fn play(&mut self) {
@@ -371,6 +400,8 @@ pub struct Frames {
     zero_copy: Arc<AtomicBool>,
     /// A picture taken for the GPU that couldn't be made a texture, kept for the next copy.
     parked: Arc<Mutex<Option<Parked>>>,
+    /// How the pictures reach the screens (see [`crate::pace`]).
+    pace: Arc<crate::pace::Pace>,
 }
 
 impl Frames {
@@ -386,14 +417,15 @@ impl Frames {
         if !self.zero_copy.load(Ordering::Relaxed) {
             return GpuNext::Unavailable;
         }
-        let Some(buffer) = self.newest() else { return GpuNext::Nothing };
+        let Some((buffer, when)) = self.newest() else { return GpuNext::Nothing };
         if let Some(texture) = import.texture(device, &buffer) {
+            self.taken(when);
             return GpuNext::Picture(texture);
         }
         // From now on this video's pictures are copied, this one first: kept for the next
         // `next_with`, so that a video that is paused shows its picture all the same.
         self.zero_copy.store(false, Ordering::Relaxed);
-        *self.parked.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Parked(buffer));
+        *self.parked.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Parked(buffer, when));
         GpuNext::Unavailable
     }
 
@@ -406,7 +438,8 @@ impl Frames {
 
     /// The picture to show now, if there is a new one since the last was taken.
     pub fn next(&self) -> Option<Frame> {
-        let buffer = self.newest()?;
+        let (buffer, when) = self.newest()?;
+        self.taken(when);
         let locked = Locked::read(&buffer)?;
         let (bytes, width, height, bytes_per_row) = locked.rows()?;
         Some(crate::bgra_rows_to_rgba(bytes, width, height, bytes_per_row, MAX_VIDEO_WIDTH))
@@ -415,7 +448,8 @@ impl Frames {
     /// Lends the picture to show now, as [`crate::Frames::next_with`] says: the decoder's own
     /// rows of BGRA pixels while they are held, or a half-size copy of a picture too wide.
     pub fn next_with<R>(&self, show: impl FnOnce(&Lent<'_>) -> R) -> Option<R> {
-        let buffer = self.newest()?;
+        let (buffer, when) = self.newest()?;
+        self.taken(when);
         let locked = Locked::read(&buffer)?;
         let (bytes, width, height, bytes_per_row) = locked.rows()?;
         let lend = |bytes, width: usize, height: usize, bytes_per_row| Lent {
@@ -436,21 +470,41 @@ impl Frames {
         (width > 0 && height > 0).then(|| show(&lend(&halved, width, height, width * 4)))
     }
 
+    /// The screens have taken a picture that was due on screen at that time in the video, at
+    /// that moment (when the system said).
+    fn taken(&self, when: Due) {
+        if let Some((at, due)) = when {
+            self.pace.taken(at, due);
+        }
+    }
+
     /// The newest picture's pixel buffer, if there is a new one since the last was taken (or one
-    /// was kept because it couldn't go to the GPU).
-    fn newest(&self) -> Option<Retained<CVPixelBuffer>> {
-        if let Some(Parked(buffer)) = self.parked.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
-            return Some(buffer);
+    /// was kept because it couldn't go to the GPU), with its time in the video and when it was
+    /// due on screen, when the system says.
+    fn newest(&self) -> Option<(Retained<CVPixelBuffer>, Due)> {
+        if let Some(Parked(buffer, when)) = self.parked.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+        {
+            return Some((buffer, when));
         }
         let host = i64::try_from(CVGetCurrentHostTime()).unwrap_or(i64::MAX);
+        let now = Instant::now();
         // SAFETY: a video output may be asked for pictures from any thread; these are plain values.
         let time = unsafe { self.output.itemTimeForMachAbsoluteTime(host) };
         // SAFETY: as above.
         if !unsafe { self.output.hasNewPixelBufferForItemTime(time) } {
             return None;
         }
-        // SAFETY: as above; a null pointer says the display time isn't wanted.
-        unsafe { self.output.copyPixelBufferForItemTime_itemTimeForDisplay(time, std::ptr::null_mut()) }
+        // SAFETY: reads a constant the framework defines.
+        let mut shown_at = unsafe { kCMTimeZero };
+        // SAFETY: as above; the pointer is to a CMTime of this frame's, which the call fills with
+        // the time in the video the picture is to be shown at, and is not kept.
+        let buffer = unsafe { self.output.copyPixelBufferForItemTime_itemTimeForDisplay(time, &raw mut shown_at) }?;
+        // As late as the time asked for is past the picture's own.
+        let when = seconds(shown_at).zip(seconds(time)).map(|(at, asked)| {
+            let late = Duration::from_secs_f64((asked - at).max(0.0));
+            (at, now.checked_sub(late).unwrap_or(now))
+        });
+        Some((buffer, when))
     }
 }
 

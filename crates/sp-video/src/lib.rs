@@ -32,6 +32,9 @@ pub use web::WebPage;
 mod ffmpeg;
 pub use ffmpeg::{SoundInfo, SoundProblem, SoundReader, decode_sound, sound_info};
 
+mod pace;
+pub use pace::{PaceMinute, fps_words, take_pace_totals};
+
 pub mod sound;
 
 #[cfg(target_os = "macos")]
@@ -403,17 +406,23 @@ macro_rules! either {
 
 impl Engine {
     /// Opens a video, paused at its start: with the system's player for an MP4 or MOV (on the
-    /// main thread), otherwise with FFmpeg.
-    fn open(path: &Path, lend: Lend) -> Result<Engine, String> {
+    /// main thread), otherwise with FFmpeg. How its pictures reach the screens is counted in
+    /// `pace`.
+    fn open(path: &Path, lend: Lend, pace: &Arc<pace::Pace>) -> Result<Engine, String> {
         #[cfg(target_os = "macos")]
         if system_first(path) {
-            return mac::Player::open(path).map(Engine::System);
+            return mac::Player::open(path, pace.clone()).map(Engine::System);
         }
-        Engine::open_with_ffmpeg(path, lend)
+        Engine::open_with_ffmpeg(path, lend, pace)
     }
 
-    fn open_with_ffmpeg(path: &Path, lend: Lend) -> Result<Engine, String> {
-        ffmpeg::Player::open(path, lend == Lend::Planes).map(|player| Engine::Ffmpeg(Box::new(player)))
+    fn open_with_ffmpeg(path: &Path, lend: Lend, pace: &Arc<pace::Pace>) -> Result<Engine, String> {
+        ffmpeg::Player::open(path, lend == Lend::Planes, pace.clone()).map(|player| Engine::Ffmpeg(Box::new(player)))
+    }
+
+    /// Its pictures a second, as the file says (0 when it doesn't).
+    fn fps(&self) -> f64 {
+        either!(self, engine => engine.fps())
     }
 
     fn source(&self) -> Source {
@@ -504,6 +513,8 @@ pub struct Player {
     last_position: f64,
     /// A file that took over since this was last asked, or why one lined up couldn't.
     handed_over: Option<Result<PathBuf, String>>,
+    /// How its pictures reach the screens (the next file's too, once it takes over).
+    pace: Arc<pace::Pace>,
 }
 
 impl Player {
@@ -511,16 +522,19 @@ impl Player {
     /// main thread), otherwise with FFmpeg. Its pictures are lent as `lend` says, and so are
     /// those of files lined up to follow it. The error is a sentence for the operator.
     pub fn open(path: &Path, lend: Lend) -> Result<Player, String> {
-        Engine::open(path, lend).map(|engine| Player::with(engine, path, lend))
+        let pace = Arc::default();
+        Engine::open(path, lend, &pace).map(|engine| Player::with(engine, path, lend, pace))
     }
 
     /// Opens a video with FFmpeg, for when the system's player has failed on it (an AV1 video
     /// on a Mac without AV1 hardware, say).
     pub fn open_with_ffmpeg(path: &Path, lend: Lend) -> Result<Player, String> {
-        Engine::open_with_ffmpeg(path, lend).map(|engine| Player::with(engine, path, lend))
+        let pace = Arc::default();
+        Engine::open_with_ffmpeg(path, lend, &pace).map(|engine| Player::with(engine, path, lend, pace))
     }
 
-    fn with(engine: Engine, path: &Path, lend: Lend) -> Player {
+    fn with(engine: Engine, path: &Path, lend: Lend, pace: Arc<pace::Pace>) -> Player {
+        pace.set_fps(engine.fps());
         Player {
             source: Arc::new(Mutex::new(engine.source())),
             engine,
@@ -531,7 +545,21 @@ impl Player {
             volume: 1.0,
             last_position: 0.0,
             handed_over: None,
+            pace,
         }
+    }
+
+    /// Its pictures a second, as the file says (0 when it doesn't).
+    pub fn fps(&self) -> f64 {
+        self.engine.fps()
+    }
+
+    /// How its pictures have reached the screens: once a minute of counting has passed, or at
+    /// once with `now_anyway` (as it stops), what was counted since the last time (see
+    /// [`PaceMinute`]); `None` before then, or when it hasn't played.
+    pub fn take_pace(&mut self, now_anyway: bool) -> Option<PaceMinute> {
+        self.pace.tick(self.engine.playing());
+        self.pace.take(now_anyway)
     }
 
     pub fn uses_ffmpeg(&self) -> bool {
@@ -571,10 +599,13 @@ impl Player {
 
     pub fn play(&mut self) {
         self.engine.play();
+        self.pace.break_run();
+        self.pace.tick(self.engine.playing());
     }
 
     pub fn pause(&mut self) {
         self.engine.pause();
+        self.pace.tick(false);
     }
 
     pub fn playing(&self) -> bool {
@@ -585,6 +616,7 @@ impl Player {
     pub fn seek(&mut self, to: f64) {
         self.engine.seek(to);
         self.last_position = to.max(0.0);
+        self.pace.break_run();
     }
 
     /// How far in it is, in seconds.
@@ -635,7 +667,7 @@ impl Player {
     /// looping as this one does, at its volume. One lined up before is let go. The error is a
     /// sentence for the operator; this one plays on as it was.
     pub fn play_next(&mut self, path: &Path) -> Result<(), String> {
-        let mut next = Engine::open(path, self.lend)?;
+        let mut next = Engine::open(path, self.lend, &self.pace)?;
         next.set_looping(self.looping);
         next.set_volume(self.volume);
         // The system's player decodes the first picture once asked for a time: it is ready
@@ -660,6 +692,7 @@ impl Player {
     /// Keeps it going (a looping video starts again at its end), and hands over to a file lined
     /// up at the end of the pass. Says how soon to call again.
     pub fn tick(&mut self) -> Duration {
+        self.pace.tick(self.engine.playing());
         if self.next.is_some()
             && let Some(wait) = self.hand_over_when_due()
         {
@@ -694,7 +727,7 @@ impl Player {
     fn hand_over(&mut self) {
         let Some((mut next, path)) = self.next.take() else { return };
         if let Some(problem) = next.problem() {
-            match Engine::open_with_ffmpeg(&path, self.lend) {
+            match Engine::open_with_ffmpeg(&path, self.lend, &self.pace) {
                 Ok(mut ffmpeg) if !matches!(next, Engine::Ffmpeg(_)) => {
                     ffmpeg.set_looping(self.looping);
                     ffmpeg.set_volume(self.volume);
@@ -707,6 +740,8 @@ impl Player {
             }
         }
         next.play();
+        self.pace.set_fps(next.fps());
+        self.pace.break_run();
         let old = std::mem::replace(&mut self.engine, next);
         *self.source.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = self.engine.source();
         self.path = path.clone();

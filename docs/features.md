@@ -1795,6 +1795,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   window last looked, without drawing it, and it is drawn then only if they changed. A playing
   video's new pictures draw it for the Program preview, but not in the Edit view, which has no
   preview.
+- **How smoothly a video plays is in the log.** As a video behind the words opens, the log says
+  its pictures a second (`30 fps`, `29.97 fps`). Once a minute while it plays, and for the part
+  of a minute it played as it stops, a `[video]` line says how its pictures reached the screens:
+  how many its time playing called for, how many FFmpeg decoded, how many the screens showed,
+  dropped (never taken, a newer one there first), repeated (one left up for more than its time
+  because the next wasn't taken yet) and late (taken more than a picture's time after it was
+  due), and the longest gap between two. A pause, a seek, a loop going round and the next file
+  taking over count as none of these. Whatever reports on the app can take the same counts, in
+  all, from `sp_video::take_pace_totals`.
 - Screens fill displays by the names System Settings shows ("3DTV", "HP 27f"); on Windows by
   the names the monitors give themselves, as Windows' display settings show them ("Mi TV",
   "Philips FTV"), or by the device name (`\\.\DISPLAY2`) for a monitor that gives none. Two of

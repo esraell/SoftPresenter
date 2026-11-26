@@ -200,6 +200,20 @@ fn file_name(path: &std::path::Path) -> String {
     path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned())
 }
 
+/// Says in the log how the video behind the words has reached the screens (pictures expected,
+/// shown, dropped, repeated and late; see `sp_video::PaceMinute`): once a minute while it plays,
+/// and for the part of a minute it played as it stops (`stopping`).
+fn say_video_pace(player: &mut sp_video::Player, stopping: bool) {
+    if let Some(minute) = player.take_pace(stopping) {
+        applog::event("video", &minute.words(&file_name(player.path())));
+    }
+}
+
+/// A video's pictures a second for the log, as `29.97 fps`, or that the file doesn't say.
+fn fps_said(fps: f64) -> String {
+    if fps > 0.0 { format!("{} fps", sp_video::fps_words(fps)) } else { "its pictures a second not said".to_owned() }
+}
+
 /// What reloading every song from its file did.
 #[derive(Default)]
 struct Reloaded {
@@ -2960,7 +2974,9 @@ impl App {
             {
                 applog::problem("video", &problem);
                 if live == Some(id) {
-                    self.video = None;
+                    if let Some((_, mut player)) = self.video.take() {
+                        say_video_pace(&mut player, true);
+                    }
                     media_changed = true;
                 }
             }
@@ -3098,7 +3114,8 @@ impl App {
             }
             return;
         }
-        if self.video.take().is_some() {
+        if let Some((_, mut player)) = self.video.take() {
+            say_video_pace(&mut player, true);
             applog::event("video", "stopped");
         }
         let Some(running) = self.running.as_mut() else { return };
@@ -3118,7 +3135,12 @@ impl App {
                 };
                 applog::event(
                     "video",
-                    &format!("opened {} with {engine} in {:?}", item.path.display(), started.elapsed()),
+                    &format!(
+                        "opened {} with {engine} in {:?}, {}",
+                        item.path.display(),
+                        started.elapsed(),
+                        fps_said(player.fps())
+                    ),
                 );
                 player.set_looping(loops);
                 // A quiet run (a test) makes no sound: someone may be working at this computer.
@@ -3777,6 +3799,7 @@ impl App {
     fn tick_video(&mut self) -> Option<Instant> {
         let (id, player) = self.video.as_mut()?;
         let wait = player.tick();
+        say_video_pace(player, false);
         if let Some(note) = player.take_note() {
             applog::event("video", &note);
         }
@@ -3810,9 +3833,10 @@ impl App {
             // The system's player couldn't play it (an AV1 video on a Mac without AV1 hardware,
             // say): FFmpeg plays it instead, from where it was.
             if !player.uses_ffmpeg()
-                && let Some((id, _)) = self.video.take()
+                && let Some((id, mut failed)) = self.video.take()
                 && let Some(item) = self.show.media().iter().find(|item| item.id == id).cloned()
             {
+                say_video_pace(&mut failed, true);
                 let loops = self.loops_now(&item);
                 let quiet = self.quiet();
                 let running = self.running.as_mut()?;
@@ -3821,7 +3845,11 @@ impl App {
                         let asked = fallback.ffmpeg_asked().unwrap_or_default();
                         applog::event(
                             "video",
-                            &format!("playing {} with FFmpeg instead ({asked})", item.path.display()),
+                            &format!(
+                                "playing {} with FFmpeg instead ({asked}), {}",
+                                item.path.display(),
+                                fps_said(fallback.fps())
+                            ),
                         );
                         fallback.set_looping(loops);
                         if quiet {
@@ -3841,8 +3869,10 @@ impl App {
             }
             running.home_state.notices.trouble(problem);
             running.home_state.video_live = None;
-            self.video = None;
             running.home_window.request_redraw();
+            if let Some((_, mut player)) = self.video.take() {
+                say_video_pace(&mut player, true);
+            }
             return None;
         }
         if let Some(live) = running.home_state.video_live.as_mut() {
@@ -11204,7 +11234,9 @@ impl App {
             if let Some(output) = self.running.as_mut().and_then(|r| r.output.take()) {
                 output.shutdown();
             }
-            self.video = None;
+            if let Some((_, mut player)) = self.video.take() {
+                say_video_pace(&mut player, true);
+            }
             self.announcing = None;
             self.quitting = Some(Instant::now());
             // The last anonymous report, if reports are on, goes from its own thread while the

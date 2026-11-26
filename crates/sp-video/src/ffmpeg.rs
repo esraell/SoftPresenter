@@ -557,14 +557,18 @@ impl rodio::Source for SoundSource {
 #[derive(Clone)]
 pub struct Frames {
     slot: Arc<Mutex<Slot>>,
+    pace: Arc<crate::pace::Pace>,
 }
 
-/// A picture as FFmpeg gave it: RGBA pixels, or (with its colours) the two planes.
+/// A picture as FFmpeg gave it: RGBA pixels, or (with its colours) the two planes; its time in
+/// the video, and when it was due on screen.
 struct Decoded {
     width: u32,
     height: u32,
     bytes: Vec<u8>,
     planes: Option<Colours>,
+    at: f64,
+    due: Instant,
 }
 
 /// The newest picture, waiting to be taken, and the room of one already shown, to fill again.
@@ -594,6 +598,7 @@ impl Frames {
     /// [`Frames::next_with`]: this takes them and gives nothing.
     pub fn next(&self) -> Option<Frame> {
         let decoded = self.slot.lock().ok()?.frame.take()?;
+        self.pace.taken(decoded.at, decoded.due);
         decoded.planes.is_none().then_some(Frame { width: decoded.width, height: decoded.height, rgba: decoded.bytes })
     }
 
@@ -601,6 +606,7 @@ impl Frames {
     /// with a later picture, not let go.
     pub fn next_with<R>(&self, show: impl FnOnce(Lending<'_>) -> R) -> Option<R> {
         let decoded = self.slot.lock().ok()?.frame.take()?;
+        self.pace.taken(decoded.at, decoded.due);
         let (width, height) = (decoded.width, decoded.height);
         let made = match decoded.planes {
             None => show(Lending::Rows(&crate::Lent::rgba(width, height, &decoded.bytes))),
@@ -675,6 +681,8 @@ pub struct Player {
     /// Something to say in the log once, such as that the graphics chip couldn't decode it.
     note: Option<String>,
     slot: Arc<Mutex<Slot>>,
+    /// How its pictures reach the screens (see [`crate::pace`]).
+    pace: Arc<crate::pace::Pace>,
     /// The sound output, tapped for the screens that send sound (see [`crate::sound`]).
     stream: Option<crate::sound::Output>,
     run: Option<Run>,
@@ -683,7 +691,7 @@ pub struct Player {
 impl Player {
     /// Opens a video, playing from its start, its pictures as planes where `planes` asks for
     /// them and the video allows (see [`colours_of`]). The error is a sentence for the operator.
-    pub fn open(path: &Path, planes: bool) -> Result<Player, String> {
+    pub fn open(path: &Path, planes: bool, pace: Arc<crate::pace::Pace>) -> Result<Player, String> {
         tool("ffmpeg").ok_or_else(|| missing(path))?;
         let info = probe(path)?;
         let stream = if info.sound { crate::sound::Output::open().ok() } else { None };
@@ -705,6 +713,7 @@ impl Player {
             hardware: HARDWARE,
             note: None,
             slot: Arc::default(),
+            pace,
             stream,
             run: None,
         };
@@ -712,9 +721,15 @@ impl Player {
         Ok(player)
     }
 
+    /// Its pictures a second, as the file says (0 when it doesn't).
+    pub fn fps(&self) -> f64 {
+        self.info.fps
+    }
+
     /// Starts FFmpeg from a point, in place of any run before.
     fn start_at(&mut self, from: f64) -> Result<(), String> {
         self.run = None;
+        self.pace.break_run();
         let ffmpeg = tool("ffmpeg").ok_or_else(|| missing(&self.path))?;
         let from = self.info.duration.map_or(from, |length| from.clamp(0.0, (length - 0.05).max(0.0)));
         let clock = Arc::new(Clock::default());
@@ -798,6 +813,7 @@ impl Player {
         });
         let sound_drives = self.info.sound && self.stream.is_some();
         let slot = self.slot.clone();
+        let pace = self.pace.clone();
         let (looping, planes) = (self.looping, self.planes);
         let (clock_v, stop_v, ended_v) = (clock.clone(), stop.clone(), ended.clone());
         let on_hardware = self.hardware.is_some();
@@ -854,8 +870,12 @@ impl Player {
                     let clock = clock_v.elapsed().unwrap_or(0.0);
                     eprintln!("sync picture {due:.3}s clock {clock:.3}s");
                 }
+                // When it was due on screen: as long ago as the clock is past its time.
+                let late = clock_v.elapsed().map_or(0.0, |now| (now - due).max(0.0));
+                let due_at = Instant::now().checked_sub(Duration::from_secs_f64(late)).unwrap_or_else(Instant::now);
+                pace.decoded();
                 if let Ok(mut slot) = slot.lock() {
-                    slot.put(Decoded { width: w, height: h, bytes, planes });
+                    slot.put(Decoded { width: w, height: h, bytes, planes, at: from + due, due: due_at });
                 }
             }
         }));
@@ -917,7 +937,7 @@ impl Player {
     }
 
     pub fn frames(&self) -> Frames {
-        Frames { slot: self.slot.clone() }
+        Frames { slot: self.slot.clone(), pace: self.pace.clone() }
     }
 
     pub fn play(&mut self) {
@@ -1086,7 +1106,7 @@ mod tests {
             .status()
             .expect("FFmpeg runs");
         assert!(made.success(), "the video is made");
-        let mut player = Player::open(&path, false).expect("FFmpeg opens the video");
+        let mut player = Player::open(&path, false, Arc::default()).expect("FFmpeg opens the video");
         player.hardware = Some("no-such-decoder");
         player.start_at(0.0).unwrap();
         let (started, mut note, mut picture) = (Instant::now(), None, None);
@@ -1232,7 +1252,7 @@ mod tests {
             .status()
             .expect("FFmpeg runs");
         assert!(made.success(), "the video is made");
-        let mut player = Player::open(&path, false).expect("FFmpeg opens the video");
+        let mut player = Player::open(&path, false, Arc::default()).expect("FFmpeg opens the video");
         assert!(player.info.sound && player.stream.is_some(), "it has sound, and an output to play it");
         player.set_volume(0.0);
         player.play();
