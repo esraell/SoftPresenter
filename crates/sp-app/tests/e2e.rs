@@ -1361,6 +1361,20 @@ fn a_big_import_on_a_slow_disk_keeps_answering_and_quitting_keeps_every_song() {
         std::fs::write(folder.join(format!("Test Song {n:03}.txt")), words).expect("a song");
     }
     let copy = run.start(&[("SOFTPRESENTER_SLOW_WRITES", &SLOW_MS.to_string())]);
+    // What is timed here is the import's files, so the copy first finishes drawing its first
+    // pictures. On a computer that draws in software (GitHub's Windows machines, on WARP) those
+    // take seconds after it first answers: the window's first drawings took 8.7, 1.4 and 2.9 s
+    // there, each beside the screens' thread's first paints of the operator's preview, and sp
+    // waited behind them; an import sent at once took one of those waits and the status after
+    // it the next. On a Mac it answers at once from the start.
+    let settled = Instant::now();
+    let mut prompt = 0;
+    while prompt < 3 {
+        let took = copy.ok(&["status"]).took;
+        prompt = if took < Duration::from_millis(500) { prompt + 1 } else { 0 };
+        assert!(settled.elapsed() < START_WITHIN, "the copy never answered promptly{}", run.context());
+    }
+    say(&format!("the copy answered promptly after another {:.1} s", settled.elapsed().as_secs_f64()));
     let imported = copy.ok(&["song", "import", &folder.to_string_lossy()]);
     assert_eq!(imported.data["imported"].as_array().map(Vec::len), Some(SONGS), "{}", imported.text);
     // The import doesn't wait for its files: they are written one by one, behind it.
@@ -1377,7 +1391,9 @@ fn a_big_import_on_a_slow_disk_keeps_answering_and_quitting_keeps_every_song() {
     }
     let (written, _) = song_files(&run.data);
     say(&format!("slowest status while saving: {} ms; {written} of {SONGS} songs written", slowest.as_millis()));
-    assert!(slowest < Duration::from_secs(2), "status took {slowest:?} while the songs were saved");
+    // Far less than waiting for the files still to be written (some 250, 40 ms each) and far more
+    // than a status takes at rest (some 75 ms on GitHub's Windows machine).
+    assert!(slowest < Duration::from_secs(2), "status took {slowest:?} while the songs were saved{}", run.context());
     // Quit part way through: it waits until every song is written.
     assert!(
         written < SONGS,
