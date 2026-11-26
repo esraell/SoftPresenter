@@ -5,6 +5,10 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.9.0-dev.21 — 25 November 2026 (development build)
+
 - A songbook's library listed its songs 1, 10, 100, 1000… in the song list once SoftPresenter had been restarted, though it listed them 1, 2, 3… right after it was installed. As listed now always follows the library's own order, in every library, so a songbook's songs stay in number order.
 - A long library or playlist name at the top of the song list, and a long song name in the line under the preview, were cut off in the middle of a letter. They now end in "…", and resting the pointer on them shows the whole name.
 
