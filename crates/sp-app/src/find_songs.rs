@@ -1149,17 +1149,20 @@ fn songbook_sources(path: &Path, place: &Where, known: &Known, until: &dyn Fn() 
                 .collect())
         }
         Err(refused) if listed_unread(path) => {
-            crate::applog::event("find", &unread_line(&file_name, &refused.why));
+            crate::applog::event("find", &unread_line(path, &refused.why));
             Ok(vec![Source { why: Some(refused.why), read: Read::Nothing, ..base(file_name, None) }])
         }
         Err(_) => Ok(Vec::new()),
     }
 }
 
-/// What the log says of a songbook found that couldn't be read: in English, whatever the
-/// window speaks.
-fn unread_line(file_name: &str, why: &load::Why) -> String {
-    format!("{file_name} couldn't be read: {}", why.english())
+/// What the log says of a songbook found that couldn't be read: its ending, size and what it
+/// looks like, never its name (the search comes across files nobody chose), and why, in English
+/// whatever the window speaks.
+fn unread_line(path: &Path, why: &load::Why) -> String {
+    let ending = path.extension().map_or_else(String::new, |ending| format!(".{} ", ending.to_string_lossy()));
+    let kind = crate::applog::file_kind::of(path).map_or_else(String::new, |kind| format!(" ({kind})"));
+    format!("a {ending}file it found couldn't be read{kind}: {}", why.english())
 }
 
 /// What the rows of a file of `count` songbooks say of it, first to last: what is about the
@@ -1720,10 +1723,11 @@ pub(crate) mod tests {
         assert_eq!(right, "Не удалось прочитать: файл обрезан или повреждён (одна из записей длиннее всего файла)");
         assert!(!right.chars().any(|c| c.is_ascii_alphabetic()), "{right}");
         // The log's line says it in English, whatever the window speaks.
-        let logged = with_language(Language::Russian, || unread_line(&name, broken.why.as_ref().unwrap()));
+        let logged = with_language(Language::Russian, || unread_line(&broken.path, broken.why.as_ref().unwrap()));
         assert_eq!(
             logged,
-            "Broken.sps couldn't be read: the file is cut short or damaged (a row is longer than the file)"
+            "a .sps file it found couldn't be read (5 KB, SQLite): the file is cut short or damaged (a row is longer than the file)",
+            "its kind and size, never its name"
         );
         // So does `sp`'s listing.
         let english = with_language(Language::English, || row_words(broken));

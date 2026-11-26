@@ -43,6 +43,28 @@ pub fn lines(ui: &egui::Ui, text: &str, font: FontId, ink: Color32, wrap: f32, l
     ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
 }
 
+/// Words laid out as [`lines`] lays them out, in at most `rows` lines, cut short with "…" past
+/// them.
+pub fn lines_at_most(
+    ui: &egui::Ui,
+    text: &str,
+    font: FontId,
+    ink: Color32,
+    (wrap, line): (f32, f32),
+    rows: usize,
+) -> Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::default();
+    let format = egui::TextFormat { font_id: font, color: ink, line_height: Some(line), ..Default::default() };
+    job.append(text, 0.0, format);
+    job.wrap = egui::text::TextWrapping {
+        max_width: wrap.max(1.0),
+        max_rows: rows,
+        break_anywhere: false,
+        overflow_character: Some('\u{2026}'),
+    };
+    ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
+}
+
 /// Words on one line, cut short with "…" where they would pass `wrap`.
 pub fn one_line(ui: &egui::Ui, text: &str, font: FontId, ink: Color32, wrap: f32) -> Arc<egui::Galley> {
     let mut job = egui::text::LayoutJob::default();

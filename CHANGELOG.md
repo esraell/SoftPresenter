@@ -17,6 +17,7 @@ A What's new window, a find box that keeps its search after a drag, and a Find s
 - **Dropped songs wait.** A song or passage dropped from the find box no longer opens or moves the slides; its row flashes orange instead. What you had open stays open, and the slides stay where they were, even when it goes in above them. The row is brought into view if it landed out of sight; click it when you want it.
 - **Last item reaches the top.** The last item of a playlist can now be scrolled to the top of the slides, like any other. Clicking it in the playlist takes it there, and a faint line under it marks the end of the playlist.
 - **Ticking rows in Find songs.** In Settings › Song files › Find songs on this computer, ticking or unticking a row no longer moves anything on the page. The key always reads Import New Songs, greyed with nothing new ticked, and how many new songs come in is said beside it; before, the key's words and width changed with every tick ("Import 3,518 New Songs"). A database copied while SoftProjector had it open now says so once, under the first of its libraries, instead of under each of them.
+- **Why a songbook couldn't be read, under its name.** In Settings › Song files › Find songs on this computer, why a songbook couldn't be read is now said under its name, across the row, in two lines at most, and the whole of it shows when the pointer is over the row. Before, it was squeezed into a narrow column beside the name, where it could take three lines.
 
 ### Fixed
 

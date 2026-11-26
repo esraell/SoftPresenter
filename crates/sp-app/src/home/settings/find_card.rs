@@ -304,12 +304,16 @@ fn rows(ui: &mut egui::Ui, state: &mut Card, chosen: Option<&[usize]>, can_tick:
 /// the words.
 const COUNTS_SHARE: f32 = 0.45;
 
+/// How many lines a row's reason for not being read takes at most; the whole of it is the row's
+/// hover.
+const WHY_LINES: usize = 2;
+
 /// A row for a source found: its tick box, its name, what and where it is and how many songs,
 /// under them what the operator should know of it (in amber), and at its right how many are new
-/// and already here (in the fixed-width face), that everything is here, or why it couldn't be
-/// read (in amber). One with nothing new, or that couldn't be read, is dimmed and can't be
-/// ticked. `can_tick`: the rows can be ticked now (once the search has ended). True when it was
-/// clicked to tick or untick it.
+/// and already here (in the fixed-width face), or that everything is here. Why one couldn't be
+/// read goes under its name instead, across the row, in amber, in two lines at most. One with
+/// nothing new, or that couldn't be read, is dimmed and can't be ticked. `can_tick`: the rows can
+/// be ticked now (once the search has ended). True when it was clicked to tick or untick it.
 fn source_row(ui: &mut egui::Ui, source: &Source, ticked: bool, can_tick: bool) -> bool {
     let width = ui.available_width();
     let usable = source.can_import();
@@ -317,20 +321,17 @@ fn source_row(ui: &mut egui::Ui, source: &Source, ticked: bool, can_tick: bool) 
     let (name, line, right) = row_words(source);
     let name_ink = if usable { TEXT } else { TEXT_FAINT };
     let warn = source.why.is_some();
-    // What it says at its right: the counts in the fixed-width face, a why in amber.
-    let (right_font, right_ink) = if warn {
-        (FontId::proportional(12.0), CARE)
+    let room = width - 30.0;
+    // The counts at the right, in the fixed-width face; under the words when they don't fit
+    // beside them. A reason for not being read is always under them, across the row.
+    let counts_ink = if usable { TEXT } else { TEXT_FAINT };
+    let right_galley: Arc<egui::Galley> = if warn {
+        parts::lines_at_most(ui, &right, FontId::proportional(12.0), CARE, (room, 16.0), WHY_LINES)
     } else {
-        (fixed_semibold(11.0), if usable { TEXT } else { TEXT_FAINT })
+        parts::words(ui, &right, fixed_semibold(11.0), counts_ink, 0.44, f32::INFINITY)
     };
-    let spacing = if warn { 0.0 } else { 0.44 };
-    let share = (width - 30.0) * COUNTS_SHARE;
-    let whole = parts::words(ui, &right, right_font.clone(), right_ink, spacing, f32::INFINITY);
-    // Counts that don't fit beside the words go under them, whole; a why wraps in its share.
-    let beside = warn || whole.size().x <= share;
-    let right_galley: Arc<egui::Galley> =
-        if warn { parts::words(ui, &right, right_font.clone(), right_ink, 0.0, share.min(300.0)) } else { whole };
-    let text_room = if beside { width - 30.0 - right_galley.size().x - 12.0 } else { width - 30.0 };
+    let beside = !warn && right_galley.size().x <= room * COUNTS_SHARE;
+    let text_room = if beside { room - right_galley.size().x - 12.0 } else { room };
     let name_galley = parts::lines(ui, &name, semibold(13.5), name_ink, text_room, 18.0);
     let line_galley = parts::lines(ui, &line, FontId::proportional(12.0), TEXT_DIM, text_room, 16.0);
     let caution_galley = source
@@ -339,21 +340,24 @@ fn source_row(ui: &mut egui::Ui, source: &Source, ticked: bool, can_tick: bool) 
         .map(|caution| parts::lines(ui, caution, FontId::proportional(12.0), CARE, text_room, 16.0));
     let caution_height = caution_galley.as_ref().map_or(0.0, |galley| 2.0 + galley.size().y);
     let words_height = name_galley.size().y + 2.0 + line_galley.size().y + caution_height;
+    // Under the words: the design's 12 between them and a reason, 4 above counts.
+    let under = if warn { 12.0 } else { 4.0 };
     let inner =
-        if beside { words_height.max(right_galley.size().y) } else { words_height + 4.0 + right_galley.size().y };
+        if beside { words_height.max(right_galley.size().y) } else { words_height + under + right_galley.size().y };
     let sense = if clickable { Sense::click() } else { Sense::hover() };
     let (place, response) = ui.allocate_exact_size(vec2(width, inner + 22.0), sense);
-    let response = response.on_hover_text(source.path.display().to_string());
+    let response = response.on_hover_text(hover_words(source));
     let painter = ui.painter();
     painter.hline(place.x_range(), place.min.y + 0.5, Stroke::new(1.0, LINE));
-    let middle = place.center().y;
-    // The tick box, where there is one to tick (a place that couldn't be looked in has none).
+    let top = place.min.y + 11.0 + if beside { (inner - words_height) / 2.0 } else { 0.0 };
+    // The tick box (a place that couldn't be looked in has none): beside the name and the line
+    // under it when a reason for not being read is under them, else in the row's middle.
     if source.kind != Kind::Place {
+        let middle = if warn { top + words_height / 2.0 } else { place.center().y };
         let tick = Rect::from_center_size(pos2(place.min.x + 8.0, middle), vec2(16.0, 16.0));
         crate::songbooks::paint_tick_box(painter, tick, ticked && usable, !can_tick && usable, clickable);
     }
     let left = place.min.x + 30.0;
-    let top = place.min.y + 11.0 + if beside { (inner - words_height) / 2.0 } else { 0.0 };
     let name_height = name_galley.size().y;
     let line_height = line_galley.size().y;
     painter.galley(pos2(left, top), name_galley, name_ink);
@@ -362,12 +366,20 @@ fn source_row(ui: &mut egui::Ui, source: &Source, ticked: bool, can_tick: bool) 
         painter.galley(pos2(left, top + name_height + 2.0 + line_height + 2.0), caution, CARE);
     }
     let right_at: Pos2 = if beside {
-        pos2(place.max.x - right_galley.size().x, middle - right_galley.size().y / 2.0)
+        pos2(place.max.x - right_galley.size().x, place.center().y - right_galley.size().y / 2.0)
     } else {
-        pos2(left, top + words_height + 4.0)
+        pos2(left, top + words_height + under)
     };
+    let right_ink = if warn { CARE } else { counts_ink };
     painter.galley(right_at, right_galley, right_ink);
     clickable && response.clicked()
+}
+
+/// A row's hover: where it is; for one that couldn't be read, the whole reason first, lead-in and
+/// all, since the row shows two lines of it at most.
+fn hover_words(source: &Source) -> String {
+    let path = source.path.display().to_string();
+    if source.why.is_some() { format!("{}\n{path}", row_words(source).2) } else { path }
 }
 
 #[cfg(test)]
@@ -646,6 +658,104 @@ mod tests {
     }
 
     #[test]
+    fn a_reason_for_not_being_read_goes_under_the_name_across_the_row_in_two_lines_at_most() {
+        use crate::i18n::{Language, with_language};
+        use sp_model::{Damage, Reason};
+        let why = crate::load::Why::Reader(Reason::Table {
+            table: "Songs".to_owned(),
+            why: Box::new(Reason::Damaged(Damage::TableOutsideFile)),
+        });
+        let broken = Source {
+            why: Some(why),
+            ..source("spData.sqlite", Kind::Songbook, (Usual::Downloads, &["old laptop"]), 0, 0)
+        };
+        for language in [Language::English, Language::Russian] {
+            with_language(language, || {
+                let (name, line, reason) = row_words(&broken);
+                // The narrowest Settings window, and a wide one.
+                for width in [820.0, 1400.0] {
+                    let mut state = state_in(Phase::Found);
+                    state.find_songs.sources = vec![broken.clone()];
+                    state.find_songs.ticked = vec![false];
+                    let ctx = crate::studio::tests::styled();
+                    let show = Show::new(Vec::new());
+                    let mut drawn = Painted::default();
+                    for _ in 0..2 {
+                        let raw = egui::RawInput {
+                            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 4000.0))),
+                            ..egui::RawInput::default()
+                        };
+                        let output = ctx.run_ui(raw, |ui| settings_ui(ui, &mut state, &show));
+                        drawn = painted(&output);
+                        output.drop_without_applying_deltas();
+                    }
+                    let find = |words: &str| {
+                        drawn
+                            .texts
+                            .iter()
+                            .find(|(galley, _)| galley.text() == words)
+                            .cloned()
+                            .unwrap_or_else(|| panic!("{language:?} {width}: {words} isn't drawn"))
+                    };
+                    let (name_galley, name_at) = find(&name);
+                    let (line_galley, line_at) = find(&line);
+                    let (why_galley, why_at) = find(&reason);
+                    let say = format!("{language:?} at {width}: {reason}");
+                    // Under the name and the line under it, from the name's left edge.
+                    assert!((why_at.x - name_at.x).abs() < 0.5, "{say}");
+                    assert!(why_at.y >= line_at.y + line_galley.size().y + 8.0, "{say}");
+                    assert!(name_at.y + name_galley.size().y <= line_at.y, "{say}");
+                    // Across the row: wrapped in the room from there to the row's right edge (the
+                    // end of the line drawn over the row).
+                    let row_right = drawn
+                        .rules
+                        .iter()
+                        .filter(|(y, _)| *y <= name_at.y)
+                        .max_by(|a, b| a.0.total_cmp(&b.0))
+                        .map(|(_, right)| *right)
+                        .expect("the line over the row");
+                    assert!((why_at.x + why_galley.job.wrap.max_width - row_right).abs() < 0.5, "{say}");
+                    assert!(why_galley.rows.len() <= 2, "{say}: {} lines", why_galley.rows.len());
+                    if why_galley.elided {
+                        assert!(why_galley.rows[1].text().ends_with('\u{2026}'), "{say}");
+                    }
+                    if language == Language::Russian && width == 820.0 {
+                        assert!(why_galley.elided, "too long for two lines there, so cut short: {say}");
+                    }
+                    // The row is tall enough for it: the line under the row (the foot's) is below
+                    // the reason, with the row's own room under it.
+                    let under_row = drawn
+                        .rules
+                        .iter()
+                        .map(|(y, _)| *y)
+                        .filter(|y| *y > name_at.y)
+                        .min_by(f32::total_cmp)
+                        .expect("the line under the row");
+                    assert!(
+                        why_at.y + why_galley.size().y + 10.0 <= under_row,
+                        "{say}: the reason runs into what follows"
+                    );
+                    // The tick box is beside the name and the line under it, not in the row's
+                    // middle, which the reason has moved down.
+                    let words_middle = (name_at.y + line_at.y + line_galley.size().y) / 2.0;
+                    let tick = drawn
+                        .boxes
+                        .iter()
+                        .find(|tick| tick.max.x < name_at.x && tick.y_range().contains(words_middle))
+                        .unwrap_or_else(|| panic!("{say}: no tick box beside the words"));
+                    assert!(
+                        (tick.center().y - words_middle).abs() < 0.5,
+                        "{say}: the tick box is at {}",
+                        tick.center().y
+                    );
+                }
+                // The whole reason, lead-in and all, is the row's hover, before where it is.
+                assert_eq!(hover_words(&broken), format!("{reason}\nspData.sqlite"));
+            });
+        }
+    }
+
+    #[test]
     fn only_the_rows_in_view_are_laid_out() {
         // 20,000 songbooks found, in the narrowest Settings window: the page scrolls, and only
         // the rows in view are laid out, the others taking their room.
@@ -674,6 +784,32 @@ mod tests {
         assert!(laid_out < 30, "{laid_out} rows were laid out");
         // Its count is worked out once for the ticks as they are.
         assert_eq!(state.find_songs.new_ticked(), 10);
+    }
+
+    /// What a frame drew: every piece of text, with where its top left is; every level line, by
+    /// its height and where it ends at the right; and every tick box (a square of 16).
+    #[derive(Default)]
+    struct Painted {
+        texts: Vec<(Arc<egui::Galley>, Pos2)>,
+        rules: Vec<(f32, f32)>,
+        boxes: Vec<Rect>,
+    }
+
+    fn painted(output: &egui::FullOutput) -> Painted {
+        fn walk(shape: &egui::Shape, into: &mut Painted) {
+            match shape {
+                egui::Shape::Text(text) => into.texts.push((text.galley.clone(), text.pos)),
+                egui::Shape::LineSegment { points: [a, b], .. } if (a.y - b.y).abs() < 0.01 => {
+                    into.rules.push((a.y, a.x.max(b.x)));
+                }
+                egui::Shape::Rect(square) if square.rect.size() == vec2(16.0, 16.0) => into.boxes.push(square.rect),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let mut into = Painted::default();
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut into));
+        into
     }
 
     #[test]

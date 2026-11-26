@@ -347,7 +347,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   stopped search's thread to end, so two never look at once. A search that ended before it had
   looked everywhere (stopped, out of time, past its files, or gone wrong) says which over what it
   found, and `sp` says so too. A source with nothing new is
-  dimmed and unticked, so is one that can't be read, with the importer's reason in amber; one
+  dimmed and unticked, so is one that can't be read, with the importer's reason in amber under
+  its name, across the row, in two lines at most (the whole of it under the pointer), and a line
+  in the log giving the file's ending, size and kind, never its name; one
   cut short says so under its line in amber and can still be ticked, and so does a database
   copied while SoftProjector had it open, once, under the first of its libraries; and a
   place the computer won't let it look in is a row saying so. Import New Songs keeps its words

@@ -1914,12 +1914,14 @@ fn songs_found_on_the_computer_are_listed_and_only_their_new_songs_come_in() {
     let why = "the file is cut short or damaged (a row is longer than the file)";
     assert_eq!(broken["why"].as_str(), Some(why), "{}", russian.text);
     assert!(russian.text.contains(&format!("be read: {why}")), "{}", russian.text);
+    // The log names neither the file nor its folder, which the search only came across.
     let log = run.log();
-    let said: Vec<&str> = log.lines().filter(|line| line.contains("[find] Broken.sps")).collect();
+    let said: Vec<&str> = log.lines().filter(|line| line.contains("[find] a .sps file it found")).collect();
     assert!(said.len() >= 2, "a line each time it was found: {log}");
     for line in said {
-        assert!(line.ends_with(&format!("Broken.sps couldn't be read: {why}")), "{line}");
+        assert!(line.ends_with(&format!("couldn't be read (5 KB, SQLite): {why}")), "{line}");
     }
+    assert!(!log.lines().any(|line| line.contains("[find]") && line.contains("Broken")), "{log}");
     copy.quit().assert_clean(&run);
 }
 
