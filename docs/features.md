@@ -407,7 +407,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   (deleting the one in front opens the one before it). Choosing puts the list back, and so
   does Escape, which then clears nothing on the screens. A library lists its songs, each with
   how many slides it has (and, in All Songs, the library it is in); at the foot are the order they
-  are listed in (**As listed, A–Z, Longest**, kept between runs), **New song** and a filter. A
+  are listed in (**As listed, A–Z, Longest**, kept between runs; As listed is the library's own
+  order, a songbook's by number), **New song** and a filter. A
   song's ⋯, or a right-click, opens its menu. While songs from the list are dragged the chooser
   shows above it, so they can be dropped on a playlist or a library (a result dragged from the
   find box goes only into the list shown, with no chooser); a new song made while a library

@@ -3341,25 +3341,32 @@ fn library_of<'a>(state: &'a HomeState, key: &str) -> Option<&'a str> {
 
 /// The songs the left column lists: how many the library (or All Songs) has, and those whose
 /// titles have what is typed in the filter, by their place among the songs, in the order
-/// chosen.
+/// chosen. A library's own order is the order it lists its songs in (a songbook's by number),
+/// whatever order the songs were loaded in; All Songs' is the order the songs are in.
 fn song_list(show: &Show, state: &HomeState, library: Option<&crate::libraries::Library>) -> crate::kept::SongList {
     let hidden = state.hidden_slots();
     let listed = |index: usize| !hidden.contains(&index) && !state.removed_songs.contains(&index);
-    // The songs in the library shown, found once with a set rather than row by row.
-    let in_set: Option<std::collections::HashSet<usize>> = library.map(|library| {
-        let wanted: std::collections::HashSet<&str> = library.songs.iter().map(String::as_str).collect();
-        state.song_keys.iter().enumerate().filter(|(_, key)| wanted.contains(key.as_str())).map(|(at, _)| at).collect()
+    // The songs in the library shown, each with its place in it, found once with a map rather
+    // than row by row.
+    let in_library: Option<std::collections::HashMap<usize, usize>> = library.map(|library| {
+        let mut places = std::collections::HashMap::with_capacity(library.songs.len());
+        for (place, key) in library.songs.iter().enumerate() {
+            places.entry(key.as_str()).or_insert(place);
+        }
+        state.song_keys.iter().enumerate().filter_map(|(at, key)| Some((at, *places.get(key.as_str())?))).collect()
     });
-    let in_library = |index: usize| in_set.as_ref().is_none_or(|set| set.contains(&index));
     let mut total = 0;
     let mut shown = Vec::new();
     for (index, song) in show.presentations().iter().enumerate() {
-        if listed(index) && in_library(index) {
+        if listed(index) && in_library.as_ref().is_none_or(|places| places.contains_key(&index)) {
             total += 1;
             if matches_filter(&song.title, &state.filter) {
                 shown.push(index);
             }
         }
+    }
+    if let Some(places) = &in_library {
+        shown.sort_by_key(|at| places.get(at).copied());
     }
     state.song_order.sort(show, &mut shown);
     // In the list's own order, a copy made this run comes just after its original.
@@ -7269,6 +7276,68 @@ pub mod tests {
     }
 
     #[test]
+    fn a_library_read_at_start_up_is_listed_in_its_own_order_not_the_order_songs_were_loaded_in() {
+        // A songbook's songs, numbered, as start-up loads them from the Songs folder: by title as
+        // text, so 10 comes before 2. Each is known by its id, as a song in the Songs folder is.
+        let numbers = [1, 2, 3, 10, 20, 100];
+        let mut songs: Vec<sp_model::Presentation> = numbers
+            .iter()
+            .map(|n| {
+                let slides = (0..*n % 7 + 1).map(|line| format!("Line {line}\n")).collect::<Vec<_>>().join("\n");
+                sp_model::parse_song_text(&format!("{n}. Song {n}"), &slides)
+            })
+            .collect();
+        songs.sort_by_key(|song| song.title.to_lowercase());
+        let loaded: Vec<&str> = songs.iter().map(|song| song.title.as_str()).collect();
+        assert_eq!(loaded, ["1. Song 1", "10. Song 10", "100. Song 100", "2. Song 2", "20. Song 20", "3. Song 3"]);
+        let keys: Vec<String> = songs.iter().map(|song| song.id.to_string()).collect();
+        let key_of = |n: usize| {
+            let at = songs.iter().position(|song| song.title == format!("{n}. Song {n}")).unwrap();
+            serde_json::Value::String(keys[at].clone())
+        };
+        // The library, read from its file, lists them by number, as the songbook has them.
+        let file = serde_json::json!({
+            "format": crate::libraries::FORMAT,
+            "version": crate::libraries::VERSION,
+            "libraries": [{
+                "id": sp_model::Uuid::new_v4(),
+                "name": "Songbook",
+                "songs": numbers.iter().map(|n| key_of(*n)).collect::<Vec<_>>(),
+            }],
+        });
+        let libraries = crate::libraries::from_json(&file.to_string()).unwrap();
+        let show = Show::new(songs.iter().cloned().map(Arc::new).collect());
+        let mut state = HomeState { song_keys: keys, libraries, ..HomeState::default() };
+        let titles = |state: &HomeState| -> Vec<String> {
+            song_list(&show, state, Some(&state.libraries[0]))
+                .shown
+                .iter()
+                .map(|at| show.presentations()[*at].title.clone())
+                .collect()
+        };
+        // As listed: the library's order, as right after it was installed.
+        assert_eq!(
+            titles(&state),
+            ["1. Song 1", "2. Song 2", "3. Song 3", "10. Song 10", "20. Song 20", "100. Song 100"]
+        );
+        // The other orders are as they were: by title, and the most slides first (songs with as
+        // many in the library's order).
+        state.song_order = crate::kept::SongOrder::AZ;
+        assert_eq!(titles(&state), loaded);
+        state.song_order = crate::kept::SongOrder::Longest;
+        assert_eq!(
+            titles(&state),
+            ["20. Song 20", "3. Song 3", "10. Song 10", "2. Song 2", "100. Song 100", "1. Song 1"]
+        );
+        // The filter still applies, in the library's order.
+        state.song_order = crate::kept::SongOrder::Listed;
+        state.filter = "0".to_owned();
+        assert_eq!(titles(&state), ["10. Song 10", "20. Song 20", "100. Song 100"]);
+        // All Songs is as the songs were loaded.
+        assert_eq!(song_list(&show, &state, None).shown, [1, 2, 4]);
+    }
+
+    #[test]
     fn a_sweep_goes_on_picking_when_the_row_it_started_on_has_scrolled_out_of_view() {
         let list = Rect::from_min_size(pos2(0.0, 0.0), vec2(200.0, 300.0));
         let mut state = HomeState {
@@ -7751,7 +7820,8 @@ pub mod tests {
         // In the library it is in, just after it; not in the other.
         assert_eq!(state.libraries[0].songs, ["three", "two", "two copy", "one"]);
         assert!(state.libraries[1].songs.is_empty() && state.libraries_changed);
-        assert_eq!(song_list(&show, &state, Some(&state.libraries[0])).shown, [0, 1, 3, 2]);
+        // Listed there in the library's own order: Three, Two, its copy, One.
+        assert_eq!(song_list(&show, &state, Some(&state.libraries[0])).shown, [2, 1, 3, 0]);
         // A new item just after Two's, open, so the left column stays on the playlist.
         let names: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
         assert_eq!(names, ["One", "Two", "Two copy", "Three"]);
