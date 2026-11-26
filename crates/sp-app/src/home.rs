@@ -10685,34 +10685,29 @@ mod tests {
         let (at_base, zoom, pixels) = columns_in(&show, base);
         assert_eq!(at_base.len(), 3, "the three columns: {at_base:?}");
         assert_eq!((zoom, pixels), (1.0, 2.0), "the base size is drawn as it always was");
-        // A window 1.6 times the base each way: the same layout, every column 1.6 times as wide
-        // and tall, its share of the window the same, at 3.2 pixels to the point (the words drawn
+        // A window 1.25 times the base each way: the same layout, every column 1.25 times as wide
+        // and tall, its share of the window the same, at 2.5 pixels to the point (the words drawn
         // afresh at that size, not stretched).
-        let big = base * 1.6;
+        let big = base * 1.25;
         let (at_big, zoom, pixels) = columns_in(&show, big);
         assert_eq!(at_big.len(), 3, "{at_big:?}");
-        assert!((zoom - 1.6).abs() < 0.001 && (pixels - 3.2).abs() < 0.001, "{zoom} {pixels}");
+        assert!((zoom - 1.25).abs() < 0.001 && (pixels - 2.5).abs() < 0.001, "{zoom} {pixels}");
         for (base, big) in at_base.iter().zip(&at_big) {
-            assert!((big.width() - base.width() * 1.6).abs() < 2.0, "{base:?} → {big:?}");
-            assert!((big.height() - base.height() * 1.6).abs() < 2.0, "{base:?} → {big:?}");
+            assert!((big.width() - base.width() * 1.25).abs() < 2.0, "{base:?} → {big:?}");
+            assert!((big.height() - base.height() * 1.25).abs() < 2.0, "{base:?} → {big:?}");
         }
         for (base, big) in shares(&at_base, base).iter().zip(shares(&at_big, big)) {
             assert!((base - big).abs() < 0.002, "{base} vs {big}");
         }
-        // The 5K iMac full screen, 2560 × 1440: the side columns take nearly their share of the
-        // base layout, not the thin strips they were at 100%.
+        // The 5K iMac full screen, 2560 × 1440: Automatic stops at 125% (in proportion it would be
+        // 160%), so the side columns are a quarter wider than at 100%, the middle taking the rest.
         let imac = egui::vec2(2560.0, 1440.0);
         let (at_imac, zoom, _) = columns_in(&show, imac);
-        assert!((zoom - 1.6).abs() < 0.001, "{zoom}");
-        let (base_shares, imac_shares) = (shares(&at_base, base), shares(&at_imac, imac));
+        assert!((zoom - 1.25).abs() < 0.001, "{zoom}");
+        let imac_shares = shares(&at_imac, imac);
         for side in [0, 2] {
             let (before, now) = (at_base[side].width() / imac.x, imac_shares[side]);
-            assert!(now > before * 1.55, "side column {side}: {now} of the window, {before} at 100%");
-            assert!(
-                now > base_shares[side] * 0.85,
-                "side column {side}: {now}, {} at the base size",
-                base_shares[side]
-            );
+            assert!(now > before * 1.2, "side column {side}: {now} of the window, {before} at 100%");
         }
         // Small windows are laid out as they always were.
         let (small, zoom, _) = columns_in(&show, egui::vec2(1100.0, 700.0));

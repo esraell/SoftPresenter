@@ -1873,9 +1873,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **Interface size** (Settings › Slides › In your window, or `sp settings set interface_size=`):
   how large the operator's windows draw everything. **Automatic**, the usual, draws a window
   bigger than 1440 × 900 points (the size the layout was drawn for) larger in proportion, by the
-  side it has least of, in steps of 5% up to 175%: a full-screen window on a 27-inch iMac
-  (2560 × 1440) draws at 160%, a 1920 × 1080 one at 120%, so the library, the preview, the layer
-  keys and the tabs keep their share of the window instead of a huge middle between thin columns;
+  side it has least of, in steps of 5% up to 125%: a 1920 × 1080 window draws at 120%, and a
+  full-screen window on a 27-inch iMac (2560 × 1440) at 125% (160% in proportion was too much),
+  so the library, the preview, the layer keys and the tabs grow instead of thin columns round a
+  huge middle;
   at 1440 × 900 or smaller nothing changes. Or a fixed **100%**, **125%**, **150%** or **175%**,
   never more than keeps the window's layout at its least size (1100 × 700 points): the row says
   what it draws at now ("Now 110%, as large as the main window has room for"). It is the

@@ -1,7 +1,7 @@
 //! How large the operator's windows draw everything (Settings › Slides › In your window ›
 //! Interface size). Automatic, the usual, draws a window bigger than the size the layout was
-//! drawn for (1440 × 900 points) larger in proportion, so a big screen shows the same layout,
-//! bigger, instead of the same narrow side columns round a huge middle; a fixed 100% to 175%
+//! drawn for (1440 × 900 points) larger in proportion, up to 125%, so a big screen shows the same
+//! layout, bigger, instead of the same narrow side columns round a huge middle; a fixed 100% to 175%
 //! draws everything that much larger, as far as the window has room.
 //!
 //! The toolkit's own zoom does it: every window is laid out in points as before, at more pixels
@@ -17,8 +17,10 @@ use egui::{Vec2, vec2};
 pub const BASE: Vec2 = vec2(1440.0, 900.0);
 /// The home window's least size, in points: no factor lays it out smaller than this.
 pub const HOME_LEAST: Vec2 = vec2(1100.0, 700.0);
-/// The most Automatic goes to, the same as the largest fixed size.
-pub const LARGEST: f32 = 1.75;
+/// The most Automatic goes to. The owner, on the 5K iMac full screen at 160%: "the scaling is a
+/// bit too much, there needs to be a limit on how much the ui should scale, i think we move it
+/// down". Larger stays a choice (150%, 175%).
+pub const AUTOMATIC_LARGEST: f32 = 1.25;
 /// The factor moves in steps of 5%, so a window a little bigger than the base keeps 100%, and a
 /// drag across a large screen changes it a few times, not at every point.
 const STEP: f32 = 0.05;
@@ -88,9 +90,9 @@ pub fn room(window: Vec2, least: Vec2) -> f32 {
 }
 
 /// Automatic: as much larger as the window is than the base size, in the direction it has least
-/// of (a wide, short window is not drawn taller than it is), from 100% to [`LARGEST`].
+/// of (a wide, short window is not drawn taller than it is), from 100% to [`AUTOMATIC_LARGEST`].
 pub fn automatic(window: Vec2) -> f32 {
-    stepped((window.x / BASE.x).min(window.y / BASE.y)).min(LARGEST)
+    stepped((window.x / BASE.x).min(window.y / BASE.y)).min(AUTOMATIC_LARGEST)
 }
 
 /// The factor the home window draws at, for its size in points (the window's own, not the
@@ -220,13 +222,14 @@ mod tests {
         }
         // Bigger, by the side it has least of, in steps of 5%, rounded down.
         assert!(close(auto(1920.0, 1080.0), 1.2), "{}", auto(1920.0, 1080.0));
-        assert!(close(auto(2560.0, 1440.0), 1.6), "the 5K iMac full screen: {}", auto(2560.0, 1440.0));
-        assert!(close(auto(2560.0, 1415.0), 1.55), "under its menu bar: {}", auto(2560.0, 1415.0));
+        assert!(close(auto(1800.0, 1125.0), 1.25), "{}", auto(1800.0, 1125.0));
+        // No larger than 125%: the 5K iMac full screen would be 160% in proportion.
+        assert!(close(auto(2560.0, 1440.0), AUTOMATIC_LARGEST), "the 5K iMac full screen: {}", auto(2560.0, 1440.0));
+        assert!(close(auto(2560.0, 1415.0), AUTOMATIC_LARGEST), "under its menu bar: {}", auto(2560.0, 1415.0));
         assert!(close(auto(1728.0, 1117.0), 1.2), "{}", auto(1728.0, 1117.0));
         // A wide, short window grows only as much as its height allows.
         assert!(close(auto(3440.0, 1000.0), 1.1), "{}", auto(3440.0, 1000.0));
-        // Never past the largest fixed size.
-        assert!(close(auto(3840.0, 2160.0), LARGEST), "{}", auto(3840.0, 2160.0));
+        assert!(close(auto(3840.0, 2160.0), AUTOMATIC_LARGEST), "{}", auto(3840.0, 2160.0));
         // Just over the base is still 100%: no step for a few points.
         assert!(close(auto(1480.0, 930.0), 1.0));
     }
@@ -253,7 +256,7 @@ mod tests {
                 for h in (600..=2400).step_by(29) {
                     let window = vec2(w as f32, h as f32);
                     let zoom = home_zoom(size, window);
-                    assert!((1.0..=LARGEST + 0.001).contains(&zoom), "{size:?} {window:?}: {zoom}");
+                    assert!((1.0..=1.751).contains(&zoom), "{size:?} {window:?}: {zoom}");
                     if zoom > 1.0 {
                         let laid_out = window / zoom;
                         assert!(laid_out.x >= HOME_LEAST.x - 0.1 && laid_out.y >= HOME_LEAST.y - 0.1);
@@ -294,7 +297,7 @@ mod tests {
         assert!(close(picture_scale(1.6), 1.0));
         assert!(close(picture_scale(2.0), 1.0), "Retina at 100%: as today");
         assert!(close(picture_scale(2.4), 1.25));
-        assert!(close(picture_scale(3.2), 1.5), "the 5K iMac at 160%");
+        assert!(close(picture_scale(3.2), 1.5), "a Retina display at 160%");
         assert!(close(picture_scale(3.5), 1.75));
         assert!(close(picture_scale(6.0), 2.0));
         assert_eq!(scaled((640, 360), 1.0), (640, 360));
