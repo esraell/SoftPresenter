@@ -9208,9 +9208,14 @@ impl App {
             static STARTED: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
             let started = *STARTED.get_or_init(Instant::now);
             let wait = std::env::var("SOFTPRESENTER_CAPTURE_AFTER").ok().and_then(|s| s.parse::<f32>().ok());
-            // The picture waits for the media bin's pictures, read on their own threads.
+            // The picture waits for the media bin's pictures, read on their own threads, and for
+            // the fade to what was put on screen to end (with a moment for the screens' last
+            // picture of it), so the preview shows it whole: taken at the 30th frame, it often
+            // caught the dissolve part way, the preview's picture dark.
+            let faded = running.preview_changed.elapsed().as_secs_f32() >= running.home_state.dissolve_seconds() + 0.25;
             let waited = wait.is_none_or(|seconds| started.elapsed().as_secs_f32() >= seconds)
-                && !self.bin_pictures.any_coming();
+                && !self.bin_pictures.any_coming()
+                && faded;
             if running.frames == GO_LIVE_AT {
                 commands.push(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 2 }));
                 // Testing aid: SOFTPRESENTER_CAPTURE_MEDIA=N puts the media bin's Nth item on
