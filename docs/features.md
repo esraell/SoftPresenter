@@ -39,7 +39,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   clicking Add again while one is open brings it back in front). One is open at a time; a window
   that leads to another (Export's question about videos, then where to save) goes before a
   question that waits its turn. What is chosen goes to the slide, theme (by the theme itself,
-  wherever it is in the list) or media playlist it was asked for, if that is still open.
+  wherever it is in the list) or media playlist it was asked for, if that is still open. On
+  Windows the questions show their own buttons ("A Folder…", "Files…", "Cancel"), as task
+  dialogs.
 - **Resizing the window** redraws the operator's window at its new size as it is dragged, so the
   layout reflows live and nothing is stretched. If setting the window up for a new size ever
   holds the graphics card long enough to risk the audience screens' pictures, the rest of that

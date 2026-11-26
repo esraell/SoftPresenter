@@ -32,8 +32,10 @@ egui-winit = "=0.37.0"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # Playing audio files: walk-in music and other tracks.
 rodio = { version = "0.21", default-features = false, features = ["playback", "mp3", "wav", "flac", "mp4", "vorbis", "symphonia-aiff"] }
-# The system's own window for choosing files to add.
-rfd = "0.17"
+# The system's own window for choosing files to add, and its questions. On Windows the questions
+# are task dialogs with the app's own button words (common-controls-v6), which need version 6 of
+# the common controls: sp-app's build.rs puts the manifest that asks for it into the program.
+rfd = { version = "0.17", features = ["common-controls-v6"] }
 # Moving a deleted song's file to the Trash rather than erasing it.
 trash = "5"
 # Song packs (.sppack): zip files, written and read with deflate only, in Rust (no other

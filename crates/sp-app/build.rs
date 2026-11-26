@@ -1,6 +1,11 @@
-//! Puts the app's icon into the Windows program, so the file, the taskbar and the window show
-//! it. Needs `windres` (the mingw-w64 toolchain's, or a native GNU one); without it the program
-//! is built without an icon and says so. Does nothing for any other system.
+//! Puts the app's icon and its manifest into the Windows program. The manifest asks Windows for
+//! version 6 of its common controls, which the app's questions need: rfd shows them with
+//! TaskDialogIndirect (its `common-controls-v6` feature), so they carry the app's own button
+//! words ("A Folder…", "Files…") rather than Yes, No and Cancel, and that function exists only in
+//! version 6. Without the manifest Windows wouldn't start the program at all, so it is never left
+//! out: with the GNU toolchain both go in through `windres` (the mingw-w64 toolchain's, or a native
+//! GNU one), and the build stops if there is none; with Microsoft's linker the manifest is handed
+//! to it to embed (the icon isn't put in there yet). Does nothing for any other system.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -34,26 +39,54 @@ fn list_locales() {
     std::fs::write(out.join("locales.rs"), text).expect("write locales.rs");
 }
 
+/// The program's manifest: version 6 of the common controls, and nothing else (the window
+/// library sets the program's DPI awareness itself, as it starts).
+const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
+    </dependentAssembly>
+  </dependency>
+</assembly>
+"#;
+
 fn main() {
     list_locales();
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../assets/icons/SoftPresenter.ico");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows")
-        || std::env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("gnu")
-    {
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
     let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"));
+    let manifest = out.join("softpresenter.manifest");
+    std::fs::write(&manifest, MANIFEST).expect("write the program's manifest");
+    match std::env::var("CARGO_CFG_TARGET_ENV").as_deref() {
+        // As Microsoft's linker takes a manifest: embedded, from this file, without the one it
+        // would write itself (which says nothing this needs).
+        Ok("msvc") => {
+            let manifest = manifest.canonicalize().expect("the manifest just written");
+            println!("cargo:rustc-link-arg-bins=/MANIFEST:EMBED");
+            println!("cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}", manifest.display());
+            println!("cargo:rustc-link-arg-bins=/MANIFESTUAC:NO");
+        }
+        Ok("gnu") => resources_with_windres(&out, &manifest),
+        other => panic!("no way to put the manifest into a Windows program built with {other:?}"),
+    }
+}
+
+/// The icon and the manifest, as a resource object made by `windres` and linked into the program.
+fn resources_with_windres(out: &std::path::Path, manifest: &std::path::Path) {
     let icon = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
         .join("../../assets/icons/SoftPresenter.ico");
     let script = out.join("softpresenter.rc");
     let object = out.join("softpresenter-icon.o");
     // Backslashes would be taken for escapes in the resource script.
     let icon = icon.to_string_lossy().replace('\\', "/");
-    if std::fs::write(&script, format!("1 ICON \"{icon}\"\n")).is_err() {
-        println!("cargo:warning=could not write the icon script; building without an icon");
-        return;
-    }
+    let manifest = manifest.to_string_lossy().replace('\\', "/");
+    // 1 ICON: the program's icon. 1 24: its manifest (CREATEPROCESS_MANIFEST_RESOURCE_ID,
+    // RT_MANIFEST), which Windows reads as it starts the program.
+    std::fs::write(&script, format!("1 ICON \"{icon}\"\n1 24 \"{manifest}\"\n")).expect("write the resource script");
     let tools = if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("x86_64") {
         ["x86_64-w64-mingw32-windres", "windres"]
     } else {
@@ -66,5 +99,8 @@ fn main() {
             return;
         }
     }
-    println!("cargo:warning=windres was not found; building without an icon");
+    panic!(
+        "windres was not found: it puts the manifest into the Windows program, without which Windows won't start it \
+         (install the mingw-w64 toolchain)"
+    );
 }
