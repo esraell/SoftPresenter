@@ -11555,6 +11555,73 @@ mod tests {
         }
     }
 
+    /// The list keys' choice of names or pictures comes from the left column's own width, which
+    /// is fixed in points: it is the same at window widths of 1100, 1280 and 1440, and at each
+    /// Interface size it is decided once, the same in every frame, and as the test's own measure
+    /// at that size says. (Letters are measured at the size's pixels, so one size may differ
+    /// from another by a hair; within a size nothing flips.)
+    #[test]
+    fn the_list_keys_choice_holds_as_the_window_is_resized_and_within_an_interface_size() {
+        use crate::i18n::{Language, with_language};
+        use crate::interface_size::{InterfaceSize, home_zoom};
+        let show = three_songs();
+        // One frame's choice and the room it was made for, in a window `window` points big
+        // drawn at `zoom`.
+        let frames = |language: Language, window: egui::Vec2, zoom: f32, count: usize| {
+            let ctx = crate::studio::tests::styled();
+            ctx.set_zoom_factor(zoom);
+            let editing = EditDraft::of(&show, SlideRef { presentation: 0, slide: 0 });
+            let mut state = HomeState { editing, ..HomeState::default() };
+            let mut seen = Vec::new();
+            with_language(language, || {
+                for n in 1..=count {
+                    let raw = RawInput {
+                        screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), window / zoom)),
+                        time: Some(n as f64 * 0.1),
+                        ..RawInput::default()
+                    };
+                    let output = ctx.run_ui(raw, |ui| {
+                        home_ui(ui, &show, &mut state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+                    });
+                    output.drop_without_applying_deltas();
+                    let drawn =
+                        ctx.data(|data| data.get_temp::<([Rect; 5], bool, f32)>(crate::studio::list_keys_drawn_id()));
+                    let (_, named, across) = drawn.expect("the keys are drawn");
+                    seen.push((named, across));
+                }
+            });
+            seen
+        };
+        for language in Language::ALL {
+            // Resizing: the column is as wide in points whatever the window, and so is the choice.
+            let sizes = [vec2(1100.0, 700.0), vec2(1280.0, 800.0), vec2(1440.0, 900.0)];
+            let resized: Vec<(bool, f32)> = sizes.iter().map(|window| frames(language, *window, 1.0, 2)[1]).collect();
+            assert!(resized.iter().all(|seen| *seen == resized[0]), "{language:?}: {resized:?}");
+            // Each Interface size, in a window with room for them all: one choice, every frame.
+            let window = vec2(2560.0, 1440.0);
+            for size in InterfaceSize::ALL {
+                let zoom = home_zoom(size, window);
+                let seen = frames(language, window, zoom, 6);
+                assert!(seen.iter().all(|frame| *frame == seen[0]), "{language:?} {size:?}: it flips: {seen:?}");
+                assert_eq!(seen[0].1, resized[0].1, "{language:?} {size:?}: the column's width in points");
+                // As this size's own letters measure.
+                let names = with_language(language, || {
+                    [t("edit.list.add", "Add"), t("edit.list.duplicate", "Duplicate"), t("edit.list.delete", "Delete")]
+                });
+                let measuring = crate::studio::tests::styled();
+                measuring.set_zoom_factor(zoom);
+                let mut words = 0.0;
+                let measured = measuring.run_ui(RawInput::default(), |ui| {
+                    let font = crate::studio::list_key_font();
+                    words = names.iter().map(|name| crate::studio::widest(ui, &[name], &font)).sum::<f32>();
+                });
+                measured.drop_without_applying_deltas();
+                let room = seen[0].1 - 16.0 - 2.0 * 26.0 - 4.0 * 4.0;
+                assert_eq!(seen[0].0, words + 18.0 <= room, "{language:?} {size:?}: {words} in {room}");
+            }
+        }
+    }
+
     /// The song editor's Objects list is dragged the same way, with no rule about text boxes:
     /// a shape goes between the main language and the translation, one undo step.
     #[test]
