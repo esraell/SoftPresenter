@@ -1671,6 +1671,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   text box's tab has Holds: which of a slide's words it takes (the main language, the
   translation, a reference). With nothing picked on a song's slide, the column
   shows the slide's own Label, Template, Go to Next and notes.
+- The keys over the Edit view's lists (Add, Duplicate, Delete, ↑, ↓) show their names where the
+  three fit the column at the usual size. In a language whose words are too long for that, all
+  five are picture keys that say their names under the pointer; the lettering is never made
+  smaller to fit.
 - **Linked Text**: a text box can show the clock, the date, a timer, the song's title, the
   slide's group, label or notes, the next slide's words, the stage message or the copyright line
   instead of its own words; the screens keep the time and timers up to date. Linked Text in the

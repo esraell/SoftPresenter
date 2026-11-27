@@ -85,6 +85,7 @@ A What's new window, a search that stays after a drag, AirPlay by name, a tidier
 - **Pictures go under the words.** A picture or video added in the Edit view goes just above the slide's background (pictures, videos or a full-slide fill), under the words.
 - **A thin white outline.** A picked box in the Edit view is outlined in thin white.
 - **Add toolbar in the editor.** The Edit view's Add keys are now one floating bar over the slide, each with a picture and a name. Linked Text is among them. It takes the place of the row of word buttons, and of the Add menu over a stage layout; in a small window each key shows its picture alone and says its name under the pointer.
+- **List keys in other languages.** In the Edit view, where Add, Duplicate and Delete don't fit over a list, all five keys there now show pictures. Each says its name under the pointer. Before, their lettering was made smaller to fit, so they read as a different kind of key.
 - **Slide settings in the editor.** With nothing picked on a song's slide, the Edit view's right side now shows the slide's Label, Template, Go to Next and notes. Before, these were only on the slide's right-click menu.
 - **Change a shape.** A shape's tab in the Edit view has a menu to make it another shape, keeping its place, size and colours.
 - **Rename and Duplicate keys.** The Box tab in the Edit view has Rename and Duplicate beside Delete.

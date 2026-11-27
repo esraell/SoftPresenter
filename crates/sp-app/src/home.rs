@@ -11407,6 +11407,91 @@ mod tests {
         }
     }
 
+    /// The keys over the Edit view's lists (Add, Duplicate, Delete, ↑, ↓), in every language at
+    /// the smallest window and the usual one: the three names all show, at the app's key size,
+    /// or none does and all five keys are 28-point pictures. Never some of each, and never
+    /// smaller lettering.
+    #[test]
+    fn the_list_keys_show_their_names_at_full_size_or_are_all_pictures() {
+        use crate::i18n::{Language, with_language};
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, f32, Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => {
+                    let size = text.galley.job.sections.first().map_or(0.0, |section| section.format.font_id.size);
+                    into.push((text.galley.text().to_owned(), size, text.visual_bounding_rect()));
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let show = three_songs();
+        let mut forms = Vec::new();
+        for language in Language::ALL {
+            for window in [vec2(1100.0, 700.0), vec2(1440.0, 900.0)] {
+                let at = format!("{language:?} in {window:?}");
+                let ctx = crate::studio::tests::styled();
+                let editing = EditDraft::of(&show, SlideRef { presentation: 0, slide: 0 });
+                let mut state = HomeState { editing, ..HomeState::default() };
+                let mut texts = Vec::new();
+                let mut places = None;
+                with_language(language, || {
+                    for n in 1..=2 {
+                        let raw = RawInput {
+                            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), window)),
+                            time: Some(f64::from(n) * 0.1),
+                            ..RawInput::default()
+                        };
+                        let output = ctx.run_ui(raw, |ui| {
+                            home_ui(ui, &show, &mut state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+                        });
+                        // Where this frame put the keys, and in which form.
+                        places =
+                            ctx.data(|data| data.get_temp::<([Rect; 5], bool)>(crate::studio::list_keys_drawn_id()));
+                        texts.clear();
+                        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts));
+                        output.drop_without_applying_deltas();
+                    }
+                });
+                let names = with_language(language, || {
+                    [t("edit.list.add", "Add"), t("edit.list.duplicate", "Duplicate"), t("edit.list.delete", "Delete")]
+                });
+                // In the left column, under its heading: the keys' own words.
+                let column = Rect::from_min_max(pos2(0.0, 52.0), pos2(crate::studio::LEFT_WIDTH + 12.0, 320.0));
+                let drawn: Vec<Option<&(String, f32, Rect)>> = names
+                    .iter()
+                    .map(|name| texts.iter().find(|(said, _, place)| said == name && column.contains_rect(*place)))
+                    .collect();
+                let (keys, named) = places.expect("laid out");
+                assert!(drawn.iter().all(|name| name.is_some() == named), "{at}: all names or none: {drawn:?}");
+                for (_, size, _) in drawn.iter().flatten() {
+                    assert_eq!(*size, 12.5, "{at}: the app's key size, never smaller");
+                }
+                if named {
+                    let (first, last) = (drawn[0].expect("Add").2, drawn[2].expect("Delete").2);
+                    assert!(first.min.x > 10.0 && last.max.x < crate::studio::LEFT_WIDTH, "{at}: inside the column");
+                    assert!(drawn[0].expect("Add").2.max.x < drawn[1].expect("Duplicate").2.min.x, "{at}");
+                    assert!(drawn[1].expect("Duplicate").2.max.x < last.min.x, "{at}");
+                } else {
+                    for key in keys {
+                        assert_eq!(key.size(), vec2(28.0, 28.0), "{at}: a 28-point picture key");
+                    }
+                }
+                assert!(keys[0].min.x > 10.0, "{at}: inside the column: {keys:?}");
+                assert!(keys[4].max.x < 10.0 + crate::studio::LEFT_WIDTH, "{at}: the five fit the column: {keys:?}");
+                for pair in keys.windows(2) {
+                    assert!(pair[0].max.x < pair[1].min.x, "{at}: side by side: {keys:?}");
+                }
+                forms.push((language, named));
+            }
+        }
+        // English has room for its names; the form is the same at both window sizes, since the
+        // column is as wide in both.
+        assert!(forms.iter().filter(|(language, _)| *language == Language::English).all(|(_, named)| *named));
+        for pair in forms.chunks(2) {
+            assert_eq!(pair[0].1, pair[1].1, "{:?}: one form whatever the window", pair[0].0);
+        }
+    }
+
     /// The song editor's Objects list is dragged the same way, with no rule about text boxes:
     /// a shape goes between the main language and the translation, one undo step.
     #[test]

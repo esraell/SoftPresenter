@@ -158,7 +158,7 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
 - **Left**: at the top a switch, Slides · Themes · Props · Stage, for what is edited. Under it,
   for Themes the themes and the open theme's templates. Slides, Props and Stage share one look
   (`studio::list_heading`, `list_keys` and `list_picture`): SLIDES, PROPS or STAGE LAYOUTS, a
-  row of keys acting on the one open (Add, Duplicate, Delete, ↑, ↓), then each as its picture
+  row of keys acting on the one open (Add, Duplicate, Delete, ↑, ↓; `studio::list_keys`: the three names at the app's key size where they fit the column, and where they don't, in a language with longer words, all five as 28-point picture keys whose names are their tooltips, never smaller lettering), then each as its picture
   with a strip under it (number and name); a click opens one, a double click renames it in
   place, a drag moves it to the ink line (`home::list_drag`, as the slides do; templates and
   themes too, the built-in theme staying first), a right-click has its other choices (a prop's:

@@ -1611,6 +1611,26 @@ impl ListKey {
             ListKey::Down => "\u{2193}",
         }
     }
+
+    /// What it is called: its words, and for the arrows what they do.
+    fn name(self) -> &'static str {
+        match self {
+            ListKey::Up => t("edit.slide.up", "Move Up"),
+            ListKey::Down => t("edit.slide.down", "Move Down"),
+            other => other.words(),
+        }
+    }
+
+    /// Its picture, where the keys are pictures only.
+    fn picture(self) -> Icon {
+        match self {
+            ListKey::Add => Icon::Plus,
+            ListKey::Copy => Icon::Stack,
+            ListKey::Delete => Icon::Trash,
+            ListKey::Up => Icon::ChevronUp,
+            ListKey::Down => Icon::ChevronDown,
+        }
+    }
 }
 
 /// How much room the row of [`list_keys`] leaves under its keys. The list of pictures under it
@@ -1619,48 +1639,85 @@ impl ListKey {
 const LIST_KEYS_UNDER: f32 = 10.0;
 pub const LIST_TOP: f32 = 2.0;
 
-/// The row of keys under a list's heading: Add, Duplicate and Delete, then ↑ and ↓ to move the
-/// one open, 30 high and 8 in from each side, 4 apart. The arrows are 26 wide; the three with
-/// words share what is left, each as wide as its words with 3 to 6 either side, and any more
-/// shared 1 : 1 : 1.2 (the left column is just wide enough for Duplicate). `can` says which of
-/// the five can be pressed (in that order), `hints` what each does, and `why` why each can't
-/// be: a key that can't be pressed is greyed, with the reason as its hover (a control is greyed
-/// rather than made to refuse). Returns the one pressed.
-pub fn list_keys(ui: &mut egui::Ui, salt: &str, can: [bool; 5], hints: [&str; 5], why: [&str; 5]) -> Option<ListKey> {
+/// The face of the words on the [`list_keys`]: the app's key size, never smaller.
+pub fn list_key_font() -> FontId {
+    FontId::proportional(12.5)
+}
+
+/// How big a list key that is only its picture is.
+pub const LIST_PICTURE_KEY: f32 = 28.0;
+
+/// Where the five [`list_keys`] go in a row starting at `min`, `across` wide, and whether they
+/// have their names: Add, Duplicate and Delete with their words where all three fit at the
+/// app's key size with their least padding (3 either side), each as wide as its words with 3 to
+/// 6 either side and any more shared 1 : 1 : 1.2, then ↑ and ↓, 26 wide; and where they don't
+/// fit (longer words in another language), all five as 28-point squares, each its picture
+/// alone. Never some of each, and the words are never set smaller to fit: which it is follows
+/// the width and the language only.
+pub fn list_key_places(ui: &egui::Ui, min: egui::Pos2, across: f32) -> ([Rect; 5], bool) {
     const TALL: f32 = 30.0;
     const ARROW: f32 = 26.0;
     const BETWEEN: f32 = 4.0;
-    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), TALL + LIST_KEYS_UNDER), Sense::hover());
-    let room = row.width() - 16.0 - 2.0 * ARROW - 4.0 * BETWEEN;
-    let measure = |font: &FontId| {
-        [ListKey::Add, ListKey::Copy, ListKey::Delete]
-            .map(|key| ui.painter().layout_no_wrap(key.words().to_owned(), font.clone(), TEXT).size().x)
-    };
-    let mut font = FontId::proportional(12.5);
-    let mut words = measure(&font);
-    // Where the system's face is wider than the one the column was sized for, the words are set
-    // a little smaller, so that the keys fit with their least padding on every system.
-    let least = 6.0 * 3.0 + 1.0;
-    if words.iter().sum::<f32>() + least > room {
-        font.size *= ((room - least) / words.iter().sum::<f32>()).max(0.5);
-        words = measure(&font);
-    }
+    let room = across - 16.0 - 2.0 * ARROW - 4.0 * BETWEEN;
+    let words = [ListKey::Add, ListKey::Copy, ListKey::Delete]
+        .map(|key| ui.painter().layout_no_wrap(key.words().to_owned(), list_key_font(), TEXT).size().x);
     let all_words: f32 = words.iter().sum();
-    let pad = ((room - all_words) / 6.0).clamp(3.0, 6.0);
-    let spare = (room - all_words - 6.0 * pad).max(0.0) / 3.2;
-    let widths =
-        [words[0] + 2.0 * pad + spare, words[1] + 2.0 * pad + spare, words[2] + 2.0 * pad + 1.2 * spare, ARROW, ARROW];
-    let mut left = row.min.x + 8.0;
+    let named = all_words + 6.0 * 3.0 <= room;
+    let widths = if named {
+        let pad = ((room - all_words) / 6.0).clamp(3.0, 6.0);
+        let spare = (room - all_words - 6.0 * pad).max(0.0) / 3.2;
+        [words[0] + 2.0 * pad + spare, words[1] + 2.0 * pad + spare, words[2] + 2.0 * pad + 1.2 * spare, ARROW, ARROW]
+    } else {
+        [LIST_PICTURE_KEY; 5]
+    };
+    let (tall, top) = if named { (TALL, min.y) } else { (LIST_PICTURE_KEY, min.y + (TALL - LIST_PICTURE_KEY) / 2.0) };
+    let mut left = min.x + 8.0;
+    let places = widths.map(|wide| {
+        let rect = Rect::from_min_size(pos2(left, top), vec2(wide, tall));
+        left = rect.max.x + BETWEEN;
+        rect
+    });
+    (places, named)
+}
+
+/// For the tests that measure a drawn frame: where the frame's list keys went and whether they
+/// had their names are kept under this.
+#[cfg(test)]
+pub fn list_keys_drawn_id() -> egui::Id {
+    egui::Id::unique("list keys drawn")
+}
+
+/// The row of keys under a list's heading: Add, Duplicate and Delete, then ↑ and ↓ to move the
+/// one open, laid out by [`list_key_places`]: with their words, or all five as pictures whose
+/// names are their tooltips and what a screen reader says. `can` says which of the five can be
+/// pressed (in that order), `hints` what each does, and `why` why each can't be: a key that
+/// can't be pressed is greyed, with the reason as its hover (a control is greyed rather than
+/// made to refuse). Returns the one pressed.
+pub fn list_keys(ui: &mut egui::Ui, salt: &str, can: [bool; 5], hints: [&str; 5], why: [&str; 5]) -> Option<ListKey> {
+    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0 + LIST_KEYS_UNDER), Sense::hover());
+    let (places, named) = list_key_places(ui, row.min, row.width());
+    #[cfg(test)]
+    ui.data_mut(|data| data.insert_temp(list_keys_drawn_id(), (places, named)));
     let mut pressed = None;
     for (at, key) in ListKey::ALL.into_iter().enumerate() {
-        let rect = Rect::from_min_size(pos2(left, row.min.y), vec2(widths[at], TALL));
-        let id = ui.scope_id().with((salt, at));
-        let response = flat_button(ui, rect, id, key.words(), font.clone(), Flat::Plain, can[at]);
-        // A greyed key still senses the pointer, so it takes a hover: the reason.
-        if response.on_hover_text(if can[at] { hints[at] } else { why[at] }).clicked() {
+        let (rect, id) = (places[at], ui.scope_id().with((salt, at)));
+        let response = if named {
+            flat_button(ui, rect, id, key.words(), list_key_font(), Flat::Plain, can[at])
+        } else {
+            icon_key(ui, rect, id, key.picture(), 14.0, can[at])
+        };
+        let name = key.name();
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, can[at], name));
+        // A greyed key still senses the pointer, so it takes a hover: the reason. A key that
+        // is only its picture says its name.
+        let hover = match (can[at], named) {
+            (false, _) => why[at],
+            (true, true) => hints[at],
+            (true, false) => name,
+        };
+        if response.on_hover_text(hover).clicked() {
             pressed = Some(key);
         }
-        left = rect.max.x + BETWEEN;
     }
     pressed
 }
