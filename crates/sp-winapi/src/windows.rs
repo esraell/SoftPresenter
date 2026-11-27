@@ -15,7 +15,7 @@ use windows_sys::Win32::Devices::Display::{
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER,
     ERROR_MORE_DATA, ERROR_SUCCESS, GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE, HWND, INVALID_HANDLE_VALUE,
-    LPARAM, LUID, POINT, RECT,
+    LPARAM, LRESULT, LUID, POINT, RECT, WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
 use windows_sys::Win32::Storage::FileSystem::{
@@ -31,10 +31,12 @@ use windows_sys::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_EXPAND_SZ, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW, RegSetKeyValueW,
 };
 use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId, GetCurrentThreadId};
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    ASFW_ANY, AllowSetForegroundWindow, EnumThreadWindows, GW_OWNER, GetForegroundWindow, GetWindow,
+    ASFW_ANY, AllowSetForegroundWindow, ENDSESSION_LOGOFF, EnumThreadWindows, GW_OWNER, GetForegroundWindow, GetWindow,
     GetWindowThreadProcessId, HWND_BROADCAST, IsIconic, IsWindowVisible, SMTO_ABORTIFHUNG, SW_RESTORE,
-    SendMessageTimeoutW, SetForegroundWindow, ShowWindow, WM_SETTINGCHANGE,
+    SendMessageTimeoutW, SendMessageW, SetForegroundWindow, ShowWindow, WM_CLOSE, WM_ENDSESSION, WM_NCDESTROY,
+    WM_QUERYENDSESSION, WM_SETTINGCHANGE,
 };
 
 fn usable(handle: HANDLE) -> bool {
@@ -461,4 +463,164 @@ pub fn ui_languages() -> Vec<String> {
     }
     names.truncate(room as usize);
     names.split(|&c| c == 0).filter(|name| !name.is_empty()).map(String::from_utf16_lossy).collect()
+}
+
+// Windows ending the session: a log-off, a restart or a shut-down. Windows asks every top-level
+// window whether the session may end (WM_QUERYENDSESSION, which the window's own procedure
+// answers yes), then tells each it is ending (WM_ENDSESSION, wParam TRUE), and may end the
+// program any time after that answer. The window library handles neither, so the app's window
+// is subclassed: on the second, the window is asked to close (a WM_CLOSE handed to the window
+// library's procedure, which tells the app at once), and only then is the answer given.
+
+/// Set once Windows has said the session is ending, before the window is asked to close.
+static SESSION_ENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Set by the app once it has saved and stopped for it.
+static SESSION_END_DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Set when the app hadn't saved and stopped by the time Windows was answered (it was busy, and
+/// the window library kept the close for later).
+static SESSION_END_LATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// This module's number for its subclass of a window, told apart from any other's.
+const SESSION_SUBCLASS: usize = 0x5350_5345;
+
+unsafe extern "system" fn session_end_proc(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _subclass: usize,
+    _data: usize,
+) -> LRESULT {
+    use std::sync::atomic::Ordering::SeqCst;
+    if message == WM_ENDSESSION && wparam != 0 {
+        SESSION_ENDING.store(true, SeqCst);
+        // SAFETY: `window` is the window Windows calls this subclass for, on its own thread; the
+        // close request carries no pointers, and goes to the next procedure in line (the window
+        // library's), which tells the app before it returns unless the app is busy.
+        unsafe { DefSubclassProc(window, WM_CLOSE, 0, 0) };
+        if !SESSION_END_DONE.load(SeqCst) {
+            SESSION_END_LATE.store(true, SeqCst);
+        }
+        return 0;
+    }
+    if message == WM_NCDESTROY {
+        // SAFETY: the window being destroyed, on its own thread: this subclass is taken off it
+        // before it goes, as Microsoft asks, with the procedure and number it was put on with.
+        unsafe { RemoveWindowSubclass(window, Some(session_end_proc), SESSION_SUBCLASS) };
+    }
+    // SAFETY: every other message goes on to the window's own procedure as it came, as a
+    // subclass must pass it: the values are the ones Windows gave this call.
+    unsafe { DefSubclassProc(window, message, wparam, lparam) }
+}
+
+pub fn on_session_end(window: isize) -> bool {
+    // SAFETY: `window` is the app's own top-level window, handed over by the window library on
+    // the thread that made it (Windows refuses a subclass from any other thread, or for a bad
+    // handle, and the call then fails harmlessly); `session_end_proc` matches SUBCLASSPROC and
+    // lives as long as the program; the data passed is a plain zero.
+    unsafe { SetWindowSubclass(window as HWND, Some(session_end_proc), SESSION_SUBCLASS, 0) != 0 }
+}
+
+pub fn session_ending() -> bool {
+    SESSION_ENDING.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+pub fn session_end_done() {
+    SESSION_END_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn session_end_late() -> bool {
+    SESSION_END_LATE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+pub fn pretend_session_end(window: isize) {
+    let window = window as HWND;
+    let logoff = ENDSESSION_LOGOFF as LPARAM;
+    // SAFETY: SendMessageW sends plain numbers (no pointers) to a window handle and waits for
+    // its answer; for a window gone since, the call fails harmlessly.
+    unsafe {
+        SendMessageW(window, WM_QUERYENDSESSION, 0, logoff);
+        SendMessageW(window, WM_ENDSESSION, 1, logoff);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+    use windows_sys::Win32::UI::WindowsAndMessaging::DefWindowProcW;
+
+    /// How many times the test's window was asked to close; the test's window marks the app's
+    /// saving done when it is.
+    static CLOSES: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "system" fn plain_window(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if message == WM_CLOSE {
+            CLOSES.fetch_add(1, SeqCst);
+            session_end_done();
+            return 0;
+        }
+        // SAFETY: the values Windows gave this call, passed on to its usual handling.
+        unsafe { DefWindowProcW(window, message, wparam, lparam) }
+    }
+
+    /// A window of the test's own, never shown, with the subclass the app's window gets: asked
+    /// whether the session may end, it says yes; told the session isn't ending after all, it does
+    /// nothing; told it is, it is asked to close before the answer goes back.
+    #[test]
+    fn a_window_is_asked_to_close_before_windows_is_told_the_session_may_end() {
+        use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, RegisterClassW, WNDCLASSW, WS_OVERLAPPED,
+        };
+        let name = wide(&format!("SoftPresenterSessionEndTest{}", std::process::id()));
+        // SAFETY: GetModuleHandleW with no name answers this program's own module.
+        let module = unsafe { GetModuleHandleW(null()) };
+        let class = WNDCLASSW {
+            style: 0,
+            lpfnWndProc: Some(plain_window),
+            cbClsExtra: 0,
+            cbWndExtra: 0,
+            hInstance: module,
+            hIcon: null_mut(),
+            hCursor: null_mut(),
+            hbrBackground: null_mut(),
+            lpszMenuName: null(),
+            lpszClassName: name.as_ptr(),
+        };
+        // SAFETY: the class names this module's procedure (matching WNDPROC) and a NUL-terminated
+        // name that outlives the class's use in this test; the call only reads it.
+        assert_ne!(unsafe { RegisterClassW(&class) }, 0, "the window class");
+        // SAFETY: a window of that class, never shown, made on this thread with no parent, menu
+        // or data; the strings are NUL-terminated (or null) and outlive the call.
+        let window = unsafe {
+            CreateWindowExW(
+                0,
+                name.as_ptr(),
+                null(),
+                WS_OVERLAPPED,
+                0,
+                0,
+                10,
+                10,
+                null_mut(),
+                null_mut(),
+                module,
+                null(),
+            )
+        };
+        assert!(!window.is_null(), "the window");
+        assert!(on_session_end(window as isize), "subclassed");
+        // SAFETY: plain numbers sent to the test's own window, on its thread.
+        let may_end = unsafe { SendMessageW(window, WM_QUERYENDSESSION, 0, ENDSESSION_LOGOFF as LPARAM) };
+        assert_ne!(may_end, 0, "the session may end");
+        // SAFETY: as above.
+        unsafe { SendMessageW(window, WM_ENDSESSION, 0, ENDSESSION_LOGOFF as LPARAM) };
+        assert!(!session_ending() && CLOSES.load(SeqCst) == 0, "not ending after all: nothing");
+        pretend_session_end(window as isize);
+        assert!(session_ending(), "ending");
+        assert_eq!(CLOSES.load(SeqCst), 1, "asked to close, once");
+        assert!(!session_end_late(), "saved before Windows was answered");
+        // SAFETY: the test's own window, on its thread; the subclass comes off as it goes.
+        assert_ne!(unsafe { DestroyWindow(window) }, 0);
+    }
 }

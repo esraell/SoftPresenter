@@ -1937,7 +1937,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   seconds at most, before the program ends. On a Mac this, and everything else Quit does
   (saving what was just changed, writing every file still to be written), also happens when
   the app is ended from the Dock, or by logging out, restarting or shutting down; before, those
-  ended it on the spot.
+  ended it on the spot. On Windows too: when Windows signs out, restarts or shuts down, it tells
+  the operator's window the session is ending, and the app saves and stops before it answers
+  (before, Windows ended it with the last second's changes, and everything still to be written,
+  lost).
 - **The log says how each NDI screen's pictures went out.** Once a minute, for each NDI screen,
   as for each DeckLink output: the pictures sent (and how many a second, against the rate it
   says it sends), sent again, late, skipped, the longest gap between them while a video plays, not

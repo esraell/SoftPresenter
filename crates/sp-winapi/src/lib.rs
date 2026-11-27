@@ -30,6 +30,66 @@ pub fn move_written_through(from: &std::path::Path, to: &std::path::Path) -> std
     }
 }
 
+/// Listens on the app's window `window` (its handle as the window library gives it, on the
+/// thread that made it) for Windows ending the session: a log-off, a restart or a shut-down. When
+/// Windows says it is ending, [`session_ending`] turns true and the window is asked to close,
+/// which the window library tells the app at once (`CloseRequested`); Windows is answered, and
+/// may end the program, only once the app returns from that. False when it couldn't listen. On
+/// other systems it does nothing (a Mac's terminate goes through the app's own leaving).
+pub fn on_session_end(window: isize) -> bool {
+    #[cfg(windows)]
+    {
+        windows::on_session_end(window)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+        false
+    }
+}
+
+/// Whether Windows has said the session is ending ([`on_session_end`]). Always false on other
+/// systems.
+pub fn session_ending() -> bool {
+    #[cfg(windows)]
+    {
+        windows::session_ending()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// The app has saved and stopped for the session ending.
+pub fn session_end_done() {
+    #[cfg(windows)]
+    windows::session_end_done();
+}
+
+/// Whether Windows was answered before the app had saved and stopped (it was busy, and the
+/// window library kept the close for later). Always false on other systems.
+pub fn session_end_late() -> bool {
+    #[cfg(windows)]
+    {
+        windows::session_end_late()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// Testing aid: sends the app's window `window` what Windows sends at a log-off, from the thread
+/// this is called on (not the window's), waiting for each answer: may the session end, then that
+/// it is ending. Nothing on other systems.
+pub fn pretend_session_end(window: isize) {
+    #[cfg(windows)]
+    windows::pretend_session_end(window);
+    #[cfg(not(windows))]
+    let _ = window;
+}
+
 /// The part of the monitor under this point that the taskbar leaves free, as `(x, y, width,
 /// height)` in pixels, or `None` where it can't be asked.
 pub fn work_area_at(x: i32, y: i32) -> Option<(i32, i32, u32, u32)> {

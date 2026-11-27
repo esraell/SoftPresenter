@@ -2407,6 +2407,9 @@ struct App {
     home_timing: applog::Timing,
     /// When quitting began, while it waits for Canva Sync to keep a sign-in it is refreshing.
     quitting: Option<Instant>,
+    /// Testing aid: SOFTPRESENTER_END_SESSION_WHEN has been acted on (see `about_to_wait`).
+    #[cfg(windows)]
+    end_session_asked: bool,
     /// Testing aid: SOFTPRESENTER_TERMINATE_AFTER has been acted on (see `about_to_wait`).
     #[cfg(target_os = "macos")]
     terminate_asked: bool,
@@ -2494,6 +2497,12 @@ impl App {
         let home_window =
             Arc::new(el.create_window(home_attrs).map_err(|e| format!("Could not open the home window: {e}"))?);
         start_steps::mark("window made");
+        // On Windows, a log-off, a restart or a shut-down is heard on the operator's window, so
+        // the app saves and stops before Windows may end it (`leave_for_session_end`).
+        #[cfg(windows)]
+        if !win32_handle(&home_window).is_some_and(sp_winapi::on_session_end) {
+            applog::problem("quit", "could not listen for Windows ending the session: a log-off may not save first");
+        }
         applog::event("start", &format!("steps: {}", start_steps::said()));
         // Where the videos' FFmpeg is, or where it was looked for: a tester's copy said FFmpeg
         // wasn't on the computer, from a folder the log couldn't name.
@@ -11769,6 +11778,26 @@ impl App {
         applog::last_run::ended();
     }
 
+    /// Windows is ending the session (a log-off, a restart, a shut-down): it asked the operator's
+    /// window to close, and may end the program as soon as this returns, so everything the app's
+    /// Quit does is done now (`leave_at_once`), then the loop is told to end.
+    fn leave_for_session_end(&mut self, el: &ActiveEventLoop) {
+        let late = sp_winapi::session_end_late();
+        applog::event(
+            "quit",
+            if late {
+                "Windows is ending the session, and asked while the app was busy: saving and stopping now"
+            } else {
+                "Windows is ending the session: saving and stopping first"
+            },
+        );
+        if !self.left {
+            self.leave_at_once();
+        }
+        sp_winapi::session_end_done();
+        el.exit();
+    }
+
     fn quit(&mut self, el: &ActiveEventLoop) {
         if self.quitting.is_none() {
             self.begin_quit();
@@ -12517,6 +12546,9 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::HoveredFile(path) => self.file_drag_told(file_drop::Told::Over(path)),
             WindowEvent::HoveredFileCancelled => self.file_drag_told(file_drop::Told::Gone),
             WindowEvent::DroppedFile(path) => self.file_drag_told(file_drop::Told::Dropped(path)),
+            // Windows ending the session asks the window to close, and may end the program once
+            // this returns: everything is saved and stopped now, waiting where it must.
+            WindowEvent::CloseRequested if sp_winapi::session_ending() => self.leave_for_session_end(el),
             WindowEvent::CloseRequested => self.quit(el),
             WindowEvent::Resized(size) => {
                 if size.width > 0 && size.height > 0 {
@@ -12744,6 +12776,36 @@ impl ApplicationHandler<AppEvent> for App {
             applog::event("quit", "Testing aid: asking macOS to terminate the app, as the Dock's Quit does");
             sp_video::terminate_app();
         }
+        // Testing aid: SOFTPRESENTER_END_SESSION_WHEN=<file> has the operator's window sent, once
+        // that file exists, what Windows sends it at a log-off (may the session end, then that it
+        // is ending), from a thread of its own as Windows sends it, so what the app does then can
+        // be tried without logging off, at a moment the test chooses however slowly the copy
+        // started. On Windows only, for a copy with its own data folder; looked at each time the
+        // loop waits, and the loop wakes for it four times a second until then.
+        #[cfg(windows)]
+        let end_session_at = {
+            static WHEN: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+            let when = WHEN.get_or_init(|| {
+                let own_folder = std::env::var_os("SOFTPRESENTER_DATA").is_some_and(|folder| !folder.is_empty());
+                std::env::var_os("SOFTPRESENTER_END_SESSION_WHEN").filter(|_| own_folder).map(PathBuf::from)
+            });
+            match when {
+                Some(file) if !self.end_session_asked => {
+                    if file.exists()
+                        && let Some(window) =
+                            self.running.as_ref().and_then(|running| win32_handle(&running.home_window))
+                    {
+                        self.end_session_asked = true;
+                        applog::event("quit", "Testing aid: sending the window what Windows sends at a log-off");
+                        std::thread::spawn(move || sp_winapi::pretend_session_end(window));
+                    }
+                    Some(Instant::now() + Duration::from_millis(250))
+                }
+                _ => None,
+            }
+        };
+        #[cfg(not(windows))]
+        let end_session_at: Option<Instant> = None;
         // Quitting, waiting for the library's writer to write what it holds, or for Canva Sync
         // to keep a sign-in it is refreshing: looked at again shortly (their threads also wake
         // the loop when they are done), and nothing else is run.
@@ -12868,6 +12930,7 @@ impl ApplicationHandler<AppEvent> for App {
             (mirror_at, "phone screens"),
             (looked_at, "the displays"),
             (close_at, "the screens' close buttons"),
+            (end_session_at, "a testing aid's log-off"),
         ];
         let soonest = wake.into_iter().filter_map(|(at, name)| at.map(|at| (at, name))).min_by_key(|(at, _)| *at);
         let now = Instant::now();
@@ -12968,6 +13031,16 @@ mod start_steps {
             .map(|pair| format!("{} {} ms", pair[1].0, pair[1].1.duration_since(pair[0].1).as_millis()))
             .collect::<Vec<_>>()
             .join(", ")
+    }
+}
+
+/// A window's handle as Windows knows it (an `HWND`), for the few Windows calls made on it.
+#[cfg(windows)]
+fn win32_handle(window: &Window) -> Option<isize> {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match window.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
+        _ => None,
     }
 }
 
@@ -13500,6 +13573,8 @@ fn main() -> ExitCode {
         quitting: None,
         #[cfg(target_os = "macos")]
         terminate_asked: false,
+        #[cfg(windows)]
+        end_session_asked: false,
         left: false,
     };
     // Themes changed while loading (a Bible layout brought into the main theme) are handed to

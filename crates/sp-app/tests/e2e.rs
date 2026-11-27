@@ -418,7 +418,7 @@ impl Copy<'_> {
     }
 
     /// Waits for a copy that ends without being asked through `sp` (the system ends it).
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     fn ended_within(mut self, within: Duration) -> Quitted {
         let status = self.wait_exit(within).unwrap_or_else(|| {
             self.kill();
@@ -1694,6 +1694,45 @@ fn terminated_by_the_system_the_app_saves_and_stops_its_ndi_sources_as_its_own_q
     assert!(ended.log.contains("was stopped before closing"), "the NDI source was still running{}", run.context());
     let saved = song_file_with(&run.data, "Morning light on the hill").expect("the song's file in Songs");
     assert!(saved.contains("Sing out, the day is here"), "the changed words were not saved: {saved}");
+}
+
+/// On Windows, a log-off, a restart and a shut-down end the app without its own Quit: Windows
+/// tells each window the session is ending, and may end the program as soon as it is answered.
+/// The app must save first what was changed a moment before (words, and a setting whose save
+/// waits its turn), and stop as its Quit does. The testing aid sends the operator's window what
+/// Windows sends at a log-off.
+#[cfg(windows)]
+#[test]
+fn a_windows_log_off_saves_and_stops_the_app_as_its_own_quit_does() {
+    let name = "a_windows_log_off_saves_and_stops_the_app_as_its_own_quit_does";
+    let Some(run) = Run::new(name) else { return };
+    let file = run.file("Hill Road.txt");
+    let words = song_text(&[("Verse 1", "Morning light on the hill"), ("Chorus", "Sing out, the day is new")]);
+    std::fs::write(&file, words).expect("the song's file");
+    // The log-off comes once this file is there: after the changes below, however slowly the
+    // copy started.
+    let log_off = run.file("log off now");
+    let copy = run.start(&[("SOFTPRESENTER_END_SESSION_WHEN", &log_off.to_string_lossy())]);
+    copy.ok(&["song", "import", &file.to_string_lossy()]);
+    copy.ok(&["go", "Hill Road"]);
+    // Changed a moment before Windows ends the session.
+    copy.ok(&["settings", "set", "columns=5"]);
+    copy.ok(&["settings", "set", "columns=7"]);
+    copy.ok(&["slide", "text", "Hill Road", "2", "Sing out, the day is here"]);
+    std::fs::write(&log_off, "").expect("the file that sends the log-off");
+    let ended = copy.ended_within(Duration::from_secs(40));
+    ended.assert_clean(&run);
+    assert!(
+        ended.log.contains("sending the window what Windows sends at a log-off"),
+        "the switch was not taken{}",
+        run.context()
+    );
+    assert!(ended.log.contains("Windows is ending the session: saving and stopping first"), "{}", run.context());
+    let saved = song_file_with(&run.data, "Morning light on the hill").expect("the song's file in Songs");
+    assert!(saved.contains("Sing out, the day is here"), "the changed words were not saved: {saved}");
+    let prefs: Value = serde_json::from_str(&std::fs::read_to_string(run.data.join("preferences.json")).unwrap())
+        .expect("the settings file reads");
+    assert_eq!(prefs["columns"], 7, "the last setting is on disk: {prefs}");
 }
 
 #[test]
