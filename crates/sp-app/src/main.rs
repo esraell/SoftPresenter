@@ -1317,7 +1317,7 @@ fn f_row(key: &Pressed) -> bool {
 /// (open, before it has drawn with the keyboard too) or Scripture Lookup. In every other text
 /// field (a song's words, a name, a title) every key is the field's, the F keys too.
 fn typing_with_f_rows(state: &home::HomeState, ctx: &egui::Context) -> bool {
-    state.library_search.is_some() || ctx.memory(|memory| memory.has_focus(home::scripture_lookup_id()))
+    state.typing_in_find() || ctx.memory(|memory| memory.has_focus(home::scripture_lookup_id()))
 }
 
 /// What an F row set to `action` does while the find box or Scripture Lookup has the keyboard
@@ -1334,7 +1334,7 @@ fn typed_key(state: &mut home::HomeState, ctx: &egui::Context, action: KeyAction
             None
         }
         other => {
-            if state.library_search.is_some() {
+            if state.typing_in_find() {
                 home::end_search(ctx, state);
             } else {
                 ctx.memory_mut(|memory| memory.surrender_focus(home::scripture_lookup_id()));
@@ -15708,27 +15708,23 @@ mod tests {
         keyboard
     }
 
-    fn find_words(keyboard: &Keyboard) -> Option<String> {
-        keyboard.state.library_search.as_ref().map(|(words, _)| words.clone())
-    }
-
     #[test]
     fn after_a_find_result_is_dropped_the_keys_run_the_show_and_slash_gives_the_box_its_words_back() {
         let mut keyboard = beta_dropped();
         // The words and what they found stay, but the keyboard is the show's again.
-        assert_eq!(find_words(&keyboard).as_deref(), Some("beta"));
+        assert_eq!(find_words(&keyboard), Some("beta"));
         assert!(!keyboard.state.find_rows.is_empty() && !keyboard.ctx.text_edit_focused());
         // Space goes on to Alpha's next slide at once, and types nothing.
         keyboard.press(Key::Named(NamedKey::Space));
         keyboard.draw();
         assert_eq!(keyboard.live(), Some((0, 1)), "Space ran the show");
-        assert_eq!(find_words(&keyboard).as_deref(), Some("beta"), "and typed nothing in the box");
+        assert_eq!(find_words(&keyboard), Some("beta"), "and typed nothing in the box");
         // `/` gives the box the keyboard again, with its words: what is typed now goes in it.
         keyboard.press(Key::Character("/".into()));
         keyboard.draw();
         keyboard.draw();
         assert!(keyboard.ctx.text_edit_focused(), "the find box has the keyboard again");
-        assert_eq!(find_words(&keyboard).as_deref(), Some("beta"), "with its words");
+        assert_eq!(find_words(&keyboard), Some("beta"), "with its words");
         keyboard.press(Key::Named(NamedKey::Space));
         keyboard.draw();
         assert_eq!(keyboard.live(), Some((0, 1)), "Space is the box's again");
