@@ -9,7 +9,7 @@ What's new opens a window with each version's changes, and in the Service view t
 
 ### New
 
-- **What's new window.** Settings › About › What's new (and Help › What's New in SoftPresenter on a Mac) now opens a window with this version's changes, in New, Better and Fixed, and the versions before it under them to scroll through. Each change is a short name and one plain sentence. Before, the key opened the list of changes on GitHub in the browser; the window needs no internet, as the changes come with SoftPresenter.
+- **What's new window.** What's new in Settings › About now opens a window with each version's changes, and needs no internet. On a Mac it is in the Help menu too. Each change is a short name and one plain sentence, in New, Better and Fixed, with the versions before it below to scroll through; before, the key opened the list of changes on GitHub.
 
 ### Better
 
