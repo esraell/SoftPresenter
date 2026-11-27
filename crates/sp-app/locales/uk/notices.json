@@ -206,6 +206,7 @@
   "notices.screens.not_placed": "Не вдалося поставити «{name}» на його монітор: {problem}",
   "notices.screens.not_drawn": "Не вдається малювати на «{name}»: {error}",
   "notices.screens.no_format": "Цей монітор не пропонує формату кольору, у якому може малювати SoftPresenter.",
+  "notices.keep_awake.failed": "SoftPresenter не вдалося втримати монітор увімкненим, поки екрани ввімкнено: він може потьмяніти, згаснути або заблокуватися, якщо до компʼютера довго не торкатися. Перевірте налаштування сну й заставки на компʼютері.",
   "notices.decklink.trying_again": "{screen}: {doing} Повторна спроба.",
   "notices.catalog.lang.en": "англійською",
   "notices.catalog.lang.ru": "російською",

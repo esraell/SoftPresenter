@@ -206,6 +206,7 @@
   "notices.screens.not_placed": "Не удалось вывести «{name}» на его монитор: {problem}",
   "notices.screens.not_drawn": "Не удаётся рисовать на «{name}»: {error}",
   "notices.screens.no_format": "Этот монитор не предлагает формата цвета, в котором SoftPresenter может рисовать.",
+  "notices.keep_awake.failed": "SoftPresenter не удалось удержать монитор включённым, пока экраны включены: он может потускнеть, погаснуть или заблокироваться, если к компьютеру долго не прикасаться. Проверьте настройки сна и заставки на компьютере.",
   "notices.decklink.trying_again": "{screen}: {doing} Пробуем ещё раз.",
   "notices.catalog.lang.en": "на английском",
   "notices.catalog.lang.ru": "на русском",

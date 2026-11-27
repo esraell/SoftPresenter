@@ -543,6 +543,75 @@ pub fn pretend_session_end(window: isize) {
     }
 }
 
+/// Windows asked to keep the display on, and the computer awake, while held: a power request.
+pub struct DisplayKeptOn {
+    request: HANDLE,
+    /// Whether the computer is kept awake too, not only the display.
+    system: bool,
+}
+
+impl DisplayKeptOn {
+    pub fn system_too(&self) -> bool {
+        self.system
+    }
+}
+
+impl Drop for DisplayKeptOn {
+    fn drop(&mut self) {
+        use windows_sys::Win32::System::Power::{
+            PowerClearRequest, PowerRequestDisplayRequired, PowerRequestSystemRequired,
+        };
+        // SAFETY: `request` was made by PowerCreateRequest in `keep_display_on`, belongs to this
+        // value alone, and is cleared and closed only here, once; the request types cleared are
+        // the ones that were set on it.
+        unsafe {
+            PowerClearRequest(self.request, PowerRequestDisplayRequired);
+            if self.system {
+                PowerClearRequest(self.request, PowerRequestSystemRequired);
+            }
+            CloseHandle(self.request);
+        }
+    }
+}
+
+pub fn keep_display_on(reason: &str) -> Result<DisplayKeptOn, String> {
+    use windows_sys::Win32::System::Power::{
+        PowerCreateRequest, PowerRequestDisplayRequired, PowerRequestSystemRequired, PowerSetRequest,
+    };
+    use windows_sys::Win32::System::Threading::{
+        POWER_REQUEST_CONTEXT_SIMPLE_STRING, REASON_CONTEXT, REASON_CONTEXT_0,
+    };
+    // POWER_REQUEST_CONTEXT_VERSION, which windows-sys keeps with the system services, a part of
+    // it this crate doesn't otherwise need.
+    const POWER_REQUEST_CONTEXT_VERSION: u32 = 0;
+    let mut reason = wide(reason);
+    let context = REASON_CONTEXT {
+        Version: POWER_REQUEST_CONTEXT_VERSION,
+        Flags: POWER_REQUEST_CONTEXT_SIMPLE_STRING,
+        Reason: REASON_CONTEXT_0 { SimpleReasonString: reason.as_mut_ptr() },
+    };
+    // SAFETY: `context` is a whole REASON_CONTEXT whose reason is a NUL-terminated wide string;
+    // both outlive the call, and Windows keeps a copy of the reason with the request.
+    let request = unsafe { PowerCreateRequest(&context) };
+    if !usable(request) {
+        // SAFETY: GetLastError takes nothing and reads the calling thread's last error.
+        let error = unsafe { GetLastError() };
+        return Err(format!("Windows couldn't make a power request (error {error})"));
+    }
+    // SAFETY: `request` is the request just made, open until it is closed here or by the value's
+    // Drop.
+    if unsafe { PowerSetRequest(request, PowerRequestDisplayRequired) } == 0 {
+        // SAFETY: GetLastError takes nothing and reads the calling thread's last error.
+        let error = unsafe { GetLastError() };
+        // SAFETY: the request was made just now, has nothing set, and is not used again.
+        unsafe { CloseHandle(request) };
+        return Err(format!("Windows wouldn't keep the display on (error {error})"));
+    }
+    // SAFETY: as above; a computer kept awake as well is asked for on the same request.
+    let system = unsafe { PowerSetRequest(request, PowerRequestSystemRequired) } != 0;
+    Ok(DisplayKeptOn { request, system })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

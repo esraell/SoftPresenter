@@ -206,6 +206,7 @@
   "notices.screens.not_placed": "No se pudo poner “{name}” en su monitor: {problem}",
   "notices.screens.not_drawn": "No se puede dibujar en “{name}”: {error}",
   "notices.screens.no_format": "Este monitor no ofrece un formato de color en el que SoftPresenter pueda dibujar.",
+  "notices.keep_awake.failed": "SoftPresenter no pudo mantener encendido el monitor mientras las pantallas están encendidas: puede atenuarse, apagarse o bloquearse si nadie toca el ordenador durante un rato. Revisa los ajustes de reposo y de salvapantallas del ordenador.",
   "notices.decklink.trying_again": "{screen}: {doing} Se vuelve a intentar.",
   "notices.catalog.lang.en": "inglés",
   "notices.catalog.lang.ru": "ruso",

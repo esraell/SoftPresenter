@@ -44,6 +44,7 @@ mod images;
 mod inspector;
 mod integrations;
 mod interface_size;
+mod keep_awake;
 mod kept;
 mod key_table;
 mod keys;
@@ -2566,6 +2567,9 @@ struct App {
     /// AirPlay: the program that receives an iPhone's, iPad's or Mac's screen, while
     /// switched on.
     mirror: mirror::Mirror,
+    /// The display kept awake while the screens are on (see `keep_awake`), told by
+    /// `sync_screens` and let go for good by the quit.
+    keep_awake: keep_awake::KeepAwake,
     /// Remote Control: the web page other devices run the show from, while switched on.
     remote: remote::Remote,
     /// Whether Remote Control, left on, has been switched on again since the app opened.
@@ -9658,6 +9662,7 @@ impl App {
     /// frame and notices a display being plugged in or out.
     fn sync_screens(&mut self, el: &ActiveEventLoop) {
         let quiet = self.quiet();
+        let quitting = self.quitting.is_some();
         let audience_on = self.show.output_enabled();
         let Some(running) = self.running.as_mut() else {
             return;
@@ -9742,6 +9747,10 @@ impl App {
         }
         let list = running.home_state.screens.clone();
         let mut placed = screens::place_all(&list, &displays, &operator);
+        // Which screens show or send, as a person's copy places them (worked out before a quiet
+        // run moves them into windows), for keeping the display awake while one is on.
+        let decklink_ready = matches!(running.home_state.decklink.driver, sp_decklink::Driver::Ready(_));
+        let would_show: Vec<bool> = placed.iter().map(|place| keep_awake::shows(place, decklink_ready)).collect();
         // A capture never fills a display or sends over the network, whatever the list says.
         if quiet {
             // Testing aid: SOFTPRESENTER_PRETEND_NDI's sources send nothing anywhere.
@@ -9792,6 +9801,13 @@ impl App {
             if !*on && matches!(place, Placed::Fullscreen(_) | Placed::Window) {
                 *place = Placed::Nothing(i18n::t("screens.status.switched_off", "Switched off").to_owned());
             }
+        }
+        // The display is kept awake while a screen is on: asked of the system only when that
+        // changes (the call is quick, and never made on the screens' thread). Never again once
+        // the quit has begun, though the screens are still brought in line while it waits.
+        let screens_on = !quitting && running.output.is_some() && keep_awake::any_on(&would_show, &on_flags);
+        if self.keep_awake.set(screens_on, Instant::now()).is_some() {
+            running.home_state.notices.trouble(keep_awake::notice_words());
         }
         // Without the driver, or while it is still looked for, a DeckLink screen plays nowhere.
         let driver = &running.home_state.decklink.driver;
@@ -12413,6 +12429,8 @@ impl App {
         if let Some(output) = self.running.as_mut().and_then(|r| r.output.take()) {
             output.shutdown();
         }
+        // With the screens gone, the display is no longer kept awake, and isn't again.
+        self.keep_awake.end();
         if let Some((_, mut player)) = self.video.take() {
             say_video_pace(&mut player, true);
         }
@@ -13600,6 +13618,8 @@ impl ApplicationHandler<AppEvent> for App {
         let looked_at = self.look_at_displays(el);
         // The X on the screens' windows, as it comes and goes.
         let close_at = self.tick_close_buttons();
+        // The display kept awake while the screens are on: looked at now and then.
+        let keep_awake_at = self.tick_keep_awake();
         // Songs changed in the Edit view are written once typing has paused for a second.
         const SAVE_AFTER: Duration = Duration::from_secs(1);
         let save_at = self.unsaved_since.map(|since| since + SAVE_AFTER);
@@ -13674,6 +13694,7 @@ impl ApplicationHandler<AppEvent> for App {
             (looked_at, "the displays"),
             (close_at, "the screens' close buttons"),
             (end_session_at, "a testing aid's log-off"),
+            (keep_awake_at, "keeping the display awake"),
         ];
         let soonest = wake.into_iter().filter_map(|(at, name)| at.map(|at| (at, name))).min_by_key(|(at, _)| *at);
         let now = Instant::now();
@@ -14228,6 +14249,7 @@ fn main() -> ExitCode {
         ffmpeg_fetch: ffmpeg_fetch::Told::default(),
         waiting: Vec::new(),
         mirror: mirror::Mirror::open(quiet_run),
+        keep_awake: keep_awake::KeepAwake::for_this_run(quiet_run),
         remote,
         remote_started: false,
         remote_pages_seen: 0,

@@ -1927,6 +1927,9 @@ impl crate::App {
             if self.show.output_enabled() { "on" } else { "off" },
             if state.is_some_and(|s| s.stage_on) { "on" } else { "off" }
         ));
+        // Whether the system is asked to keep the display awake (while a screen is on), and how.
+        let (kept_awake, kept_how) = self.keep_awake.status();
+        lines.push(format!("Display kept awake: {} ({kept_how})", if kept_awake { "yes" } else { "no" }));
         if let Some(selected) = &selected {
             lines.push(format!("Song shown in the window: {selected}"));
         }
@@ -2023,6 +2026,7 @@ impl crate::App {
             "props": props,
             "audience_on": self.show.output_enabled(),
             "stage_on": state.is_some_and(|s| s.stage_on),
+            "display_kept_awake": {"kept": kept_awake, "how": kept_how},
             "selected_song": selected,
         });
         let mut data = data;

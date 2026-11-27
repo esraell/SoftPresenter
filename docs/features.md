@@ -1837,6 +1837,28 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   card's On key opens it there. Its − asks before a screen goes ("Remove the screen
   “Lobby”? Nothing more is sent to it, and its settings go. This can't be undone."), as Undo
   can't bring a screen back.
+- **The display stays awake while the screens are on.** While a screen is on (it fills a
+  display, sends over NDI, plays out of a DeckLink output, or shows in a window, and its kind is
+  switched on too), SoftPresenter asks the computer to keep its display on and
+  not to go to sleep for want of someone touching it, as a video player does; when every screen
+  is off, or SoftPresenter quits, it lets go and the computer's own settings apply again. It
+  changes none of the computer's settings, and doesn't stop anyone putting the computer to sleep
+  or closing a laptop's lid. An automatic screen shown in a window because there is no other
+  display counts too: a laptop mirrored to a projector must not go dark in the middle of a sermon.
+  Switch the screens off to let the computer sleep. On a Mac it runs Apple's own `caffeinate -d -i`,
+  which `pmset -g assertions` lists and which ends by itself if SoftPresenter does; on Windows it
+  makes a power request, which `powercfg /requests` lists under DISPLAY and SYSTEM as "The
+  screens are on", and which keeps the screen saver from starting too (tried on a Windows 11 PC
+  with a one-minute screen saver: none for three minutes with the screens on, one a minute after
+  they went off); on Linux it holds logind's idle lock (`systemd-inhibit --list`), which KDE
+  Plasma's own code honours (not yet tried on a KDE desktop), and, where it is installed,
+  GNOME's own (`gnome-session-inhibit --list`), which GNOME honours; on GNOME, which takes no
+  notice of logind's lock, the display counts as kept awake only while GNOME's own holds. A
+  desktop that honours neither isn't kept awake. When the computer can't be
+  asked, the log says why (`[power]`), a notice says so once, and it is tried again each minute
+  while the screens stay on. `sp status` says "Display kept awake: yes (caffeinate -d -i)" or
+  "no (no screen is on)". A quiet run (a test) asks nothing of the computer unless
+  `SOFTPRESENTER_KEEP_AWAKE=1` is set.
 - **A PC with no graphics driver.** Where Windows has only its own software graphics to
   offer (WARP, "Microsoft Basic Render Driver": a PC whose graphics driver is missing or
   broken, some virtual machines), SoftPresenter still starts and draws, with the processor

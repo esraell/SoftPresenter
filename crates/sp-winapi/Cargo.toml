@@ -14,9 +14,10 @@ license.workspace = true
 # when another start asks and asking the user's display languages for the message such a start
 # shows when it gets no answer, and, for the app's file
 # windows, setting up OLE on their thread, bringing one back in front and giving the operator's
-# window the front again when one closes, and hearing on the operator's window that Windows is
-# ending the session (a log-off, a restart, a shut-down), so the app saves first. windows-sys is already in the build (winit and others
-# use it); this adds no crate.
+# window the front again when one closes, hearing on the operator's window that Windows is
+# ending the session (a log-off, a restart, a shut-down), so the app saves first, and asking
+# Windows to keep the display on while the screens are on (a power request). windows-sys is
+# already in the build (winit and others use it); this adds no crate.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Devices_Display",
@@ -31,6 +32,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_LibraryLoader",
     "Win32_System_Ole",
+    "Win32_System_Power",
     "Win32_System_ProcessStatus",
     "Win32_System_Registry",
     "Win32_System_SystemInformation",

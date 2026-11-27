@@ -260,6 +260,14 @@ pub fn ui_languages() -> Vec<String> {
     }
 }
 
+/// Windows asked to keep the display on and the computer awake for as long as the value is held:
+/// a power request, which `powercfg /requests` lists under DISPLAY (and SYSTEM, when
+/// `system_too` says so) with the reason given. Dropped, the request is cleared; Windows clears
+/// it too when the program ends, however it ends. Nothing in Windows' settings changes. What
+/// keeps the display awake while the app's screens are on.
+#[cfg(windows)]
+pub use windows::{DisplayKeptOn, keep_display_on};
+
 /// Who owns a file or folder and who may open it, read and set with Windows' own security
 /// calls, and the user this program runs as: what keeps the control socket's folder to one
 /// user. Access lists go in and out written down as Windows writes them (SDDL); what they mean
