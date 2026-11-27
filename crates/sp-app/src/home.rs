@@ -11506,17 +11506,19 @@ mod tests {
         assert!(state.editing.is_some(), "still editing");
         // ...and the keyboard clears there instead: off a Mac F1 to F6, and Escape with nothing
         // picked or typed (`home_key_command` in main.rs, read before the window draws).
+        use crate::key_table::KeyAction;
         let ctx = egui::Context::default();
         let key = |state: &HomeState, key: NamedKey, f_keys| {
             crate::home_key_command(state, &ctx, &Pressed::Named(key), false, &show, f_keys)
         };
-        assert_eq!(key(&state, NamedKey::F1, true), Some(Command::ClearAll));
-        assert_eq!(key(&state, NamedKey::F2, true), Some(Command::Clear(Layer::Slides)));
-        assert_eq!(key(&state, NamedKey::F3, true), Some(Command::Clear(Layer::Media)));
-        assert_eq!(key(&state, NamedKey::F4, true), Some(Command::Clear(Layer::Props)));
-        assert_eq!(key(&state, NamedKey::F5, true), Some(Command::Clear(Layer::Audio)));
-        assert_eq!(key(&state, NamedKey::F6, true), Some(Command::Clear(Layer::Messages)));
-        assert_eq!(key(&state, NamedKey::Escape, false), Some(Command::ClearAll), "Escape, on a Mac too");
+        let does = |action| Some(crate::KeyPress::Action(action));
+        assert_eq!(key(&state, NamedKey::F1, true), does(KeyAction::ClearAll));
+        assert_eq!(key(&state, NamedKey::F2, true), does(KeyAction::ClearSlide));
+        assert_eq!(key(&state, NamedKey::F3, true), does(KeyAction::ClearMedia));
+        assert_eq!(key(&state, NamedKey::F4, true), does(KeyAction::ClearProps));
+        assert_eq!(key(&state, NamedKey::F5, true), does(KeyAction::ClearAudio));
+        assert_eq!(key(&state, NamedKey::F6, true), does(KeyAction::ClearMessages));
+        assert_eq!(key(&state, NamedKey::Escape, false), does(KeyAction::ClearAll), "Escape, on a Mac too");
         // With an object picked, Escape lets go of it first: it clears only the next time.
         let first = state.editing.as_ref().and_then(|draft| draft.slide.objects.first().map(|object| object.id));
         if let Some(draft) = state.editing.as_mut() {
@@ -11537,7 +11539,7 @@ mod tests {
             0.1,
         );
         assert!(state.editing.as_ref().is_some_and(|draft| draft.selected.is_none()), "let go of");
-        assert_eq!(key(&state, NamedKey::Escape, false), Some(Command::ClearAll), "the next Escape clears");
+        assert_eq!(key(&state, NamedKey::Escape, false), does(KeyAction::ClearAll), "the next Escape clears");
     }
 
     #[test]

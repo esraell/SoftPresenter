@@ -35,6 +35,7 @@ pub enum ShowKey {
 
 impl ShowKey {
     /// Every key, in the order of the rows.
+    #[allow(dead_code)] // Settings › Keys lists its rows from it (`rows`), next.
     const ALL: [ShowKey; 14] = [
         ShowKey::Escape,
         ShowKey::F1,
@@ -96,6 +97,7 @@ impl ShowKey {
     }
 
     /// The key as its cap says it, as the list of keys writes it.
+    #[allow(dead_code)] // Settings › Keys reads it, next.
     pub fn cap(self) -> String {
         match self {
             ShowKey::Escape => "Esc",
@@ -117,7 +119,7 @@ impl ShowKey {
     }
 
     /// Whether it is an F key, which has a row off a Mac only.
-    fn is_f_key(self) -> bool {
+    pub fn is_f_key(self) -> bool {
         matches!(
             self,
             ShowKey::F1
@@ -134,6 +136,7 @@ impl ShowKey {
 
 /// The keys Settings › Keys has a row for, in order: the F keys only with `f_keys` (off a Mac,
 /// `keys::f_keys()`), since a Mac's are the system's (brightness, sound, Mission Control).
+#[allow(dead_code)] // Settings › Keys reads it, next.
 pub fn rows(f_keys: bool) -> Vec<ShowKey> {
     ShowKey::ALL.into_iter().filter(|key| f_keys || !key.is_f_key()).collect()
 }
@@ -227,6 +230,7 @@ impl KeyAction {
     }
 
     /// The action in words, as its chooser says it.
+    #[allow(dead_code)] // Settings › Keys reads it, next.
     pub fn words(self) -> String {
         match self {
             KeyAction::ClearAll => t("settings.keys.do.clear_all", "Clear All"),
@@ -347,6 +351,7 @@ impl KeyTable {
     }
 
     /// Sets what `key` does. Its style's own action is no change, so the row is forgotten.
+    #[allow(dead_code)] // Settings › Keys changes the table with it, next.
     pub fn set(&mut self, key: ShowKey, action: KeyAction) {
         if action == KeyTable::default_action(self.style, key) {
             self.changed.remove(key.name());
@@ -356,27 +361,32 @@ impl KeyTable {
     }
 
     /// Chooses a style: every key does what it says, and the keys changed are changed no more.
+    #[allow(dead_code)] // Settings › Keys changes the table with it, next.
     pub fn set_style(&mut self, style: KeyStyle) {
         self.style = style;
         self.changed.clear();
     }
 
     /// Every key back to what its style says (Reset to Defaults).
+    #[allow(dead_code)] // Settings › Keys changes the table with it, next.
     pub fn reset(&mut self) {
         self.changed.clear();
     }
 
     /// Whether `key` does something other than its style says.
+    #[allow(dead_code)] // Settings › Keys reads it, next.
     pub fn is_changed(&self, key: ShowKey) -> bool {
         self.action(key) != KeyTable::default_action(self.style, key)
     }
 
     /// Whether any key does something other than its style says, an F key on a Mac too.
+    #[allow(dead_code)] // Settings › Keys reads it, next.
     pub fn any_changed(&self) -> bool {
         ShowKey::ALL.into_iter().any(|key| self.is_changed(key))
     }
 
     /// The keys with a row (the F keys only with `f_keys`) that do `action`, in the rows' order.
+    #[allow(dead_code)] // Settings › Keys reads it, next.
     pub fn keys_for(&self, action: KeyAction, f_keys: bool) -> Vec<ShowKey> {
         rows(f_keys).into_iter().filter(|key| self.action(*key) == action).collect()
     }
