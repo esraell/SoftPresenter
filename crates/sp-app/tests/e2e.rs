@@ -888,6 +888,35 @@ fn settings_changed_just_before_quitting_are_saved() {
     assert!(timers.contains("Doors open") && !timers.contains("Walk-in"), "the last change is on disk: {timers}");
 }
 
+/// Themes are written by the library's writer, on its thread: a theme copied and renamed a
+/// moment before quitting is on disk after, whole, and one deleted straight after it was copied
+/// stays deleted (its file goes after its save is written, never before).
+#[test]
+fn themes_changed_just_before_quitting_are_saved_and_one_deleted_stays_deleted() {
+    let name = "themes_changed_just_before_quitting_are_saved_and_one_deleted_stays_deleted";
+    let Some(run) = Run::new(name) else { return };
+    // Each file takes a while to write, as on a slow disk, so a save is still waiting when the
+    // next command comes.
+    let copy = run.start(&[("SOFTPRESENTER_SLOW_WRITES", "300")]);
+    copy.ok(&["theme", "duplicate", "Built-in", "as", "Evening"]);
+    copy.ok(&["theme", "rename", "Evening", "to", "Night"]);
+    copy.ok(&["theme", "duplicate", "Built-in", "as", "Gone Soon"]);
+    copy.ok(&["theme", "delete", "Gone Soon", "--yes"]);
+    copy.quit().assert_clean(&run);
+    let themes = run.data.join("Themes");
+    let files: Vec<String> = std::fs::read_dir(&themes)
+        .map(|entries| entries.flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    let read = |file: &String| std::fs::read_to_string(themes.join(file)).unwrap_or_default();
+    let named = |words: &str| files.iter().filter(|file| read(file).contains(words)).count();
+    assert_eq!(named("\"Night\""), 1, "the renamed theme is on disk: {files:?}");
+    assert_eq!(named("\"Evening\""), 0, "under its new name: {files:?}");
+    assert_eq!(named("\"Gone Soon\""), 0, "the deleted theme stays deleted: {files:?}");
+    assert!(files.iter().all(|file| file.ends_with(".sptheme")), "nothing half-written: {files:?}");
+    let note = std::fs::read_to_string(run.data.join("themes-in-use.txt")).unwrap_or_default();
+    assert!(note.starts_with("main="), "the note of the theme in use: {note:?}");
+}
+
 // ---------------------------------------------------------------------------------------------
 // One copy per data folder
 

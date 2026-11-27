@@ -25,7 +25,8 @@
 //! What happened comes back as [`Done`]s, which the main thread takes with
 //! [`Writer::finished`]; the thread wakes it when a save fails or the queue empties.
 //!
-//! The small settings files (the preferences, the screens, the audio list, macros, timers…) are
+//! Themes and the note of the theme in use are written here too, as songs are. The small
+//! settings files (the preferences, the screens, the audio list, macros, timers…) are
 //! written here too, so the window never waits for the disk: flushing one takes about 11 ms on an
 //! Apple silicon Mac, and a slider dragged changes the settings at every step. [`Paced`] hands
 //! each one over at most every [`PACE`]: the first change at once, the last always, and those
@@ -46,6 +47,10 @@ pub enum Kind {
     Playlists,
     Libraries,
     MediaList,
+    /// A theme's file in the Themes folder.
+    Theme,
+    /// The note of the theme in use and the order of the list (`themes-in-use.txt`).
+    ThemesInUse,
     /// One of the small settings files.
     Settings(crate::whole_file::What),
 }
@@ -56,9 +61,12 @@ impl Kind {
         let name = path.file_name().map_or_else(|| "file".into(), |name| name.to_string_lossy().into_owned());
         match self {
             Kind::Song => path.with_file_name(format!(".{name}.saving")),
-            Kind::Playlists | Kind::Libraries | Kind::MediaList | Kind::Settings(_) => {
-                path.with_file_name(format!("{name}.part"))
-            }
+            Kind::Playlists
+            | Kind::Libraries
+            | Kind::MediaList
+            | Kind::Theme
+            | Kind::ThemesInUse
+            | Kind::Settings(_) => path.with_file_name(format!("{name}.part")),
         }
     }
 
@@ -73,6 +81,8 @@ impl Kind {
             Kind::Playlists => crate::service::not_saved(error),
             Kind::Libraries => crate::libraries::not_saved(error),
             Kind::MediaList => crate::media::list_not_saved(error),
+            Kind::Theme => crate::theme_store::not_saved(error),
+            Kind::ThemesInUse => crate::theme_store::in_use_not_saved(error),
             Kind::Settings(what) => what.not_saved(error),
         }
     }

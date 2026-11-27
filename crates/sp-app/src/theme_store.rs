@@ -1,5 +1,11 @@
 //! Where themes are kept on this computer: one file for each in the Themes folder, named by
 //! the theme's id, and a note of which one is in use.
+//!
+//! Both are written by the library's writer (`writer`), as songs and settings are: flushed to
+//! the disk and renamed into place, on its thread, never the window's (`whole_file::replace`). A
+//! theme's file that can't be read at the start is left out, and never saved over that run
+//! (`whole_file::refuses`): the built-in theme's own file, changed by the church, would
+//! otherwise get the theme the app is built with saved over it at the next change.
 
 use std::path::{Path, PathBuf};
 
@@ -169,37 +175,42 @@ fn load_from(folder: &Path) -> Vec<Theme> {
             Ok(theme) if theme.id.is_nil() => themes[0] = theme,
             Ok(theme) if themes.iter().all(|have| have.id != theme.id) => themes.push(theme),
             Ok(_) => {}
-            Err(problem) => eprintln!("{}: {problem}", path.display()),
+            Err(problem) => {
+                crate::applog::problem("themes", &format!("{} could not be read: {problem}", path.display()));
+                crate::whole_file::leave_unread(&path, false);
+            }
         }
     }
     themes
 }
 
-/// Writes a theme to its file. The error is a plain sentence.
-pub fn save(theme: &Theme) -> Result<(), String> {
+/// A theme's save, for the library's writer to write (`writer`): its file in the Themes folder
+/// (made if it isn't there), saved only as `guard` says (`outside`). The error is a plain
+/// sentence.
+pub fn to_save(theme: &Theme, guard: crate::writer::Guard) -> Result<crate::writer::Save, String> {
     let folder = folder().ok_or_else(|| {
         t("notices.save.no_place_themes", "Could not find where to keep themes on this computer.").to_owned()
     })?;
-    save_in(&folder, theme)
+    Ok(to_save_in(&folder, theme, guard))
 }
 
-fn save_in(folder: &Path, theme: &Theme) -> Result<(), String> {
-    std::fs::create_dir_all(folder).map_err(|e| {
-        tf(
-            "notices.save.no_themes_folder",
-            "Could not make the Themes folder: {error}",
-            &[("error", &crate::notices::write_problem(&e))],
-        )
-    })?;
+fn to_save_in(folder: &Path, theme: &Theme, guard: crate::writer::Guard) -> crate::writer::Save {
+    let json = theme.to_json();
     let path = folder.join(format!("{}.sptheme", theme.id));
-    // Write beside it and rename, so a half-written file is never left under the real name.
-    let partial = path.with_extension("sptheme.part");
-    std::fs::write(&partial, theme.to_json()).and_then(|()| std::fs::rename(&partial, &path)).map_err(|e| {
-        tf("notices.save.theme", "Could not save the theme: {error}", &[("error", &crate::notices::write_problem(&e))])
-    })?;
-    // The same theme saved before the rename is replaced by the new file, not left beside it.
-    let _ = std::fs::remove_file(folder.join(format!("{}.pctheme", theme.id)));
-    Ok(())
+    let mut save = crate::writer::Save::new(path, crate::writer::Kind::Theme, guard, move || json.into_bytes());
+    save.make_folder = true;
+    save
+}
+
+/// The file a theme was saved in before the project was renamed (`.pctheme`), which its next
+/// save replaces: taken away once that save is written (by a job handed to the writer after it).
+pub fn old_file_of(theme: &Theme) -> Option<PathBuf> {
+    folder().map(|folder| folder.join(format!("{}.pctheme", theme.id)))
+}
+
+/// What the window says when a theme couldn't be written.
+pub fn not_saved(error: &std::io::Error) -> String {
+    tf("notices.save.theme", "Could not save the theme: {error}", &[("error", &crate::notices::write_problem(error))])
 }
 
 /// Removes a theme's file. A theme that was never saved has none, which is not a failure.
@@ -222,14 +233,30 @@ pub fn delete(theme: &Theme) -> Result<(), String> {
     Ok(())
 }
 
-/// Remembers which theme is the main one, and the order of the list, for the next start.
-pub fn remember_in_use(main: &Theme, themes: &[Theme]) {
-    if let Some(file) = in_use_file() {
-        if let Some(dir) = file.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let _ = std::fs::write(file, in_use_note(main, themes));
-    }
+/// The note of which theme is the main one, and the order of the list, for the library's writer
+/// to write (`writer`), so they are as they were at the next start. `None` where there is no
+/// place to keep it.
+pub fn in_use_to_save(main: &Theme, themes: &[Theme]) -> Option<crate::writer::Save> {
+    Some(in_use_to_save_at(in_use_file()?, main, themes))
+}
+
+fn in_use_to_save_at(file: PathBuf, main: &Theme, themes: &[Theme]) -> crate::writer::Save {
+    let note = in_use_note(main, themes);
+    let mut save =
+        crate::writer::Save::new(file, crate::writer::Kind::ThemesInUse, crate::writer::Guard::Any, move || {
+            note.into_bytes()
+        });
+    save.make_folder = true;
+    save
+}
+
+/// What the window says when the note of the theme in use couldn't be written.
+pub fn in_use_not_saved(error: &std::io::Error) -> String {
+    tf(
+        "notices.save.themes_in_use",
+        "Could not save which theme is in use: {error}",
+        &[("error", &crate::notices::write_problem(error))],
+    )
 }
 
 /// The note of the main theme and the order of the list.
@@ -320,8 +347,9 @@ mod tests {
         sunday.name = "Sunday".to_owned();
         let mut built_in = Theme::builtin();
         built_in.templates[1].boxes[0].rect.y = 10.0;
-        save_in(&folder, &sunday).unwrap();
-        save_in(&folder, &built_in).unwrap();
+        let any = crate::writer::Guard::Any;
+        crate::whole_file::tests::written(to_save_in(&folder, &sunday, any));
+        crate::whole_file::tests::written(to_save_in(&folder, &built_in, any));
         std::fs::write(folder.join("broken.pctheme"), "not a theme").unwrap();
 
         let loaded = load_from(&folder);
@@ -329,8 +357,94 @@ mod tests {
         assert_eq!(loaded[0], built_in);
         assert_eq!(loaded[1], sunday);
         // The old built-in Bible theme, if it was saved, is a theme like any other.
-        save_in(&folder, &Theme::builtin_bible()).unwrap();
+        crate::whole_file::tests::written(to_save_in(&folder, &Theme::builtin_bible(), any));
         assert_eq!(load_from(&folder).len(), 3);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// A theme is written by the library's writer, whole: under a name of its own beside its
+    /// file (`<id>.sptheme.part`, which the library tidy knows as half-written), then renamed
+    /// over it, its folder made if need be; a save that fails leaves nothing half-written. Only
+    /// over the file as the app last saw it, unless Keep mine.
+    #[test]
+    fn a_theme_is_saved_whole_by_the_library_writer_and_never_over_a_change_made_outside() {
+        let folder = std::env::temp_dir().join(format!("softpresenter-test-theme-writer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let mut theme = Theme { id: Uuid::new_v4(), name: "Evening".to_owned(), ..Theme::builtin() };
+        let save = to_save_in(&folder, &theme, crate::writer::Guard::Unchanged(None));
+        let file = save.path.clone();
+        assert_eq!(file, folder.join(format!("{}.sptheme", theme.id)));
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let said = crate::writer::Kind::Theme.problem(&file, &std::io::Error::other("x"));
+            assert_eq!(said, "Could not save the theme: x");
+        });
+        crate::whole_file::tests::written(save);
+        assert_eq!(load_from(&folder)[1], theme, "the folder made, the theme whole in it");
+        assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1, "nothing half-written beside it");
+        // Changed outside the app since: the save is left undone.
+        let seen = crate::outside::stamp(&file);
+        std::fs::write(&file, theme.to_json().replace("Evening", "Changed outside")).unwrap();
+        theme.name = "Night".to_owned();
+        let writer = crate::writer::Writer::start(|| {});
+        writer.write(to_save_in(&folder, &theme, crate::writer::Guard::Unchanged(seen)));
+        writer.drain();
+        assert!(
+            matches!(writer.finished().as_slice(), [crate::writer::Done::ChangedOutside { path, .. }] if *path == file)
+        );
+        assert_eq!(load_from(&folder)[1].name, "Changed outside", "never saved over");
+        // Keep mine goes over it.
+        crate::whole_file::tests::written(to_save_in(&folder, &theme, crate::writer::Guard::Any));
+        assert_eq!(load_from(&folder)[1].name, "Night");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// The built-in theme's own file, changed by the church, that can't be read at the start is
+    /// left out (the theme the app is built with takes its place for the run), and no save goes
+    /// over it until the app starts again.
+    #[test]
+    fn a_built_in_themes_file_that_cant_be_read_is_never_saved_over_that_run() {
+        let folder = std::env::temp_dir().join(format!("softpresenter-test-theme-unread-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join(format!("{}.sptheme", Uuid::nil()));
+        let cut_short = &Theme::builtin().to_json()[..200];
+        std::fs::write(&file, cut_short).unwrap();
+        assert_eq!(load_from(&folder), vec![Theme::builtin()], "the theme the app is built with, for the run");
+        let writer = crate::writer::Writer::start(|| {});
+        writer.write(to_save_in(&folder, &Theme::builtin(), crate::writer::Guard::Any));
+        writer.drain();
+        assert!(matches!(writer.finished().as_slice(), [crate::writer::Done::NotRead { .. }]));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), cut_short, "left as it was");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// The note of the main theme and the order of the list is written by the library's writer,
+    /// whole, its folder made if need be, and read back as it was left.
+    #[test]
+    fn the_note_of_the_theme_in_use_is_written_whole_by_the_library_writer() {
+        let folder = std::env::temp_dir().join(format!("softpresenter-test-theme-note-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let (alpha, beta) = (
+            Theme { id: Uuid::new_v4(), name: "Alpha".to_owned(), ..Theme::builtin() },
+            Theme { id: Uuid::new_v4(), name: "Beta".to_owned(), ..Theme::builtin() },
+        );
+        let file = folder.join("themes-in-use.txt");
+        crate::whole_file::tests::written(in_use_to_save_at(
+            file.clone(),
+            &alpha,
+            &[Theme::builtin(), beta.clone(), alpha.clone()],
+        ));
+        let note = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(note, format!("main={}\norder={},{},{}\n", alpha.id, Uuid::nil(), beta.id, alpha.id));
+        let mut loaded = vec![Theme::builtin(), alpha, beta];
+        assert_eq!(settle(&mut loaded, &note).0, 2, "the main theme found again, in its place");
+        assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1, "nothing half-written beside it");
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            assert_eq!(
+                crate::writer::Kind::ThemesInUse.problem(&file, &std::io::Error::other("x")),
+                "Could not save which theme is in use: x"
+            );
+        });
         let _ = std::fs::remove_dir_all(&folder);
     }
 

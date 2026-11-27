@@ -458,12 +458,10 @@ impl crate::App {
                     copy.name = format!("{base} {n}");
                     n += 1;
                 }
-                crate::theme_store::save(&copy)?;
-                if let Some(file) = crate::theme_store::file_of(&copy) {
-                    self.stamps.note(&file);
-                }
                 let name = copy.name.clone();
                 self.themes.push(copy);
+                // Written by the library's writer; one that can't be is said in the notices.
+                self.write_theme(self.themes.len() - 1, false);
                 self.themes_changed();
                 Ok(Reply::done(format!("Copied {} as {name}.", names[at])))
             }

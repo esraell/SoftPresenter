@@ -182,12 +182,12 @@ pub fn read<T>(path: &Path, what: What, parse: impl FnOnce(&str) -> Result<T, St
             let refused = e.kind() == std::io::ErrorKind::PermissionDenied;
             return match set_aside(path, None, &format!("{name} could not be read ({e}).")) {
                 Err(_) if refused => {
-                    leave_unread(path, what, false);
+                    leave_unread(path, false);
                     Ok(None)
                 }
                 kept => {
                     if kept.is_err() {
-                        leave_unread(path, what, true);
+                        leave_unread(path, true);
                     }
                     Err(Unread { what, kept })
                 }
@@ -201,7 +201,7 @@ pub fn read<T>(path: &Path, what: What, parse: impl FnOnce(&str) -> Result<T, St
     parsed.map(Some).map_err(|why| {
         let kept = set_aside(path, Some(&bytes), &format!("{name}: {}.", why.trim_end_matches('.')));
         if kept.is_err() {
-            leave_unread(path, what, true);
+            leave_unread(path, true);
         }
         Unread { what, kept }
     })
@@ -223,12 +223,12 @@ fn not_read() -> std::sync::MutexGuard<'static, Vec<NotRead>> {
     NOT_READ.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Notes a file neither read nor kept aside, so no save goes over it this run; `told` when the
-/// start's notice says so already.
-fn leave_unread(path: &Path, what: What, told: bool) {
+/// Notes a file there at the start that was neither read nor kept aside (a settings file, or a
+/// theme's), so no save goes over it this run; `told` when the start's notice says so already.
+pub fn leave_unread(path: &Path, told: bool) {
     crate::applog::problem(
         "settings",
-        &format!("{} ({what:?}) is not saved over until SoftPresenter starts again.", path.display()),
+        &format!("{} is not saved over until SoftPresenter starts again.", path.display()),
     );
     let mut left = not_read();
     if !left.iter().any(|left| left.path == path) {

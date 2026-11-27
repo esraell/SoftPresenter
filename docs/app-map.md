@@ -347,7 +347,7 @@ of this one copies it to Documents, checks the copy, and keeps the old folder as
 | File or folder | Holds |
 |---|---|
 | `Songs/*.sppres` | Songs made or changed in the app (JSON), each named by its id. Written on a thread of their own (`writer.rs`), in the order they were saved, as are `services.json`, `libraries.json`, `media.json` and every settings file below (those at most every 300 ms each, `writer::Paced`), so the window never waits for the disk; each is flushed to the disk before it is renamed into place, and its folder once a run of files into it is written (`whole_file.rs`); quitting waits until all are written |
-| `Themes/*.sptheme` | Themes (JSON), each with its versions' names and templates under `versions`; `themes-in-use.txt` says which theme songs and Bible slides use |
+| `Themes/*.sptheme` | Themes (JSON), each with its versions' names and templates under `versions`; `themes-in-use.txt` says which theme songs and Bible slides use. Both are written by the library's writer, as songs are (`theme_store.rs`) |
 | `Images/` | Pictures put on slides, and slides made from PDFs and presentations; any nothing uses goes to the Trash after a week (`sweep.rs`) |
 | `Media/` | Videos brought in by song packs (a slide names one as `Media/<file>`), and the sample backgrounds when they are added to the media bin (`samples.rs`, under their own names); tidied as `Images/` is |
 | `Bibles/` | Downloaded Bibles |

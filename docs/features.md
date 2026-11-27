@@ -117,8 +117,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   list of the displays (`--list-displays`), only look at the settings, and leave a damaged file to
   the copy that opens the window. A copy kept aside never stops the library's daily tidy: what it
   names still counts.
-- **Saved whole, never on the window's thread.** Every song and settings file is written under
-  another name beside it, flushed to the disk, then renamed into place (on Windows by a rename
+- **Saved whole, never on the window's thread.** Every song, theme and settings file (and the
+  note of the theme in use) is written under another name beside it, flushed to the disk, then renamed into place (on Windows by a rename
   written through to the disk), and its folder flushed after (on a Mac and Linux), so a power
   cut leaves the old file or the new one, never an empty or half-written one; a save that fails
   takes its half-written file away. A flush waits for the disk (on an Apple silicon Mac about
@@ -126,8 +126,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   thread (`writer.rs`), never the window's or the screens': the writer flushes a folder once
   after a run of files into it (an import's songs flush the Songs folder once), and the small
   settings files are handed to it at most every 300 ms each (`writer::Paced`): the first change
-  at once, the last always, so a slider dragged writes a few times, not at every step. Quitting
-  hands over whatever waits, and waits until it is written.
+  at once, the last always, so a slider dragged writes a few times, not at every step. A theme
+  deleted goes from the disk after its last save is written, never before. Quitting hands over
+  whatever waits, and waits until it is written. A theme's file that can't be read at the start
+  is left out (the built-in theme takes its place for the run), said in the log, and never saved
+  over until the app starts again.
 - **Song packs** (`.sppack`), to carry songs prepared at home to the church computer by
   AirDrop, email or a USB stick. File › Export Songs… (the songs picked out, or the one shown),
   a song's or playlist's right-click Export…, or `sp song export SONG… [--playlist NAME] --to

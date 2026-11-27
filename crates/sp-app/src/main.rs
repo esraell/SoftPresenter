@@ -6028,39 +6028,78 @@ impl App {
         // Edit view, and on quitting.
     }
 
-    /// Writes every song changed in the Edit view to its file (by way of the library's writer,
-    /// which writes it a moment later on a thread of its own). The bundled sample has no file.
+    /// Writes every song and theme changed to its file (by way of the library's writer, which
+    /// writes it a moment later on a thread of its own). The bundled sample has no file. A theme
+    /// whose file changed outside the app since it was read is never saved over: it waits on
+    /// Reload or Keep mine, holding its changes.
     fn save_unsaved(&mut self) {
-        let mut problem = None;
         for index in std::mem::take(&mut self.unsaved) {
             self.save_song_file(index, None);
         }
         for index in std::mem::take(&mut self.themes_unsaved) {
             let Some(theme) = self.themes.get(index) else { continue };
-            let file = theme_store::file_of(theme);
-            if file.as_ref().is_some_and(|file| self.stamps.check(file) != outside::Now::Same) {
+            if theme_store::file_of(theme).is_some_and(|file| self.stamps.check(&file) != outside::Now::Same) {
                 applog::event("outside", &format!("did not save over the theme {}: it changed outside", theme.name));
-                if !self.held_themes.contains(&index) {
-                    self.held_themes.push(index);
-                }
-                self.wait_on(outside::Waiting::Theme(index));
+                self.hold_theme(index);
                 continue;
             }
-            match theme_store::save(theme) {
-                Ok(()) => {
-                    if let Some(file) = file {
-                        self.stamps.note(&file);
-                    }
-                }
-                Err(e) => problem = Some(e),
-            }
+            self.write_theme(index, false);
         }
         self.unsaved_since = None;
         if let Some(running) = self.running.as_mut() {
-            if let Some(problem) = problem {
-                running.home_state.notices.trouble(problem);
-            }
             running.home_window.request_redraw();
+        }
+    }
+
+    /// A theme whose file changed outside the app: its changes are held, and it waits on Reload
+    /// or Keep mine.
+    fn hold_theme(&mut self, index: usize) {
+        if !self.held_themes.contains(&index) {
+            self.held_themes.push(index);
+        }
+        self.wait_on(outside::Waiting::Theme(index));
+    }
+
+    /// Hands a theme to the library's writer to be written to its file, only over the file as
+    /// the app last saw it (see `outside`), or over whatever is there with `over_anything` (Keep
+    /// mine). The file it had before the project was renamed goes once it is written.
+    fn write_theme(&mut self, index: usize, over_anything: bool) {
+        let Some(theme) = self.themes.get(index) else { return };
+        let file = theme_store::file_of(theme);
+        let guard = match &file {
+            Some(_) if over_anything => writer::Guard::Any,
+            Some(file) => self.stamps.guard(file),
+            None => writer::Guard::Any,
+        };
+        let old = theme_store::old_file_of(theme);
+        match theme_store::to_save(theme, guard) {
+            Ok(save) => {
+                let seq = self.writer.write(save);
+                if let Some(file) = &file {
+                    self.stamps.writing(file, seq);
+                }
+                if let Some(old) = old {
+                    self.writer.then(move || {
+                        if !whole_file::refuses(&old) {
+                            let _ = std::fs::remove_file(&old);
+                        }
+                        Ok(())
+                    });
+                }
+            }
+            Err(problem) => {
+                if let Some(running) = self.running.as_mut() {
+                    running.home_state.notices.trouble(problem);
+                }
+            }
+        }
+    }
+
+    /// Hands the library's writer the note of the main theme and the order of the list, for the
+    /// next start.
+    fn remember_themes_in_use(&mut self) {
+        if let Some(save) = theme_store::in_use_to_save(&self.theme, &self.themes) {
+            self.writer.write(save);
         }
     }
 
@@ -6135,6 +6174,12 @@ impl App {
                     });
                     if let Some(index) = song {
                         self.hold_song(index);
+                    }
+                    // A theme, found by its file (the places in the list may have moved since).
+                    let theme =
+                        self.themes.iter().position(|theme| theme_store::file_of(theme).as_ref() == Some(&path));
+                    if let Some(index) = theme {
+                        self.hold_theme(index);
                     }
                     continue;
                 }
@@ -6420,6 +6465,11 @@ impl App {
         let theme = self.themes.get(index).ok_or(crate::i18n::t("notices.theme_gone", "That theme is gone."))?;
         let file = theme_store::file_of(theme)
             .ok_or(crate::i18n::t("notices.reload.theme_no_file", "The theme has no file."))?;
+        // The app's own saves of it on their way are written first, so the file read is not
+        // taken over by one of them a moment later.
+        self.writer.flush(&file);
+        self.finish_saves();
+        let theme = self.themes.get(index).ok_or(crate::i18n::t("notices.theme_gone", "That theme is gone."))?;
         let text = std::fs::read_to_string(&file).map_err(|e| {
             crate::i18n::tf(
                 "notices.theme.unreadable",
@@ -6452,14 +6502,12 @@ impl App {
         Ok(name)
     }
 
-    /// Writes the app's version of a theme over its file, which changed outside the app.
+    /// Writes the app's version of a theme over its file, which changed outside the app (by way
+    /// of the library's writer).
     fn keep_theme(&mut self, index: usize) -> Result<String, String> {
         let theme = self.themes.get(index).ok_or(crate::i18n::t("notices.theme_gone", "That theme is gone."))?;
-        theme_store::save(theme)?;
         let name = theme_store::shown_theme_name(theme).into_owned();
-        if let Some(file) = theme_store::file_of(theme) {
-            self.stamps.note(&file);
-        }
+        self.write_theme(index, true);
         self.held_themes.retain(|at| *at != index);
         self.stop_waiting(outside::Waiting::Theme(index));
         Ok(name)
@@ -7139,12 +7187,8 @@ impl App {
                         theme.name = format!("{base} ({n})");
                         n += 1;
                     }
-                    if theme_store::save(&theme).is_ok()
-                        && let Some(file) = theme_store::file_of(&theme)
-                    {
-                        self.stamps.note(&file);
-                    }
                     self.themes.push(theme);
+                    self.write_theme(self.themes.len() - 1, false);
                     themes_in.insert(id, id);
                     new_themes += 1;
                     id
@@ -8582,7 +8626,7 @@ impl App {
             Some(ThemeRequest::UseForSongs(index)) if index < count && index != self.songs_theme => {
                 self.songs_theme = index;
                 self.themes_changed();
-                theme_store::remember_in_use(&self.theme, &self.themes);
+                self.remember_themes_in_use();
                 // Bible slides now use this theme's Bible template: the translations are pointed
                 // at its boxes, as a fresh start.
                 if let Some(running) = self.running.as_mut() {
@@ -8651,14 +8695,15 @@ impl App {
                     edit.index = home::place_after_move(edit.index, from, to);
                 }
                 self.themes_changed();
-                theme_store::remember_in_use(&self.theme, &self.themes);
+                self.remember_themes_in_use();
             }
             // The built-in theme, at the front of the list, is always kept.
             Some(ThemeRequest::Delete(index)) if index > 0 && index < count => {
                 // Write what is waiting first, so the places in the list still mean what they did.
                 self.save_unsaved();
                 let gone = self.themes.remove(index);
-                let problem = theme_store::delete(&gone).err();
+                // Its file goes after its last save is written, never before.
+                self.writer.then(move || theme_store::delete(&gone));
                 // Whatever used it falls back to the built-in theme; later themes move up one.
                 let moved = |at: usize| match at.cmp(&index) {
                     std::cmp::Ordering::Less => at,
@@ -8676,7 +8721,7 @@ impl App {
                     });
                 }
                 self.themes_changed();
-                theme_store::remember_in_use(&self.theme, &self.themes);
+                self.remember_themes_in_use();
                 if main_gone && let Some(running) = self.running.as_mut() {
                     running.home_state.bible.assign_boxes();
                 }
@@ -8686,9 +8731,6 @@ impl App {
                     self.open_theme_editor(moved(open));
                 } else {
                     self.refresh_output();
-                }
-                if let (Some(problem), Some(running)) = (problem, self.running.as_mut()) {
-                    running.home_state.notices.trouble(problem);
                 }
             }
             _ => {}
@@ -13095,18 +13137,8 @@ fn main() -> ExitCode {
     start_steps::mark("event loop made");
     let (themes, songs_theme, moved_in) = theme_store::load_all();
     start_steps::mark("themes read");
-    // Themes changed while loading (a Bible layout brought into the main theme) are written
-    // at once, with the new note of what is in use, so it happens only once.
-    if !moved_in.is_empty() {
-        for at in &moved_in {
-            if let Err(problem) = theme_store::save(&themes[*at]) {
-                eprintln!("{problem}");
-            }
-        }
-        theme_store::remember_in_use(&themes[songs_theme], &themes);
-    }
     let (bible_theme, bible_layout) = (songs_theme, themes[songs_theme].bible_template_index());
-    // How each song and theme file is now, as it was just read (and the themes saved above).
+    // How each song and theme file is now, as it was just read.
     let mut stamps = outside::Stamps::default();
     for source in sources.iter().flatten() {
         stamps.note(&load::song_file_for(source));
@@ -13303,6 +13335,15 @@ fn main() -> ExitCode {
         terminate_asked: false,
         left: false,
     };
+    // Themes changed while loading (a Bible layout brought into the main theme) are handed to
+    // the library's writer at once, with the new note of what is in use, so it happens only
+    // once; never by a list of the displays, which may run beside the copy running.
+    if !moved_in.is_empty() && !app.options.list_displays {
+        for at in moved_in {
+            app.write_theme(at, false);
+        }
+        app.remember_themes_in_use();
+    }
     start_steps::mark("app made");
     // The log says when the window's thread is held up, and with what.
     stall::watch();
