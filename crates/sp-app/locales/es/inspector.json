@@ -109,7 +109,6 @@
   "inspector.shadow.angle": "Ángulo",
   "inspector.shadow.offset": "Distancia",
   "inspector.shadow.blur": "Desenfoque",
-  "inspector.object.name": "Nombre",
   "inspector.undo": "Deshacer",
   "inspector.undo.hint": "Deshacer el último cambio",
   "inspector.redo": "Rehacer",
@@ -268,5 +267,10 @@
   "inspector.kind.web": "página web",
   "inspector.kind.ndi": "fuente NDI",
   "inspector.kind.mirror": "AirPlay",
-  "inspector.kind.screen": "imagen de pantalla"
+  "inspector.kind.screen": "imagen de pantalla",
+  "inspector.rename": "Renombrar",
+  "inspector.rename.hint": "Escribir su nombre de nuevo en la lista de objetos",
+  "inspector.duplicate": "Duplicar",
+  "inspector.duplicate.hint": "Hacer una copia a su lado",
+  "inspector.row.holds": "Contiene"
 }

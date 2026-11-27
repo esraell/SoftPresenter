@@ -780,7 +780,8 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
         let stage = state.theme_edit.is_none() && state.editing.as_ref().is_some_and(crate::stage_editor::is_stage);
         let layout = stage && state.editing.as_ref().is_some_and(|draft| draft.selected.is_none());
         let tabs = tabs_for(state);
-        if tabs.is_empty() {
+        let nothing_picked = tabs.is_empty();
+        if nothing_picked {
             // One section has a plain heading, not a lone tab.
             let (heading, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
             let words = if layout {
@@ -907,24 +908,10 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
                         theme_slide_panel(ui, state);
                     } else if layout {
                         crate::stage_editor::layout_panel(ui, state);
+                    } else if nothing_picked {
+                        slide_panel(ui, state);
                     } else {
-                        // An object's tabs: rows a key tall, their fields and menus a step
-                        // lighter than the panel, numbers in the fixed-width face.
-                        ui.spacing_mut().item_spacing = vec2(BETWEEN, ROWS_APART);
-                        ui.spacing_mut().interact_size.y = KEY;
-                        ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
-                        let visuals = ui.visuals_mut();
-                        visuals.extreme_bg_color = WELL;
-                        visuals.widgets.inactive.weak_bg_fill = WELL;
-                        visuals.widgets.inactive.bg_fill = WELL;
-                        for widget in [
-                            &mut visuals.widgets.inactive,
-                            &mut visuals.widgets.hovered,
-                            &mut visuals.widgets.active,
-                            &mut visuals.widgets.open,
-                        ] {
-                            widget.corner_radius = egui::CornerRadius::same(9);
-                        }
+                        tab_style(ui);
                         // With several objects selected, a change made here is made to them all.
                         let before = state.editing.as_ref().and_then(|draft| draft.selected_object().cloned());
                         let text = before.as_ref().is_some_and(|object| object.as_text().is_some());
@@ -1084,6 +1071,126 @@ fn nothing_selected(ui: &mut egui::Ui) {
         .size(11.5)
         .color(DIM),
     );
+}
+
+/// The look of an object's tabs and the slide's panel: rows a key tall, their fields and menus
+/// a step lighter than the panel, numbers in the fixed-width face.
+fn tab_style(ui: &mut egui::Ui) {
+    ui.spacing_mut().item_spacing = vec2(BETWEEN, ROWS_APART);
+    ui.spacing_mut().interact_size.y = KEY;
+    ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
+    let visuals = ui.visuals_mut();
+    visuals.extreme_bg_color = WELL;
+    visuals.widgets.inactive.weak_bg_fill = WELL;
+    visuals.widgets.inactive.bg_fill = WELL;
+    for widget in [
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.hovered,
+        &mut visuals.widgets.active,
+        &mut visuals.widgets.open,
+    ] {
+        widget.corner_radius = egui::CornerRadius::same(9);
+    }
+}
+
+/// A song's slide with nothing picked: what the slide itself has. Its label, the template it is
+/// drawn with, going on to the next slide by itself, and its notes. A prop has none of these.
+fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
+    let of_song = state.edit_kind() == Some(crate::home::EditKind::Slides);
+    let templates = state.song_templates.clone();
+    let Some(draft) = state.editing.as_mut() else { return };
+    if !of_song {
+        return nothing_selected(ui);
+    }
+    tab_style(ui);
+    let captions = [
+        t("slides.menu.label", "Label"),
+        t("slides.menu.template", "Template"),
+        t("slides.menu.go_next", "Go to Next"),
+    ];
+    let column = caption_column(ui, &captions);
+    let room = control_room(column);
+    let before = (draft.slide.label.clone(), draft.slide.template, draft.slide.advance);
+    let (mut label, mut template, mut advance) = before.clone();
+    row(ui, column, captions[0], |ui| {
+        let none = t("slides.menu.label.none", "None");
+        let shown = label.clone().unwrap_or_else(|| none.to_owned());
+        egui::ComboBox::from_id_salt("slide label")
+            .selected_text(shown)
+            .width(room)
+            .wrap_mode(egui::TextWrapMode::Truncate)
+            .show_ui(ui, |ui| {
+                if ui.add(egui::Button::selectable(label.is_none(), none)).clicked() {
+                    label = None;
+                }
+                // In the language set, and ticked whatever language the slide's label was given in.
+                for offered in crate::home::SLIDE_LABELS {
+                    let name = crate::i18n::tg(offered.0, offered.1);
+                    let ticked = crate::i18n::every_wording(offered).any(|said| label.as_deref() == Some(said));
+                    if ui.add(egui::Button::selectable(ticked, name)).clicked() {
+                        label = Some(name.to_owned());
+                    }
+                }
+            });
+    });
+    // Which of the theme's templates the slide is drawn with. Usual lets the theme pick the one
+    // that suits what is on the slide.
+    if !templates.is_empty() {
+        row(ui, column, captions[1], |ui| {
+            let usual = t("slides.menu.template.usual", "Usual (the theme picks)");
+            let current = template.filter(|id| templates.iter().any(|(have, _)| have == id));
+            let shown = templates
+                .iter()
+                .find(|(id, _)| Some(*id) == current)
+                .map_or(usual.to_owned(), |(id, name)| crate::theme_store::template_name(*id, name).into_owned());
+            egui::ComboBox::from_id_salt("slide template")
+                .selected_text(shown)
+                .width(room)
+                .wrap_mode(egui::TextWrapMode::Truncate)
+                .show_ui(ui, |ui| {
+                    if ui.add(egui::Button::selectable(current.is_none(), usual)).clicked() {
+                        template = None;
+                    }
+                    for (id, name) in &templates {
+                        let shown = crate::theme_store::template_name(*id, name);
+                        if ui.add(egui::Button::selectable(current == Some(*id), shown.as_ref())).clicked() {
+                            template = Some(*id);
+                        }
+                    }
+                });
+        });
+    }
+    // Going on to the next slide by itself, after a time.
+    row(ui, column, captions[2], |ui| {
+        let after =
+            |seconds: f32| tf("slides.menu.go_next.after", "After {n} Seconds", &[("n", &format!("{seconds:.0}"))]);
+        let none = t("slides.menu.go_next.none", "None");
+        let shown = advance.map_or(none.to_owned(), after);
+        egui::ComboBox::from_id_salt("slide go to next").selected_text(shown).width(room).show_ui(ui, |ui| {
+            if ui.add(egui::Button::selectable(advance.is_none(), none)).clicked() {
+                advance = None;
+            }
+            for seconds in [3.0, 5.0, 8.0, 10.0, 15.0, 20.0, 30.0, 45.0, 60.0] {
+                if ui.add(egui::Button::selectable(advance == Some(seconds), after(seconds))).clicked() {
+                    advance = Some(seconds);
+                }
+            }
+        });
+    });
+    if (label.clone(), template, advance) != before {
+        draft.record();
+        (draft.slide.label, draft.slide.template, draft.slide.advance) = (label, template, advance);
+    }
+    scope_line(ui, false, t("inspector.notes.heading", "SLIDE NOTES"), "");
+    let mut notes = draft.slide.notes.clone().unwrap_or_default();
+    let field = egui::TextEdit::multiline(&mut notes)
+        .desired_rows(4)
+        .desired_width(f32::INFINITY)
+        .hint_text(t("inspector.notes.placeholder", "Notes for whoever runs the slides"));
+    if ui.add(field).changed() {
+        draft.slide.notes = (!notes.trim().is_empty()).then_some(notes);
+    }
+    nothing_selected(ui);
 }
 
 /// The name of an object's own tab: what the object is.
@@ -1385,14 +1492,26 @@ fn kind_tab(ui: &mut egui::Ui, state: &mut HomeState) {
     if matches!(object.kind, ObjectKind::Screen { .. }) {
         return crate::stage_editor::screen_settings(ui, object, &screens);
     }
-    if matches!(object.kind, ObjectKind::Shape { .. }) {
+    if let ObjectKind::Shape { shape } = &mut object.kind {
         let captions = [
+            t("inspector.tab.shape", "Shape"),
             t("inspector.shape.fill", "Fill"),
             t("inspector.row.gradient", "Gradient"),
             t("inspector.row.to", "To"),
             t("inspector.row.outline", "Outline"),
         ];
         let column = caption_column(ui, &captions);
+        // Which shape it is. One still called what it was takes the new shape's name.
+        let was = *shape;
+        row(ui, column, captions[0], |ui| {
+            let shapes: Vec<(sp_model::Shape, &str)> =
+                sp_model::Shape::ALL.into_iter().map(|shape| (shape, crate::editor::shape_name(shape))).collect();
+            choice(ui, "which shape", control_room(column), shape, &shapes);
+        });
+        let now = *shape;
+        if now != was && object.name == crate::editor::shape_name(was) {
+            crate::editor::shape_name(now).clone_into(&mut object.name);
+        }
         fill_rows(ui, column, object);
         outline_row(ui, column, object);
         return;
@@ -1430,6 +1549,7 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let history = (state.can_undo(false), state.can_undo(true));
     let menu_asked = &mut state.menu_asked;
     let lock_shape = &mut state.inspector.lock_shape;
+    let rename_started = &mut state.rename_started;
     let Some(draft) = state.editing.as_mut() else { return };
     let picked = draft.selection();
     // With several picked: how many, and what they are.
@@ -1608,19 +1728,23 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         }
     });
 
-    let mut delete = false;
+    // Rename starts retyping the name where it is listed, under Objects, as a double click on
+    // it there does.
+    let (mut delete, mut duplicate, mut rename) = (false, false, false);
     row(ui, column, named, |ui| {
-        let words = t("inspector.delete", "Delete");
-        let key_wide = crate::studio::flat_button_width(ui, &[words], &word_key_font(), 13.0);
-        let hint = t("inspector.object.name", "Name");
-        let mut name = crate::editor::object_name(object);
-        let field = egui::TextEdit::singleline(&mut name).hint_text(hint).align(Align2::LEFT_CENTER);
-        if ui.add_sized([room - key_wide - BETWEEN, KEY], field).changed() {
-            object.name = crate::editor::typed_object_name(object, &name);
-        }
-        let hint = t("inspector.delete.hint", "Remove this object from the slide (Delete)");
-        delete = word_key(ui, words, false, true).on_hover_text(hint).clicked();
+        // Where the three don't fit one line in a language, they wrap.
+        let wrapping = Layout::left_to_right(Align::Min).with_main_wrap(true);
+        ui.allocate_ui_with_layout(vec2(room, KEY), wrapping, |ui| {
+            ui.spacing_mut().item_spacing = vec2(BETWEEN, FOOT_APART);
+            let hint = t("inspector.rename.hint", "Retype its name in the Objects list");
+            rename = word_key(ui, t("inspector.rename", "Rename"), false, true).on_hover_text(hint).clicked();
+            let hint = crate::keys::hint(t("inspector.duplicate.hint", "Make a copy of it beside it"), "D", false);
+            duplicate = word_key(ui, t("inspector.duplicate", "Duplicate"), false, true).on_hover_text(hint).clicked();
+            let hint = t("inspector.delete.hint", "Remove this object from the slide (Delete)");
+            delete = word_key(ui, t("inspector.delete", "Delete"), false, true).on_hover_text(hint).clicked();
+        });
     });
+    let renamed = (object.id, crate::editor::object_name(object));
     let follows_theme =
         object.frame.is_none() && object.rotation == 0.0 && object.opacity == 1.0 && object.fill.is_none();
 
@@ -1657,6 +1781,14 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     if reset {
         draft.reset_to_theme();
     }
+    if rename {
+        draft.renaming = Some(renamed);
+        *rename_started = true;
+    }
+    if duplicate {
+        let copies = draft.copied(theme);
+        draft.paste(&copies);
+    }
     if delete {
         draft.delete_selected();
     }
@@ -1675,6 +1807,8 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let Some(draft) = state.editing.as_mut() else { return };
     let words_selected = draft.selected_words();
     let boxes = draft.selection().len();
+    let taken_roles: Vec<sp_model::Role> =
+        draft.slide.objects.iter().filter_map(|object| object.role.clone()).collect();
     let Some(object) = draft.selected_object_mut() else {
         return nothing_selected(ui);
     };
@@ -1736,6 +1870,9 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     ];
     if shows {
         captions.push(t("inspector.row.shows", "Shows"));
+    }
+    if for_theme {
+        captions.push(t("inspector.row.holds", "Holds"));
     }
     let column = caption_column(ui, &captions);
 
@@ -1876,6 +2013,41 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
                 spans.clear();
             }
             object.link = link;
+        }
+    }
+
+    // In a template: which of a slide's words the box holds. No two boxes hold the same, and
+    // every text box holds some (one with no role yet takes one from its name when the
+    // template is kept), so there is no choice of none.
+    if for_theme {
+        let mut holds = object.role.clone();
+        row(ui, column, t("inspector.row.holds", "Holds"), |ui| {
+            let shown = holds.as_ref().map_or_else(|| object.name.clone(), crate::editor::role_label);
+            egui::ComboBox::from_id_salt("holds")
+                .selected_text(shown)
+                .width(control_room(column))
+                .wrap_mode(egui::TextWrapMode::Truncate)
+                .show_ui(ui, |ui| {
+                    for role in crate::editor::word_roles() {
+                        let on = holds.as_ref() == Some(&role);
+                        let taken = !on && taken_roles.contains(&role);
+                        let key =
+                            ui.add_enabled(!taken, egui::Button::selectable(on, crate::editor::role_label(&role)));
+                        let why = t("editor.add.box.taken", "This template has one already");
+                        if key.on_disabled_hover_text(why).clicked() {
+                            holds = Some(role);
+                        }
+                    }
+                });
+        });
+        if holds != object.role {
+            // A box still named after what it held is named after what it holds now.
+            let named_for_role = object.role.as_ref().is_some_and(|role| object.name == role.label());
+            if let (true, Some(role)) = (named_for_role, holds.as_ref()) {
+                object.name = role.label();
+            }
+            object.role = holds;
+            inspector.new_step = true;
         }
     }
 
@@ -2838,6 +3010,149 @@ mod tests {
             words
         };
         crate::i18n::with_language(crate::i18n::Language::English, || assert_eq!(places(false), places(true)));
+    }
+
+    /// One frame of the inspector for `state` in `ctx` with `events`, and where it drew `words`
+    /// last (on top: in an open menu).
+    fn frame_with(
+        (ctx, time): (&egui::Context, &mut f64),
+        state: &mut HomeState,
+        theme: &Theme,
+        events: Vec<egui::Event>,
+        words: &str,
+    ) -> Option<egui::Pos2> {
+        fn walk(shape: &egui::Shape, words: &str, found: &mut Option<egui::Pos2>) {
+            match shape {
+                egui::Shape::Text(text) if text.galley.text() == words => {
+                    *found = Some(text.pos + text.galley.size() / 2.0);
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, words, found)),
+                _ => {}
+            }
+        }
+        *time += 0.1;
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(PANEL_WIDTH, 2400.0))),
+            time: Some(*time),
+            events,
+            ..RawInput::default()
+        };
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().frame(Frame::NONE).show(ui, |ui| inspector(ui, state, theme));
+        });
+        let mut found = None;
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, words, &mut found));
+        output.drop_without_applying_deltas();
+        found
+    }
+
+    /// Clicks the middle of `words` where the inspector draws them for `state` in `ctx` (kept
+    /// from one click to the next, so a menu a click opened is still open), and draws a frame
+    /// after.
+    fn click_in(ctx: &egui::Context, time: &mut f64, state: &mut HomeState, theme: &Theme, words: &str) {
+        frame_with((ctx, time), state, theme, vec![], words);
+        let at = frame_with((ctx, time), state, theme, vec![], words).unwrap_or_else(|| panic!("{words} drawn"));
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for events in [vec![egui::Event::PointerMoved(at)], vec![press(true)], vec![press(false)], vec![]] {
+            frame_with((ctx, time), state, theme, events, words);
+        }
+    }
+
+    /// [`click_in`] with a context of its own.
+    fn click_words(state: &mut HomeState, theme: &Theme, words: &str) {
+        click_in(&crate::studio::tests::styled(), &mut 0.0, state, theme, words);
+    }
+
+    #[test]
+    fn the_box_tabs_object_row_renames_duplicates_and_deletes() {
+        let theme = Theme::builtin();
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let count = |state: &HomeState| state.editing.as_ref().map_or(0, |draft| draft.slide.objects.len());
+            let mut state = editing_shape(InspectorTab::Box, false);
+            let before = count(&state);
+            let star = state.editing.as_ref().and_then(|draft| draft.selected);
+            click_words(&mut state, &theme, "Rename");
+            let renaming = state.editing.as_ref().and_then(|draft| draft.renaming.clone());
+            assert_eq!(renaming.map(|(id, name)| (Some(id), name)), Some((star, "Star".to_owned())));
+            assert!(state.rename_started, "the Objects list takes the keyboard for it");
+            click_words(&mut state, &theme, "Duplicate");
+            assert_eq!(count(&state), before + 1, "a copy beside it");
+            click_words(&mut state, &theme, "Delete");
+            assert_eq!(count(&state), before, "the copy, which is picked, goes");
+        });
+    }
+
+    #[test]
+    fn a_shapes_own_tab_says_which_shape_and_a_slide_with_nothing_picked_has_its_panel() {
+        let theme = Theme::builtin();
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let words = words_drawn(&mut editing_shape(InspectorTab::Own, false), &theme);
+            for wanted in ["SHAPE", "Star", "FILL", "OUTLINE"] {
+                assert!(words.iter().any(|said| said == wanted), "{wanted} in {words:?}");
+            }
+            // A song's slide with nothing picked: its own settings, under the heading SLIDE.
+            let mut state = editing_text(InspectorTab::Own, false, false);
+            if let Some(draft) = state.editing.as_mut() {
+                draft.select_only(None);
+            }
+            let words = words_drawn(&mut state, &theme);
+            for wanted in ["SLIDE", "LABEL", "GO TO NEXT", "SLIDE NOTES", "None"] {
+                assert!(words.iter().any(|said| said == wanted), "{wanted} in {words:?}");
+            }
+            // A time chosen from Go to Next's menu (the last None drawn) is the slide's, and one
+            // Undo step.
+            let depth = |state: &HomeState| state.editing.as_ref().map_or(0, EditDraft::undo_depth);
+            let advance = |state: &HomeState| state.editing.as_ref().and_then(|draft| draft.slide.advance);
+            let before = depth(&state);
+            let (ctx, mut time) = (crate::studio::tests::styled(), 0.0);
+            click_in(&ctx, &mut time, &mut state, &theme, "None");
+            click_in(&ctx, &mut time, &mut state, &theme, "After 5 Seconds");
+            assert_eq!(advance(&state), Some(5.0));
+            assert_eq!(depth(&state), before + 1, "one step for Undo");
+            assert!(state.editing.as_mut().is_some_and(EditDraft::undo), "Undo");
+            assert_eq!(advance(&state), None);
+        });
+    }
+
+    #[test]
+    fn a_templates_text_box_says_what_it_holds_and_has_no_animation() {
+        let theme = Theme::builtin();
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let mut draft = EditDraft::of_template(&theme.templates[0], 0);
+            let main = draft.slide.objects.iter().find(|object| object.role == Some(sp_model::Role::primary()));
+            draft.selected = main.map(|object| object.id);
+            assert!(draft.selected.is_some(), "the template has a main box");
+            let theme_edit = Some(crate::home::ThemeEdit::of(0, theme.clone()));
+            let mut state = HomeState { editing: Some(draft), theme_edit, ..HomeState::default() };
+            let tabs: Vec<&str> = tabs_for(&state).into_iter().map(|(_, name)| name).collect();
+            assert_eq!(tabs, ["Text", "Box"]);
+            let words = words_drawn(&mut state, &theme);
+            for wanted in ["HOLDS", "Main"] {
+                assert!(words.iter().any(|said| said == wanted), "{wanted} in {words:?}");
+            }
+            // From its menu the box takes what no other box holds; what another holds is greyed.
+            let (ctx, mut time) = (crate::studio::tests::styled(), 0.0);
+            let role = |state: &HomeState| {
+                state.editing.as_ref().and_then(|draft| draft.selected_object()).and_then(|object| object.role.clone())
+            };
+            click_in(&ctx, &mut time, &mut state, &theme, "Main");
+            click_in(&ctx, &mut time, &mut state, &theme, "Translation");
+            assert_eq!(role(&state), Some(sp_model::Role::primary()), "the template has a translation box");
+            // The click closed the menu: open it again.
+            if frame_with((&ctx, &mut time), &mut state, &theme, vec![], "Translation reference").is_none() {
+                click_in(&ctx, &mut time, &mut state, &theme, "Main");
+            }
+            click_in(&ctx, &mut time, &mut state, &theme, "Translation reference");
+            assert_eq!(role(&state), Some(sp_model::Role::translation_reference()));
+            // On a song's slide the row isn't there.
+            let words = words_drawn(&mut editing_text(InspectorTab::Own, false, false), &theme);
+            assert!(!words.iter().any(|said| said == "HOLDS"), "{words:?}");
+        });
     }
 
     #[test]

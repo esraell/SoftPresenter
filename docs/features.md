@@ -1662,12 +1662,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **The inspector follows what is picked.** Its first tab is the object's own, named for what
   it is (Text, Shape, Picture, Web Page, NDI Source, AirPlay, Screen); then Box, the same
   for every kind (place, size, lining up, rotation, opacity, fill, outline, shadow, flip, order,
-  name, Delete); then Animation, on slides and props. Box and Animation stay open when another
+  Rename, Duplicate, Delete); then Animation, on slides and props. Box and Animation stay open when another
   object is picked. Every row has its name in small capitals at the left; colours are a row of
   swatches with a well for any other colour at its end; and a row that belongs to a switch
   (Shadow, Outline, a gradient, a build) stays in place, greyed, while the switch is off, so
   nothing moves when a key is clicked. Copy style, Paste style and Back to theme are at the
-  foot of the Text tab.
+  foot of the Text tab. A shape's tab has a menu to change which shape it is. In a template, a
+  text box's tab has Holds: which of a slide's words it takes (the main language, the
+  translation, a reference). With nothing picked on a song's slide, the column
+  shows the slide's own Label, Template, Go to Next and notes.
 - **Linked Text**: a text box can show the clock, the date, a timer, the song's title, the
   slide's group, label or notes, the next slide's words, the stage message or the copyright line
   instead of its own words; the screens keep the time and timers up to date. Linked Text in the

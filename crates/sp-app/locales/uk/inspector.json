@@ -110,7 +110,6 @@
   "inspector.shadow.angle": "Кут",
   "inspector.shadow.offset": "Зсув",
   "inspector.shadow.blur": "Розмиття",
-  "inspector.object.name": "Назва",
   "inspector.undo": "Відмінити",
   "inspector.undo.hint": "Відмінити останню зміну",
   "inspector.redo": "Повторити",
@@ -271,5 +270,10 @@
   "inspector.kind.web": "вебсторінка",
   "inspector.kind.ndi": "джерело NDI",
   "inspector.kind.mirror": "AirPlay",
-  "inspector.kind.screen": "зображення екрана"
+  "inspector.kind.screen": "зображення екрана",
+  "inspector.rename": "Перейменувати",
+  "inspector.rename.hint": "Ввести назву заново у списку об’єктів",
+  "inspector.duplicate": "Дублювати",
+  "inspector.duplicate.hint": "Зробити копію поруч",
+  "inspector.row.holds": "Містить"
 }

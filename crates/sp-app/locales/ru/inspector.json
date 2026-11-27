@@ -110,7 +110,6 @@
   "inspector.shadow.angle": "Угол",
   "inspector.shadow.offset": "Смещение",
   "inspector.shadow.blur": "Размытие",
-  "inspector.object.name": "Название",
   "inspector.undo": "Отменить",
   "inspector.undo.hint": "Отменить последнее изменение",
   "inspector.redo": "Повторить",
@@ -271,5 +270,10 @@
   "inspector.kind.web": "веб-страница",
   "inspector.kind.ndi": "источник NDI",
   "inspector.kind.mirror": "AirPlay",
-  "inspector.kind.screen": "картинка экрана"
+  "inspector.kind.screen": "картинка экрана",
+  "inspector.rename": "Переименовать",
+  "inspector.rename.hint": "Ввести имя заново в списке объектов",
+  "inspector.duplicate": "Дублировать",
+  "inspector.duplicate.hint": "Сделать копию рядом",
+  "inspector.row.holds": "Содержит"
 }

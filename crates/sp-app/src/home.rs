@@ -5364,7 +5364,7 @@ pub fn first_group_name() -> &'static str {
 
 /// The labels a slide's Label menu offers, each a key and its English, said in the language set;
 /// a slide keeps its label in the language it was given in.
-const SLIDE_LABELS: [(&str, &str); 4] = [
+pub const SLIDE_LABELS: [(&str, &str); 4] = [
     tk("slides.label.blank", "Blank Slide"),
     tk("slides.label.instrumental", "Instrumental"),
     tk("slides.label.repeat", "Repeat"),
@@ -11177,6 +11177,20 @@ mod tests {
         add_bar_click(&ctx, &show, &mut state, window, frame.key(Kind::Picture).center(), &mut time);
         assert!(state.picture_request);
         assert_eq!(drafted(&state), before);
+        // Web Page: one click adds a box over the whole slide, just under the first words, so
+        // a click on the words still picks the words.
+        let had = drafted(&state);
+        add_bar_click(&ctx, &show, &mut state, window, frame.key(Kind::Web).center(), &mut time);
+        let now = drafted(&state);
+        assert_eq!(now.len(), had.len() + 1);
+        let web = now.iter().position(|o| matches!(o.kind, sp_model::ObjectKind::Web { .. })).expect("a web box");
+        let words = now.iter().position(|o| o.as_text().is_some()).expect("the words");
+        assert_eq!(web + 1, words, "just under the first words");
+        let whole = sp_model::SlideRect { x: 0.0, y: 0.0, w: sp_model::SLIDE_WIDTH, h: sp_model::SLIDE_HEIGHT };
+        assert_eq!(now[web].frame, Some(whole), "over the whole slide");
+        assert_eq!(state.editing.as_ref().and_then(|draft| draft.selected), Some(now[web].id), "and picked");
+        // Its address field has the keyboard now, so Undo is the field's until it is left.
+        assert_eq!(state.inspector.tab, crate::inspector::InspectorTab::Own, "its own tab, for the address");
     }
 
     /// Over a stage layout, Linked Text offers what the stage shows live and Screen Picture the
