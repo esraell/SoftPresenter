@@ -6152,6 +6152,20 @@ impl App {
 
     /// Remembers what is in the media bin, how each item is shown, and the media playlists.
     fn save_media_list(&mut self) {
+        match self.media_list_save() {
+            Ok(save) => {
+                self.writer.write(save);
+            }
+            Err(problem) => {
+                if let Some(running) = self.running.as_mut() {
+                    running.home_state.notices.trouble(problem);
+                }
+            }
+        }
+    }
+
+    /// The media bin's file and what goes in it now, for the library's writer.
+    fn media_list_save(&self) -> Result<writer::Save, String> {
         let entries = self
             .show
             .media()
@@ -6166,16 +6180,7 @@ impl App {
             })
             .collect();
         let playlists = self.running.as_ref().map(|r| r.home_state.media_playlists.clone()).unwrap_or_default();
-        match media::list_to_save(&media::List { entries, playlists }) {
-            Ok(save) => {
-                self.writer.write(save);
-            }
-            Err(problem) => {
-                if let Some(running) = self.running.as_mut() {
-                    running.home_state.notices.trouble(problem);
-                }
-            }
-        }
+        media::list_to_save(&media::List { entries, playlists })
     }
 
     /// Keeps a song as it is now, so the change about to be made to it can be undone.
@@ -6785,9 +6790,13 @@ impl App {
         })
     }
 
-    /// What a song or theme is called in a notice, by its file.
+    /// What a song or theme is called in a notice, by its file; any other file (settings, the
+    /// playlists…) by its name.
     fn saved_name(&self, path: &std::path::Path) -> Option<String> {
-        match self.whose_file(path)? {
+        let Some(saved) = self.whose_file(path) else {
+            return Some(crate::i18n::quoted(&file_name(path)));
+        };
+        match saved {
             Saved::Song(index) => self.show.presentations().get(index).map(|song| crate::i18n::quoted(&song.title)),
             Saved::Theme(index) => self.themes.get(index).map(|theme| {
                 crate::i18n::tf(
@@ -6799,11 +6808,30 @@ impl App {
         }
     }
 
-    /// Hands the library's writer a song's or theme's save again, after one failed, from what the
-    /// app has now, keeping the file as it was in `keep_old_in` first as the failed save was to
-    /// (the library tidy's backup: a save that can't make it is left undone). One deleted since,
-    /// or whose file changed outside meanwhile (held for Reload or Keep mine), is no longer tried.
-    fn save_again(&mut self, path: &std::path::Path, keep_old_in: Option<PathBuf>) {
+    /// Hands the library's writer a save again, after one failed, made from what the app has now:
+    /// a song's or theme's, keeping the file as it was in the folder the failed save was to keep
+    /// it in first (the library tidy's backup: a save that can't make it is left undone); a
+    /// settings file's (paced, as every settings save is), the playlists', the libraries', the
+    /// media bin's or the note of the theme in use. A song or theme deleted since, or whose file
+    /// changed outside meanwhile (held for Reload or Keep mine), is no longer tried.
+    fn save_again(&mut self, due: writer::Due) {
+        let writer::Due { path, kind, keep_old_in } = due;
+        let path = path.as_path();
+        if !matches!(kind, writer::Kind::Song | writer::Kind::Theme) {
+            match self.current_save(kind) {
+                Some(Ok(save)) if save.path == path => {
+                    if matches!(kind, writer::Kind::Settings(_)) {
+                        self.paced.save(&self.writer, save, Instant::now());
+                    } else {
+                        self.writer.write(save);
+                    }
+                }
+                _ => {
+                    self.retries.done(path);
+                }
+            }
+            return;
+        }
         match self.whose_file(path) {
             Some(Saved::Song(index)) => {
                 self.save_song_file(index, keep_old_in);
@@ -6824,26 +6852,60 @@ impl App {
         }
     }
 
-    /// While quitting, a song or theme whose save failed is written into the library's "Not
-    /// saved" folder instead (named by its title and the time), once, so the change is kept; the
-    /// log says where, or why it couldn't be.
-    fn keep_failed_aside(&mut self, path: &std::path::Path) {
+    /// The save of a settings file, the playlists, the libraries, the media bin or the note of
+    /// the theme in use, made from what the app has now (`None` for a song or theme, or with no
+    /// window yet): for one tried again after a failed save, or kept in "Not saved" at quit.
+    fn current_save(&self, kind: writer::Kind) -> Option<Result<writer::Save, String>> {
+        use whole_file::What;
+        use writer::Kind;
+        let state = &self.running.as_ref()?.home_state;
+        Some(match kind {
+            Kind::Song | Kind::Theme => return None,
+            Kind::Playlists | Kind::Settings(What::Playlists) => service::to_save(&state.services),
+            Kind::Libraries | Kind::Settings(What::Libraries) => libraries::to_save(&state.libraries),
+            Kind::MediaList | Kind::Settings(What::MediaList) => self.media_list_save(),
+            Kind::ThemesInUse => Ok(theme_store::in_use_to_save(&self.theme, &self.themes)?),
+            Kind::Settings(What::Screens) => screens::to_save(&state.screens),
+            Kind::Settings(What::Settings) => service::prefs_to_save(&state.prefs()),
+            Kind::Settings(What::Audio) => audio::to_save(&state.audio),
+            Kind::Settings(What::Macros) => macros::to_save(&state.macros),
+            Kind::Settings(What::Timers) => timers::to_save(&state.timers),
+            Kind::Settings(What::Messages) => messages::to_save(&state.messages),
+            Kind::Settings(What::Props) => props::to_save(&state.props),
+            Kind::Settings(What::StageLayouts) => stage::layouts_to_save(&state.stage_layouts),
+            Kind::Settings(What::BiblePage) => {
+                service::bible_page_to_save(&service::SavedPassage { lookup: String::new(), ..state.bible.settings() })
+            }
+            Kind::Settings(What::BibleHistory) => service::bible_history_to_save(&state.bible.history),
+        })
+    }
+
+    /// While quitting, a file whose save failed is written into the library's "Not saved" folder
+    /// instead, once, so the change is kept: a song or theme named by its title and the time, any
+    /// other (a settings file, the playlists…) by its own name and the time, as the app has it
+    /// now. The log says where, or why it couldn't be.
+    fn keep_failed_aside(&mut self, path: &std::path::Path, kind: writer::Kind) {
         let (title, ending, bytes) = match self.whose_file(path) {
             Some(Saved::Song(index)) => {
                 let Some(song) = self.show.presentations().get(index) else { return };
-                (song.title.clone(), load::SONG_EXTENSION, sp_model::to_json(song))
+                (song.title.clone(), load::SONG_EXTENSION.to_owned(), sp_model::to_json(song).into_bytes())
             }
             Some(Saved::Theme(index)) => {
                 let Some(theme) = self.themes.get(index) else { return };
-                (theme.name.clone(), "sptheme", theme.to_json())
+                (theme.name.clone(), "sptheme".to_owned(), theme.to_json().into_bytes())
             }
-            None => return,
+            None => {
+                let Some(Ok(save)) = self.current_save(kind) else { return };
+                let stem = path.file_stem().map_or_else(|| file_name(path), |stem| stem.to_string_lossy().into_owned());
+                let ending = path.extension().map_or_else(|| "json".to_owned(), |e| e.to_string_lossy().into_owned());
+                (stem, ending, (save.content)())
+            }
         };
         if self.kept_failed.iter().any(|kept| kept == path) {
             return;
         }
         self.kept_failed.push(path.to_path_buf());
-        match keep_in_not_saved(&title, ending, bytes.as_bytes()) {
+        match keep_in_not_saved(&title, &ending, &bytes) {
             Ok(kept) => applog::problem(
                 "saving",
                 &format!(
@@ -6951,17 +7013,16 @@ impl App {
                 }
                 writer::Done::Failed { path, seq, kind, error, keep_old_in } => {
                     self.stamps.written(&path, seq, None);
-                    let retried = matches!(kind, writer::Kind::Song | writer::Kind::Theme);
-                    if retried && self.quitting.is_some() {
+                    if self.quitting.is_some() {
                         // Quitting: never tried again (the quit would wait for ever), but kept
                         // in the library's "Not saved" folder, so the change isn't lost.
                         self.retries.done(&path);
-                        self.keep_failed_aside(&path);
+                        self.keep_failed_aside(&path, kind);
                         kind.problem(&path, &error)
-                    } else if retried {
+                    } else {
                         // Tried again after a wait (another program may have held the file for
                         // a moment); said the first time, logged each time.
-                        if !self.retries.failed(&path, Instant::now(), keep_old_in) {
+                        if !self.retries.failed(&path, Instant::now(), kind, keep_old_in) {
                             continue;
                         }
                         format!(
@@ -6972,8 +7033,6 @@ impl App {
                                 "SoftPresenter tries again in a moment; if it still can't when it quits, it keeps the change in the library's Not saved folder."
                             )
                         )
-                    } else {
-                        kind.problem(&path, &error)
                     }
                 }
                 // A settings file the start could neither read nor keep aside: said the first
@@ -12511,8 +12570,8 @@ impl App {
     /// does.
     fn hand_over_all(&mut self) {
         self.save_unsaved();
-        for (path, keep_old_in) in self.retries.due(Instant::now(), true) {
-            self.save_again(&path, keep_old_in);
+        for due in self.retries.due(Instant::now(), true) {
+            self.save_again(due);
         }
         self.hand_over_choices(true);
         self.hand_over_lists(true);
@@ -13838,8 +13897,8 @@ impl ApplicationHandler<AppEvent> for App {
         // Settings files whose saves wait for their time (`writer::Paced`) are handed over.
         let settings_at = self.paced.tick(&self.writer, Instant::now());
         // Songs and themes whose save failed, tried again once their wait is up.
-        for (path, keep_old_in) in self.retries.due(Instant::now(), false) {
-            self.save_again(&path, keep_old_in);
+        for due in self.retries.due(Instant::now(), false) {
+            self.save_again(due);
         }
         let retry_at = self.retries.next();
         // `status --wait`s held: answered now if anything changed, or their time is up.

@@ -5,7 +5,11 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-Nothing yet.
+Settings and playlists that couldn't be saved are tried again.
+
+### Fixed
+
+- **Settings and playlists saved again.** A setting, playlist, library or the media bin that couldn't be saved because another program held its file for a moment (a virus scanner, a sync tool) was lost at quit unless something else changed; now SoftPresenter keeps trying, as it does for songs and themes, says when it is saved, and at quit keeps any change it still couldn't save in the library's Not saved folder.
 
 ## 0.9.0-dev.29 — 27 November 2026 (development build)
 

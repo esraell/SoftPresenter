@@ -41,7 +41,7 @@ use crate::outside::{self, Stamp};
 
 /// What a file is, which says how its half-written copy is named and what the window says if it
 /// can't be written.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
     Song,
     Playlists,
@@ -365,48 +365,66 @@ pub fn retry_after(tries: u32) -> Duration {
     Duration::from_secs(1u64 << tries.saturating_sub(1).min(6)).min(RETRY_MOST)
 }
 
-/// The songs and themes whose save failed, each tried again after [`retry_after`] until a save of
-/// it is written: a file another program held for a moment (a virus scanner, a sync tool, the
-/// search indexer) is saved once it lets go, and the operator is told once, not at every try.
-/// What is still not saved at quit is kept in the library's "Not saved" folder (`main.rs`).
+/// The files whose save failed (songs, themes, settings, playlists, libraries, the media bin and
+/// the note of the theme in use), each tried again after [`retry_after`] until a save of it is
+/// written: a file another program held for a moment (a virus scanner, a sync tool, the search
+/// indexer) is saved once it lets go, and the operator is told once, not at every try. What is
+/// still not saved at quit is kept in the library's "Not saved" folder (`main.rs`).
 #[derive(Default)]
 pub struct Retries {
-    /// For each file: how many saves of it have failed in a row, when the next try is due
-    /// (`None` while one is on its way), and the folder the file as it was is to be copied into
-    /// first (the library tidy's backup), which every try keeps.
-    files: HashMap<PathBuf, (u32, Option<Instant>, Option<PathBuf>)>,
+    files: HashMap<PathBuf, Retry>,
+}
+
+/// A file whose save failed: how many saves of it have failed in a row, when the next try is due
+/// (`None` while one is on its way), what it is (which says how the app makes its save again),
+/// and the folder the file as it was is to be copied into first (the library tidy's backup),
+/// which every try keeps.
+struct Retry {
+    tries: u32,
+    due: Option<Instant>,
+    kind: Kind,
+    keep_old_in: Option<PathBuf>,
+}
+
+/// A file whose next try is due ([`Retries::due`]).
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Due {
+    pub path: PathBuf,
+    pub kind: Kind,
+    pub keep_old_in: Option<PathBuf>,
 }
 
 impl Retries {
-    /// A save of `path` failed at `now`: it is tried again later, keeping the file as it was in
-    /// `keep_old_in` first if that save was to (and if an earlier one of the run was). True the
-    /// first time in a row, to tell the operator.
-    pub fn failed(&mut self, path: &Path, now: Instant, keep_old_in: Option<PathBuf>) -> bool {
-        let (tries, due, keep) = self.files.entry(path.to_path_buf()).or_insert((0, None, None));
-        *tries += 1;
-        *due = Some(now + retry_after(*tries));
+    /// A save of `path`, of this `kind`, failed at `now`: it is tried again later, keeping the
+    /// file as it was in `keep_old_in` first if that save was to (and if an earlier one of the
+    /// run was). True the first time in a row, to tell the operator.
+    pub fn failed(&mut self, path: &Path, now: Instant, kind: Kind, keep_old_in: Option<PathBuf>) -> bool {
+        let retry =
+            self.files.entry(path.to_path_buf()).or_insert(Retry { tries: 0, due: None, kind, keep_old_in: None });
+        retry.tries += 1;
+        retry.due = Some(now + retry_after(retry.tries));
+        retry.kind = kind;
         if keep_old_in.is_some() {
-            *keep = keep_old_in;
+            retry.keep_old_in = keep_old_in;
         }
-        *tries == 1
+        retry.tries == 1
     }
 
     /// A save of `path` was written, or it is no longer the app's to write (deleted, read again
     /// from its file, held for a change made outside): no more tries. How many saves of it had
     /// failed, if any.
     pub fn done(&mut self, path: &Path) -> Option<u32> {
-        self.files.remove(path).map(|(tries, _, _)| tries)
+        self.files.remove(path).map(|retry| retry.tries)
     }
 
-    /// The files whose next try is due at `now` (all of them, `at_once`, as a quit begins), each
-    /// with the folder its old file is to be kept in first, if any; each is counted as on its way
-    /// until it is written or fails again.
-    pub fn due(&mut self, now: Instant, at_once: bool) -> Vec<(PathBuf, Option<PathBuf>)> {
+    /// The files whose next try is due at `now` (all of them, `at_once`, as a quit begins); each
+    /// is counted as on its way until it is written or fails again.
+    pub fn due(&mut self, now: Instant, at_once: bool) -> Vec<Due> {
         let mut due = Vec::new();
-        for (path, (_, at, keep)) in &mut self.files {
-            if at.is_some_and(|at| at_once || at <= now) {
-                *at = None;
-                due.push((path.clone(), keep.clone()));
+        for (path, retry) in &mut self.files {
+            if retry.due.is_some_and(|at| at_once || at <= now) {
+                retry.due = None;
+                due.push(Due { path: path.clone(), kind: retry.kind, keep_old_in: retry.keep_old_in.clone() });
             }
         }
         due.sort();
@@ -415,7 +433,7 @@ impl Retries {
 
     /// When the next try is due.
     pub fn next(&self) -> Option<Instant> {
-        self.files.values().filter_map(|(_, at, _)| *at).min()
+        self.files.values().filter_map(|retry| retry.due).min()
     }
 }
 
@@ -644,34 +662,40 @@ mod tests {
         let mut retries = Retries::default();
         let t0 = Instant::now();
         let backup = PathBuf::from("/l/Backup before tidying 2026-11-27");
-        assert!(retries.failed(song, t0, Some(backup.clone())), "the first failure is told");
+        let due =
+            |path: &Path, kind: Kind, keep_old_in: Option<PathBuf>| Due { path: path.to_path_buf(), kind, keep_old_in };
+        assert!(retries.failed(song, t0, Kind::Song, Some(backup.clone())), "the first failure is told");
         assert_eq!(retries.next(), Some(t0 + Duration::from_secs(1)));
         assert!(retries.due(t0, false).is_empty(), "not yet");
         let at = t0 + Duration::from_secs(1);
         assert_eq!(
             retries.due(at, false),
-            [(song.to_path_buf(), Some(backup.clone()))],
+            [due(song, Kind::Song, Some(backup.clone()))],
             "tried again after a second, keeping the old file where the first save was to"
         );
         assert_eq!(retries.next(), None, "on its way, nothing else is due");
         assert!(retries.due(at + Duration::from_secs(5), false).is_empty(), "never twice at once");
         // It fails again: not told again, and it waits twice as long.
-        assert!(!retries.failed(song, at, None));
+        assert!(!retries.failed(song, at, Kind::Song, None));
         assert_eq!(retries.next(), Some(at + Duration::from_secs(2)));
         // Another file fails meanwhile; a quit tries every file at once, whatever its wait.
-        assert!(retries.failed(theme, at, None));
+        // A settings file too, which the app makes its save of again from what it has then.
+        let timers = Path::new("/l/timers.json");
+        let what = Kind::Settings(crate::whole_file::What::Timers);
+        assert!(retries.failed(theme, at, Kind::Theme, None));
+        assert!(retries.failed(timers, at, what, None));
         assert_eq!(
             retries.due(at, true),
-            [(song.to_path_buf(), Some(backup)), (theme.to_path_buf(), None)],
-            "the backup folder kept across tries"
+            [due(song, Kind::Song, Some(backup)), due(theme, Kind::Theme, None), due(timers, what, None)],
+            "the backup folder kept across tries, and each file's kind"
         );
         // Written at last: no more tries, and how many failed is said.
         assert_eq!(retries.done(song), Some(2));
         assert_eq!(retries.done(song), None);
         // Failing again later starts from a second, and is told again.
-        assert!(retries.failed(song, at, None));
+        assert!(retries.failed(song, at, Kind::Song, None));
         assert_eq!(retries.next(), Some(at + Duration::from_secs(1)));
-        assert_eq!(retries.due(at + Duration::from_secs(1), false), [(song.to_path_buf(), None)]);
+        assert_eq!(retries.due(at + Duration::from_secs(1), false)[0], due(song, Kind::Song, None));
     }
 
     fn save(path: &Path, text: &str, guard: Guard) -> Save {

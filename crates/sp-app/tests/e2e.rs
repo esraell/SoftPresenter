@@ -1009,6 +1009,73 @@ fn a_failed_save_is_tried_again_and_kept_in_not_saved_if_it_still_fails_at_quit(
     );
 }
 
+/// A settings file whose save fails (another program holds it for a moment; here a folder stands
+/// where its save is written, which fails on every system) is said once and tried again, made
+/// from what the app has then, until it is written, and that is said too; one still failing at
+/// quit is kept, as the app has it, in the library's "Not saved" folder.
+#[test]
+fn a_settings_file_whose_save_fails_is_tried_again_and_kept_in_not_saved_at_quit() {
+    let name = "a_settings_file_whose_save_fails_is_tried_again_and_kept_in_not_saved_at_quit";
+    let Some(run) = Run::new(name) else { return };
+    let copy = run.start(&[]);
+    let wait_until = |what: &str, within: Duration, ready: &dyn Fn() -> bool| {
+        let began = Instant::now();
+        while !ready() {
+            assert!(began.elapsed() < within, "{what} didn't happen within {within:?}{}", run.context());
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    let told = |words: &str| {
+        copy.ok(&["notices"])
+            .data
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|notice| notice["text"].as_str().is_some_and(|text| text.contains(words)))
+            .count()
+    };
+    let timers = run.data.join("timers.json");
+    let saving = run.data.join("timers.json.part");
+    let on_disk = || std::fs::read_to_string(&timers).unwrap_or_default();
+    // The save can't be written: said once, while it is tried again.
+    std::fs::create_dir_all(&saving).expect("a folder where the save is written");
+    copy.ok(&["timer", "new", "Walk-in", "countdown", "5:00"]);
+    wait_until("the failure said", Duration::from_secs(15), &|| {
+        told("Could not save the timers") == 1 && told("SoftPresenter tries again in a moment") == 1
+    });
+    std::thread::sleep(Duration::from_millis(2500));
+    assert_eq!(told("SoftPresenter tries again in a moment"), 1, "said once, not at every try{}", run.context());
+    assert!(!on_disk().contains("Walk-in"), "not written yet");
+    // The other program lets go: the next try writes it, and that is said.
+    std::fs::remove_dir(&saving).expect("the folder taken away");
+    wait_until("the timers written on a later try", Duration::from_secs(15), &|| on_disk().contains("Walk-in"));
+    wait_until("the save said", Duration::from_secs(5), &|| told("\u{201c}timers.json\u{201d} is saved now.") == 1);
+    // Failing again, and still failing at quit: kept in Not saved as the app has it.
+    let failures = || run.log().matches("[saving] could not write").count();
+    let before = failures();
+    std::fs::create_dir_all(&saving).expect("a folder where the save is written");
+    copy.ok(&["timer", "set", "Walk-in", "name", "Doors open"]);
+    wait_until("the second failure", Duration::from_secs(15), &|| failures() > before);
+    copy.quit().assert_clean(&run);
+    assert!(!on_disk().contains("Doors open"), "the file is as the last save written left it");
+    let kept: Vec<(String, String)> = std::fs::read_dir(run.data.join("Not saved"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| {
+            let text = std::fs::read_to_string(entry.path()).unwrap_or_default();
+            (entry.file_name().to_string_lossy().into_owned(), text)
+        })
+        .collect();
+    assert!(
+        kept.iter()
+            .any(|(name, text)| name.starts_with("timers ") && name.ends_with(".json") && text.contains("Doors open")),
+        "the change is kept in Not saved: {:?}{}",
+        kept.iter().map(|(name, _)| name).collect::<Vec<_>>(),
+        run.context()
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // One copy per data folder
 

@@ -35,7 +35,7 @@ use crate::i18n::{t, tf};
 
 /// Which settings file it is, which says what the operator is told when it can't be read or
 /// saved.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum What {
     Screens,
     Settings,
