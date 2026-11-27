@@ -13,7 +13,7 @@ What's new opens a window with each version's changes, and in the Service view t
 
 ### Better
 
-- **Search stays after a drag.** After you drag a song or passage from the find box, its words and results stay, ready for the next one. This is so for a drop into the playlist, onto a placeholder, or onto a playlist or library in the left column. The box gives the keys back at once, so Space, the arrows and a clicker run the slides; click the box or press / to type in it again. Escape closes the search, as before.
+- **Search stays after a drag.** After you drag a song or passage from the find box, its words and results stay, ready for the next one. This is so for a drop into the playlist, onto a placeholder, or onto a playlist or library in the left column. The box gives the keys back at once, so Space, the arrows and a clicker run the slides, and the list dims and says so; click the box or press / to type in it again. Escape, or a click anywhere else, closes the search.
 - **Dropped songs wait.** A song or passage dropped from the find box no longer opens or moves the slides; its row flashes orange instead. What you had open stays open, and the slides stay where they were, even when it goes in above them. The row is brought into view if it landed out of sight; click it when you want it.
 - **Last item reaches the top.** The last item of a playlist can now be scrolled to the top of the slides, like any other. Clicking it in the playlist takes it there, and a faint line under it marks the end of the playlist.
 

@@ -993,7 +993,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Command-Return adds it, and no library takes one (the pointer says so). After a drop the
   search stays, with its words and what they found, for the next one, but the box gives the
   keyboard back: Space, the arrows and a clicker run the show at once, and a click on the box
-  or `/` gives it the keyboard again with its words still there. Escape ends the search, and
+  or `/` gives it the keyboard again with its words still there. While it rests its words are
+  grey and its `/` shows again, the list's rows are dimmed (each at full strength under the
+  pointer, and still dragged as before), and the line at the list's foot says "The keys run
+  the slides again.", "Drag another in", "/ or a click in the box to search again" and "esc
+  Close"; the list stays where it is, and a click anywhere outside it and the box ends the
+  search. Escape ends the search, and
   so do clearing the box and Return in it, as before. What went in is not opened: the open item stays open,
   what is picked stays picked, and the slides stay where they were, even when it went in above
   the item at their top. Its row in the playlist flashes orange for 1.2 seconds (held for 0.4,

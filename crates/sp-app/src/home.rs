@@ -450,6 +450,8 @@ pub struct HomeState {
     /// Where each result the find box lists was drawn last, in the list's order (for a testing
     /// aid to drag one, and for tests).
     pub find_rows: Vec<Rect>,
+    /// Where the list under the find box was drawn last, its foot line included (for tests).
+    pub find_list: Option<Rect>,
     /// The find box's Bible results, and the Bible view's Search's verses as they are typed,
     /// each found on a thread of its own.
     pub finder: crate::find::Finder,
@@ -2002,6 +2004,7 @@ impl Default for HomeState {
             search_resting: false,
             find_rect: None,
             find_rows: Vec::new(),
+            find_list: None,
             finder: crate::find::Finder::default(),
             page_finder: crate::find::Finder::new(crate::find::search_page),
             clock: crate::clock::SystemClock::default(),
@@ -2398,11 +2401,17 @@ impl HomeState {
     /// a sheet, the find box, the list of keys, the setup), which takes it before the chooser or
     /// the Reflow editor under it.
     pub fn escape_taken_above(&self, ctx: &egui::Context) -> bool {
+        self.escape_taken_above_find(ctx) || self.library_search.is_some()
+    }
+
+    /// Whether an Escape pressed now belongs to something over the find box's list (a menu, a
+    /// question, a sheet, the list of keys, the setup), which takes it before the list: one
+    /// Escape closes only the thing on top.
+    pub fn escape_taken_above_find(&self, ctx: &egui::Context) -> bool {
         egui::Popup::is_any_open(ctx)
             || self.key_sheet
             || self.alert_open()
             || self.new_song_sheet.is_some()
-            || self.library_search.is_some()
             || self.setup.is_some()
             || !self.bible.options.details.is_empty()
             || self.free_songbooks.open
@@ -2592,6 +2601,9 @@ fn home_view(
     canvas: Option<TextureId>,
 ) -> Vec<Command> {
     let mut commands = Vec::new();
+    // Whether an Escape is for something over the find box's list, as the frame begins: what
+    // it closes (a menu, the list of keys) is gone by the time the list looks.
+    let escape_above_find = state.escape_taken_above_find(ui.ctx());
     // The window's own colour behind everything, the gaps between the three columns and round
     // their corners included: the margins a column's frame leaves are not painted by it, and
     // would otherwise show the black the window is cleared to.
@@ -2761,7 +2773,7 @@ fn home_view(
     {
         state.library_search = Some((words.to_owned(), 0));
     }
-    library_search(ui, show, state, &mut commands);
+    library_search(ui, show, state, escape_above_find, &mut commands);
     // Edit › Stage edits the open layout as a draft, as the other kinds do.
     crate::stage_editor::prepare(state);
     if state.editing.is_some() {
@@ -5426,6 +5438,91 @@ const SONGS_LISTED: usize = 6;
 const CATALOG_LEAST: usize = 2;
 /// How tall the heading over the catalog's songs is.
 const CATALOG_HEADING: f32 = 24.0;
+/// How strong the find list's rows are while its box rests (has given the keyboard back after a
+/// drop); a row is at full strength under the pointer and while it is dragged.
+const RESTING_ROW: f32 = 0.55;
+/// The find list's foot line: how tall one line of it is, what each line more adds, and how
+/// far in from the list's edge its words start.
+const FOOT_LINE: f32 = 26.0;
+const FOOT_MORE: f32 = 18.0;
+const FOOT_IN: f32 = 10.0;
+/// The room between two parts of the resting foot line on a line, and after a key's cap.
+const FOOT_GAP: f32 = 16.0;
+const CAP_AFTER: f32 = 4.0;
+
+/// The find list's foot line while its box rests, laid out: each piece of words (and each key's
+/// cap, with the room it takes) where it goes from the first line's left middle, and how many
+/// lines it takes.
+struct RestingFoot {
+    pieces: Vec<(egui::Vec2, std::sync::Arc<egui::Galley>, bool)>,
+    lines: usize,
+}
+
+impl RestingFoot {
+    /// Paints it with its first line's left middle at `first`.
+    fn paint(&self, painter: &egui::Painter, first: egui::Pos2) {
+        for (at, galley, cap) in &self.pieces {
+            let middle = first + *at;
+            let top = middle.y - galley.size().y / 2.0;
+            if *cap {
+                let rect = Rect::from_min_size(pos2(middle.x, top - 1.0), galley.size() + vec2(10.0, 2.0));
+                painter.rect_filled(rect, 4.0, crate::studio::CARD);
+                painter.galley(pos2(middle.x + 5.0, top), galley.clone(), crate::studio::TEXT_DIM);
+            } else {
+                painter.galley(pos2(middle.x, top), galley.clone(), crate::studio::TEXT_FAINT);
+            }
+        }
+    }
+}
+
+/// The resting foot line, laid out in `width`: "The keys run the slides again." in ink, then
+/// "**Drag** another in", "/ or a click in the box to search again" and "esc Close", each part
+/// kept whole and put on the next line when the line is full. A word between `**` is in the
+/// heavier face, `{key}` is the key in a cap, as the design draws them.
+fn resting_foot(ui: &egui::Ui, width: f32) -> RestingFoot {
+    use crate::studio::{TEXT, TEXT_DIM, TEXT_FAINT, fixed_semibold, semibold};
+    let esc = if cfg!(target_os = "macos") { "esc" } else { "Esc" };
+    let parts = [
+        (t("find.rest.keys", "The keys run the slides again."), "", TEXT),
+        (t("find.rest.drag", "**Drag** another in"), "", TEXT_FAINT),
+        (t("find.rest.again", "{key} or a click in the box to search again"), "/", TEXT_FAINT),
+        (t("find.rest.close", "{key} Close"), esc, TEXT_FAINT),
+    ];
+    let layout = |text: &str, font: FontId, ink: Color32| {
+        ui.ctx().fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), font, ink))
+    };
+    let mut pieces = Vec::new();
+    let (mut x, mut line) = (0.0, 0);
+    for (words, key, ink) in parts {
+        // Its pieces, measured: the words around the cap, their `**` words heavier.
+        let mut part: Vec<(std::sync::Arc<egui::Galley>, bool)> = Vec::new();
+        for (n, around) in words.split("{key}").enumerate() {
+            if n > 0 {
+                part.push((layout(key, fixed_semibold(10.5), TEXT_DIM), true));
+            }
+            for (m, run) in around.split("**").enumerate().filter(|(_, run)| !run.is_empty()) {
+                let (font, ink) =
+                    if m % 2 == 1 { (semibold(11.0), TEXT_DIM) } else { (FontId::proportional(11.0), ink) };
+                part.push((layout(run, font, ink), false));
+            }
+        }
+        let room = |(galley, cap): &(std::sync::Arc<egui::Galley>, bool)| {
+            galley.size().x + if *cap { 10.0 + CAP_AFTER } else { 0.0 }
+        };
+        let wide: f32 = part.iter().map(room).sum();
+        if x > 0.0 && x + FOOT_GAP + wide > width {
+            (x, line) = (0.0, line + 1);
+        } else if x > 0.0 {
+            x += FOOT_GAP;
+        }
+        for piece in part {
+            let step = room(&piece);
+            pieces.push((vec2(x, line as f32 * FOOT_MORE), piece.0, piece.1));
+            x += step;
+        }
+    }
+    RestingFoot { pieces, lines: line + 1 }
+}
 
 /// Testing aid: SOFTPRESENTER_FIND_RETURN=WORDS types the words in the find box when the window
 /// first draws, and presses Return once something is listed and the Bibles have answered, as an
@@ -5581,7 +5678,13 @@ pub fn pointer_drag(step: u32, from: egui::Pos2, to: egui::Pos2, drop: bool) -> 
 /// library), a passage or verse in the Bible view. Nothing goes on the screens. With Command
 /// (Ctrl elsewhere), Return adds it to the playlist in front instead (a catalog song then joins
 /// the library).
-fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
+fn library_search(
+    ui: &mut egui::Ui,
+    show: &Show,
+    state: &mut HomeState,
+    escape_above: bool,
+    commands: &mut Vec<Command>,
+) {
     use crate::studio::FoundKind;
     let hidden = state.hidden_slots();
     // A Bible the search read for the first time stays read.
@@ -5649,7 +5752,8 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             typing && input.key_pressed(egui::Key::ArrowDown),
             typing && input.key_pressed(egui::Key::Enter),
             input.modifiers.command,
-            input.key_pressed(egui::Key::Escape),
+            // Not when a menu or a sheet over the list takes it: one Escape closes one thing.
+            !escape_above && input.key_pressed(egui::Key::Escape),
         )
     });
     // Testing aid (see `find_return_words`): Return, once, when something is listed.
@@ -5764,6 +5868,10 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                     }
                     if faint {
                         ui.painter().rect_filled(rect, 9.0, PANEL.gamma_multiply(0.6));
+                    } else if !typing && !response.hovered() && !response.dragged() {
+                        // Given the keyboard back after a drop, the list steps back: its rows
+                        // at 55%, each at full strength under the pointer or while dragged.
+                        ui.painter().rect_filled(rect, 9.0, PANEL.gamma_multiply(1.0 - RESTING_ROW));
                     }
                     if response.clicked() {
                         clicked = Some(place);
@@ -5831,19 +5939,23 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                         TEXT_FAINT,
                     );
                 }
+                // The foot line says what the keys do: while typing, the box's keys; at rest, that
+                // the keys run the slides again. It is as tall as the taller of the two, so
+                // nothing moves when the box gives the keyboard back.
                 let keys = if cfg!(target_os = "macos") {
                     t("find.keys.mac", "↵ Open    ⌘↵ Add to Playlist    esc Close")
                 } else {
                     t("find.keys", "Enter: Open    Ctrl+Enter: Add to Playlist    Esc: Close")
                 };
-                let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
-                ui.painter().text(
-                    rect.left_center() + vec2(10.0, 2.0),
-                    Align2::LEFT_CENTER,
-                    keys,
-                    FontId::proportional(11.0),
-                    TEXT_FAINT,
-                );
+                let resting = resting_foot(ui, ui.available_width() - 2.0 * FOOT_IN);
+                let height = FOOT_LINE + FOOT_MORE * resting.lines.saturating_sub(1) as f32;
+                let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+                let first = pos2(rect.min.x + FOOT_IN, rect.min.y + FOOT_LINE / 2.0 + 2.0);
+                if typing {
+                    ui.painter().text(first, Align2::LEFT_CENTER, keys, FontId::proportional(11.0), TEXT_FAINT);
+                } else {
+                    resting.paint(ui.painter(), first);
+                }
             });
         });
         list = Some(shown.response.rect);
@@ -5994,6 +6106,7 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         None => {}
     }
     state.find_rows = rects;
+    state.find_list = list;
     if ended {
         end_search(ui.ctx(), state);
     }
@@ -14665,6 +14778,89 @@ mod tests {
     fn above_beta(drawn: &Drawn) -> egui::Pos2 {
         let beta = drawn.left("Beta");
         pos2(beta.center().x, beta.center().y - 8.0)
+    }
+
+    #[test]
+    fn at_rest_the_list_steps_back_says_the_keys_run_the_slides_and_shows_the_slash_and_nothing_moves() {
+        use crate::studio::PANEL;
+        let (mut show, mut state) = find_drag_setting();
+        let (ctx, mut commands) = (egui::Context::default(), Vec::new());
+        // Typed: where the list and its rows are, and its foot line of the box's keys.
+        state.library_search = Some(("gamma".to_owned(), 0));
+        found_step(&ctx, &mut show, &mut state, vec![], 0.0, &mut commands);
+        let typing = found_step(&ctx, &mut show, &mut state, vec![], 0.1, &mut commands);
+        let (list, rows) = (state.find_list.expect("the list"), state.find_rows.clone());
+        let said = |drawn: &Drawn, words: &str| {
+            drawn.texts.iter().filter(|(text, _)| text == words).map(|(_, rect)| *rect).collect::<Vec<Rect>>()
+        };
+        let keys_line = |drawn: &Drawn| drawn.texts.iter().any(|(text, _)| text.contains("Add to Playlist"));
+        assert!(keys_line(&typing) && said(&typing, "The keys run the slides again.").is_empty());
+        // Gamma dropped between Alpha and Beta: the box rests.
+        let (dragged, ..) = drag_found_in(&ctx, 0.2, &mut show, &mut state, "gamma", 0, above_beta);
+        commands.extend(dragged);
+        assert!(state.search_resting);
+        let resting = found_step(&ctx, &mut show, &mut state, vec![], 1.2, &mut commands);
+        // Nothing moved: the list, its rows and so its foot line are where they were.
+        assert_eq!((state.find_list, &state.find_rows), (Some(list), &rows));
+        // Its foot line: the keys run the slides again, Drag another in, / or a click in the
+        // box to search again, esc Close.
+        let in_list = |rect: &Rect| list.contains_rect(*rect);
+        assert!(!keys_line(&resting));
+        for words in ["The keys run the slides again.", "Drag", " another in", " Close"] {
+            assert!(said(&resting, words).iter().any(in_list), "{words} in the foot line");
+        }
+        let esc = if cfg!(target_os = "macos") { "esc" } else { "Esc" };
+        assert!(said(&resting, esc).iter().any(in_list) && said(&resting, "/").iter().any(in_list), "the caps");
+        // The / cap is in the box again.
+        let find = state.find_rect.expect("the find box");
+        assert!(said(&resting, "/").iter().any(|rect| find.contains_rect(*rect)), "the / cap in the box");
+        assert!(!said(&typing, "/").iter().any(|rect| find.contains_rect(*rect)), "not while typing");
+        // The rows at 55%; one under the pointer at full strength.
+        let veil = PANEL.gamma_multiply(1.0 - RESTING_ROW);
+        let dimmed = |drawn: &Drawn| drawn.rects.iter().any(|(rect, fill, _)| *rect == rows[0] && *fill == veil);
+        assert!(dimmed(&resting) && !dimmed(&typing));
+        let over = vec![Event::PointerMoved(rows[0].center())];
+        let hovered = found_step(&ctx, &mut show, &mut state, over, 1.3, &mut commands);
+        assert!(!dimmed(&hovered), "full strength under the pointer");
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn at_rest_a_drag_out_of_the_list_keeps_the_search_and_a_click_elsewhere_ends_it() {
+        let (mut show, mut state) = find_drag_setting();
+        let (mut commands, _, ctx) = drag_found(&mut show, &mut state, "gamma", 0, above_beta);
+        assert!(state.search_resting);
+        // Another result dragged out of the list (Gamma again, which is there already): the
+        // search stays, still at rest.
+        let (dragged, _, let_go) =
+            drag_found_in(&ctx, 1.0, &mut show, &mut state, "gamma", 0, |drawn| drawn.left("Alpha").center());
+        commands.extend(dragged);
+        assert!(state.library_search.is_some() && state.search_resting, "a drag out of the list is no click");
+        // A click on Alpha's row, outside the list and the box: the search ends, as Escape ends it.
+        let mut time = 2.0;
+        let alpha = let_go.left("Alpha").center();
+        click_holding(&ctx, (&mut show, &mut state), alpha, Modifiers::NONE, &mut time, &mut commands);
+        assert!(state.library_search.is_none() && !state.search_resting, "the search has ended");
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn escape_with_a_menu_over_the_resting_search_closes_only_the_menu() {
+        let (mut show, mut state) = find_drag_setting();
+        let (mut commands, _, ctx) = drag_found(&mut show, &mut state, "gamma", 0, above_beta);
+        // The menu of the slide on screen, from the keys (modifier-O), over the search at rest.
+        let command_o = pressed(Key::O, Modifiers::COMMAND);
+        step_holding(&ctx, &mut show, &mut state, command_o, Modifiers::COMMAND, 1.0, &mut commands);
+        for time in [1.1, 1.2] {
+            found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        }
+        assert!(egui::Popup::is_any_open(&ctx), "the menu is open");
+        found_step(&ctx, &mut show, &mut state, pressed(Key::Escape, Modifiers::NONE), 1.3, &mut commands);
+        assert!(!egui::Popup::is_any_open(&ctx), "Escape closed the menu");
+        assert!(state.library_search.is_some(), "and only the menu");
+        found_step(&ctx, &mut show, &mut state, pressed(Key::Escape, Modifiers::NONE), 1.4, &mut commands);
+        assert!(state.library_search.is_none(), "the next Escape closes the search");
+        nothing_went_live(&show, &commands);
     }
 
     #[test]

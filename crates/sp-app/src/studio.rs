@@ -1832,6 +1832,8 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
             .color(TEXT_FAINT),
         )
         .font(FontId::proportional(13.0))
+        // At rest after a drop (the keyboard given back to the show) its words step back.
+        .text_color_opt(state.search_resting.then_some(TEXT_DIM))
         .background_color(Color32::TRANSPARENT)
         .frame(Frame::new())
         .align(Align2::LEFT_CENTER)
@@ -1844,8 +1846,9 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
     if response.has_focus() {
         state.search_resting = false;
     }
-    // The key that finds, at the right end, until the box has the keyboard.
-    if !focused && !open {
+    // The key that finds, at the right end, until the box has the keyboard (and again while it
+    // rests after a drop, when `/` gives it the keyboard back).
+    if !focused && (!open || state.search_resting) {
         let cap = Rect::from_min_size(pos2(find.max.x - 30.0, find.center().y - 10.0), vec2(20.0, 20.0));
         ui.painter().rect_filled(cap, 5.0, CARD);
         ui.painter().text(cap.center(), Align2::CENTER_CENTER, "/", fixed(11.0), TEXT_DIM);

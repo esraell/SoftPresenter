@@ -1,5 +1,5 @@
 {
-  "_note": "Russian; see topbar.json. The find box's list of results: the tags beside each result (in capitals, as the English), what it says while it looks, the keys at its foot.",
+  "_note": "Russian; see topbar.json. The find box's list of results: the tags beside each result (in capitals, as the English), what it says while it looks, the keys at its foot. After a drop the box gives the keyboard back and the foot line says so instead (find.rest.*): the word between ** is set heavier and {key} is the key, in a cap.",
   "find.tag.song": "ПЕСНЯ",
   "find.tag.song_group": "ПЕСНЯ · {group}",
   "find.nothing": "Ничего не найдено",
@@ -8,5 +8,9 @@
   "find.catalog.from": "Из Worship Leader App",
   "find.tag.catalog": "ПЕСНЯ · {language}",
   "find.keys.mac": "↵ Открыть    ⌘↵ В список    esc Закрыть",
-  "find.keys": "Enter: открыть    Ctrl+Enter: в список    Esc: закрыть"
+  "find.keys": "Enter: открыть    Ctrl+Enter: в список    Esc: закрыть",
+  "find.rest.keys": "Клавиши снова управляют слайдами.",
+  "find.rest.drag": "**Перетащить** ещё",
+  "find.rest.again": "{key} или щелчок в поле — искать снова",
+  "find.rest.close": "{key} Закрыть"
 }
