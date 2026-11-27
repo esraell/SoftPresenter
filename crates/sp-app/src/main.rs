@@ -3609,6 +3609,10 @@ impl App {
             applog::event("ndi", &format!("{} stopped sending", sp_model::ndi_short_name(source)));
             running.home_state.notices.trouble(ndi_in::stopped_notice(source));
         }
+        if !report.stopped_now.is_empty() {
+            // The notice shows at once, on a wake nothing else asked a drawing on.
+            running.home_window.request_redraw();
+        }
         for source in &report.first {
             applog::event("ndi", &format!("receiving {}", sp_model::ndi_short_name(source)));
         }
@@ -3970,8 +3974,12 @@ impl App {
             let changed =
                 live.position.floor() != position.floor() || live.duration != duration || live.playing != playing;
             *live = home::VideoLive { position, duration, playing, ..live.clone() };
-            if changed && running.home_state.preview_painted {
-                running.home_window.request_redraw();
+            if changed {
+                if running.home_state.preview_painted {
+                    running.home_window.request_redraw();
+                }
+                // Pages show a video's time and length too, in the Edit view as well.
+                self.remote.stir();
             }
         }
         Some(Instant::now() + wait)
@@ -4668,6 +4676,9 @@ impl App {
 
     /// Tells the output what is on each layer now, then redraws the operator's preview.
     fn refresh_output(&mut self) {
+        // Whatever changes what the screens show changes what pages are sent: a message or prop
+        // that leaves by itself is taken off on a pass nothing else stirred.
+        self.remote.stir();
         self.follow_version();
         self.sync_video();
         self.sync_slide_video();

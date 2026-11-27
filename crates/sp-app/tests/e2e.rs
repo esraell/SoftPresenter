@@ -2228,6 +2228,68 @@ fn remote_control_signs_in_takes_a_snapshot_runs_a_command_and_signs_out() {
     copy.quit().assert_clean(&run);
 }
 
+#[test]
+fn remote_control_sends_a_change_at_once_and_one_that_happens_by_itself_with_it() {
+    const PASSWORD: &str = "a password for this test";
+    let name = "remote_control_sends_a_change_at_once_and_one_that_happens_by_itself_with_it";
+    let Some(run) = Run::new(name) else { return };
+    let copy = run.start(&[]);
+    assert!(run.sp_with_input(&["remote", "password"], Some(PASSWORD)).ok);
+    let port = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port").local_addr().expect("port").port();
+    copy.ok(&["remote", "port", &port.to_string()]);
+    copy.ok(&["remote", "on"]);
+    let certificate = std::fs::read(run.data.join("remote").join("cert.der")).expect("the certificate it made");
+    let page = remote::Page::new(port, certificate);
+    let body = serde_json::json!({ "password": PASSWORD }).to_string();
+    let signed = page.http(
+        "POST",
+        "/api/login",
+        &[
+            ("Origin", &page.origin()),
+            ("Content-Type", "application/json"),
+            ("User-Agent", "Mozilla/5.0 (iPad) Safari/604.1"),
+        ],
+        &body,
+    );
+    assert_eq!(signed.status, 200, "{}", signed.body);
+    let cookie = signed.header("set-cookie").expect("a cookie").to_owned();
+    let token = cookie
+        .strip_prefix(&format!("{}=", remote::COOKIE))
+        .and_then(|rest| rest.split(';').next())
+        .expect("the device's token")
+        .to_owned();
+    let mut socket = page.socket(&token);
+    page.send(&mut socket, serde_json::json!({"type": "hello"}));
+    page.receive_type(&mut socket, "snapshot");
+
+    // The next change that says whether a message is on the screens (`want`), and how long after
+    // `since` it came.
+    let message_layer = |socket: &mut _, want: bool, since: Instant| {
+        for _ in 0..400 {
+            let said = page.receive(socket).unwrap_or_else(|code| panic!("closed ({code:?})"));
+            let layer = &said["parts"]["live"]["layers"]["messages"];
+            if said["type"] == "change" && layer.as_bool() == Some(want) {
+                return since.elapsed();
+            }
+        }
+        panic!("no change said a message was {}", if want { "on" } else { "off" });
+    };
+    // A command, which comes to the app as an event: its change is sent at once, not on the
+    // backstop's time (a second).
+    copy.ok(&["message", "new", "Parking", "Car with lights on"]);
+    copy.ok(&["message", "set", "Parking", "leaves=1"]);
+    let shown = Instant::now();
+    copy.ok(&["message", "show", "Parking"]);
+    let on = message_layer(&mut socket, true, shown);
+    assert!(on < Duration::from_millis(400), "the message reached the page after {on:?}");
+    // The message leaves by itself after a second, on a pass of the loop that no event asked
+    // for: the page is told with the screens, not a backstop's second later.
+    let gone = message_layer(&mut socket, false, shown);
+    assert!(gone >= Duration::from_millis(900), "the page was told the message left after {gone:?}");
+    assert!(gone < Duration::from_millis(1_800), "the page was told the message left after {gone:?}");
+    copy.quit().assert_clean(&run);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Check for Updates, against a stand-in for GitHub on this computer
 

@@ -874,6 +874,46 @@ mod tests {
         assert_eq!(just.next(later, false, false), Publish::At(now + SLOW_EVERY + PUBLISH_EVERY));
     }
 
+    /// The body of the function `fn name` in some source: up to the next function of the same
+    /// indentation.
+    fn body_of<'a>(source: &'a str, signature: &str) -> &'a str {
+        let from = source.find(signature).unwrap_or_else(|| panic!("{signature} is in the source"));
+        let rest = &source[from + signature.len()..];
+        &rest[..rest.find("\n    fn ").or_else(|| rest.find("\n    pub fn ")).unwrap_or(rest.len())]
+    }
+
+    /// What the loop does about the state for pages is run by the app's event loop, which a test
+    /// can't make (the end-to-end tests drive it through a copy, as a page does). So each place
+    /// that says "something happened" is kept in view here: the test is red when one is taken
+    /// out, and says which.
+    #[test]
+    fn every_place_the_loop_stirs_remote_control_still_does() {
+        let main = include_str!("../main.rs");
+        let repaints = include_str!("../repaints.rs");
+        let stirs = |signature: &str, also: &str| {
+            let body = body_of(main, signature);
+            assert!(body.contains("self.remote.stir()"), "{signature} no longer stirs Remote Control");
+            assert!(body.contains(also), "{signature} no longer has {also}");
+        };
+        // A clock's time (and the loop's first pass), an event, and a window's event.
+        stirs("fn new_events(", "StartCause::ResumeTimeReached");
+        stirs("fn user_event(", "event.name()");
+        stirs("fn window_event(", "reports::ui::window_event");
+        // A request to redraw the window, seen by the pass that follows.
+        stirs("fn about_to_wait(", "repaints::redraw_asked()");
+        for signature in ["pub fn request_redraw(&self)", "pub fn request_redraw_for("] {
+            let body = body_of(repaints, signature);
+            assert!(body.contains("REDRAW_ASKED.store(true"), "{signature} no longer notes the request");
+        }
+        // Whatever changes what the screens show (a message that leaves by itself, a prop that
+        // clears itself), and a video's time found on a pass nothing else woke.
+        stirs("fn refresh_output(", "self.follow_version()");
+        stirs("fn tick_video(", "Pages show a video's time");
+        // The NDI notice shows at once.
+        let ndi = body_of(main, "fn sync_ndi(");
+        assert!(ndi.contains("report.stopped_now.is_empty()") && ndi.contains("request_redraw()"), "NDI notice");
+    }
+
     #[test]
     fn a_position_read_a_moment_later_keeps_the_same_start() {
         let mut looks = Looks::default();

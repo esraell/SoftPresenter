@@ -5,6 +5,7 @@
 //! lighter grey for "on" and "chosen", and one colour, orange, kept only for what is on screen
 //! right now.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use egui::{
@@ -3764,23 +3765,21 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         paint_carried(ui.ctx(), &words);
     }
 }
-use std::collections::HashMap;
-
 /// [`playlist_song`] for many keys at once: the songs are looked through once, when it is made,
 /// instead of once for each key (a library of thousands of songs would take the square of that).
 /// It finds what `playlist_song` finds.
-pub struct SongFinder {
+pub struct SongFinder<'a> {
     /// The first place each key is at, listed or not (as `playlist_song` takes the first).
-    by_key: HashMap<String, usize>,
+    by_key: HashMap<&'a str, usize>,
     /// The first listed song each id belongs to.
     by_id: HashMap<sp_model::Uuid, usize>,
     /// Each title of a listed song: where the first is, and whether a second has it too.
-    by_title: HashMap<String, (usize, bool)>,
+    by_title: HashMap<&'a str, (usize, bool)>,
     listed: Vec<bool>,
 }
 
-impl SongFinder {
-    pub fn new(show: &Show, state: &HomeState) -> SongFinder {
+impl<'a> SongFinder<'a> {
+    pub fn new(show: &'a Show, state: &'a HomeState) -> SongFinder<'a> {
         let hidden = state.bible.slots.unwrap_or([usize::MAX; 2]);
         let songs = show.presentations();
         let listed: Vec<bool> = (0..songs.len())
@@ -3790,12 +3789,12 @@ impl SongFinder {
             .collect();
         let mut by_key = HashMap::new();
         for (at, key) in state.song_keys.iter().enumerate() {
-            by_key.entry(key.clone()).or_insert(at);
+            by_key.entry(key.as_str()).or_insert(at);
         }
-        let (mut by_id, mut by_title) = (HashMap::new(), HashMap::<String, (usize, bool)>::new());
+        let (mut by_id, mut by_title) = (HashMap::new(), HashMap::<&str, (usize, bool)>::new());
         for (at, song) in songs.iter().enumerate().filter(|(at, _)| listed[*at]) {
             by_id.entry(song.id).or_insert(at);
-            by_title.entry(song.title.clone()).and_modify(|(_, several)| *several = true).or_insert((at, false));
+            by_title.entry(song.title.as_str()).and_modify(|(_, several)| *several = true).or_insert((at, false));
         }
         SongFinder { by_key, by_id, by_title, listed }
     }
@@ -8963,8 +8962,6 @@ pub mod tests {
             .collect();
         keys.push("alpha.txt".to_owned());
         let mut state = HomeState { song_keys: keys, ..HomeState::default() };
-        // Delta is taken out, so are its key, id and title; the second Alpha shares a key with the first.
-        state.removed_songs.push(4);
         let mut asked: Vec<String> = ["alpha.txt", "beta.txt", "gamma.txt", "delta.txt", "nothing.txt", "title:Alpha"]
             .iter()
             .map(|key| (*key).to_owned())
@@ -8972,6 +8969,8 @@ pub mod tests {
         asked.extend(["title:Beta", "title:Gamma", "title:Delta", "title:Nobody", "", "title:"].map(str::to_owned));
         asked.extend(songs.iter().map(|song| song.id.to_string()));
         asked.push(sp_model::Uuid::new_v4().to_string());
+        // Delta is taken out, with its key, id and title.
+        state.removed_songs.push(4);
         let finder = SongFinder::new(&show, &state);
         for key in &asked {
             assert_eq!(finder.find(key), playlist_song(&show, &state, key), "key {key:?}");
@@ -8979,5 +8978,13 @@ pub mod tests {
         assert_eq!(finder.find("title:Gamma"), Some(3));
         assert_eq!(finder.find("title:Beta"), None, "two songs have it");
         assert_eq!(finder.find("delta.txt"), None, "taken out");
+        // The first of two songs that share a key is taken out: the key finds neither, as
+        // `playlist_song` has it (the first song is the one the key names).
+        state.removed_songs = vec![0];
+        let finder = SongFinder::new(&show, &state);
+        for key in &asked {
+            assert_eq!(finder.find(key), playlist_song(&show, &state, key), "key {key:?}");
+        }
+        assert_eq!(finder.find("alpha.txt"), None, "the first song of the key is taken out");
     }
 }
