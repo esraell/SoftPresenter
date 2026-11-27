@@ -58,25 +58,27 @@ fn find_again() -> &'static str {
 }
 
 /// How many lines the sentence before a search keeps room for from the start, in every
-/// language (or as many as it takes with no folder, where that is more: four or five beside the
-/// keys in the narrowest Settings window), so choosing a folder moves nothing (the owner:
-/// nothing changes size when clicked).
+/// language, so choosing a folder moves nothing (the owner: nothing changes size when clicked).
 const SENTENCE_LINES: usize = 3;
+
+/// The least room the line's words keep beside its keys, as the design has it: with less (the
+/// narrowest Settings window leaves 214), the keys go under the sentence and it has the card's
+/// whole width, so it keeps to three lines in every language.
+const WORDS_ROOM: f32 = 320.0;
 
 /// Before a search, one line (the owner, 26 November): Look for songs you already have, with
 /// where it looks and that nothing comes in unasked in its sentence, and Choose a Folder… and
-/// Find at its right. The sentence keeps three lines' room, its folders' names cut in their
-/// middle where it would take more, with their whole paths under the pointer.
+/// Find at its right, or under the sentence in a narrow window. The sentence keeps three lines'
+/// room, a folder's name cut in its middle only where it would take more, with the folders'
+/// whole paths under the pointer.
 fn before(ui: &mut egui::Ui, state: &mut Card) {
     let label = t("settings.find.look", "Look for songs you already have");
     let keys = [Key::plain(choose_folder()), Key::main(t("settings.find.find", "Find")).at_least(FIND_WIDTH)];
-    let room = parts::keys_row_note_room(ui, ui.available_width(), &keys);
-    let kept = SENTENCE_LINES.max(parts::note_lines(ui, &looks_in_words(&[]), room));
-    let sentence = looks_in_fitted(ui, &state.added, room, kept);
-    let top = ui.cursor().min;
-    let clicked = parts::keys_row_keeping(ui, "find before", label, (&sentence, kept), &keys);
+    let room = parts::keys_row_note_room(ui, ui.available_width(), &keys, WORDS_ROOM);
+    let sentence = looks_in_fitted(ui, &state.added, room, SENTENCE_LINES);
+    let (clicked, words) =
+        parts::keys_row_keeping(ui, "find before", label, (&sentence, SENTENCE_LINES), &keys, WORDS_ROOM);
     if !state.added.is_empty() {
-        let words = Rect::from_min_max(top, pos2(top.x + room, ui.cursor().min.y));
         ui.interact(words, ui.scope_id().with("find before folders"), Sense::hover())
             .on_hover_text(added_paths(&state.added));
     }
@@ -124,14 +126,14 @@ fn looks_in_named(folders: &[String]) -> String {
 /// so\u{2026}Elm Street"). Should even "…" for each take more (many folders), the line cuts the
 /// sentence's end.
 fn looks_in_fitted(ui: &egui::Ui, added: &[std::path::PathBuf], room: f32, kept: usize) -> String {
-    let names: Vec<String> = added.iter().map(|folder| folder_name(folder)).collect();
-    let cut_to = |keep: usize| looks_in_named(&names.iter().map(|name| cut_middle(name, keep)).collect::<Vec<_>>());
     let fits = |sentence: &str| parts::note_lines(ui, sentence, room) <= kept;
-    let longest = names.iter().map(|name| name.chars().count()).max().unwrap_or(0);
-    let whole = cut_to(longest);
+    let whole = looks_in_words(added);
     if fits(&whole) {
         return whole;
     }
+    let names: Vec<String> = added.iter().map(|folder| folder_name(folder)).collect();
+    let cut_to = |keep: usize| looks_in_named(&names.iter().map(|name| cut_middle(name, keep)).collect::<Vec<_>>());
+    let longest = names.iter().map(|name| name.chars().count()).max().unwrap_or(0);
     // The fewest letters kept that don't fit: the sentence grows with what each name keeps.
     let (mut fit, mut over) = (0, longest);
     while over - fit > 1 {
@@ -1044,18 +1046,62 @@ mod tests {
                             .unwrap_or_else(|| panic!("{}", say(&format!("no key under {words}"))))
                     };
                     let (choose_key, find_key) = (key_of(&rest, choose), key_of(&rest, find));
-                    // At the right of the line, beside its words, Find last.
                     assert!(find_key.width() >= 84.0 - 0.01, "{}", say(&format!("Find is {} wide", find_key.width())));
                     assert!(choose_key.max.x < find_key.min.x, "{}", say("Choose a Folder\u{2026} comes before Find"));
-                    let words_right =
-                        (sentence_at.x + sentence_galley.size().x).max(label_at.x + label_galley.size().x);
-                    assert!(words_right < choose_key.min.x, "{}", say("the keys are beside the line\u{2019}s words"));
-                    let words_rows = label_at.y..=sentence_at.y + sentence_galley.size().y;
+                    // The sentence keeps to three lines in every language, at every width.
                     assert!(
-                        words_rows.contains(&find_key.center().y),
+                        sentence_galley.rows.len() <= SENTENCE_LINES,
                         "{}",
-                        say("the keys are on the line\u{2019}s height")
+                        say(&format!("the sentence takes {} lines", sentence_galley.rows.len()))
                     );
+                    let row_right = rest
+                        .rules
+                        .iter()
+                        .filter(|(y, _)| *y <= label_at.y)
+                        .max_by(|a, b| a.0.total_cmp(&b.0))
+                        .map(|(_, right)| *right)
+                        .expect("the line over the row");
+                    if width < 1000.0 {
+                        // The narrowest window leaves the words 214 points beside the keys, less than
+                        // the design's 320: the keys go under the sentence, at its left, 8 below its
+                        // three lines' room, Choose a Folder… first, and the sentence has the
+                        // card's whole width.
+                        let room_bottom = sentence_at.y + SENTENCE_LINES as f32 * 18.0;
+                        assert!((choose_key.min.x - label_at.x).abs() < 0.5, "{}", say("the keys start at the left"));
+                        assert!(
+                            (choose_key.min.y - room_bottom - 8.0).abs() < 0.5,
+                            "{}",
+                            say(&format!("the keys are at {}, not 8 under the sentence", choose_key.min.y))
+                        );
+                        assert_eq!(find_key.min.y, choose_key.min.y, "{}", say("the keys share a line"));
+                        assert!((find_key.min.x - choose_key.max.x - 8.0).abs() < 0.5, "{}", say("8 between the keys"));
+                        assert!(
+                            (sentence_galley.job.wrap.max_width - (row_right - label_at.x)).abs() < 0.5,
+                            "{}",
+                            say("the sentence has the card\u{2019}s whole width")
+                        );
+                    } else {
+                        // At the usual width and wider, at the right of the line, beside its words,
+                        // Find last.
+                        let words_right =
+                            (sentence_at.x + sentence_galley.size().x).max(label_at.x + label_galley.size().x);
+                        assert!(
+                            words_right < choose_key.min.x,
+                            "{}",
+                            say("the keys are beside the line\u{2019}s words")
+                        );
+                        assert!(
+                            (find_key.max.x - row_right).abs() < 0.5,
+                            "{}",
+                            say("Find ends at the row\u{2019}s right")
+                        );
+                        let words_rows = label_at.y..=sentence_at.y + sentence_galley.size().y;
+                        assert!(
+                            words_rows.contains(&find_key.center().y),
+                            "{}",
+                            say("the keys are on the line\u{2019}s height")
+                        );
+                    }
                     // Pointing at a key, then pressing it, moves nothing.
                     for words in [choose, find] {
                         let at = |drawn: &Painted| key_of(drawn, words).center();
@@ -1077,14 +1123,17 @@ mod tests {
                         state.find_songs.asks.clear();
                     }
                     // A folder chosen joins the sentence, and only the sentence changes, whatever
-                    // its name: the sentence keeps three lines' room from the start (or what it
-                    // takes with no folder, where that is more), so the keys, the card's height
-                    // and everything under it stay where they are. A name too long for that room
-                    // is cut in its middle with "…", never past it, even a very long one in the
-                    // narrowest window and the longest language.
+                    // its name: the sentence keeps three lines' room from the start, so the keys,
+                    // the card's height and everything under it stay where they are. An ordinary
+                    // name (28 letters or fewer) comes whole; only a very long one is cut, in its
+                    // middle with "…", never past three lines, even in the narrowest window and
+                    // the longest language.
                     // About as long as a folder's name can be (255 bytes).
                     let very_long = "Worship songs 2019 from the old church on Elm Street, kept by the choir director before the move to the new building across town, with the youth group's songs, the Christmas cantata and the hymns the choir sang the year the roof was mended, all together";
-                    for folder in ["Choir", "Worship songs", very_long] {
+                    // As long as an ordinary folder's name is: never cut.
+                    let ordinary = "Youth choir songs, 2019\u{2013}2020";
+                    assert_eq!(ordinary.chars().count(), 28);
+                    for folder in ["Choir", "Worship songs", ordinary, very_long] {
                         let mut chosen = state_in(Phase::Before);
                         chosen.find_songs.added = vec![PathBuf::from("/Volumes/Old laptop").join(folder)];
                         let after = frame(&mut chosen, &|_| Vec::new());
@@ -1095,11 +1144,8 @@ mod tests {
                             .cloned()
                             .unwrap_or_else(|| panic!("{}", say(&format!("no sentence for {folder}"))));
                         let said = shown.text();
-                        // Three lines at most, or as many as the sentence takes with no folder
-                        // where that is more (four or five beside the keys at 820).
-                        let alone = sentence_galley.rows.len();
                         assert!(
-                            shown.rows.len() <= SENTENCE_LINES.max(alone),
+                            shown.rows.len() <= SENTENCE_LINES,
                             "{}",
                             say(&format!("{} lines for {folder}: {said}", shown.rows.len()))
                         );
@@ -1111,6 +1157,8 @@ mod tests {
                         }
                         if folder == very_long {
                             assert_ne!(said, whole, "{}", say("a very long name is cut"));
+                        } else {
+                            assert_eq!(said, whole, "{}", say(&format!("{folder} is cut")));
                         }
                         assert_eq!(shown_at, sentence_at);
                         for words in [choose, find] {

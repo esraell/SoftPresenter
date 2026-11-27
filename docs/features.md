@@ -333,10 +333,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Before a search the card is one line, Look for songs you already have, whose sentence says
   where it looks, a folder added joining it ("…SoftProjector's folder and Worship songs."), and
   that nothing comes in until you choose, with Choose a Folder… and Find at its right. The
-  sentence keeps three lines' room from the start (or what it takes alone, where that is more:
-  four or five lines beside the keys in the narrowest Settings window), so choosing a folder
-  moves nothing; a name too long for that room is cut in its middle with "…", the folders' whole
-  paths under the pointer. It never
+  sentence keeps three lines' room from the start, so choosing a folder moves nothing. In a
+  narrow Settings window (less than 320 points left for the words beside the keys; the narrowest,
+  820, leaves 214) the keys go under the sentence, at its left, and the sentence has the card's
+  whole width; the window's width alone decides which. A name too long for three lines is cut in
+  its middle with "…" (an ordinary one, 28 letters or fewer, never is), the folders' whole paths
+  under the pointer. It never
   looks into hidden folders (named with a dot, or
   marked hidden on Windows), app or library bundles, Safari's downloads under way,
   `node_modules` and caches, never through a link (on Windows a junction or a mounted drive is

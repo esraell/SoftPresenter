@@ -212,18 +212,16 @@ pub fn row_greyed(
     inked_row(ui, label, TEXT_FAINT, (why, 0), control, draw);
 }
 
-/// A row's words in `ink`, its note (`kept`: in that many lines' room, however few it takes, and
-/// cut short with "…" past them; 0: as many as it takes), and its control.
-fn inked_row(
-    ui: &mut egui::Ui,
+/// A row's words: its name in `ink` and its note under it (`kept`: in that many lines' room,
+/// however few it takes, and cut short with "…" past them; 0: as many as it takes), both wrapped
+/// `room` wide; and how tall they are together.
+fn row_words(
+    ui: &egui::Ui,
     label: &str,
     ink: Color32,
     (note, kept): (&str, usize),
-    control: egui::Vec2,
-    draw: impl FnOnce(&mut egui::Ui, Rect),
-) {
-    let width = ui.available_width();
-    let room = note_room(width, control.x);
+    room: f32,
+) -> (Arc<egui::Galley>, Option<Arc<egui::Galley>>, f32) {
     let label = lines(ui, label, semibold(13.0), ink, room, LINE_HEIGHT);
     let font = FontId::proportional(12.5);
     let note = (!note.is_empty()).then(|| match kept {
@@ -231,18 +229,40 @@ fn inked_row(
         kept => lines_at_most(ui, note, font, TEXT_FAINT, (room, LINE_HEIGHT), kept),
     });
     let note_height = note.as_ref().map_or(0.0, |note| note.size().y).max(kept as f32 * LINE_HEIGHT);
-    let text = label.size().y + note_height;
+    let height = label.size().y + note_height;
+    (label, note, height)
+}
+
+/// Paints a row's words (from [`row_words`]) with their top left at `at`.
+fn paint_row_words(ui: &egui::Ui, at: Pos2, ink: Color32, label: Arc<egui::Galley>, note: Option<Arc<egui::Galley>>) {
+    let label_height = label.size().y;
+    ui.painter().galley(at, label, ink);
+    if let Some(note) = note {
+        ui.painter().galley(at + vec2(0.0, label_height), note, TEXT_FAINT);
+    }
+}
+
+/// A row's words in `ink`, its note (`kept` as for [`row_words`]), and its control. Where its
+/// words are.
+fn inked_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    ink: Color32,
+    note: (&str, usize),
+    control: egui::Vec2,
+    draw: impl FnOnce(&mut egui::Ui, Rect),
+) -> Rect {
+    let width = ui.available_width();
+    let room = note_room(width, control.x);
+    let (label, note, text) = row_words(ui, label, ink, note, room);
     let inner = text.max(control.y);
     let (place, _) = ui.allocate_exact_size(vec2(width, inner + 24.0), Sense::hover());
     ui.painter().hline(place.x_range(), place.min.y + 0.5, Stroke::new(1.0, LINE));
     let top = place.min.y + 12.0 + (inner - text) / 2.0;
-    let label_height = label.size().y;
-    ui.painter().galley(pos2(place.min.x, top), label, ink);
-    if let Some(note) = note {
-        ui.painter().galley(pos2(place.min.x, top + label_height), note, TEXT_FAINT);
-    }
+    paint_row_words(ui, pos2(place.min.x, top), ink, label, note);
     let at = pos2(place.max.x - control.x, place.min.y + 12.0 + (inner - control.y) / 2.0);
     draw(ui, Rect::from_min_size(at, control));
+    Rect::from_min_size(pos2(place.min.x, top), vec2(room, text))
 }
 
 /// The least room a row's words keep beside its controls; with less, the controls go on a line
@@ -254,11 +274,17 @@ fn note_room(width: f32, control: f32) -> f32 {
     (width - control - 16.0).max(80.0)
 }
 
+/// Whether a [`keys_row_keeping`] row `width` wide has its keys beside its words: when they leave
+/// the words `least` at least, else they go under the words. Its width decides it, never what it
+/// says, so the keys never move as its note changes.
+fn keys_beside(ui: &egui::Ui, width: f32, keys: &[Key], least: f32) -> bool {
+    note_room(width, keys_width(ui, keys)) >= least
+}
+
 /// How wide a [`keys_row_keeping`]'s note wraps, in a row `width` wide with these keys: in what
-/// they leave beside the words, or across the row when they go on a line of their own.
-pub fn keys_row_note_room(ui: &egui::Ui, width: f32, keys: &[Key]) -> f32 {
-    let keys_wide = keys_width(ui, keys);
-    note_room(width, if keys_wide + 16.0 + LABEL_ROOM <= width { keys_wide } else { 0.0 })
+/// they leave beside the words, or across the whole row when they go under the words.
+pub fn keys_row_note_room(ui: &egui::Ui, width: f32, keys: &[Key], least: f32) -> f32 {
+    if keys_beside(ui, width, keys, least) { note_room(width, keys_width(ui, keys)) } else { width }
 }
 
 /// How many lines a row's note takes, `room` wide.
@@ -396,38 +422,13 @@ pub fn keys_row(
     readout: Option<&str>,
     keys: &[Key],
 ) -> Option<usize> {
-    keys_row_in(ui, salt, label, (note, 0), readout, keys)
-}
-
-/// A row as [`keys_row`] (with no readout) whose note keeps the room of `kept` lines however few
-/// it takes, and is cut short with "…" past them, so the row keeps its height, and its keys their
-/// place, as the note changes. [`keys_row_note_room`] says how wide the note wraps, for a caller
-/// that fits its words to the room. The key clicked, if any.
-pub fn keys_row_keeping(
-    ui: &mut egui::Ui,
-    salt: &str,
-    label: &str,
-    (note, kept): (&str, usize),
-    keys: &[Key],
-) -> Option<usize> {
-    keys_row_in(ui, salt, label, (note, kept), None, keys)
-}
-
-fn keys_row_in(
-    ui: &mut egui::Ui,
-    salt: &str,
-    label: &str,
-    note: (&str, usize),
-    readout: Option<&str>,
-    keys: &[Key],
-) -> Option<usize> {
     let width = ui.available_width();
     let keys_wide = keys_width(ui, keys);
     let readout_wide = readout.map_or(0.0, |text| readout_size(ui, text).x + 8.0);
     let control = vec2(readout_wide + keys_wide, if keys.is_empty() { 24.0 } else { 30.0 });
     if control.x + 16.0 + LABEL_ROOM <= width {
         let mut clicked = None;
-        inked_row(ui, label, TEXT, note, control, |ui, place| {
+        inked_row(ui, label, TEXT, (note, 0), control, |ui, place| {
             if let Some(text) = readout {
                 let size = readout_size(ui, text);
                 paint_readout(ui, Rect::from_min_size(pos2(place.min.x, place.center().y - 12.0), size), text);
@@ -436,7 +437,7 @@ fn keys_row_in(
         });
         return clicked;
     }
-    inked_row(ui, label, TEXT, note, vec2(0.0, 0.0), |_, _| {});
+    inked_row(ui, label, TEXT, (note, 0), vec2(0.0, 0.0), |_, _| {});
     let together = readout_wide + keys_wide <= width;
     if let Some(text) = readout.filter(|_| !together) {
         let size = readout_size(ui, text);
@@ -452,6 +453,39 @@ fn keys_row_in(
     let clicked = draw_keys(ui, line.max.x, line.center().y, salt, keys);
     ui.add_space(12.0);
     clicked
+}
+
+/// A row with keys (no readout) whose note keeps the room of `kept` lines however few it takes,
+/// and is cut short with "…" past them, so the row keeps its height, and its keys their place, as
+/// the note changes. Where the keys leave its words `least` at least, they are at its right, in
+/// the middle of its height; else under its words, at their left, 8 under the note's room, and
+/// the words have the row's whole width. Its width alone decides which. [`keys_row_note_room`]
+/// says how wide the note wraps, for a caller that fits its words to the room. The key clicked,
+/// if any, and where the words are.
+pub fn keys_row_keeping(
+    ui: &mut egui::Ui,
+    salt: &str,
+    label: &str,
+    note: (&str, usize),
+    keys: &[Key],
+    least: f32,
+) -> (Option<usize>, Rect) {
+    let width = ui.available_width();
+    if keys_beside(ui, width, keys, least) {
+        let mut clicked = None;
+        let control = vec2(keys_width(ui, keys), 30.0);
+        let words = inked_row(ui, label, TEXT, note, control, |ui, place| {
+            clicked = draw_keys(ui, place.max.x, place.center().y, salt, keys);
+        });
+        return (clicked, words);
+    }
+    let (label, note, text) = row_words(ui, label, TEXT, note, width);
+    let (place, _) = ui.allocate_exact_size(vec2(width, 12.0 + text + 8.0 + 30.0 + 12.0), Sense::hover());
+    ui.painter().hline(place.x_range(), place.min.y + 0.5, Stroke::new(1.0, LINE));
+    let top = place.min.y + 12.0;
+    paint_row_words(ui, pos2(place.min.x, top), TEXT, label, note);
+    let clicked = draw_keys(ui, place.min.x + keys_width(ui, keys), top + text + 8.0 + 15.0, salt, keys);
+    (clicked, Rect::from_min_size(pos2(place.min.x, top), vec2(width, text)))
 }
 
 /// A line of keys at a card's right, with `lead` in small faint words before them (what the
