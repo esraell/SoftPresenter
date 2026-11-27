@@ -52,5 +52,7 @@
   "keys.changing.5": "En Editar: un cuadro de texto nuevo, duplicar, elegirlo todo",
   "keys.changing.6": "En Editar: mover el objeto elegido (con Mayús, un píxel)",
   "keys.cap.home": "Inicio",
-  "keys.cap.end": "Fin"
+  "keys.cap.end": "Fin",
+  "keys.add.none": "Abre una canción de una biblioteca, o un pasaje en Biblia, para añadirlo a la lista",
+  "keys.remove.none": "Elige un elemento de la lista para quitarlo"
 }

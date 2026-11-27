@@ -13,6 +13,7 @@ use sp_render::object_frame;
 use crate::displays::DisplayInfo;
 use crate::editor::EditDraft;
 use crate::i18n::{t, tf, tk, tn, ts};
+use crate::key_table::KeyAction;
 use crate::screens::{Kind, Output, Screen};
 
 use crate::icons::{self, Icon};
@@ -395,6 +396,15 @@ pub struct HomeState {
     pub keys_on_buttons: bool,
     /// What each key that runs the show does (Settings › Keys; kept with the preferences).
     pub keys: crate::key_table::KeyTable,
+    /// Show Selected or Add to Playlist, from an F row pressed while the find box or Scripture
+    /// Lookup has the keyboard (`typed_key` in `main.rs`), for that field to carry out on what is
+    /// typed as it next draws: its Return (the find box's Command-Return, for Add), then Enter
+    /// (`enter_after`) or Bible's Add. Let go of at the end of the frame if no field took it, so
+    /// it is never carried out later.
+    pub typed_key: Option<KeyAction>,
+    /// Enter, asked by the find box or Scripture Lookup for Show Selected: the app does it once
+    /// the window has drawn and what was opened is in the show (`App::enter_key`).
+    pub enter_after: bool,
     /// How large the operator's windows draw everything (Settings › Slides › In your window),
     /// and the factor the home window draws at now, for the setting to say.
     pub interface_size: crate::interface_size::InterfaceSize,
@@ -2031,6 +2041,8 @@ impl Default for HomeState {
             numbers: None,
             keys_on_buttons: false,
             keys: crate::key_table::KeyTable::default(),
+            typed_key: None,
+            enter_after: false,
             interface_size: crate::interface_size::InterfaceSize::Automatic,
             zoom_now: 1.0,
             show_interface_size: false,
@@ -2590,6 +2602,9 @@ pub fn home_ui(
     canvas: Option<TextureId>,
 ) -> Vec<Command> {
     let commands = home_view(ui, show, state, theme, thumb, preview, canvas);
+    // A key's ask that no field took (it went before it drew) is let go of, never carried out
+    // later.
+    state.typed_key = None;
     // A refusal's cue, last, over whichever view is open.
     crate::notices::paint_cue(ui.ctx(), &mut state.notices);
     commands
@@ -5714,7 +5729,9 @@ pub fn pointer_drag(step: u32, from: egui::Pos2, to: egui::Pos2, drop: bool) -> 
 /// one picked: a song in the Service view (a catalog song from a place of its own, not in the
 /// library), a passage or verse in the Bible view. Nothing goes on the screens. With Command
 /// (Ctrl elsewhere), Return adds it to the playlist in front instead (a catalog song then joins
-/// the library).
+/// the library). An F row set to Show Selected (`HomeState::typed_key`) is Return, and then the
+/// app's Enter puts what it opened on screen; one set to Add to Playlist is Command-Return, and
+/// with nothing found a refusal's cue says why.
 fn library_search(
     ui: &mut egui::Ui,
     show: &Show,
@@ -5732,6 +5749,7 @@ fn library_search(
     // the results'; Escape still ends the search.
     let typing = !state.search_resting;
     let Some((query, picked)) = state.library_search.as_mut() else { return };
+    let asked = state.typed_key.take();
     // Worked out again only when what is typed, or the songs, change: not on every frame the
     // list is open (the cursor blinking, the mouse moving).
     let epoch = state.lists.songs.epoch();
@@ -5799,7 +5817,11 @@ fn library_search(
         && total > 0
         && find_return_words().is_some()
         && !RETURNED.swap(true, std::sync::atomic::Ordering::Relaxed);
-    let enter = enter || test_return;
+    let enter = enter || test_return || asked.is_some();
+    let command = match asked {
+        Some(action) => action == KeyAction::AddToPlaylist,
+        None => command,
+    };
     if up {
         *picked = picked.saturating_sub(1);
     }
@@ -6073,6 +6095,10 @@ fn library_search(
         Some(!inside(state.find_rect) && !inside(list))
     }) == Some(true);
     let ended = chosen.is_some() || escape || pressed_outside;
+    let shows = asked == Some(KeyAction::ShowSelected) && chosen.is_some();
+    if asked == Some(KeyAction::AddToPlaylist) && chosen.is_none() {
+        state.notices.refuse(nothing_to_add());
+    }
     match chosen {
         Some((Do::Song(index, ..), true)) => {
             if let (Some(key), Some(song)) = (state.song_keys.get(index), show.presentations().get(index)) {
@@ -6142,11 +6168,19 @@ fn library_search(
         }
         None => {}
     }
+    if shows {
+        state.enter_after = true;
+    }
     state.find_rows = rects;
     state.find_list = list;
     if ended {
         end_search(ui.ctx(), state);
     }
+}
+
+/// Why Add to Playlist's key added nothing (`keys.add.none`).
+pub(crate) fn nothing_to_add() -> &'static str {
+    t("keys.add.none", "Open a song in a library, or a passage in Bible, to add it to the playlist")
 }
 
 /// Ends the find box's search: the list under it goes, and the box gives the keyboard back, so
@@ -8233,7 +8267,7 @@ fn bible_switch_look() -> crate::studio::SwitchLook {
 }
 
 /// The id of the reference field.
-fn scripture_lookup_id() -> egui::Id {
+pub(crate) fn scripture_lookup_id() -> egui::Id {
     egui::Id::unique("bible scripture lookup")
 }
 
@@ -8548,7 +8582,7 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
 /// already. With no playlist given, a new one is made with the passage in it and comes to the
 /// front, its name ready to type in the chooser of the Service view, as a song's New Playlist…
 /// does (there to see, so nothing is said).
-fn add_passage(state: &mut HomeState, playlist: Option<usize>, saved: crate::service::SavedPassage) {
+pub(crate) fn add_passage(state: &mut HomeState, playlist: Option<usize>, saved: crate::service::SavedPassage) {
     let item = crate::service::Item::Passage(saved);
     let Some(at) = playlist else {
         state.services.add_service();
@@ -8567,7 +8601,11 @@ fn add_passage(state: &mut HomeState, playlist: Option<usize>, saved: crate::ser
 /// The reference field: a reference in English, Russian or Ukrainian (whole names or short
 /// forms), or words to find. The chapter follows what is typed a moment after typing stops;
 /// Return picks the passage's first verse and gives the keyboard back, for Enter. While a
-/// book's name is typed, the books it could be are offered under it.
+/// book's name is typed, the books it could be are offered under it. An F row set to Show
+/// Selected or Add to Playlist, pressed while it has the keyboard (`HomeState::typed_key`), is
+/// Return, and then the app's Enter puts the verse on screen, or Bible's Add keeps the passage in
+/// the playlist in front; the reference stays in the field. With nothing looked up, Add's
+/// refusal says why.
 fn bible_field(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, rect: Rect, live: Option<usize>) {
     let lookup_id = scripture_lookup_id();
     let entered = |response: &egui::Response, ui: &egui::Ui| {
@@ -8614,11 +8652,20 @@ fn bible_field(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, rect: Rect
     if lookup.changed() && completion.accepted.is_none() {
         state.bible.typed_at = Some(now);
     }
-    if entered(&lookup, ui) && lookup_words(&state.bible.lookup, &language).is_some() {
+    // A key's Show Selected or Add to Playlist, while the field has the keyboard: its Return.
+    let asked = state.typed_key.filter(|_| lookup.has_focus());
+    if asked.is_some() {
+        state.typed_key = None;
+    }
+    let returned = entered(&lookup, ui) || asked.is_some();
+    if returned && lookup_words(&state.bible.lookup, &language).is_some() {
         // Words, not a reference: their verses are listed already (see `bible_live_search`);
         // the field keeps the keyboard.
         lookup.request_focus();
-    } else if entered(&lookup, ui) {
+        if asked == Some(KeyAction::AddToPlaylist) {
+            state.notices.refuse(nothing_to_add());
+        }
+    } else if returned {
         state.bible.look_up(live);
         // Its first verse is picked and the keyboard goes back to the show, as from the find
         // box: Enter puts the verse on screen; with nothing on screen the arrows pick another (with
@@ -8627,6 +8674,18 @@ fn bible_field(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, rect: Rect
         if !state.pick_passage(show) {
             lookup.request_focus();
             select_all_text(ui.ctx(), lookup_id, &state.bible.lookup);
+            if asked == Some(KeyAction::AddToPlaylist) {
+                state.notices.refuse(nothing_to_add());
+            }
+        } else if let Some(action) = asked {
+            // An F key, unlike Return, leaves the field the keyboard: it is given back here.
+            lookup.surrender_focus();
+            if action == KeyAction::ShowSelected {
+                state.enter_after = true;
+            } else if let Some(saved) = state.bible.saved() {
+                let front = state.services.front_at();
+                add_passage(state, Some(front), saved);
+            }
         }
     } else if let Some(at) = state.bible.typed_at {
         // A moment after typing stops, the page shows what is typed. Nothing goes on screen.

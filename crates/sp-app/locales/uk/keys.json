@@ -1,5 +1,6 @@
 {
   "_note": "Ukrainian; see topbar.json and docs/translating.md. The keys sheet and key names. What is printed on a key stays as printed (Shift, Enter, Delete, Home, End, Esc), as on Ukrainian keyboards; what describes keys is translated (Пробіл, Стрілки, Літера).",
+  "keys.add.none": "Відкрийте пісню з бібліотеки або уривок у Біблії, щоб додати його до списку",
   "keys.also_in": "Також у розділі Налаштування › Клавіші.",
   "keys.cap.arrows": "Стрілки",
   "keys.cap.button_only": "Лише кнопка",
@@ -44,6 +45,7 @@
   "keys.places.4": "Списки й бібліотеки",
   "keys.places.5": "Знайти пісню, рядок або вірш",
   "keys.places.6": "Цей перелік (унизу є «Клавіші на кнопках»)",
+  "keys.remove.none": "Виберіть пункт у списку, щоб вилучити його",
   "keys.running.1": "Наступний слайд",
   "keys.running.2": "Попередній слайд",
   "keys.running.3": "Пункт вище чи нижче; у Біблії — вибрати попередній чи наступний вірш",
