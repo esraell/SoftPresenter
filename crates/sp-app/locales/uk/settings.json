@@ -301,5 +301,16 @@
   "settings.whats_new.month.9": "вересня",
   "settings.whats_new.month.10": "жовтня",
   "settings.whats_new.month.11": "листопада",
-  "settings.whats_new.month.12": "грудня"
+  "settings.whats_new.month.12": "грудня",
+  "settings.keys.refused.listed": "{key} уже є в списку.",
+  "settings.keys.refused.held_mac": "Клавіші з ⌘, ⌃ або ⌥ зайняті меню. Натисніть клавішу без них.",
+  "settings.keys.refused.held": "Клавіші з Ctrl або Alt зайняті меню. Натисніть клавішу без них.",
+  "settings.keys.refused.enter": "Enter завжди показує вибраний слайд на екрані. Натисніть іншу.",
+  "settings.keys.refused.tab": "Tab завжди переходить між кнопками. Натисніть іншу.",
+  "settings.keys.refused.up": "↑ завжди переходить до пункту вище. Натисніть іншу.",
+  "settings.keys.refused.down": "↓ завжди переходить до пункту нижче. Натисніть іншу.",
+  "settings.keys.refused.slash": "/ завжди відкриває пошук. Натисніть іншу.",
+  "settings.keys.refused.question_mark": "? завжди відкриває список клавіш. Натисніть іншу.",
+  "settings.keys.refused.delete": "Delete завжди видаляє вибране. Натисніть іншу.",
+  "settings.keys.refused.backspace": "Backspace завжди видаляє вибране. Натисніть іншу."
 }

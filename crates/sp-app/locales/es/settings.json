@@ -313,5 +313,16 @@
   "settings.whats_new.month.9": "septiembre",
   "settings.whats_new.month.10": "octubre",
   "settings.whats_new.month.11": "noviembre",
-  "settings.whats_new.month.12": "diciembre"
+  "settings.whats_new.month.12": "diciembre",
+  "settings.keys.refused.listed": "{key} ya está en la lista.",
+  "settings.keys.refused.held_mac": "Las teclas pulsadas con ⌘, ⌃ u ⌥ son de los menús. Pulsa una tecla sola.",
+  "settings.keys.refused.held": "Las teclas pulsadas con Ctrl o Alt son de los menús. Pulsa una tecla sola.",
+  "settings.keys.refused.enter": "Intro siempre pone en pantalla la diapositiva elegida. Pulsa otra.",
+  "settings.keys.refused.tab": "Tab siempre pasa de un botón a otro. Pulsa otra.",
+  "settings.keys.refused.up": "↑ siempre va al elemento de arriba. Pulsa otra.",
+  "settings.keys.refused.down": "↓ siempre va al elemento de abajo. Pulsa otra.",
+  "settings.keys.refused.slash": "/ siempre abre la búsqueda. Pulsa otra.",
+  "settings.keys.refused.question_mark": "? siempre abre la lista de teclas. Pulsa otra.",
+  "settings.keys.refused.delete": "Supr siempre borra lo elegido. Pulsa otra.",
+  "settings.keys.refused.backspace": "Retroceso siempre borra lo elegido. Pulsa otra."
 }

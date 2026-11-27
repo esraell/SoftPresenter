@@ -301,5 +301,16 @@
   "settings.whats_new.month.9": "сентября",
   "settings.whats_new.month.10": "октября",
   "settings.whats_new.month.11": "ноября",
-  "settings.whats_new.month.12": "декабря"
+  "settings.whats_new.month.12": "декабря",
+  "settings.keys.refused.listed": "{key} уже есть в списке.",
+  "settings.keys.refused.held_mac": "Клавиши с ⌘, ⌃ или ⌥ заняты меню. Нажмите клавишу без них.",
+  "settings.keys.refused.held": "Клавиши с Ctrl или Alt заняты меню. Нажмите клавишу без них.",
+  "settings.keys.refused.enter": "Enter всегда показывает выбранный слайд на экране. Нажмите другую.",
+  "settings.keys.refused.tab": "Tab всегда переходит между кнопками. Нажмите другую.",
+  "settings.keys.refused.up": "↑ всегда переходит к пункту выше. Нажмите другую.",
+  "settings.keys.refused.down": "↓ всегда переходит к пункту ниже. Нажмите другую.",
+  "settings.keys.refused.slash": "/ всегда открывает поиск. Нажмите другую.",
+  "settings.keys.refused.question_mark": "? всегда открывает список клавиш. Нажмите другую.",
+  "settings.keys.refused.delete": "Delete всегда удаляет выбранное. Нажмите другую.",
+  "settings.keys.refused.backspace": "Backspace всегда удаляет выбранное. Нажмите другую."
 }

@@ -128,7 +128,7 @@ use winit::window::{Window, WindowId};
 use crate::displays::{DisplayInfo, choose_output};
 use crate::editor::EditDraft;
 use crate::home::{HomeState, ThumbOf, home_ui};
-use crate::key_table::{ActionGroup, KeyAction, KeyTable, ShowKey};
+use crate::key_table::{ActionGroup, KeyAction, KeyTable, Pressed, ShowKey};
 use crate::output::{Frame, OutputHandle, OutputMsg};
 use crate::screens::Placed;
 use crate::thumbs::Thumbs;
@@ -1156,21 +1156,21 @@ fn popup_takes_show_keys(ctx: &egui::Context) -> bool {
     egui::Popup::is_any_open(ctx) && !notices::list_open(ctx)
 }
 
-/// What a key that runs the show does, as the table says (Settings › Keys): `None` for a key
-/// with no row, and for an F key when `f_keys` is false (on a Mac, where they are the system's:
-/// brightness, volume, Mission Control), whatever the table says, since preferences brought
-/// from a PC may have changed them. The keys are read straight from the window, before the
-/// interface draws, so a key press reaches the output without waiting for the home window.
-fn show_key_action(key: &Key, table: &KeyTable, f_keys: bool) -> Option<KeyAction> {
-    let key = ShowKey::of(key)?;
-    if key.is_f_key() && !f_keys {
-        return None;
-    }
-    Some(table.action(key))
+/// What a key that runs the show does, as the table says (Settings › Keys), by the key's place on
+/// the keyboard (`KeyTable::row_of`: a clicker's "." works on a Russian layout, where that key
+/// types ю): `None` for a key with no row, and for an F key not added when `f_keys` is false (on
+/// a Mac, where they are the system's: brightness, volume, Mission Control), whatever the table
+/// says, since preferences brought from a PC may have changed them. The keys are read straight
+/// from the window, before the interface draws, so a key press reaches the output without
+/// waiting for the home window.
+fn show_key_action(key: &Pressed, table: &KeyTable, f_keys: bool) -> Option<KeyAction> {
+    table.row_of(key, f_keys).map(|row| table.action(row))
 }
 
-/// A letter that runs the show: a slide's own hot key puts it on screen; otherwise the letter
-/// jumps to the group it stands for (A for the first verse, C for the chorus, and so on).
+/// A letter that runs the show, by the character it types (a church typing in Russian sees its
+/// own letters): a slide's own hot key puts it on screen; otherwise the letter jumps to the group
+/// it stands for (A for the first verse, C for the chorus, and so on). A letter added in Settings
+/// › Keys does its row instead (`show_key_press`).
 fn letter_command(key: &Key, show: &Show) -> Option<Command> {
     // The key that opens find is never a slide's hot key or a group's letter.
     if opens_find(key) {
@@ -1222,11 +1222,11 @@ enum KeyPress {
 /// show's, and does nothing (`App::key_action`), so Space set to Nothing never presses the control
 /// that has the keyboard; only Escape set to Nothing is the window's (`None`), which closes a
 /// menu or pop-up with it as ever.
-fn show_key_press(key: &Key, table: &KeyTable, show: &Show, f_keys: bool) -> Option<KeyPress> {
+fn show_key_press(key: &Pressed, table: &KeyTable, show: &Show, f_keys: bool) -> Option<KeyPress> {
     match show_key_action(key, table, f_keys) {
-        Some(KeyAction::Nothing) if matches!(key, Key::Named(NamedKey::Escape)) => None,
+        Some(KeyAction::Nothing) if matches!(key.logical, Key::Named(NamedKey::Escape)) => None,
         Some(action) => Some(KeyPress::Action(action)),
-        None => letter_command(key, show).map(KeyPress::Letter),
+        None => letter_command(&key.logical, show).map(KeyPress::Letter),
     }
 }
 
@@ -1249,17 +1249,18 @@ fn held_down(press: KeyPress, repeat: bool) -> KeyPress {
 /// What a key that runs the show does from any of the app's windows, the home window's and the
 /// screens' alike (`show_key_press`), with the rules every window keeps: nothing while a question
 /// or the new-song sheet is open; a key held down as `held_down` says; and in the Edit view only
-/// Escape and the F rows reach the show, and only when they clear or hide the words
-/// (`ActionGroup::Clear`): Escape only when it has nothing to do in the editor
+/// Escape, the F rows (an F key added on a Mac too) and "." reach the show, and only when they
+/// clear or hide the words (`ActionGroup::Clear`): Escape only when it has nothing to do in the editor
 /// (`HomeState::escape_edits`: no words being typed, no name being retyped, nothing picked on the
 /// canvas, no drag, nothing open over the window), and never when it is held down (`repeat`): the
 /// press that let go of the picked box, or put back the words typed, must not go on to clear the
-/// screens as it repeats. Space, the arrows, Home, End and the letters stay the editor's,
-/// whatever they are set to. The home window holds more keys back of its own (`home_key_command`).
+/// screens as it repeats. Space, the arrows, Page Down and Page Up, Home, End, the letters and
+/// every key added stay the editor's, whatever they are set to. The home window holds more keys
+/// back of its own (`home_key_command`).
 fn show_key_command(
     state: &home::HomeState,
     ctx: &egui::Context,
-    key: &Key,
+    key: &Pressed,
     repeat: bool,
     show: &Show,
     f_keys: bool,
@@ -1269,19 +1270,23 @@ fn show_key_command(
     }
     let press = held_down(show_key_press(key, &state.keys, show, f_keys)?, repeat);
     if state.edit_kind().is_some() {
-        let escape = matches!(key, Key::Named(NamedKey::Escape));
+        let escape = matches!(key.logical, Key::Named(NamedKey::Escape));
         let clears = matches!(press, KeyPress::Action(action) if action.group() == ActionGroup::Clear);
-        let escape_or_f = ShowKey::of(key).is_some_and(|key| key == ShowKey::Escape || key.is_f_key());
-        if !clears || !escape_or_f || (escape && (repeat || state.escape_edits(ctx))) {
+        let escape_f_or_period = state
+            .keys
+            .row_of(key, f_keys)
+            .is_some_and(|key| key == ShowKey::Escape || key == ShowKey::Period || key.is_f_key());
+        if !clears || !escape_f_or_period || (escape && (repeat || state.escape_edits(ctx))) {
             return None;
         }
     }
     Some(press)
 }
 
-/// Whether `key` is one of the F rows (Settings › Keys).
-fn f_row(key: &Key) -> bool {
-    ShowKey::of(key).is_some_and(ShowKey::is_f_key)
+/// Whether `key` is one of the F rows, F1 to F12 (Settings › Keys), by its place, else by the key
+/// the window says it is.
+fn f_row(key: &Pressed) -> bool {
+    ShowKey::of(&key.physical).or_else(|| ShowKey::named(&key.logical)).is_some_and(ShowKey::is_f_key)
 }
 
 /// Whether the keyboard is in one of the two typing fields the F rows still reach: the find box
@@ -1380,28 +1385,54 @@ fn add_key(show: &Show, state: &mut home::HomeState) {
 
 /// Keys that run the show but belong to something open in the window: under the list of keys
 /// nothing runs the show; while the numbers show (after modifier-1 to 7), a number and Escape
-/// are theirs; in an open menu the arrows, Space and Enter move in it and choose. In the Bible
-/// view a letter or a number starts the next reference in Scripture Lookup (see `bible_area` in
-/// `home.rs`), never a jump to a group of the song on screen: after Return has picked a verse and
-/// given the keyboard back, typing "ps 23" must not put the song's second verse up with its "s".
+/// are theirs, a number by the digit it types or by its place (a digit added does its row only
+/// when no numbers show); in an open menu the arrows, Space and Enter move in it and choose,
+/// whatever they are set to. In the Bible view a key typing a letter or a number starts the next
+/// reference in Scripture Lookup (see `bible_area` in `home.rs`), never a jump to a group of the
+/// song on screen, and a letter or a digit added there types too, whatever its row says: after
+/// Return has picked a verse and given the keyboard back, typing "ps 23" must not put the song's
+/// second verse up with its "s". A row that is no letter's or digit's place does its action
+/// there, as in the Service view: "." clears on any layout, though it types ю on a Russian one.
 /// While the find box is being typed in every key is the box's, before the box has drawn with the
 /// keyboard too: a letter typed straight after `/` is typed in it, never a slide's hot key or a
 /// group's letter, and Escape closes it, clearing nothing. Only the F rows reach the show from it
 /// (`typed_key`). A search left open after a drop has given the keys back to the show
 /// (`HomeState::search_resting`).
-fn show_key_held_back(state: &home::HomeState, ctx: &egui::Context, key: &Key) -> bool {
+fn show_key_held_back(state: &home::HomeState, ctx: &egui::Context, key: &Pressed, f_keys: bool) -> bool {
     if state.key_sheet || (state.typing_in_find() && !f_row(key)) {
         return true;
     }
-    if state.bible_open && matches!(key, Key::Character(_)) && !opens_find(key) {
+    if state.bible_open
+        && matches!(key.logical, Key::Character(_))
+        && !opens_find(&key.logical)
+        && state.keys.row_of(key, f_keys).is_none_or(ShowKey::is_letter_or_digit)
+    {
         return true;
     }
-    let digit = matches!(key, Key::Character(typed) if typed.chars().count() == 1 && typed.chars().all(|c| ('1'..='9').contains(&c)));
-    if state.numbers.is_some() && (digit || matches!(key, Key::Named(NamedKey::Escape))) {
+    use winit::keyboard::{KeyCode as C, PhysicalKey};
+    let digit = matches!(&key.logical, Key::Character(typed) if typed.chars().count() == 1 && typed.chars().all(|c| ('1'..='9').contains(&c)))
+        || matches!(
+            key.physical,
+            PhysicalKey::Code(
+                C::Digit1
+                    | C::Digit2
+                    | C::Digit3
+                    | C::Digit4
+                    | C::Digit5
+                    | C::Digit6
+                    | C::Digit7
+                    | C::Digit8
+                    | C::Digit9
+            )
+        );
+    if state.numbers.is_some() && (digit || matches!(key.logical, Key::Named(NamedKey::Escape))) {
         return true;
     }
     popup_takes_show_keys(ctx)
-        && matches!(key, Key::Named(NamedKey::ArrowLeft | NamedKey::ArrowRight | NamedKey::Space | NamedKey::Enter))
+        && matches!(
+            key.logical,
+            Key::Named(NamedKey::ArrowLeft | NamedKey::ArrowRight | NamedKey::Space | NamedKey::Enter)
+        )
 }
 
 /// What a key pressed in the home window does to the show, as the table in `state.keys` says
@@ -1414,17 +1445,17 @@ fn show_key_held_back(state: &home::HomeState, ctx: &egui::Context, key: &Key) -
 fn home_key_command(
     state: &home::HomeState,
     ctx: &egui::Context,
-    key: &Key,
+    key: &Pressed,
     repeat: bool,
     show: &Show,
     f_keys: bool,
 ) -> Option<KeyPress> {
     let f_row_typed = f_row(key) && typing_with_f_rows(state, ctx);
-    if (ctx.text_edit_focused() && !f_row_typed) || show_key_held_back(state, ctx, key) {
+    if (ctx.text_edit_focused() && !f_row_typed) || show_key_held_back(state, ctx, key, f_keys) {
         return None;
     }
     let press = show_key_command(state, ctx, key, repeat, show, f_keys)?;
-    if matches!(key, Key::Named(NamedKey::Escape)) && escape_closes_something(state, ctx) {
+    if matches!(key.logical, Key::Named(NamedKey::Escape)) && escape_closes_something(state, ctx) {
         return None;
     }
     Some(press)
@@ -1434,12 +1465,12 @@ fn home_key_command(
 /// and Previous touch the pick. Space doing Next takes it; any other key doing Next or Previous
 /// (Space doing Previous too) moves it the way its action goes. A key set to anything else does
 /// that, so Space set to Clear All clears, never putting the pick on screen.
-fn pick_key_for(key: &Key, action: KeyAction, picked: bool, showing: bool, editing: bool) -> running::PickKey {
+fn pick_key_for(key: &Pressed, action: KeyAction, picked: bool, showing: bool, editing: bool) -> running::PickKey {
     let (next, previous) = (action == KeyAction::Next, action == KeyAction::Previous);
     if !next && !previous {
         return running::PickKey::Pass;
     }
-    let space = matches!(key, Key::Named(NamedKey::Space)) && next;
+    let space = matches!(key.logical, Key::Named(NamedKey::Space)) && next;
     running::pick_key(space, next, previous, picked, showing, editing)
 }
 
@@ -1499,13 +1530,12 @@ fn home_key_goes(
     state: &home::HomeState,
     ctx: &egui::Context,
     show: &Show,
-    key: &Key,
+    key: &Pressed,
     repeat: bool,
-    held: winit::keyboard::ModifiersState,
     f_keys: bool,
 ) -> KeyGoes {
-    let (command, control, alt) = (held.super_key(), held.control_key(), held.alt_key());
-    if opens_find(key) && find_key_is_free(state, ctx) && !command && !control && !alt {
+    let (command, control, alt) = (key.held.super_key(), key.held.control_key(), key.held.alt_key());
+    if opens_find(&key.logical) && find_key_is_free(state, ctx) && !command && !control && !alt {
         return KeyGoes::Find;
     }
     if !command
@@ -1517,7 +1547,7 @@ fn home_key_goes(
             asked => KeyGoes::Show(asked),
         };
     }
-    if matches!(key, Key::Named(NamedKey::Enter))
+    if matches!(key.logical, Key::Named(NamedKey::Enter))
         && !repeat
         && enter_key_is_free(state, ctx)
         && !command
@@ -1545,7 +1575,7 @@ fn home_key_goes(
 fn key_waits_for_drawing(
     waiting: &[egui::Event],
     asked: bool,
-    key: &Key,
+    key: &Pressed,
     repeat: bool,
     table: &KeyTable,
     show: &Show,
@@ -1579,8 +1609,8 @@ fn key_waits_for_drawing(
         egui::Event::PointerButton { .. } | egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) => true,
         _ => false,
     };
-    let kept = matches!(key, Key::Named(NamedKey::Enter))
-        || opens_find(key)
+    let kept = matches!(key.logical, Key::Named(NamedKey::Enter))
+        || opens_find(&key.logical)
         || show_key_press(key, table, show, f_keys).is_some();
     !repeat && (asked || (kept && waiting.iter().any(changes_keys)))
 }
@@ -4890,7 +4920,7 @@ impl App {
     /// putting nothing on. With something on screen they run it as ever (false: not taken here),
     /// so a song can be finished with a reading picked and waiting for Enter. A key set to
     /// anything else does that (`pick_key_for`).
-    fn pick_key(&mut self, key: &Key, action: KeyAction) -> bool {
+    fn pick_key(&mut self, key: &Pressed, action: KeyAction) -> bool {
         let Some(running) = self.running.as_ref() else { return false };
         let state = &running.home_state;
         let picked = state.pick(&self.show);
@@ -11992,7 +12022,7 @@ impl App {
     /// A key that runs the show, from the home window or a screen's: a letter's slide goes up; an
     /// action from the table is carried out (`key_action`), once a key doing Next or Previous has
     /// had its say over a slide picked (`pick_key`).
-    fn key_press(&mut self, key: &Key, press: KeyPress) {
+    fn key_press(&mut self, key: &Pressed, press: KeyPress) {
         match press {
             KeyPress::Letter(command) => self.apply(vec![command]),
             KeyPress::Action(action) => {
@@ -12006,7 +12036,7 @@ impl App {
     /// An F row pressed while the find box or Scripture Lookup has the keyboard
     /// (`KeyGoes::Typed`): what it does there (`typed_key`), and what that leaves is done as
     /// anywhere.
-    fn typed_key_press(&mut self, key: &Key, action: KeyAction) {
+    fn typed_key_press(&mut self, key: &Pressed, action: KeyAction) {
         let Some(running) = self.running.as_mut() else { return };
         let rest = typed_key(&mut running.home_state, &running.egui_ctx, action);
         running.home_window.request_redraw();
@@ -12958,19 +12988,19 @@ impl ApplicationHandler<AppEvent> for App {
                     );
                 }
                 WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                    let pressed = Pressed::of(&event, self.held);
                     if !self.held.super_key()
                         && !self.held.control_key()
                         && let Some(press) = show_key_command(
                             &running.home_state,
                             &running.egui_ctx,
-                            &event.logical_key,
+                            &pressed,
                             event.repeat,
                             &self.show,
                             keys::f_keys(),
                         )
                     {
-                        let logical = event.logical_key.clone();
-                        self.key_press(&logical, press);
+                        self.key_press(&pressed, press);
                     }
                 }
                 // The pointer over a window that fills a display shows its X (see
@@ -13024,7 +13054,7 @@ impl ApplicationHandler<AppEvent> for App {
             && key_waits_for_drawing(
                 &running.egui_state.egui_input().events,
                 running.home_state.typed_key.is_some(),
-                &key.logical_key,
+                &Pressed::of(key, self.held),
                 key.repeat,
                 &running.home_state.keys,
                 &self.show,
@@ -13042,22 +13072,16 @@ impl ApplicationHandler<AppEvent> for App {
             && key.state == ElementState::Pressed
             && let Some(running) = self.running.as_mut()
         {
-            let goes = home_key_goes(
-                &running.home_state,
-                &running.egui_ctx,
-                &self.show,
-                &key.logical_key,
-                key.repeat,
-                self.held,
-                keys::f_keys(),
-            );
+            let pressed = Pressed::of(key, self.held);
+            let goes =
+                home_key_goes(&running.home_state, &running.egui_ctx, &self.show, &pressed, key.repeat, keys::f_keys());
             match &goes {
                 KeyGoes::Find => {
                     running.home_state.open_find();
                     running.home_window.request_redraw();
                 }
-                KeyGoes::Show(press) => self.key_press(&key.logical_key, *press),
-                KeyGoes::Typed(action) => self.typed_key_press(&key.logical_key, *action),
+                KeyGoes::Show(press) => self.key_press(&pressed, *press),
+                KeyGoes::Typed(action) => self.typed_key_press(&pressed, *action),
                 KeyGoes::Enter => self.enter_key(),
                 KeyGoes::Window => {}
             }
@@ -14183,6 +14207,11 @@ mod tests {
 
     use super::*;
 
+    /// A key pressed as on a US keyboard, with nothing held (`Pressed::from`).
+    fn us(key: &Key) -> Pressed {
+        Pressed::from(key.clone())
+    }
+
     #[test]
     fn enter_is_free_in_the_bible_view_too_but_not_while_typing_editing_or_under_the_key_list() {
         let ctx = egui::Context::default();
@@ -14225,17 +14254,20 @@ mod tests {
         assert!(matches!(letter_command(&s, &show), Some(Command::GoTo(_))));
         // ...so in the Bible view it is held back from the show, for Scripture Lookup.
         let mut state = home::HomeState { bible_open: true, ..home::HomeState::default() };
-        assert!(show_key_held_back(&state, &ctx, &s));
-        assert!(show_key_held_back(&state, &ctx, &Key::Character("2".into())));
-        assert!(!show_key_held_back(&state, &ctx, &Key::Named(NamedKey::Space)), "Space still runs the show");
-        assert!(!show_key_held_back(&state, &ctx, &Key::Named(NamedKey::Escape)), "and Escape clears");
+        assert!(show_key_held_back(&state, &ctx, &us(&s), true));
+        assert!(show_key_held_back(&state, &ctx, &us(&Key::Character("2".into())), true));
+        assert!(
+            !show_key_held_back(&state, &ctx, &us(&Key::Named(NamedKey::Space)), true),
+            "Space still runs the show"
+        );
+        assert!(!show_key_held_back(&state, &ctx, &us(&Key::Named(NamedKey::Escape)), true), "and Escape clears");
         // Home and End go to the first and last slide there too, as before the table.
         for (key, action) in [(NamedKey::Home, KeyAction::First), (NamedKey::End, KeyAction::Last)] {
-            let press = home_key_command(&state, &ctx, &Key::Named(key), false, &show, false);
+            let press = home_key_command(&state, &ctx, &us(&Key::Named(key)), false, &show, false);
             assert_eq!(press, Some(KeyPress::Action(action)), "{key:?} in the Bible view");
         }
         state.bible_open = false;
-        assert!(!show_key_held_back(&state, &ctx, &s), "the Service view keeps its group letters");
+        assert!(!show_key_held_back(&state, &ctx, &us(&s), true), "the Service view keeps its group letters");
     }
 
     #[test]
@@ -14272,7 +14304,7 @@ mod tests {
         let state = home::HomeState::default();
         assert!(escape_closes_something(&state, &ctx), "Escape closes the list instead of clearing the screens");
         for key in [NamedKey::Space, NamedKey::ArrowRight, NamedKey::ArrowLeft] {
-            assert!(!show_key_held_back(&state, &ctx, &Key::Named(key)), "{key:?} runs the show");
+            assert!(!show_key_held_back(&state, &ctx, &us(&Key::Named(key)), true), "{key:?} runs the show");
         }
         assert!(enter_key_is_free(&state, &ctx), "and so does Enter");
     }
@@ -14480,7 +14512,7 @@ mod tests {
         let slash = Key::Character("/".into());
         assert!(opens_find(&slash));
         assert_eq!(letter_command(&slash, &show), None);
-        assert_eq!(show_key_press(&slash, &KeyTable::default(), &show, true), None);
+        assert_eq!(show_key_press(&us(&slash), &KeyTable::default(), &show, true), None);
         // Other keys are as they were: a hot key still goes to its slide, and is not find.
         let k = Key::Character("k".into());
         assert!(!opens_find(&k) && !opens_find(&Key::Named(NamedKey::Space)));
@@ -14506,15 +14538,15 @@ mod tests {
         let space = Key::Named(NamedKey::Space);
         let escape = Key::Named(NamedKey::Escape);
         let mut state = home::HomeState::default();
-        assert!(!show_key_held_back(&state, &ctx, &space), "nothing open: Space runs the show");
-        assert!(!show_key_held_back(&state, &ctx, &digit), "a digit is a slide's hot key");
+        assert!(!show_key_held_back(&state, &ctx, &us(&space), true), "nothing open: Space runs the show");
+        assert!(!show_key_held_back(&state, &ctx, &us(&digit), true), "a digit is a slide's hot key");
         state.numbers = Some(keys::Numbers { of: keys::NumbersOf::Tab, since: 0.0, picked: None });
-        assert!(show_key_held_back(&state, &ctx, &digit), "while the numbers show, a digit picks");
-        assert!(show_key_held_back(&state, &ctx, &escape), "and Escape only puts them away");
-        assert!(!show_key_held_back(&state, &ctx, &space), "Space still runs the show");
+        assert!(show_key_held_back(&state, &ctx, &us(&digit), true), "while the numbers show, a digit picks");
+        assert!(show_key_held_back(&state, &ctx, &us(&escape), true), "and Escape only puts them away");
+        assert!(!show_key_held_back(&state, &ctx, &us(&space), true), "Space still runs the show");
         state.numbers = None;
         state.key_sheet = true;
-        assert!(show_key_held_back(&state, &ctx, &space), "nothing runs the show under the list of keys");
+        assert!(show_key_held_back(&state, &ctx, &us(&space), true), "nothing runs the show under the list of keys");
     }
 
     #[test]
@@ -14524,7 +14556,8 @@ mod tests {
         let show = Show::new(vec![Arc::new(song)]);
         let ctx = egui::Context::default();
         let named = Key::Named;
-        let key = |state: &home::HomeState, key: Key, f_keys| home_key_command(state, &ctx, &key, false, &show, f_keys);
+        let key =
+            |state: &home::HomeState, key: Key, f_keys| home_key_command(state, &ctx, &us(&key), false, &show, f_keys);
         let editing = EditDraft::of(&show, sp_engine::SlideRef { presentation: 0, slide: 0 });
         let mut state = home::HomeState { editing, ..home::HomeState::default() };
         assert!(state.editing.is_some());
@@ -14590,11 +14623,11 @@ mod tests {
         assert_eq!(escape(&state), does(A::ClearAll), "nothing left for it to do");
         // Held down, Escape repeats: the repeats never clear in the Edit view (the first press
         // may have let go of a box, or put back words typed), and the F keys still do.
-        let held = |key: NamedKey| home_key_command(&state, &ctx, &Key::Named(key), true, &show, true);
+        let held = |key: NamedKey| home_key_command(&state, &ctx, &us(&Key::Named(key)), true, &show, true);
         assert_eq!(held(NamedKey::Escape), None, "a held Escape");
         assert_eq!(held(NamedKey::F2), does(A::ClearSlide), "a held F2");
         let service = home::HomeState::default();
-        let held_in_service = home_key_command(&service, &ctx, &Key::Named(NamedKey::Escape), true, &show, false);
+        let held_in_service = home_key_command(&service, &ctx, &us(&Key::Named(NamedKey::Escape)), true, &show, false);
         assert_eq!(held_in_service, does(A::ClearAll), "the Service view as before");
         // A text box with the keyboard (an inspector field, a name) keeps every key, F keys too.
         let frame = |focus: bool| {
@@ -14678,7 +14711,7 @@ mod tests {
         let softpresenter = KeyTable::default();
         let mut softprojector = KeyTable::default();
         softprojector.set_style(key_table::KeyStyle::SoftProjector);
-        let action = |table: &KeyTable, key: N, f_keys: bool| show_key_action(&Key::Named(key), table, f_keys);
+        let action = |table: &KeyTable, key: N, f_keys: bool| show_key_action(&us(&Key::Named(key)), table, f_keys);
         // Both styles run the slides alike, on every computer.
         for table in [&softpresenter, &softprojector] {
             for f_keys in [true, false] {
@@ -14725,15 +14758,19 @@ mod tests {
             assert_eq!(action(&softprojector, f, false), None, "{f:?} on a Mac");
         }
         assert_eq!(
-            show_key_action(&Key::Named(N::F1), &softpresenter, keys::f_keys()).is_some(),
+            show_key_action(&us(&Key::Named(N::F1)), &softpresenter, keys::f_keys()).is_some(),
             keys::f_keys(),
             "this computer's way"
         );
-        // Keys with no row, and letters, are no action.
-        for other in [N::Tab, N::ArrowUp, N::ArrowDown, N::Enter, N::F9, N::Delete] {
+        // Keys with no row, and letters, are no action; F9 to F12 are rows doing Nothing.
+        for other in [N::Tab, N::ArrowUp, N::ArrowDown, N::Enter, N::Insert, N::Delete] {
             assert_eq!(action(&softprojector, other, true), None, "{other:?}");
         }
-        assert_eq!(show_key_action(&Key::Character("c".into()), &softpresenter, true), None);
+        for f in [N::F9, N::F10, N::F11, N::F12] {
+            assert_eq!(action(&softprojector, f, true), Some(A::Nothing), "{f:?}");
+            assert_eq!(action(&softprojector, f, false), None, "{f:?} on a Mac");
+        }
+        assert_eq!(show_key_action(&us(&Key::Character("c".into())), &softpresenter, true), None);
         // What each action asks of the show; the app's own (Show Selected, the playlist's, the
         // views') ask nothing of it, and nor does Nothing.
         let layer = |layer| Some(Command::Clear(layer));
@@ -14755,7 +14792,7 @@ mod tests {
         }
         // With nothing changed, every key asks the show for what it asked before the table: off a
         // Mac F1 clears everything and F2 to F6 a layer each; F7 and F8 ask nothing of it.
-        let asked = |key: N, f_keys: bool| match show_key_press(&Key::Named(key), &softpresenter, &show, f_keys) {
+        let asked = |key: N, f_keys: bool| match show_key_press(&us(&Key::Named(key)), &softpresenter, &show, f_keys) {
             Some(KeyPress::Action(action)) => action_command(action),
             Some(KeyPress::Letter(command)) => Some(command),
             None => None,
@@ -14777,7 +14814,7 @@ mod tests {
             assert_eq!(asked(key, true), Some(command), "{key:?}");
         }
         for key in [N::F7, N::F8] {
-            let press = show_key_press(&Key::Named(key), &softpresenter, &show, true);
+            let press = show_key_press(&us(&Key::Named(key)), &softpresenter, &show, true);
             assert_eq!(press, Some(KeyPress::Action(A::Nothing)), "{key:?}");
             assert_eq!(asked(key, true), None, "{key:?}");
         }
@@ -14841,7 +14878,7 @@ mod tests {
                 state.editing = EditDraft::of(&show, sp_engine::SlideRef { presentation: 0, slide: 0 });
                 assert!(state.editing.is_some());
             }
-            let press = home_key_command(&state, &ctx, &escape, false, &show, false);
+            let press = home_key_command(&state, &ctx, &us(&escape), false, &show, false);
             assert_eq!(press, Some(KeyPress::Action(KeyAction::ClearSlide)), "editing: {editing}");
             let Some(KeyPress::Action(action)) = press else { unreachable!() };
             let command = action_command(action).expect("the show is asked");
@@ -14857,23 +14894,22 @@ mod tests {
         let show = Show::new(vec![Arc::new(sp_model::parse_song_text("Song", "[Verse 1]\nOne\n\nTwo\n"))]);
         let ctx = egui::Context::default();
         let (space, escape) = (Key::Named(NamedKey::Space), Key::Named(NamedKey::Escape));
-        let goes = |state: &home::HomeState, key: &Key, f_keys| {
-            home_key_goes(state, &ctx, &show, key, false, Default::default(), f_keys)
-        };
+        let goes =
+            |state: &home::HomeState, key: &Key, f_keys| home_key_goes(state, &ctx, &show, &us(key), false, f_keys);
         let nothing = Some(KeyPress::Action(KeyAction::Nothing));
         let mut state = home::HomeState::default();
         state.keys.set(ShowKey::Space, KeyAction::Nothing);
         state.keys.set(ShowKey::Escape, KeyAction::Nothing);
         // The table says Nothing: the key is kept from the window, as a key that runs the show
         // is, and does nothing (`App::key_action`); the show is asked nothing.
-        assert_eq!(show_key_action(&space, &state.keys, true), Some(KeyAction::Nothing));
-        assert_eq!(show_key_press(&space, &state.keys, &show, true), nothing);
-        assert_eq!(home_key_command(&state, &ctx, &space, false, &show, true), nothing);
+        assert_eq!(show_key_action(&us(&space), &state.keys, true), Some(KeyAction::Nothing));
+        assert_eq!(show_key_press(&us(&space), &state.keys, &show, true), nothing);
+        assert_eq!(home_key_command(&state, &ctx, &us(&space), false, &show, true), nothing);
         assert_eq!(goes(&state, &space, true), KeyGoes::Show(KeyPress::Action(KeyAction::Nothing)));
         assert_eq!(action_command(KeyAction::Nothing), None);
         // Escape set to Nothing is the window's: it still closes a menu or pop-up.
-        assert_eq!(show_key_press(&escape, &state.keys, &show, true), None);
-        assert_eq!(home_key_command(&state, &ctx, &escape, false, &show, true), None);
+        assert_eq!(show_key_press(&us(&escape), &state.keys, &show, true), None);
+        assert_eq!(home_key_command(&state, &ctx, &us(&escape), false, &show, true), None);
         assert_eq!(goes(&state, &escape, true), KeyGoes::Window);
         let enter_waiting = [egui::Event::Key {
             key: egui::Key::Enter,
@@ -14883,11 +14919,11 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         }];
         assert!(
-            key_waits_for_drawing(&enter_waiting, false, &space, false, &state.keys, &show, true),
+            key_waits_for_drawing(&enter_waiting, false, &us(&space), false, &state.keys, &show, true),
             "kept, so it waits"
         );
-        assert!(!key_waits_for_drawing(&enter_waiting, false, &escape, false, &state.keys, &show, true));
-        assert!(key_waits_for_drawing(&enter_waiting, false, &escape, false, &KeyTable::default(), &show, true));
+        assert!(!key_waits_for_drawing(&enter_waiting, false, &us(&escape), false, &state.keys, &show, true));
+        assert!(key_waits_for_drawing(&enter_waiting, false, &us(&escape), false, &KeyTable::default(), &show, true));
         // In a typing field every key is the field's, a key set to Nothing too.
         let typing = |events: Vec<egui::Event>| {
             ctx.run_ui(egui::RawInput { events, ..egui::RawInput::default() }, |ui| {
@@ -14914,7 +14950,7 @@ mod tests {
         // F7 and F8 do nothing in SoftPresenter's style: kept from the window, as Space is.
         let fresh = home::HomeState::default();
         for f in [NamedKey::F7, NamedKey::F8] {
-            assert_eq!(show_key_action(&Key::Named(f), &fresh.keys, true), Some(KeyAction::Nothing));
+            assert_eq!(show_key_action(&us(&Key::Named(f)), &fresh.keys, true), Some(KeyAction::Nothing));
             assert_eq!(goes(&fresh, &Key::Named(f), true), KeyGoes::Show(KeyPress::Action(KeyAction::Nothing)));
         }
         // A Mac never reads the F rows, even rows changed on a PC whose preferences came over: they
@@ -14933,11 +14969,11 @@ mod tests {
             NamedKey::F8,
         ];
         for f in f_rows {
-            assert_eq!(show_key_action(&Key::Named(f), &from_a_pc.keys, false), None, "{f:?}");
+            assert_eq!(show_key_action(&us(&Key::Named(f)), &from_a_pc.keys, false), None, "{f:?}");
             assert_eq!(goes(&from_a_pc, &Key::Named(f), false), KeyGoes::Window, "{f:?}");
         }
         assert_eq!(goes(&from_a_pc, &Key::Named(NamedKey::F7), true), KeyGoes::Show(KeyPress::Action(KeyAction::Next)));
-        assert_eq!(show_key_action(&Key::Named(NamedKey::F2), &from_a_pc.keys, true), Some(KeyAction::HideWords));
+        assert_eq!(show_key_action(&us(&Key::Named(NamedKey::F2)), &from_a_pc.keys, true), Some(KeyAction::HideWords));
     }
 
     /// A button that has the keyboard, drawn with `events`: whether it was pressed. Over it, as
@@ -14985,7 +15021,7 @@ mod tests {
         button_with_the_keyboard(&ctx, Vec::new(), false);
         assert!(ctx.memory(|memory| memory.focused().is_some()) && !ctx.text_edit_focused(), "the button has it");
         let space = Key::Named(NamedKey::Space);
-        let goes = home_key_goes(&state, &ctx, &show, &space, false, Default::default(), true);
+        let goes = home_key_goes(&state, &ctx, &show, &us(&space), false, true);
         assert_eq!(goes, KeyGoes::Show(KeyPress::Action(KeyAction::Nothing)));
         let (pressed, _) = button_with_the_keyboard(&ctx, given(&goes, egui::Key::Space), false);
         assert!(!pressed, "Space set to Nothing is kept from the window: the button is not pressed");
@@ -14998,7 +15034,7 @@ mod tests {
         let (_, open) = button_with_the_keyboard(&ctx, Vec::new(), false);
         assert!(open, "a frame with no key leaves the menu open");
         let escape = Key::Named(NamedKey::Escape);
-        let goes = home_key_goes(&state, &ctx, &show, &escape, false, Default::default(), true);
+        let goes = home_key_goes(&state, &ctx, &show, &us(&escape), false, true);
         assert_eq!(goes, KeyGoes::Window);
         let (_, open) = button_with_the_keyboard(&ctx, given(&goes, egui::Key::Escape), false);
         assert!(!open, "Escape closed the menu");
@@ -15013,7 +15049,7 @@ mod tests {
         table.set_style(key_table::KeyStyle::SoftProjector);
         table.set(ShowKey::Right, KeyAction::ClearMedia);
         // A key pressed in a screen's window (`show_key_press`, as `window_event` reads it there).
-        let press = |key: NamedKey, f_keys| show_key_press(&Key::Named(key), &table, &show, f_keys);
+        let press = |key: NamedKey, f_keys| show_key_press(&us(&Key::Named(key)), &table, &show, f_keys);
         let does = |action| Some(KeyPress::Action(action));
         assert_eq!(press(NamedKey::Escape, false), does(KeyAction::HideWords));
         assert_eq!(press(NamedKey::ArrowRight, false), does(KeyAction::ClearMedia), "a changed row");
@@ -15023,7 +15059,7 @@ mod tests {
         assert_eq!(press(NamedKey::F4, false), None, "a Mac's F keys are the system's");
         assert_eq!(press(NamedKey::F8, true), does(KeyAction::Nothing), "kept from the window, and does nothing");
         let chorus = Some(KeyPress::Letter(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 1 })));
-        assert_eq!(show_key_press(&Key::Character("c".into()), &table, &show, true), chorus, "a group's letter");
+        assert_eq!(show_key_press(&us(&Key::Character("c".into())), &table, &show, true), chorus, "a group's letter");
         // The home window, in the Service view, gives every key the same.
         let state = home::HomeState { keys: table.clone(), ..home::HomeState::default() };
         let keys = [
@@ -15042,8 +15078,8 @@ mod tests {
         for key in keys {
             for f_keys in [true, false] {
                 assert_eq!(
-                    home_key_command(&state, &ctx, &key, false, &show, f_keys),
-                    show_key_press(&key, &table, &show, f_keys),
+                    home_key_command(&state, &ctx, &us(&key), false, &show, f_keys),
+                    show_key_press(&us(&key), &table, &show, f_keys),
                     "{key:?}, F keys {f_keys}"
                 );
             }
@@ -15057,7 +15093,7 @@ mod tests {
             (Key::Named(NamedKey::Space), Key::Named(NamedKey::ArrowRight), Key::Named(NamedKey::ArrowLeft));
         // A slide picked and nothing on screen: as before the table, Space takes it and the arrows
         // move it.
-        let picked = |key: &Key, action| pick_key_for(key, action, true, false, false);
+        let picked = |key: &Key, action| pick_key_for(&us(key), action, true, false, false);
         assert_eq!(picked(&space, KeyAction::Next), PickKey::TakeIt);
         assert_eq!(picked(&right, KeyAction::Next), PickKey::Move(true));
         assert_eq!(picked(&left, KeyAction::Previous), PickKey::Move(false));
@@ -15071,9 +15107,9 @@ mod tests {
         assert_eq!(picked(&right, KeyAction::Previous), PickKey::Move(false));
         assert_eq!(picked(&Key::Named(NamedKey::End), KeyAction::Next), PickKey::Move(true));
         // With something on screen, or in the Edit view, the keys run the show as ever.
-        assert_eq!(pick_key_for(&space, KeyAction::Next, true, true, false), PickKey::Pass);
-        assert_eq!(pick_key_for(&space, KeyAction::Next, true, false, true), PickKey::Pass);
-        assert_eq!(pick_key_for(&space, KeyAction::Next, false, false, false), PickKey::Pass);
+        assert_eq!(pick_key_for(&us(&space), KeyAction::Next, true, true, false), PickKey::Pass);
+        assert_eq!(pick_key_for(&us(&space), KeyAction::Next, true, false, true), PickKey::Pass);
+        assert_eq!(pick_key_for(&us(&space), KeyAction::Next, false, false, false), PickKey::Pass);
     }
 
     /// A bundle's songs, taken in as an import takes them: one the library has already (or
@@ -15271,11 +15307,17 @@ mod tests {
 
         /// A key pressed, or a repeat of one held down (`repeat`), as the window gets it.
         fn press_as(&mut self, key: Key, repeat: bool) {
+            self.press_key(Pressed::from(key), repeat);
+        }
+
+        /// A key pressed at its place, typing what it types there, with what is held
+        /// (`Pressed`), or a repeat of one held down (`repeat`), as the window gets it.
+        fn press_key(&mut self, key: Pressed, repeat: bool) {
             let asked = self.state.typed_key.is_some();
             if key_waits_for_drawing(&self.waiting, asked, &key, repeat, &self.state.keys, &self.show, self.f_keys) {
                 self.draw();
             }
-            match home_key_goes(&self.state, &self.ctx, &self.show, &key, repeat, Default::default(), self.f_keys) {
+            match home_key_goes(&self.state, &self.ctx, &self.show, &key, repeat, self.f_keys) {
                 KeyGoes::Find => self.state.open_find(),
                 KeyGoes::Show(KeyPress::Letter(command)) => {
                     self.show.apply(command);
@@ -15289,29 +15331,42 @@ mod tests {
                     }
                 }
                 KeyGoes::Enter => self.enter(),
-                // As egui-winit passes it on: the key, and the letter it types.
+                // As egui-winit passes it on: the key (as it is, else by its place), with the
+                // modifiers held, and the letter it types (none with ⌥ held).
                 KeyGoes::Window => {
-                    let (named, typed) = match &key {
+                    let place = match key.physical {
+                        winit::keyboard::PhysicalKey::Code(code) => {
+                            let name = format!("{code:?}");
+                            let name = name.strip_prefix("Key").or(name.strip_prefix("Digit")).unwrap_or(&name);
+                            egui::Key::from_name(name)
+                        }
+                        winit::keyboard::PhysicalKey::Unidentified(_) => None,
+                    };
+                    let alt = key.held.alt_key();
+                    let (named, typed) = match &key.logical {
                         // An F key (on a Mac, or one the window keeps): the key, typing nothing.
-                        Key::Named(named) if ShowKey::of(&key).is_some_and(ShowKey::is_f_key) => {
+                        Key::Named(named) if ShowKey::named(&key.logical).is_some_and(ShowKey::is_f_key) => {
                             (egui::Key::from_name(&format!("{named:?}")).expect("an F key"), None)
                         }
                         Key::Named(NamedKey::Enter) => (egui::Key::Enter, None),
                         Key::Named(NamedKey::Escape) => (egui::Key::Escape, None),
                         Key::Named(NamedKey::ArrowDown) => (egui::Key::ArrowDown, None),
                         Key::Named(NamedKey::ArrowUp) => (egui::Key::ArrowUp, None),
+                        Key::Named(NamedKey::PageDown) => (egui::Key::PageDown, None),
+                        Key::Named(NamedKey::PageUp) => (egui::Key::PageUp, None),
                         Key::Named(NamedKey::Space) => (egui::Key::Space, Some(" ".to_owned())),
-                        Key::Character(letter) => {
-                            (egui::Key::from_name(&letter.to_uppercase()).expect("a letter"), Some(letter.to_string()))
-                        }
+                        Key::Character(letter) => (
+                            egui::Key::from_name(&letter.to_uppercase()).or(place).expect("a letter or its place"),
+                            (!alt).then(|| letter.to_string()),
+                        ),
                         other => panic!("not passed on in these tests: {other:?}"),
                     };
                     self.waiting.push(egui::Event::Key {
                         key: named,
-                        physical_key: Some(named),
+                        physical_key: place.or(Some(named)),
                         pressed: true,
                         repeat: false,
-                        modifiers: egui::Modifiers::NONE,
+                        modifiers: egui::Modifiers { alt, shift: key.held.shift_key(), ..egui::Modifiers::NONE },
                     });
                     self.waiting.extend(typed.map(egui::Event::Text));
                 }
@@ -15707,7 +15762,7 @@ mod tests {
         let f8 = Key::Named(NamedKey::F8);
         assert_eq!(keyboard.state.keys.action(ShowKey::F8), KeyAction::Nothing);
         // Kept from the window as a row set to Nothing is, and doing nothing.
-        let goes = home_key_goes(&keyboard.state, &keyboard.ctx, &keyboard.show, &f8, false, Default::default(), true);
+        let goes = home_key_goes(&keyboard.state, &keyboard.ctx, &keyboard.show, &us(&f8), false, true);
         assert_eq!(goes, KeyGoes::Typed(KeyAction::Nothing));
         keyboard.press(f8);
         keyboard.draw();
@@ -15755,7 +15810,7 @@ mod tests {
         keyboard.state.set_pick(&keyboard.show, sp_engine::SlideRef { presentation: 1, slide: 2 }, false);
         keyboard.draw();
         let f5 = Key::Named(NamedKey::F5);
-        let goes = home_key_goes(&keyboard.state, &keyboard.ctx, &keyboard.show, &f5, false, Default::default(), true);
+        let goes = home_key_goes(&keyboard.state, &keyboard.ctx, &keyboard.show, &us(&f5), false, true);
         assert_eq!(goes, KeyGoes::Show(KeyPress::Action(KeyAction::ShowSelected)));
         keyboard.press(f5.clone());
         assert_eq!(keyboard.live(), Some((1, 2)), "the picked slide");
@@ -15930,7 +15985,7 @@ mod tests {
         open_and_pick(&mut keyboard.state, 1);
         let (f2, f3) = (Key::Named(NamedKey::F2), Key::Named(NamedKey::F3));
         let held = |keyboard: &Keyboard, key: &Key| {
-            home_key_goes(&keyboard.state, &keyboard.ctx, &keyboard.show, key, true, Default::default(), true)
+            home_key_goes(&keyboard.state, &keyboard.ctx, &keyboard.show, &us(key), true, true)
         };
         assert_eq!(held(&keyboard, &f3), KeyGoes::Show(KeyPress::Action(KeyAction::Nothing)));
         assert_eq!(held(&keyboard, &f2), KeyGoes::Show(KeyPress::Action(KeyAction::Nothing)));
@@ -15952,7 +16007,7 @@ mod tests {
         let state = in_softprojector_style(home::HomeState::default()).state;
         let ctx = egui::Context::default();
         let show = Show::new(vec![Arc::new(parse_song_text("Alpha", "One\n\nTwo\n"))]);
-        let from_a_screen = |key: &Key, repeat| show_key_command(&state, &ctx, key, repeat, &show, true);
+        let from_a_screen = |key: &Key, repeat| show_key_command(&state, &ctx, &us(key), repeat, &show, true);
         let does = |action| Some(KeyPress::Action(action));
         assert_eq!(from_a_screen(&f3, true), does(KeyAction::Nothing));
         assert_eq!(from_a_screen(&f2, true), does(KeyAction::Nothing));
@@ -15969,7 +16024,7 @@ mod tests {
         let does = |action| Some(KeyPress::Action(action));
         let mut state = in_softprojector_style(home::HomeState::default()).state;
         let from_a_screen = |state: &home::HomeState, key: NamedKey| {
-            show_key_command(state, &ctx, &Key::Named(key), false, &show, true)
+            show_key_command(state, &ctx, &us(&Key::Named(key)), false, &show, true)
         };
         // The Edit view open: only Escape and the F rows, and only to clear or hide the words.
         state.editing = EditDraft::of(&show, sp_engine::SlideRef { presentation: 0, slide: 0 });
@@ -16044,9 +16099,8 @@ mod tests {
         let f5 = Key::Named(NamedKey::F5);
         keyboard.press(f5.clone());
         assert_eq!(keyboard.live(), Some((1, 2)));
-        let held = |keyboard: &Keyboard| {
-            home_key_goes(&keyboard.state, &keyboard.ctx, &keyboard.show, &f5, true, Default::default(), true)
-        };
+        let held =
+            |keyboard: &Keyboard| home_key_goes(&keyboard.state, &keyboard.ctx, &keyboard.show, &us(&f5), true, true);
         assert_eq!(held(&keyboard), KeyGoes::Show(KeyPress::Action(KeyAction::Nothing)));
         // In the find box too, before and after it has carried the first press out.
         let mut keyboard = found_in_softprojector_style("third lines");
@@ -16239,5 +16293,192 @@ mod tests {
         let from = NextLineFrom::of(&show, &state);
         show.apply(Command::ShowAgain);
         assert!(!from.holds(&show, &state), "and so does Show Again");
+    }
+
+    #[test]
+    fn keys_go_by_position_so_period_works_on_a_russian_layout() {
+        use key_table::KeyStyle;
+        use winit::keyboard::KeyCode;
+        // On a Russian layout the key at "." types ю; a clicker's blank-screen button is that place.
+        let period = Pressed::at(Key::Character("\u{44e}".into()), KeyCode::Period);
+        let ctx = egui::Context::default();
+        let show = Show::new(vec![Arc::new(parse_song_text("Song", "One\n\nTwo\n"))]);
+        let goes =
+            |state: &home::HomeState, key: &Pressed, f_keys| home_key_goes(state, &ctx, &show, key, false, f_keys);
+        let does = |action| KeyGoes::Show(KeyPress::Action(action));
+        let mut state = home::HomeState::default();
+        assert_eq!(goes(&state, &period, true), does(KeyAction::ClearAll), "Clear All in Standard");
+        assert_eq!(goes(&state, &period, false), does(KeyAction::ClearAll), "on a Mac too");
+        state.keys.set_style(KeyStyle::SoftProjector);
+        assert_eq!(goes(&state, &period, true), does(KeyAction::HideWords), "Hide the Words like SoftProjector");
+        // In the Bible view too: "." is no letter's place, whatever it types.
+        state.bible_open = true;
+        assert_eq!(goes(&state, &period, true), does(KeyAction::HideWords), "in the Bible view");
+        state.bible_open = false;
+        // The key at "/" types "." there: it is no row, and the window has it.
+        assert_eq!(goes(&state, &Pressed::at(Key::Character(".".into()), KeyCode::Slash), true), KeyGoes::Window);
+        // On a US keyboard "." is the same row.
+        assert_eq!(goes(&state, &us(&Key::Character(".".into())), true), does(KeyAction::HideWords));
+        // Through the window: the slide goes.
+        let mut keyboard = Keyboard::new(home::HomeState::default());
+        assert_eq!(keyboard.live(), Some((0, 0)));
+        keyboard.press_key(period, false);
+        assert_eq!(keyboard.live(), None, "Clear All took the slide off");
+    }
+
+    #[test]
+    fn a_mapped_letter_beats_the_group_jump_in_service_but_types_in_bible() {
+        use winit::keyboard::KeyCode;
+        let c = Key::Character("c".into());
+        let at_c = ShowKey::Other(KeyCode::KeyC);
+        // Not added, C jumps to the chorus, by the letter it types.
+        let mut keyboard = Keyboard::new(home::HomeState::default());
+        keyboard.press(c.clone());
+        assert_eq!(keyboard.live(), Some((0, 2)), "C: Alpha's chorus");
+        // Added and set to Next, it does its row in place of the jump.
+        let mut table = KeyTable::default();
+        assert_eq!(table.add(&us(&c), true), Ok(at_c));
+        table.set(at_c, KeyAction::Next);
+        let mut keyboard = Keyboard::new(home::HomeState { keys: table.clone(), ..home::HomeState::default() });
+        keyboard.press(c.clone());
+        assert_eq!(keyboard.live(), Some((0, 1)), "C set to Next: the next slide, not the chorus");
+        // By its place: the Russian letter at C's place does it too.
+        keyboard.show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        keyboard.press_key(Pressed::at(Key::Character("\u{441}".into()), KeyCode::KeyC), false);
+        assert_eq!(keyboard.live(), Some((0, 1)), "с at C's place");
+        // In place of a slide's own hot key too.
+        let mut keyed = parse_song_text("Song", "[Verse 1]\nOne\n\nTwo\n");
+        keyed.groups[0].slides[1].hot_key = Some('C');
+        let show = Show::new(vec![Arc::new(keyed)]);
+        assert!(matches!(letter_command(&c, &show), Some(Command::GoTo(_))), "C is the slide's hot key");
+        assert_eq!(show_key_press(&us(&c), &table, &show, true), Some(KeyPress::Action(KeyAction::Next)));
+        // Set to Nothing it does nothing at all: no jump either.
+        table.set(at_c, KeyAction::Nothing);
+        assert_eq!(show_key_press(&us(&c), &table, &show, true), Some(KeyPress::Action(KeyAction::Nothing)));
+        table.set(at_c, KeyAction::Next);
+        // A field being typed in keeps it: the find box.
+        let ctx = egui::Context::default();
+        let finding = home::HomeState {
+            keys: table.clone(),
+            library_search: Some((String::new(), 0)),
+            ..home::HomeState::default()
+        };
+        assert_eq!(
+            home_key_goes(&finding, &ctx, &show, &us(&c), false, true),
+            KeyGoes::Window,
+            "typed in the find box"
+        );
+        // In the Bible view it types a reference, whatever its row says.
+        let mut bible = Keyboard::new(home::HomeState { keys: table, bible_open: true, ..home::HomeState::default() });
+        bible.press(c);
+        bible.draw();
+        assert_eq!(bible.state.bible.lookup, "c", "C started a reference");
+        assert_eq!(bible.live(), Some((0, 0)), "and nothing moved on screen");
+    }
+
+    #[test]
+    fn digits_pick_the_numbers_while_they_show() {
+        use winit::keyboard::{KeyCode, ModifiersState};
+        let one = Key::Character("1".into());
+        let mut table = KeyTable::default();
+        assert_eq!(table.add(&us(&one), true), Ok(ShowKey::Other(KeyCode::Digit1)));
+        table.set(ShowKey::Other(KeyCode::Digit1), KeyAction::ClearAll);
+        let mut keyboard = Keyboard::new(home::HomeState { keys: table, ..home::HomeState::default() });
+        // While the numbers show (after ⌥1 … ⌥7 or ⇧⌘M), 1 picks the first thing numbered.
+        let numbers =
+            |keyboard: &Keyboard| keys::Numbers { of: keys::NumbersOf::Tab, since: keyboard.time, picked: None };
+        keyboard.state.numbers = Some(numbers(&keyboard));
+        keyboard.press(one.clone());
+        keyboard.draw();
+        assert!(keys::Numbers::picked(&keyboard.state.numbers, keys::NumbersOf::Tab, 0), "1 picked the first");
+        assert_eq!(keyboard.live(), Some((0, 0)), "and cleared nothing");
+        // At that place on a layout where it types another character (& on a French one) too.
+        keyboard.press_key(Pressed::at(Key::Character("&".into()), KeyCode::Digit1), false);
+        keyboard.draw();
+        assert!(keys::Numbers::picked(&keyboard.state.numbers, keys::NumbersOf::Tab, 0), "& at 1's place");
+        assert_eq!(keyboard.live(), Some((0, 0)));
+        // With no numbers showing, the digit does its row.
+        keyboard.state.numbers = None;
+        keyboard.press(one);
+        assert_eq!(keyboard.live(), None, "1 set to Clear All cleared");
+        // ⌥1 is the window's still: it opens the first tool tab and numbers what is in it.
+        keyboard.show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        let option_one =
+            Pressed { held: ModifiersState::ALT, ..Pressed::at(Key::Character("\u{a1}".into()), KeyCode::Digit1) };
+        keyboard.press_key(option_one, false);
+        keyboard.draw();
+        assert_eq!(keyboard.live(), Some((0, 0)), "⌥1 cleared nothing");
+        assert!(keys::Numbers::showing(&keyboard.state.numbers, keys::NumbersOf::Tab), "⌥1 numbered the tab");
+    }
+
+    #[test]
+    fn page_down_is_next_and_page_up_is_previous_by_default() {
+        for style in [key_table::KeyStyle::SoftPresenter, key_table::KeyStyle::SoftProjector] {
+            for f_keys in [false, true] {
+                let mut state = home::HomeState::default();
+                state.keys.set_style(style);
+                let mut keyboard = Keyboard::new(state);
+                keyboard.f_keys = f_keys;
+                keyboard.press(Key::Named(NamedKey::PageDown));
+                assert_eq!(keyboard.live(), Some((0, 1)), "{style:?}, F keys {f_keys}: Page Down, the next slide");
+                keyboard.press(Key::Named(NamedKey::PageDown));
+                assert_eq!(keyboard.live(), Some((0, 2)));
+                keyboard.press(Key::Named(NamedKey::PageUp));
+                assert_eq!(keyboard.live(), Some((0, 1)), "{style:?}, F keys {f_keys}: Page Up, the previous slide");
+            }
+        }
+    }
+
+    #[test]
+    fn in_the_edit_view_period_clears_when_it_is_a_clear_and_keys_added_wait() {
+        use KeyAction as A;
+        use winit::keyboard::KeyCode;
+        let song = parse_song_text("Song", "[Verse 1]\nOne\n\n[Chorus]\nTwo\n");
+        let show = Show::new(vec![Arc::new(song)]);
+        let ctx = egui::Context::default();
+        let editing = EditDraft::of(&show, sp_engine::SlideRef { presentation: 0, slide: 0 });
+        let mut state = home::HomeState { editing, ..home::HomeState::default() };
+        assert!(state.editing.is_some());
+        let key =
+            |state: &home::HomeState, key: &Pressed, f_keys| home_key_command(state, &ctx, key, false, &show, f_keys);
+        let does = |action| Some(KeyPress::Action(action));
+        let period = us(&Key::Character(".".into()));
+        assert_eq!(key(&state, &period, false), does(A::ClearAll), "Clear All in Standard");
+        state.keys.set_style(key_table::KeyStyle::SoftProjector);
+        assert_eq!(key(&state, &period, false), does(A::HideWords), "Hide the Words is a clear");
+        state.keys.set(ShowKey::Period, A::Next);
+        assert_eq!(key(&state, &period, false), None, "set to Next it waits, as Space does");
+        // A key added never reaches the show from here, set to a clear or not...
+        let b = us(&Key::Character("b".into()));
+        assert_eq!(state.keys.add(&b, false), Ok(ShowKey::Other(KeyCode::KeyB)));
+        state.keys.set(ShowKey::Other(KeyCode::KeyB), A::ClearAll);
+        assert_eq!(key(&state, &b, false), None, "B is the editor's");
+        // ...but an F key added on a Mac is an F row, and clears here as they do.
+        let f3 = us(&Key::Named(NamedKey::F3));
+        assert_eq!(key(&state, &f3, false), None, "a Mac's F3, not added");
+        assert_eq!(state.keys.add(&f3, false), Ok(ShowKey::F3));
+        state.keys.set(ShowKey::F3, A::ClearMedia);
+        assert_eq!(key(&state, &f3, false), does(A::ClearMedia), "F3 added on a Mac");
+        // In the Service view the keys added run the show.
+        let service = home::HomeState { keys: state.keys.clone(), ..home::HomeState::default() };
+        assert_eq!(key(&service, &b, false), does(A::ClearAll));
+        assert_eq!(key(&service, &period, false), does(A::Next));
+    }
+
+    #[test]
+    fn an_f_key_added_on_a_mac_runs_the_show_there() {
+        let f2 = Key::Named(NamedKey::F2);
+        let mut state = home::HomeState::default();
+        assert_eq!(state.keys.add(&us(&f2), false), Ok(ShowKey::F2));
+        assert_eq!(state.keys.action(ShowKey::F2), KeyAction::ClearSlide, "as Standard gives it off a Mac");
+        // The harness reads no F rows (`f_keys` false), as on a Mac.
+        let mut keyboard = Keyboard::new(state);
+        keyboard.press(f2);
+        assert_eq!(keyboard.live(), None, "F2 cleared the slide");
+        // F3, not added, is the system's.
+        keyboard.show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        keyboard.press(Key::Named(NamedKey::F3));
+        keyboard.draw();
+        assert_eq!(keyboard.live(), Some((0, 0)));
     }
 }

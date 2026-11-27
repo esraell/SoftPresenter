@@ -54,5 +54,17 @@
   "keys.cap.home": "Inicio",
   "keys.cap.end": "Fin",
   "keys.add.none": "Abre una canción de una biblioteca, o un pasaje en Biblia, para añadirlo a la lista.",
-  "keys.remove.none": "Elige un elemento de la lista para quitarlo."
+  "keys.remove.none": "Elige un elemento de la lista para quitarlo.",
+  "keys.cap.page_down": "Av Pág",
+  "keys.cap.page_up": "Re Pág",
+  "keys.cap.insert": "Insert",
+  "keys.cap.print_screen": "Impr Pant",
+  "keys.cap.scroll_lock": "Bloq Despl",
+  "keys.cap.pause": "Pausa",
+  "keys.cap.menu": "Menú",
+  "keys.cap.play_pause": "Reproducir/Pausa",
+  "keys.cap.stop": "Detener",
+  "keys.cap.next_track": "Pista siguiente",
+  "keys.cap.previous_track": "Pista anterior",
+  "keys.cap.numpad": "Num {key}"
 }

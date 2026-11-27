@@ -1717,7 +1717,7 @@ mod tests {
     fn an_unknown_key_or_action_in_the_table_keeps_every_other_preference() {
         use crate::key_table::{KeyAction, KeyStyle, ShowKey};
         let prefs: Prefs =
-            serde_json::from_str(r#"{"columns": 3, "keys": {"changed": {"f9": "clear_all", "esc": "fly_away"}}}"#)
+            serde_json::from_str(r#"{"columns": 3, "keys": {"changed": {"f99": "clear_all", "esc": "fly_away"}}}"#)
                 .unwrap();
         assert_eq!(prefs.columns, 3);
         assert_eq!(prefs.keys.action(ShowKey::Escape), KeyAction::ClearAll);

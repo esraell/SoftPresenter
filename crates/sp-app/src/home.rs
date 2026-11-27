@@ -11520,7 +11520,7 @@ mod tests {
     #[test]
     fn a_layer_key_and_clear_all_clear_in_the_show_view_and_the_keyboard_clears_in_the_edit_view() {
         use sp_engine::Layer;
-        use winit::keyboard::{Key as Pressed, NamedKey};
+        use winit::keyboard::{Key as WinitKey, NamedKey};
         let show = three_songs();
         let press = |at: egui::Pos2, pressed: bool| Event::PointerButton {
             pos: at,
@@ -11568,7 +11568,7 @@ mod tests {
         use crate::key_table::KeyAction;
         let ctx = egui::Context::default();
         let key = |state: &HomeState, key: NamedKey, f_keys| {
-            crate::home_key_command(state, &ctx, &Pressed::Named(key), false, &show, f_keys)
+            crate::home_key_command(state, &ctx, &WinitKey::Named(key).into(), false, &show, f_keys)
         };
         let does = |action| Some(crate::KeyPress::Action(action));
         assert_eq!(key(&state, NamedKey::F1, true), does(KeyAction::ClearAll));

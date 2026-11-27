@@ -54,5 +54,17 @@
   "keys.cap.home": "Home",
   "keys.cap.end": "End",
   "keys.add.none": "Откройте песню из библиотеки или отрывок в Библии, чтобы добавить его в список.",
-  "keys.remove.none": "Выберите пункт в списке, чтобы убрать его."
+  "keys.remove.none": "Выберите пункт в списке, чтобы убрать его.",
+  "keys.cap.page_down": "Page Down",
+  "keys.cap.page_up": "Page Up",
+  "keys.cap.insert": "Insert",
+  "keys.cap.print_screen": "Print Screen",
+  "keys.cap.scroll_lock": "Scroll Lock",
+  "keys.cap.pause": "Pause",
+  "keys.cap.menu": "Меню",
+  "keys.cap.play_pause": "Воспроизведение/Пауза",
+  "keys.cap.stop": "Стоп",
+  "keys.cap.next_track": "Следующий трек",
+  "keys.cap.previous_track": "Предыдущий трек",
+  "keys.cap.numpad": "Num {key}"
 }
