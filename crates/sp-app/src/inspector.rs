@@ -122,7 +122,7 @@ fn fit_name(fit: sp_model::ImageFit) -> &'static str {
 }
 
 /// What a text box can be linked to, in the language set.
-fn link_name(link: sp_model::TextLink) -> &'static str {
+pub fn link_name(link: sp_model::TextLink) -> &'static str {
     use sp_model::TextLink;
     match link {
         TextLink::Clock => t("inspector.link.clock", "Clock"),
@@ -136,6 +136,11 @@ fn link_name(link: sp_model::TextLink) -> &'static str {
         TextLink::StageMessage => t("inspector.link.stage_message", "Stage Message"),
         TextLink::Copyright => t("inspector.link.copyright", "Copyright"),
     }
+}
+
+/// A link to the timer called `name`, as the linked text choices offer it.
+pub fn timer_link_name(name: &str) -> String {
+    tf("inspector.link.timer", "Timer: {name}", &[("name", name)])
 }
 
 /// The marks before each line of a box, in the language set.
@@ -1836,7 +1841,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
                     }
                     for (id, name) in &timers {
                         let option = sp_model::TextLink::Timer { id: *id };
-                        let words = tf("inspector.link.timer", "Timer: {name}", &[("name", name)]);
+                        let words = timer_link_name(name);
                         if ui.add(egui::Button::selectable(link == Some(option), words)).clicked() {
                             link = Some(option);
                         }

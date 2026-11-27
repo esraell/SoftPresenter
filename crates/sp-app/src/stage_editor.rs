@@ -10,7 +10,7 @@ use crate::editor::EditDraft;
 use crate::home::HomeState;
 use crate::i18n::{t, tf};
 use crate::live_tabs::StagePictures;
-use crate::stage::{ITEMS, STAGE_SLOT};
+use crate::stage::STAGE_SLOT;
 use crate::studio::{ListKey, ListPicture, TEXT, TEXT_DIM, TEXT_FAINT, Thumb};
 
 /// What the list of layouts asked for. It is carried out once the frame's change to the open
@@ -384,68 +384,6 @@ pub fn item_object(role: &str) -> Object {
     object
 }
 
-/// The canvas's Add menu on a stage layout: words of its own, a shape, a picture or video, a
-/// web page; then each item the stage can show live, and a picture of an audience screen.
-/// Returns true when the menu asked for a picture or video from a file.
-pub fn add_menu(ui: &mut egui::Ui, draft: &mut EditDraft, screens: &[(sp_model::Uuid, String)]) -> bool {
-    let mut wants_picture = false;
-    if ui.add(egui::Button::new(t("editor.add.text", "Text")).shortcut_text("T")).clicked() {
-        draft.add_text();
-        ui.close();
-    }
-    ui.menu_button(t("editor.add.shape", "Shape"), |ui| {
-        for (shape, key) in sp_model::Shape::ALL.into_iter().zip(crate::home::SHAPE_KEYS) {
-            let name = crate::editor::shape_name(shape);
-            if ui.add(egui::Button::new(name).shortcut_text(key.to_string())).clicked() {
-                draft.add_shape(shape);
-                ui.close();
-            }
-        }
-    });
-    if ui.button(t("editor.add.picture", "Picture or Video…")).clicked() {
-        wants_picture = true;
-        ui.close();
-    }
-    if ui.button(t("editor.add.web", "Web Page")).clicked() {
-        draft.add_web();
-        ui.close();
-    }
-    if ui.button(t("editor.add.ndi", "NDI Source")).clicked() {
-        draft.add_ndi();
-        ui.close();
-    }
-    if ui.button(t("editor.add.mirror", "AirPlay")).clicked() {
-        draft.add_mirror();
-        ui.close();
-    }
-    ui.separator();
-    ui.label(
-        egui::RichText::new(t("editor.add.shows_live", "SHOWS LIVE"))
-            .font(crate::studio::fixed_semibold(11.0))
-            .color(TEXT_FAINT),
-    );
-    for (role, _, _) in ITEMS {
-        if ui.button(crate::stage::item_name(&sp_model::Role((*role).to_owned()))).clicked() {
-            draft.add(item_object(role));
-            ui.close();
-        }
-    }
-    ui.menu_button(t("editor.add.screen", "Screen Picture"), |ui| {
-        let mut choices = vec![(None, main_screen().to_owned())];
-        choices.extend(screens.iter().map(|(id, name)| (Some(*id), name.clone())));
-        for (screen, name) in choices {
-            let hint = t("editor.add.screen.hint", "What this screen shows, live, in a box on the stage");
-            if ui.button(name).on_hover_text(hint).clicked() {
-                let mut object = Object::screen(screen);
-                object.name = screen_object_name(screen, screens);
-                draft.add(object);
-                ui.close();
-            }
-        }
-    });
-    wants_picture
-}
-
 /// The inspector with nothing picked on a layout: its name, which stage screens use it, and
 /// what its objects can be.
 pub fn layout_panel(ui: &mut egui::Ui, state: &mut HomeState) {
@@ -700,7 +638,7 @@ pub fn hint(ui: &mut egui::Ui) {
 mod tests {
     #[test]
     fn every_item_has_a_name_and_stand_in_words() {
-        for (role, name, sample) in super::ITEMS {
+        for (role, name, sample) in crate::stage::ITEMS {
             let role = sp_model::Role(role.to_owned());
             assert_eq!(crate::stage::item_name(&role), name);
             assert_eq!(crate::stage::item_sample(&role), sample);

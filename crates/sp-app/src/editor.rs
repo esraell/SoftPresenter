@@ -346,6 +346,13 @@ pub fn is_new_text_name(name: &str) -> bool {
     })
 }
 
+/// The boxes for words a template's slides fill, in the order its Add toolbar offers them: the
+/// main language, the translation, and a Bible verse's reference and its translation's.
+pub fn word_roles() -> [sp_model::Role; 4] {
+    use sp_model::Role;
+    [Role::primary(), Role::translation(), Role::reference(), Role::translation_reference()]
+}
+
 /// What a box's role is called in the window: the built-in roles (the main language, the
 /// translation, a Bible verse's reference and its translation's) in the language set, any other
 /// by its own name. sp-model keeps the role itself, and its English label for files and the

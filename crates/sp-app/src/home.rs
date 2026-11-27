@@ -3730,7 +3730,8 @@ fn edit_view(
                         format!("{:.0}%", state.edit_zoom * 100.0)
                     };
                     ui.menu_button(egui::RichText::new(shown).size(11.5), |ui| {
-                        if ui.add(egui::Button::selectable(state.edit_zoom <= 0.0, t("edit.zoom.fit", "Fit"))).clicked() {
+                        if ui.add(egui::Button::selectable(state.edit_zoom <= 0.0, t("edit.zoom.fit", "Fit"))).clicked()
+                        {
                             state.edit_zoom = 0.0;
                             state.edit_pan = egui::Vec2::ZERO;
                             ui.close();
@@ -3764,17 +3765,26 @@ fn edit_view(
         });
         let area = ui.available_rect_before_wrap();
         let ruler = 16.0;
-        // Fitted, the slide fills the room under the tools; zoomed, it is its own size, moved by
-        // scrolling. A pinch zooms from wherever it is. The object tools are placed first: when
-        // their words need a second row, the slide goes under it.
+        // Fitted, the slide and the Add toolbar over it fill the room, centred together;
+        // zoomed, the slide is its own size, moved by scrolling. A pinch zooms from wherever it
+        // is. A template's and a stage layout's name (and a layout's Undo and Redo) have a line
+        // of their own at the top.
         let inner = canvas_inner(area, ruler);
         let title = theme_canvas_title(state).filter(|_| theme_mode);
-        let title_room = title.as_ref().map(|(name, _)| {
-            ui.painter().layout_no_wrap(name.clone(), theme_title_font(), crate::studio::TEXT).size().x + 14.0
-        });
-        let tool_places =
-            (!stage_mode).then(|| tool_bars(&tool_widths(ui), inner, title_room.or(theme_mode.then_some(0.0))));
-        let (room, fit_width) = canvas_room(inner, tool_places.as_deref().map_or(TOOLS_ONE_ROW, |b| tools_tall(b, inner)));
+        let editor = if theme_mode {
+            crate::add_bar::Editor::Template
+        } else if stage_mode {
+            crate::add_bar::Editor::Stage
+        } else {
+            crate::add_bar::Editor::Slide
+        };
+        let kinds = crate::add_bar::kinds(editor);
+        let room = canvas_room(inner, theme_mode || stage_mode);
+        // The well may stand into the canvas's margins, short of its edges; which form its
+        // keys take follows that room and the window's width, never a click.
+        let window = ui.ctx().content_rect().width();
+        let plan = crate::add_bar::Plan::of(ui, &kinds, room.width() + 2.0 * (CANVAS_MARGIN - 8.0), window);
+        let (fitted_bar, fitted_centre, fit_width) = crate::add_bar::fit(room, plan.size());
         let pixels = ui.ctx().pixels_per_point();
         let canvas_area = Rect::from_min_max(area.min + vec2(ruler, ruler), area.max);
         if ui.rect_contains_pointer(canvas_area) {
@@ -3788,7 +3798,6 @@ fn edit_view(
             }
         }
         let width = if state.edit_zoom > 0.0 { sp_model::SLIDE_WIDTH * state.edit_zoom / pixels } else { fit_width };
-        let fitted_centre = fitted_slide_centre(inner, room, fit_width);
         if state.edit_zoom <= 0.0 {
             state.edit_pan = egui::Vec2::ZERO;
         }
@@ -3850,7 +3859,13 @@ fn edit_view(
             } else {
                 t("edit.drop.slide", "Drop to put it on the slide")
             };
-            painter.text(slide.center(), Align2::CENTER_CENTER, words, crate::studio::semibold(16.0), crate::studio::TEXT);
+            painter.text(
+                slide.center(),
+                Align2::CENTER_CENTER,
+                words,
+                crate::studio::semibold(16.0),
+                crate::studio::TEXT,
+            );
         }
         // A press on the slide makes Delete and the other keys act on its boxes again.
         if response.drag_started() || response.clicked() || response.secondary_clicked() {
@@ -4044,12 +4059,13 @@ fn edit_view(
                     let field_id = ui.scope_id().with(("typing on the slide", id));
                     if started {
                         draft.typing_range = None;
-                        draft.typing_backup = Some((object.as_text().unwrap_or_default().to_owned(), object.spans().to_vec()));
+                        draft.typing_backup =
+                            Some((object.as_text().unwrap_or_default().to_owned(), object.spans().to_vec()));
                     }
                     // After a control in the inspector took the keyboard to style words, the
                     // field takes it back with the same words selected.
-                    let refocus = std::mem::take(&mut draft.typing_refocus)
-                        | std::mem::take(&mut state.inspector.refocus_typing);
+                    let refocus =
+                        std::mem::take(&mut draft.typing_refocus) | std::mem::take(&mut state.inspector.refocus_typing);
                     if refocus && let Some((from, to)) = draft.typing_range {
                         let mut edit = egui::text_edit::TextEditState::load(ui.ctx(), field_id).unwrap_or_default();
                         edit.cursor.set_char_range(Some(egui::text::CCursorRange::two(
@@ -4090,9 +4106,13 @@ fn edit_view(
                     // Command-B, I and U change the words typed in (no menu bar takes them).
                     if field.has_focus() {
                         let key = ui.input(|input| {
-                            [(egui::Key::B, EditRequest::Bold), (egui::Key::I, EditRequest::Italic), (egui::Key::U, EditRequest::Underline)]
-                                .into_iter()
-                                .find(|(key, _)| input.modifiers.command && input.key_pressed(*key))
+                            [
+                                (egui::Key::B, EditRequest::Bold),
+                                (egui::Key::I, EditRequest::Italic),
+                                (egui::Key::U, EditRequest::Underline),
+                            ]
+                            .into_iter()
+                            .find(|(key, _)| input.modifiers.command && input.key_pressed(*key))
                         });
                         if let Some((_, request)) = key {
                             shortcut = Some(request);
@@ -4119,112 +4139,24 @@ fn edit_view(
             state.edit_request = shortcut;
         }
 
-        // On a stage layout: its name, and one Add menu (with the items it can show live and
-        // the screens' pictures), Undo and Redo.
+        // Over a template, its name; over a stage layout, its name, Undo and Redo.
+        if let Some(title) = title {
+            paint_theme_canvas_title(ui, title, inner);
+        }
         if stage_mode {
             stage_tools(ui, state, inner, at.slide);
-        } else if let Some(tools) = tool_places.as_deref() {
-        // The object tools, the same for a song's slide and a theme's layout: a text box, the
-        // shapes, and pictures and videos, in a row over the slide, or two when their words
-        // need it (`tool_bars`). In the Theme Editor they stand at the right, leaving the left
-        // for what is on the canvas.
-        if let Some(title) = title {
-            // Beside the first row of tools, or alone in it.
-            let first_row = tools.iter().find(|tool| tool.min.y <= inner.min.y + TOOL_GAP + 0.5);
-            paint_theme_canvas_title(ui, title, inner, first_row.map_or(inner.max.x, |tool| tool.min.x - 14.0));
         }
-        // A picture from a file.
-        let picture_bar = tools[2];
-        let picture = ui.interact(picture_bar, ui.scope_id().with("add picture"), Sense::click());
-        crate::studio::paint_button(ui.painter(), picture_bar, picture.hovered());
-        ui.painter().text(picture_bar.center(), Align2::CENTER_CENTER, tool_words(2), tool_font(), crate::studio::TEXT);
-        if picture
-            .on_hover_text(t(
-                "edit.tools.media.hint",
-                "Put a picture or video from a file on the slide (a video plays in its box when the slide is on screen)",
-            ))
-            .clicked()
-        {
-            state.picture_request = true;
-        }
-        // A live web page, in a box.
-        let web_bar = tools[3];
-        let web = ui.interact(web_bar, ui.scope_id().with("add web page"), Sense::click());
-        crate::studio::paint_button(ui.painter(), web_bar, web.hovered());
-        ui.painter().text(web_bar.center(), Align2::CENTER_CENTER, tool_words(3), tool_font(), crate::studio::TEXT);
-        if web
-            .on_hover_text(t(
-                "edit.tools.web.hint",
-                "Put a live web page on the slide, in a box (it shows while the slide is on screen)",
-            ))
-            .clicked()
-            && let Some(draft) = state.editing.as_mut()
-        {
-            draft.add_web();
-            // The box's own tab in the inspector, where the address field is, and it takes the keyboard,
-            // ready for the address.
-            state.inspector.tab = crate::inspector::InspectorTab::Own;
-            ui.data_mut(|data| data.insert_temp(egui::Id::unique("web address focus"), true));
-        }
-        // A live NDI source, in a box, set up the same way.
-        let ndi_bar = tools[4];
-        let ndi = ui.interact(ndi_bar, ui.scope_id().with("add ndi source"), Sense::click());
-        crate::studio::paint_button(ui.painter(), ndi_bar, ndi.hovered());
-        ui.painter().text(ndi_bar.center(), Align2::CENTER_CENTER, tool_words(4), tool_font(), crate::studio::TEXT);
-        if ndi
-            .on_hover_text(t(
-                "edit.tools.ndi.hint",
-                "Put a live NDI source on the slide, in a box (it shows while the slide is on screen)",
-            ))
-            .clicked()
-            && let Some(draft) = state.editing.as_mut()
-        {
-            draft.add_ndi();
-            // The box's own tab in the inspector, where the Source field is, and it takes the keyboard,
-            // ready for a choice.
-            state.inspector.tab = crate::inspector::InspectorTab::Own;
-            ui.data_mut(|data| data.insert_temp(egui::Id::unique("ndi source focus"), true));
-        }
-        // AirPlay: the screen of an iPhone, iPad or Mac that is showing it to this computer, in a box.
-        let mirror_bar = tools[5];
-        let mirror = ui.interact(mirror_bar, ui.scope_id().with("add phone screen"), Sense::click());
-        crate::studio::paint_button(ui.painter(), mirror_bar, mirror.hovered());
-        ui.painter().text(mirror_bar.center(), Align2::CENTER_CENTER, tool_words(5), tool_font(), crate::studio::TEXT);
-        if mirror
-            .on_hover_text(t(
-                "edit.tools.mirror.hint",
-                "Put a box on the slide for the screen of an iPhone, iPad or Mac that shows it to this computer (it shows while the slide is on screen)",
-            ))
-            .clicked()
-            && let Some(draft) = state.editing.as_mut()
-        {
-            draft.add_mirror();
-            state.inspector.tab = crate::inspector::InspectorTab::Own;
-        }
-        let shapes_bar = tools[1];
-        let shapes = ui.interact(shapes_bar, ui.scope_id().with("add shape"), Sense::click());
-        crate::studio::paint_button(ui.painter(), shapes_bar, shapes.hovered());
-        ui.painter().text(shapes_bar.center(), Align2::CENTER_CENTER, tool_words(1), tool_font(), crate::studio::TEXT);
-        let shapes = shapes.on_hover_text(t("edit.tools.shapes.hint", "Add a shape. Each has a key: O R E G L H P S D A"));
-        egui::Popup::menu(&shapes).show(|ui| {
-            for (shape, key) in sp_model::Shape::ALL.into_iter().zip(SHAPE_KEYS) {
-                if ui.add(egui::Button::new(crate::editor::shape_name(shape)).shortcut_text(key.to_string())).clicked()
-                    && let Some(draft) = state.editing.as_mut()
-                {
-                    draft.add_shape(shape);
-                }
-            }
+        // The Add toolbar: fitted, centred over the slide; zoomed, at the top left of the slide's
+        // room, the slide moving under it. Its keys are drawn after the
+        // canvas, so a press on one never reaches the slide.
+        let zoomed = state.edit_zoom > 0.0;
+        let bar = plan.lay_out(if zoomed {
+            let at = pos2(canvas_area.min.x, if theme_mode || stage_mode { room.min.y } else { canvas_area.min.y });
+            crate::add_bar::pinned(at)
+        } else {
+            fitted_bar
         });
-        let bar = tools[0];
-        let add = ui.interact(bar, ui.scope_id().with("add text"), Sense::click());
-        crate::studio::paint_button(ui.painter(), bar, add.hovered());
-        ui.painter().text(bar.center(), Align2::CENTER_CENTER, tool_words(0), tool_font(), crate::studio::TEXT);
-        if add.on_hover_text(t("edit.tools.text.hint", "Add a text box to the slide")).clicked()
-            && let Some(draft) = state.editing.as_mut()
-        {
-            draft.add_text();
-        }
-        }
+        crate::add_bar::show(ui, state, editor, &bar);
     });
     crate::studio::round_corners(ui, middle);
 
@@ -4354,12 +4286,13 @@ fn theme_title_font() -> FontId {
     crate::studio::semibold(16.0)
 }
 
-/// Paints the name of what is on the theme canvas (see [`theme_canvas_title`]) at its top left,
-/// in the room before `right` that the tools leave it; then, where there is room before
-/// `right`, what it is in small capitals.
-fn paint_theme_canvas_title(ui: &egui::Ui, (name, what): (String, String), inner: Rect, right: f32) {
+/// Paints the name of what is on the theme canvas (see [`theme_canvas_title`]) at the left of
+/// the line over the canvas room `inner`, cut at its right; then, where there is room, what it
+/// is in small capitals.
+fn paint_theme_canvas_title(ui: &egui::Ui, (name, what): (String, String), inner: Rect) {
+    let right = inner.max.x;
     let y = inner.min.y + 22.0;
-    let room = Rect::from_min_max(inner.min, pos2(right, inner.min.y + TOOLS_ONE_ROW));
+    let room = Rect::from_min_max(inner.min, pos2(right, inner.min.y + TITLE_ROW));
     let title = ui.painter().with_clip_rect(room).text(
         pos2(inner.min.x, y),
         Align2::LEFT_CENTER,
@@ -4384,15 +4317,14 @@ fn paint_theme_canvas_title(ui: &egui::Ui, (name, what): (String, String), inner
     }
 }
 
-/// The tools over a stage layout's canvas: the layout's name at the left, and at the right Add
-/// (a menu of everything a layout can hold), Undo and Redo.
+/// The line over a stage layout's canvas: the layout's name at the left, and Undo and Redo at
+/// the right. What a layout can hold is added from the Add toolbar under it (`add_bar`).
 fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: usize) {
     let y = inner.min.y + 22.0;
     let redo_bar = Rect::from_min_size(pos2(inner.max.x - 72.0, y - 15.0), vec2(72.0, 30.0));
     let undo_bar = redo_bar.translate(vec2(-80.0, 0.0));
-    let add_bar = Rect::from_min_size(pos2(undo_bar.min.x - 88.0, y - 15.0), vec2(80.0, 30.0));
     let name = state.stage_layouts.get(layout).map(|layout| layout.name.clone()).unwrap_or_default();
-    let room = Rect::from_min_max(pos2(inner.min.x, inner.min.y), pos2(add_bar.min.x - 14.0, inner.min.y + 44.0));
+    let room = Rect::from_min_max(pos2(inner.min.x, inner.min.y), pos2(undo_bar.min.x - 14.0, inner.min.y + 44.0));
     let title = ui.painter().with_clip_rect(room).text(
         pos2(inner.min.x, y),
         Align2::LEFT_CENTER,
@@ -4400,7 +4332,7 @@ fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: us
         crate::studio::semibold(16.0),
         crate::studio::TEXT,
     );
-    // The words' own width, so a longer wording never runs under Add.
+    // The words' own width, so a longer wording never runs under Undo.
     let what = t("edit.stage.layout", "Stage layout");
     let look = crate::studio::Lettering::cap(crate::studio::TEXT_FAINT);
     let wide = crate::studio::spaced(ui, &what.to_uppercase(), look.font.clone(), look.ink, look.spacing).size().x;
@@ -4408,30 +4340,7 @@ fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: us
         let at = pos2(title.max.x + 8.0, y + 1.0);
         crate::studio::cap(ui, at, Align2::LEFT_CENTER, what, crate::studio::TEXT_FAINT);
     }
-    let screens = crate::stage_editor::audience_screens(state);
-    let add = ui.interact(add_bar, ui.scope_id().with("stage add"), Sense::click());
-    crate::studio::paint_button(ui.painter(), add_bar, add.hovered());
     let font = crate::studio::semibold(12.5);
-    ui.painter().text(
-        add_bar.center(),
-        Align2::CENTER_CENTER,
-        t("edit.stage.add", "Add ▾"),
-        font.clone(),
-        crate::studio::TEXT,
-    );
-    let add = add.on_hover_text(t(
-        "edit.stage.add.hint",
-        "Add words, a shape, a picture, something the stage shows live, or a screen's picture",
-    ));
-    let mut wants_picture = false;
-    egui::Popup::menu(&add).show(|ui| {
-        if let Some(draft) = state.editing.as_mut() {
-            wants_picture = crate::stage_editor::add_menu(ui, draft, &screens);
-        }
-    });
-    if wants_picture {
-        state.picture_request = true;
-    }
     // They take the Edit view's steps in turn, as Command-Z does: the layout's own changes, and
     // a layout deleted from the list; greyed when there is none, saying so.
     let (undo_hint, redo_hint) = (
@@ -9217,109 +9126,23 @@ fn bible_row_extras(
     }
 }
 
-/// How far apart the object tools are, side by side and one row under another.
-const TOOL_GAP: f32 = 8.0;
-/// How tall an object tool is.
-const TOOL_TALL: f32 = 28.0;
-/// The narrowest an object tool is, so short words still make a tool of the usual size.
-const TOOL_WIDTH: f32 = 96.0;
-/// The room an object tool keeps either side of its words.
-const TOOL_PAD: f32 = 12.0;
-/// The room the tools over the canvas take at its top when they are in one row (a stage
-/// layout's always are).
-const TOOLS_ONE_ROW: f32 = 44.0;
-
-/// The words on the Edit view's object tools, left to right: Add Text, Shapes, Media…, Web Page,
-/// NDI Source and AirPlay.
-const TOOL_WORDS: [(&str, &str); 6] = [
-    tk("edit.add_text", "Add Text"),
-    tk("edit.tools.shapes", "Shapes ▾"),
-    tk("edit.tools.media", "Media…"),
-    tk("edit.tools.web", "Web Page"),
-    tk("edit.tools.ndi", "NDI Source"),
-    tk("edit.tools.mirror", "AirPlay"),
-];
-
-/// The words on the object tool at `place` (see [`TOOL_WORDS`]), in the language set.
-fn tool_words(place: usize) -> &'static str {
-    let (key, english) = TOOL_WORDS[place];
-    t(key, english)
-}
-
-/// The face of the object tools' words.
-fn tool_font() -> FontId {
-    crate::studio::semibold(12.5)
-}
-
-/// How wide each object tool is in the language set: its words and the room either side of
-/// them, and never narrower than [`TOOL_WIDTH`].
-fn tool_widths(ui: &egui::Ui) -> [f32; 6] {
-    std::array::from_fn(|place| {
-        crate::studio::flat_button_width(ui, &[tool_words(place)], &tool_font(), TOOL_PAD).max(TOOL_WIDTH)
-    })
-}
-
-/// Where the object tools go at the top of the canvas room `inner`, left to right in order,
-/// each as wide as `widths` says: in one row when they fit across the room, and otherwise in as
-/// many rows as they need, filled in order, so no tool's words are ever cut. Without a `title`
-/// each row is centred on the room, which is centred on the slide as drawn when it fits (not on
-/// the area round it, whose rulers take room at the left, and not moved by a zoomed slide's
-/// scrolling). In the Theme Editor, `title` is the room the name of what is open takes at the
-/// left of the first row: the rows stand against the room's right edge, the first leaving that
-/// room, and when not even one tool fits beside the name, the name has the first row to itself.
-fn tool_bars(widths: &[f32], inner: Rect, title: Option<f32>) -> Vec<Rect> {
-    let mut rows: Vec<Vec<f32>> = vec![Vec::new()];
-    for &width in widths {
-        let first = rows.len() == 1;
-        let room = if first { inner.width() - title.unwrap_or(0.0) } else { inner.width() };
-        let Some(row) = rows.last_mut() else { break };
-        let used: f32 = row.iter().map(|have| have + TOOL_GAP).sum();
-        // A tool wider than the whole room still has a row of its own.
-        if used + width <= room || (row.is_empty() && (title.is_none() || !first)) {
-            row.push(width);
-        } else {
-            rows.push(vec![width]);
-        }
-    }
-    let mut bars = Vec::with_capacity(widths.len());
-    for (n, row) in rows.iter().enumerate().filter(|(_, row)| !row.is_empty()) {
-        let across = row.iter().sum::<f32>() + TOOL_GAP * (row.len() - 1) as f32;
-        let left = if title.is_some() { inner.max.x - across } else { inner.center().x - across / 2.0 };
-        let top = inner.min.y + TOOL_GAP + n as f32 * (TOOL_TALL + TOOL_GAP);
-        let mut x = left.max(inner.min.x);
-        for &width in row {
-            bars.push(Rect::from_min_size(pos2(x, top), vec2(width, TOOL_TALL)));
-            x += width + TOOL_GAP;
-        }
-    }
-    bars
-}
-
-/// How much of the top of the canvas room `inner` the object tools in `bars` take, with the
-/// gap under their last row: [`TOOLS_ONE_ROW`] for one row, and a row's height more for each
-/// further row.
-fn tools_tall(bars: &[Rect], inner: Rect) -> f32 {
-    let bottom = bars.iter().map(|bar| bar.max.y).fold(inner.min.y, f32::max);
-    (bottom + TOOL_GAP - inner.min.y).max(TOOLS_ONE_ROW)
-}
+/// The room the name over a template's or a stage layout's canvas takes at its top (a
+/// layout's Undo and Redo too), above the Add toolbar.
+const TITLE_ROW: f32 = 44.0;
 
 /// The Edit view's canvas in an `area` (the middle column's room, with `ruler` taken at the top
 /// and left): the room inside its margins.
 fn canvas_inner(area: Rect, ruler: f32) -> Rect {
-    Rect::from_min_max(area.min + vec2(ruler, ruler), area.max).shrink(28.0)
+    Rect::from_min_max(area.min + vec2(ruler, ruler), area.max).shrink(CANVAS_MARGIN)
 }
 
-/// The part of the canvas room `inner` under the tools, which take `tools` points at its top,
-/// and the width a slide fitted to it has.
-fn canvas_room(inner: Rect, tools: f32) -> (Rect, f32) {
-    let room = Rect::from_min_max(pos2(inner.min.x, inner.min.y + tools), inner.max);
-    let fit_width = inner.width().min(room.height() * 16.0 / 9.0).max(1.0);
-    (room, fit_width)
-}
+/// The room the Edit view's canvas keeps clear inside its rulers and edges.
+const CANVAS_MARGIN: f32 = 28.0;
 
-/// Where the middle of a slide fitted to the canvas is.
-fn fitted_slide_centre(inner: Rect, room: Rect, fit_width: f32) -> egui::Pos2 {
-    pos2(inner.center().x, room.min.y + fit_width * 9.0 / 32.0)
+/// The room the Add toolbar and the slide share in the canvas room `inner`: all of it, or with
+/// a line taken at the top for the name over the canvas (`named`).
+fn canvas_room(inner: Rect, named: bool) -> Rect {
+    if named { Rect::from_min_max(pos2(inner.min.x, inner.min.y + TITLE_ROW), inner.max) } else { inner }
 }
 
 /// The rulers along the top and left of the Edit view's canvas, in the slide's own pixels: a
@@ -9923,86 +9746,6 @@ mod tests {
     use sp_model::parse_song_text;
 
     use super::*;
-
-    #[test]
-    fn the_editors_object_tools_fit_their_words_and_take_a_second_row_rather_than_cut_them() {
-        use crate::i18n::{Language, with_language};
-        let ctx = crate::studio::tests::styled();
-        for language in [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian] {
-            // Each tool is as wide as its words in the language, with room either side.
-            let mut widths = [0.0; 6];
-            let mut words = [0.0; 6];
-            let output = ctx.run_ui(RawInput::default(), |ui| {
-                with_language(language, || {
-                    widths = tool_widths(ui);
-                    words = std::array::from_fn(|n| crate::studio::widest(ui, &[tool_words(n)], &tool_font()));
-                });
-            });
-            output.drop_without_applying_deltas();
-            // Wide and narrow rooms, as a window of any size or the inspector's room taken from
-            // it leaves; over a song's slide (centred), and in the Theme Editor (at the right),
-            // with no name and with a name 200 points wide at the left.
-            for (left, width, height) in
-                [(0.0, 1000.0, 700.0), (370.0, 760.0, 640.0), (370.0, 420.0, 900.0), (12.0, 1500.0, 500.0)]
-            {
-                for title in [None, Some(0.0), Some(200.0)] {
-                    let area = Rect::from_min_size(pos2(left, 70.0), vec2(width, height));
-                    let inner = canvas_inner(area, 16.0);
-                    let tools = tool_bars(&widths, inner, title);
-                    let (room, fit) = canvas_room(inner, tools_tall(&tools, inner));
-                    let slide =
-                        Rect::from_center_size(fitted_slide_centre(inner, room, fit), vec2(fit, fit * 9.0 / 16.0));
-                    let at = format!("{language:?} in {area:?}, the name taking {title:?}");
-                    assert_eq!(tools.len(), 6, "{at}");
-                    for (n, tool) in tools.iter().enumerate() {
-                        assert!(tool.width() >= words[n] + 2.0 * TOOL_PAD - 0.01, "{at}: tool {n}'s words are cut");
-                        assert!(inner.contains_rect(*tool), "{at}: tool {n} {tool:?} out of the room {inner:?}");
-                        assert!(tool.max.y + TOOL_GAP <= slide.min.y + 0.01, "{at}: tool {n} over the slide");
-                    }
-                    // In order, left to right along a row and row under row, none over another.
-                    for pair in tools.windows(2) {
-                        let along = (pair[0].center().y - pair[1].center().y).abs() < 0.01;
-                        assert!(
-                            if along { pair[0].max.x < pair[1].min.x } else { pair[0].max.y < pair[1].min.y },
-                            "{at}: {pair:?}"
-                        );
-                    }
-                    // Each row is centred on the slide as drawn, or stands at the right.
-                    let mut rows: Vec<Rect> = Vec::new();
-                    for tool in &tools {
-                        match rows.last_mut() {
-                            Some(row) if (row.center().y - tool.center().y).abs() < 0.01 => *row = row.union(*tool),
-                            _ => rows.push(*tool),
-                        }
-                    }
-                    for row in &rows {
-                        if title.is_some() {
-                            assert!((row.max.x - inner.max.x).abs() < 0.01, "{at}: {row:?}");
-                        } else {
-                            assert!(
-                                (row.center().x - slide.center().x).abs() < 0.01,
-                                "{at}: {row:?} against {slide:?}"
-                            );
-                        }
-                    }
-                    // The name has its room at the left of the first row, or the row to itself.
-                    let name = title.unwrap_or(0.0);
-                    let first_row = inner.min.y + TOOL_GAP;
-                    match tools.iter().find(|tool| (tool.min.y - first_row).abs() < 0.01) {
-                        Some(first) => assert!(first.min.x - inner.min.x >= name - 0.01, "{at}: {first:?}"),
-                        None => assert!(name + widths[0] > inner.width(), "{at}: the name alone, with room for a tool"),
-                    }
-                    // One row where the room is wide enough for all six beside the name; the
-                    // narrow room needs more.
-                    let all = name + widths.iter().sum::<f32>() + 5.0 * TOOL_GAP;
-                    assert_eq!(rows.len() == 1 && rows[0].min.y < first_row + 0.01, all <= inner.width(), "{at}");
-                    if width == 420.0 {
-                        assert!(rows.len() >= 2, "{at}");
-                    }
-                }
-            }
-        }
-    }
 
     #[test]
     fn removing_a_bible_no_row_shows_keeps_every_translations_boxes() {
@@ -11219,6 +10962,435 @@ mod tests {
         state.edit_request = Some(EditRequest::BringForward);
         frame_texts(&ctx, &show, &mut state, vec![], time + 0.7);
         assert_eq!(template(&state).in_front, [rect]);
+    }
+
+    /// The Edit view open on `editor`'s first slide, template or stage layout (a stage layout
+    /// opens at the first frame).
+    fn add_bar_state(show: &Show, editor: crate::add_bar::Editor) -> HomeState {
+        use crate::add_bar::Editor;
+        match editor {
+            Editor::Slide => HomeState {
+                editing: EditDraft::of(show, SlideRef { presentation: 0, slide: 0 }),
+                ..HomeState::default()
+            },
+            Editor::Template => {
+                let theme = Theme::builtin();
+                let draft = EditDraft::of_template(&theme.templates[0], 0);
+                HomeState { theme_edit: Some(ThemeEdit::of(0, theme)), editing: Some(draft), ..HomeState::default() }
+            }
+            Editor::Stage => HomeState { edit_kind_request: Some(EditKind::Stage), ..HomeState::default() },
+        }
+    }
+
+    /// What one frame of a window `window` points big drew, with `events`: the slide on the
+    /// canvas, each of the Add toolbar's keys by its kind, left to right and row under row, and
+    /// every piece of text with where it is.
+    struct AddBarFrame {
+        slide: Rect,
+        /// The ruler down the canvas's left, from the top of the one across it to the foot.
+        ruler: Rect,
+        keys: Vec<(crate::add_bar::Kind, Rect)>,
+        /// The toolbar's well.
+        well: Rect,
+        texts: Vec<(String, Rect)>,
+    }
+
+    impl AddBarFrame {
+        /// Where `words` were drawn last (on top: in an open menu), and the whole of them.
+        fn place(&self, words: &str) -> Option<Rect> {
+            self.texts.iter().rfind(|(text, _)| text == words).map(|(_, rect)| *rect)
+        }
+
+        fn key(&self, kind: crate::add_bar::Kind) -> Rect {
+            self.keys.iter().find(|(have, _)| *have == kind).map(|(_, rect)| *rect).expect("the key is drawn")
+        }
+    }
+
+    fn add_bar_frame(
+        ctx: &egui::Context,
+        show: &Show,
+        state: &mut HomeState,
+        window: egui::Vec2,
+        events: Vec<Event>,
+        time: f64,
+    ) -> AddBarFrame {
+        fn walk(shape: &egui::Shape, texts: &mut Vec<(String, Rect)>, slides: &mut Vec<Rect>, blocks: &mut Vec<Rect>) {
+            match shape {
+                egui::Shape::Text(text) => texts.push((text.galley.text().to_owned(), text.visual_bounding_rect())),
+                egui::Shape::Rect(rect)
+                    if rect.fill == Color32::BLACK && (rect.rect.aspect_ratio() - 16.0 / 9.0).abs() < 0.01 =>
+                {
+                    slides.push(rect.rect);
+                }
+                egui::Shape::Rect(rect) if rect.fill == Color32::from_rgb(12, 12, 12) && rect.rect.width() == 16.0 => {
+                    slides.push(rect.rect);
+                }
+                // The well: a card 34 tall with corners of 10.
+                egui::Shape::Rect(rect)
+                    if (rect.rect.height() - crate::add_bar::WELL_TALL).abs() < 0.01
+                        && rect.fill == crate::studio::CARD
+                        && rect.corner_radius == egui::CornerRadius::same(10) =>
+                {
+                    blocks.push(rect.rect);
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, texts, slides, blocks)),
+                _ => {}
+            }
+        }
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), window)),
+            time: Some(time),
+            events,
+            ..RawInput::default()
+        };
+        let output = ctx.run_ui(raw, |ui| {
+            home_ui(ui, show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+        });
+        let (mut texts, mut slides, mut blocks) = (Vec::new(), Vec::new(), Vec::new());
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts, &mut slides, &mut blocks));
+        output.drop_without_applying_deltas();
+        let ruler = slides.iter().copied().rfind(|rect| rect.width() == 16.0).unwrap_or(Rect::NOTHING);
+        let slide =
+            slides.into_iter().filter(|rect| rect.width() > 16.0).max_by(|a, b| a.width().total_cmp(&b.width()));
+        let slide = slide.unwrap_or(Rect::NOTHING);
+        // The toolbar as this frame laid it out, and its well as this frame painted it: the two
+        // must agree.
+        let drawn = ctx.data_mut(|data| {
+            let drawn = data.get_temp::<crate::add_bar::Drawn>(crate::add_bar::well_id());
+            data.remove::<crate::add_bar::Drawn>(crate::add_bar::well_id());
+            drawn
+        });
+        let (well, keys) = drawn.map_or((Rect::NOTHING, Vec::new()), |drawn| (drawn.well, drawn.keys));
+        assert!(keys.is_empty() || blocks.contains(&well), "the well is painted where it is laid out: {well:?}");
+        AddBarFrame { slide, ruler, keys, well, texts }
+    }
+
+    /// Clicks once at `at` in a window `window` points big, and draws a frame after.
+    fn add_bar_click(
+        ctx: &egui::Context,
+        show: &Show,
+        state: &mut HomeState,
+        window: egui::Vec2,
+        at: egui::Pos2,
+        time: &mut f64,
+    ) -> AddBarFrame {
+        let press = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        for events in [vec![Event::PointerMoved(at)], vec![press(true)], vec![press(false)]] {
+            *time += 0.1;
+            add_bar_frame(ctx, show, state, window, events, *time);
+        }
+        *time += 0.1;
+        add_bar_frame(ctx, show, state, window, Vec::new(), *time)
+    }
+
+    /// The objects of what is open in the editor.
+    fn drafted(state: &HomeState) -> Vec<sp_model::Object> {
+        state.editing.as_ref().map(|draft| draft.slide.objects.clone()).unwrap_or_default()
+    }
+
+    /// The Add toolbar over each editor shows its kinds by name, left to right, after its
+    /// caption, and nothing of the Add menus it took the place of.
+    #[test]
+    fn the_add_toolbar_shows_each_editors_kinds_by_name_in_order() {
+        use crate::add_bar::{Editor, kinds};
+        let (ctx, show) = (crate::studio::tests::styled(), three_songs());
+        let window = vec2(1440.0, 900.0);
+        for editor in [Editor::Slide, Editor::Template, Editor::Stage] {
+            let mut state = add_bar_state(&show, editor);
+            add_bar_frame(&ctx, &show, &mut state, window, vec![], 0.1);
+            let frame = add_bar_frame(&ctx, &show, &mut state, window, vec![], 0.2);
+            let shown: Vec<_> = frame.keys.iter().map(|(kind, _)| *kind).collect();
+            assert_eq!(shown, kinds(editor), "{editor:?}");
+            for pair in frame.keys.windows(2) {
+                assert!(pair[0].1.max.x < pair[1].1.min.x && pair[0].1.min.y == pair[1].1.min.y, "{editor:?} {pair:?}");
+            }
+            for (kind, key) in &frame.keys {
+                let name = frame.texts.iter().find(|(text, rect)| text == kind.short() && key.contains_rect(*rect));
+                assert!(name.is_some(), "{editor:?}: {kind:?}'s name on its key");
+                // ▾ after the name of a key that opens a choice, and never on Media.
+                let (_, name) = name.expect("its name");
+                let marked = frame
+                    .texts
+                    .iter()
+                    .any(|(text, rect)| text == "\u{25be}" && key.contains_rect(*rect) && rect.min.x > name.max.x);
+                assert_eq!(marked, kind.chooses(), "{editor:?}: {kind:?}");
+                assert!(*kind != crate::add_bar::Kind::Picture || !marked, "Media opens the file window");
+            }
+            let caption = frame.place("ADD").expect("the caption");
+            assert!(caption.max.x < frame.keys[0].1.min.x && frame.keys[0].1.y_range().contains(caption.center().y));
+            for old in ["Add \u{25be}", "Shapes \u{25be}", "Media\u{2026}", "Add Text", "SHOWS LIVE"] {
+                assert!(frame.place(old).is_none(), "{editor:?} still says {old}");
+            }
+        }
+    }
+
+    /// One click adds what needs no choice, selected, and Undo takes it away; a key marked ▾
+    /// opens its choice under it, which adds what is chosen. Over a song's slide: Text, a
+    /// shape, linked text; a picture or video asks for its file.
+    #[test]
+    fn a_click_on_a_key_adds_and_a_key_with_a_choice_opens_it_under_the_key() {
+        use crate::add_bar::{Editor, Kind};
+        let (ctx, show) = (crate::studio::tests::styled(), three_songs());
+        let (window, mut time) = (vec2(1440.0, 900.0), 0.1);
+        let mut state = add_bar_state(&show, Editor::Slide);
+        let frame = add_bar_frame(&ctx, &show, &mut state, window, vec![], time);
+        let before = drafted(&state);
+        // Text: a text box, on top, selected, saying the sample words.
+        add_bar_click(&ctx, &show, &mut state, window, frame.key(Kind::Text).center(), &mut time);
+        let added = drafted(&state);
+        assert_eq!(added.len(), before.len() + 1);
+        let text = added.last().expect("added");
+        assert!(matches!(&text.kind, sp_model::ObjectKind::Text { text, .. } if text == "Text"));
+        assert_eq!(state.editing.as_ref().and_then(|draft| draft.selected), Some(text.id));
+        time += 0.1;
+        add_bar_frame(&ctx, &show, &mut state, window, vec![command_z(false)], time);
+        assert_eq!(drafted(&state), before, "Undo takes it away");
+        // Shape ▾: the shapes, under the key; a star chosen is added.
+        let shape = frame.key(Kind::Shape);
+        let open = add_bar_click(&ctx, &show, &mut state, window, shape.center(), &mut time);
+        let star = open.place(crate::editor::shape_name(sp_model::Shape::Star)).expect("the shapes are offered");
+        assert!(star.min.y > shape.max.y - 1.0, "under the key: {star:?} {shape:?}");
+        add_bar_click(&ctx, &show, &mut state, window, star.center(), &mut time);
+        assert!(matches!(
+            drafted(&state).last().map(|o| &o.kind),
+            Some(sp_model::ObjectKind::Shape { shape: sp_model::Shape::Star })
+        ));
+        // Linked Text ▾: what it can show; the clock chosen is a text box linked to it.
+        let open = add_bar_click(&ctx, &show, &mut state, window, frame.key(Kind::Linked).center(), &mut time);
+        let clock = open.place("Clock").expect("what linked text shows is offered");
+        add_bar_click(&ctx, &show, &mut state, window, clock.center(), &mut time);
+        let linked = drafted(&state).last().cloned().expect("added");
+        assert_eq!((linked.link, linked.name.as_str()), (Some(sp_model::TextLink::Clock), "Clock"));
+        assert_eq!(drafted(&state).len(), before.len() + 2);
+        // Undo takes them away in turn.
+        for (n, left) in [(1, before.len() + 1), (2, before.len())] {
+            time += 0.1;
+            add_bar_frame(&ctx, &show, &mut state, window, vec![command_z(false)], time);
+            assert_eq!(drafted(&state).len(), left, "undo {n}");
+        }
+        // Picture or Video: the file dialog's turn, nothing added yet.
+        add_bar_click(&ctx, &show, &mut state, window, frame.key(Kind::Picture).center(), &mut time);
+        assert!(state.picture_request);
+        assert_eq!(drafted(&state), before);
+    }
+
+    /// Over a stage layout, Linked Text offers what the stage shows live and Screen Picture the
+    /// audience screens; over a template, A Box for Words offers the boxes it has none of yet,
+    /// and a shape added to it goes behind the words. Undo takes each away.
+    #[test]
+    fn a_stage_layouts_and_a_templates_own_keys_add_what_they_offer() {
+        use crate::add_bar::{Editor, Kind};
+        let (ctx, show) = (crate::studio::tests::styled(), three_songs());
+        let (window, mut time) = (vec2(1440.0, 900.0), 0.1);
+        let mut state = add_bar_state(&show, Editor::Stage);
+        add_bar_frame(&ctx, &show, &mut state, window, vec![], time);
+        let frame = add_bar_frame(&ctx, &show, &mut state, window, vec![], time + 0.05);
+        let before = drafted(&state).len();
+        let open = add_bar_click(&ctx, &show, &mut state, window, frame.key(Kind::Linked).center(), &mut time);
+        let timer = open.place("Timer").expect("the stage's items are offered");
+        add_bar_click(&ctx, &show, &mut state, window, timer.center(), &mut time);
+        assert_eq!(drafted(&state).last().and_then(crate::stage::item_of), Some("timer"));
+        let open = add_bar_click(&ctx, &show, &mut state, window, frame.key(Kind::Screen).center(), &mut time);
+        let main = open.place(crate::stage_editor::main_screen()).expect("the screens are offered");
+        add_bar_click(&ctx, &show, &mut state, window, main.center(), &mut time);
+        assert!(matches!(drafted(&state).last().map(|o| &o.kind), Some(sp_model::ObjectKind::Screen { .. })));
+        assert_eq!(drafted(&state).len(), before + 2);
+        assert!(state.stage_layouts_changed, "the layout takes them");
+        for left in [before + 1, before] {
+            time += 0.1;
+            add_bar_frame(&ctx, &show, &mut state, window, vec![command_z(false)], time);
+            assert_eq!(drafted(&state).len(), left);
+        }
+
+        let mut state = add_bar_state(&show, Editor::Template);
+        let frame = add_bar_frame(&ctx, &show, &mut state, window, vec![], time);
+        let template = |state: &HomeState| state.theme_edit.as_ref().expect("editing").theme.templates[0].clone();
+        let boxes = template(&state).boxes.len();
+        let open = add_bar_click(&ctx, &show, &mut state, window, frame.key(Kind::WordsBox).center(), &mut time);
+        // The template has a main box already: greyed, it adds none.
+        let main = open.place(&crate::editor::role_label(&sp_model::Role::primary())).expect("offered");
+        add_bar_click(&ctx, &show, &mut state, window, main.center(), &mut time);
+        assert_eq!(template(&state).boxes.len(), boxes);
+        let open = add_bar_click(&ctx, &show, &mut state, window, frame.key(Kind::WordsBox).center(), &mut time);
+        let role = sp_model::Role::translation_reference();
+        let wanted = open.place(&crate::editor::role_label(&role)).expect("offered");
+        add_bar_click(&ctx, &show, &mut state, window, wanted.center(), &mut time);
+        assert_eq!(template(&state).boxes.len(), boxes + 1);
+        assert!(template(&state).boxes.iter().any(|b| b.role == role), "the template has the box");
+        let open = add_bar_click(&ctx, &show, &mut state, window, frame.key(Kind::Shape).center(), &mut time);
+        let rectangle = open.place(crate::editor::shape_name(sp_model::Shape::Rectangle)).expect("offered");
+        add_bar_click(&ctx, &show, &mut state, window, rectangle.center(), &mut time);
+        assert_eq!((template(&state).objects.len(), template(&state).in_front.len()), (1, 0), "behind the words");
+        for (objects, boxes) in [(0, boxes + 1), (0, boxes)] {
+            time += 0.1;
+            add_bar_frame(&ctx, &show, &mut state, window, vec![command_z(false)], time);
+            assert_eq!((template(&state).objects.len(), template(&state).boxes.len()), (objects, boxes));
+        }
+    }
+
+    /// At the smallest window and the usual one, over every editor, in every language: every
+    /// key is inside the well and none over another, the well is over the slide (or no further
+    /// past it than the canvas's margins), centred on it and 34 points above it, and well and
+    /// slide are centred together down the canvas. The keys all have their names or all are
+    /// pictures: in English at 1440 × 900 the names, after the caption ADD; at 1100 × 700,
+    /// where the middle column has the left column beside it, pictures alone.
+    #[test]
+    fn the_add_toolbar_fits_over_the_slide_at_the_smallest_window_in_every_language() {
+        use crate::add_bar::{Editor, KEY_TALL, OVER_SLIDE, WELL_TALL};
+        use crate::i18n::{Language, with_language};
+        let (ctx, show) = (crate::studio::tests::styled(), three_songs());
+        for language in Language::ALL {
+            for window in [vec2(1100.0, 700.0), vec2(1440.0, 900.0)] {
+                for editor in [Editor::Template, Editor::Stage, Editor::Slide] {
+                    let at = format!("{editor:?} in {window:?}, {language:?}");
+                    let mut state = add_bar_state(&show, editor);
+                    let frame = with_language(language, || {
+                        add_bar_frame(&ctx, &show, &mut state, window, vec![], 0.1);
+                        add_bar_frame(&ctx, &show, &mut state, window, vec![], 0.2)
+                    });
+                    let (slide, keys, well) = (frame.slide, &frame.keys, frame.well);
+                    assert!(slide.width() > 300.0, "{at}: {slide:?}");
+                    let kinds = crate::add_bar::kinds(editor);
+                    assert_eq!(keys.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(), kinds, "{at}: every key");
+                    assert_eq!(well.height(), WELL_TALL, "{at}");
+                    for (n, (kind, key)) in keys.iter().enumerate() {
+                        assert_eq!(key.height(), KEY_TALL, "{at}: {kind:?}");
+                        assert!(well.contains_rect(*key), "{at}: {kind:?} {key:?} out of {well:?}");
+                        assert!(keys[n + 1..].iter().all(|(_, b)| !key.intersects(b.shrink(0.5))), "{at}: {key:?}");
+                    }
+                    // Inside the middle column: right of the ruler down its left, and no further
+                    // past the slide than the canvas's margins.
+                    let over = slide.expand2(vec2(CANVAS_MARGIN + 0.5, 0.0));
+                    assert!(well.min.x >= over.min.x && well.max.x <= over.max.x, "{at}: {well:?} {slide:?}");
+                    assert!(well.min.x > frame.ruler.max.x, "{at}: {well:?} over the ruler");
+                    assert!((well.center().x - slide.center().x).abs() < 1.0, "{at}: centred over the slide");
+                    assert!((slide.min.y - well.max.y - OVER_SLIDE).abs() < 0.5, "{at}: {well:?} {slide:?}");
+                    // All names, or all pictures.
+                    let named: Vec<bool> = keys
+                        .iter()
+                        .map(|(kind, key)| {
+                            let short = with_language(language, || kind.short());
+                            let name = frame.texts.iter().find(|(text, rect)| text == short && key.intersects(*rect));
+                            if let Some((_, name)) = name {
+                                assert!(key.contains_rect(*name), "{at}: {kind:?}'s name {name:?} out of {key:?}");
+                                assert!(name.height() < 16.0, "{at}: {kind:?}'s name on one line");
+                            }
+                            name.is_some()
+                        })
+                        .collect();
+                    assert!(named.iter().all(|has| *has == named[0]), "{at}: never some of each: {named:?}");
+                    let caption = with_language(language, || t("editor.add.caption", "Add").to_uppercase());
+                    let caption = frame.texts.iter().any(|(text, rect)| *text == caption && well.contains_rect(*rect));
+                    if window.x == 1100.0 {
+                        // 456 points of middle column: no seven names fit, in any language.
+                        assert!(!named[0] && !caption, "{at}: pictures alone, no caption");
+                        for (kind, key) in keys {
+                            assert_eq!(key.width() > KEY_TALL, kind.chooses(), "{at}: {kind:?} is a square");
+                        }
+                    } else if language == Language::English {
+                        assert!(named[0] && caption, "{at}: names after ADD");
+                    } else {
+                        assert!(!caption || named[0], "{at}: a caption only before names");
+                    }
+                    // Over a slide, well and slide in the middle of the canvas: as much room
+                    // over the well as under the slide.
+                    if editor == Editor::Slide {
+                        let (top, bottom) = (frame.ruler.min.y + 16.0, frame.ruler.max.y);
+                        let (above, below) = (well.min.y - top, bottom - slide.max.y);
+                        assert!((above - below).abs() < 1.0, "{at}: {above} over, {below} under");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Zoomed in, the well stays at the top left of the canvas wherever the slide is moved to
+    /// under it; a press between its keys never reaches the slide, a key still adds, and no key
+    /// changes size or place when it is pressed.
+    #[test]
+    fn zoomed_in_the_toolbar_stays_at_the_top_left_while_the_slide_moves_under_it() {
+        use crate::add_bar::{Editor, Kind};
+        let show = three_songs();
+        for window in [vec2(1440.0, 900.0), vec2(1100.0, 700.0)] {
+            let ctx = crate::studio::tests::styled();
+            let mut time = 0.1;
+            let mut state = add_bar_state(&show, Editor::Slide);
+            add_bar_frame(&ctx, &show, &mut state, window, vec![], time);
+            time += 0.1;
+            let fitted = add_bar_frame(&ctx, &show, &mut state, window, vec![], time);
+            state.edit_zoom = 2.0;
+            // Each frame's keys, well and slide.
+            type Seen = (Vec<(Kind, Rect)>, Rect, Rect);
+            let mut seen: Vec<Seen> = Vec::new();
+            for pan in [vec2(0.0, 0.0), vec2(-400.0, -300.0), vec2(400.0, 300.0), vec2(0.0, 0.0)] {
+                state.edit_pan = pan;
+                time += 0.1;
+                let frame = add_bar_frame(&ctx, &show, &mut state, window, vec![], time);
+                seen.push((frame.keys, frame.well, frame.slide));
+            }
+            // The first zoomed frame still has the fitted frame's record of the keys.
+            let (keys, well, _) = &seen[1];
+            assert_ne!(*well, fitted.well, "{window:?}: it moved to the corner");
+            assert!(seen[1..].iter().all(|(have, at, _)| have == keys && at == well), "{window:?}: it stays put");
+            assert!(seen[1].2 != seen[2].2, "{window:?}: the slide moved");
+            // At the top left of the canvas, just inside its rulers; the same keys as fitted.
+            let corner = pos2(fitted.ruler.max.x, fitted.ruler.min.y + 16.0);
+            assert!((well.min - corner).length() < 12.0, "{window:?}: {well:?} at {corner:?}");
+            assert_eq!(well.size(), fitted.well.size(), "{window:?}: the same well");
+            assert_eq!(keys.len(), fitted.keys.len(), "{window:?}");
+            // The slide is under the well: a press between two keys reaches neither.
+            state.edit_pan = egui::Vec2::ZERO;
+            let picked = state.editing.as_ref().and_then(|draft| draft.slide.objects.first()).map(|o| o.id);
+            if let Some(draft) = state.editing.as_mut() {
+                draft.select_only(picked);
+            }
+            state.picking = Picking::Slides;
+            let before = drafted(&state);
+            let gap = pos2(keys[0].1.max.x + crate::add_bar::KEY_GAP / 2.0, keys[0].1.center().y);
+            add_bar_click(&ctx, &show, &mut state, window, gap, &mut time);
+            assert_eq!(state.picking, Picking::Slides, "{window:?}: the canvas never had the press");
+            assert_eq!(state.editing.as_ref().and_then(|draft| draft.selected), picked);
+            assert_eq!(drafted(&state), before);
+            let after = add_bar_click(&ctx, &show, &mut state, window, keys[0].1.center(), &mut time);
+            assert_eq!(drafted(&state).len(), before.len() + 1, "{window:?}: Text adds");
+            assert_eq!((&after.keys, after.well), (keys, *well), "{window:?}: nothing changes size when clicked");
+        }
+    }
+
+    /// Fitted, a key pressed changes no key's size or place, with names or as pictures.
+    #[test]
+    fn no_key_of_the_add_toolbar_changes_size_when_clicked() {
+        use crate::add_bar::Editor;
+        let show = three_songs();
+        for window in [vec2(1440.0, 900.0), vec2(1100.0, 700.0)] {
+            let ctx = crate::studio::tests::styled();
+            let mut state = add_bar_state(&show, Editor::Slide);
+            let mut time = 0.1;
+            add_bar_frame(&ctx, &show, &mut state, window, vec![], time);
+            time += 0.1;
+            let before = add_bar_frame(&ctx, &show, &mut state, window, vec![], time);
+            for n in 0..before.keys.len() {
+                let after = add_bar_click(&ctx, &show, &mut state, window, before.keys[n].1.center(), &mut time);
+                assert_eq!((&after.keys, after.well), (&before.keys, before.well), "{window:?}: key {n}");
+                assert_eq!(after.slide, before.slide, "{window:?}: key {n}: the slide stays");
+                // Let go of any menu the key opened.
+                let escape = Event::Key {
+                    key: Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::NONE,
+                };
+                time += 0.1;
+                add_bar_frame(&ctx, &show, &mut state, window, vec![escape], time);
+                state.picture_request = false;
+            }
+        }
     }
 
     /// The song editor's Objects list is dragged the same way, with no rule about text boxes:

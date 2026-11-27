@@ -98,11 +98,17 @@ pub enum Icon {
     File,
     /// An i in a circle: Settings › About.
     Info,
+    /// A capital T: words of one's own (the editor's Add Text).
+    Letter,
+    /// A square and a circle: a shape (the editor's Add Shape).
+    Shapes,
+    /// A box with two lines of words in it: a template's box for words.
+    WordsBox,
 }
 
 /// Every icon, so a test can draw them all.
 #[cfg(test)]
-pub const ALL: [Icon; 70] = [
+pub const ALL: [Icon; 73] = [
     Icon::Search,
     Icon::Theme,
     Icon::Play,
@@ -173,6 +179,9 @@ pub const ALL: [Icon; 70] = [
     Icon::Prompt,
     Icon::File,
     Icon::Info,
+    Icon::Letter,
+    Icon::Shapes,
+    Icon::WordsBox,
 ];
 
 /// Draws inside a square using coordinates from 0 to 1.
@@ -591,6 +600,19 @@ pub fn paint(painter: &Painter, icon: Icon, rect: Rect, color: Color32) {
             p.circle(0.5, 0.5, 0.385);
             p.line(&[(0.5, 0.462), (0.5, 0.692)]);
             p.dot(0.5, 0.308, 0.05);
+        }
+        Icon::Letter => {
+            p.line(&[(0.231, 0.231), (0.769, 0.231)]);
+            p.line(&[(0.5, 0.231), (0.5, 0.808)]);
+        }
+        Icon::Shapes => {
+            p.rect(0.138, 0.485, 0.523, 0.869, 0.01);
+            p.circle(0.677, 0.323, 0.192);
+        }
+        Icon::WordsBox => {
+            p.rect(0.138, 0.215, 0.862, 0.785, 0.01);
+            p.line(&[(0.292, 0.408), (0.708, 0.408)]);
+            p.line(&[(0.292, 0.585), (0.569, 0.585)]);
         }
     }
 }

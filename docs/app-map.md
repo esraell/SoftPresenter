@@ -144,7 +144,7 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
 ```
 ┌──────────────────┬─────────────────────────────────────────────┬───────────────────────────┐
 │ SONG             │ ruler ─────────────────────────────────────  │ [Shape] [Text] [Build]   │
-│ ▤ Song title     │  [Add Text] [Shapes ▾] [Media…] [Web Page] [NDI Source] [AirPlay]  (the open tab is light) │
+│ ▤ Song title     │  ADD Text Shape▾ Media Web Page NDI Source AirPlay Linked Text▾  (the open tab is light) │
 │ SLIDES           │ ┌───────────────────────────────────────┐    │  font, size, colour,     │
 │ Add Copy Del ↑ ↓ │ │                                       │    │  outline, shadow, fill,  │
 │ ┌──────────────┐ │ │         the slide, full size          │    │  gradient, spacing,      │
@@ -180,7 +180,18 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   Move Up and Move Down) retypes the group's name in the strip; dragging moves a slide (and
   those picked out with it) to the ink line. The pictures are 224 wide, the props' and
   layouts' 204: the design's slides view sits 10 in from the column's sides, not 20.
-- **Canvas**: Add Text, Shapes, Media… (the row is centred on the slide, or in the Theme Editor stands at the right beside the name of what is open; each tool is as wide as its words, and when they don't fit across the canvas they take a second row, which the slide goes under: `tool_bars` in `home.rs`) (a picture or a video, which plays in its box when the
+- **Canvas**: the Add toolbar over the slide (`add_bar.rs`, one list of kinds for every editor,
+  `add_bar::kinds`): one rounded well, 34 tall, with a soft shadow and a thin line round it;
+  in it the caption ADD, then a flat key per kind, 28 tall, its picture beside its name and as
+  wide as they need, with a small ▾ after the name of those that open a choice under the key.
+  `add_bar::Plan::of` picks the keys' form from the canvas's room and the window's width alone:
+  with the caption from 1250 points of window, tighter without it under that, and every key
+  its picture alone (a 28-point square, its name the tooltip) where the names don't all fit, as
+  at 1100 × 700 with the left column beside the canvas. Fitted, well and slide are one block
+  centred in the canvas, the well centred over the slide 34 points above it (`add_bar::fit`);
+  zoomed, the well is pinned at the canvas's top left and takes presses (`add_bar::pinned`). A
+  template's or a stage layout's name (and a layout's Undo and Redo) has a line of its own over
+  it. Kinds: Text, Shape (the shapes with their keys), Media (a picture or a video from a file, which plays in its box when the
   slide is on screen), Web Page (a box showing a live web page; its address is typed in the
   inspector's Web Page tab), NDI Source (a box over the whole slide showing a live NDI source, chosen in the inspector's NDI Source tab: Source menu, Look again, a line saying what is so, Fits, Quality, Sound; `ndi_in.rs`, `inspector::ndi_source`; the picture is received on a thread of its own and put where every drawing thread finds it, `sp_render::show_ndi`, and the screens only look for news in `Output::take_video_picture`); pictures and videos can be dropped on it from the Finder. Double-click a
   text box to type in it. The letter keys add objects (T for a text box, one key per shape).
@@ -209,10 +220,10 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   it): the layouts for the stage screens, edited with the same canvas, Objects list and
   inspector as a slide. Left: STAGE LAYOUTS, Add, Duplicate, Delete, ↑ and ↓, and each layout as
   a live picture of the stage in it (shared with the Stage tab, `live_tabs::StagePictures`),
-  its right-click menu for Rename, Duplicate, Delete. Over the canvas: the layout's name, Add ▾ (Text, a shape, a
-  picture or video, a web page, then what the stage shows live: Current Slide, Next Slide, Next
-  Label, Clock, Timer, Slide Notes, Song Title, Group, Stage Message, and Screen Picture with
-  the audience screens), Undo and Redo; under it two lines saying the keyboard edits here. The
+  its right-click menu for Rename, Duplicate, Delete. Over the canvas: the layout's name, Undo and Redo, and the
+  Add toolbar (Text, Shape, Media, Web Page, NDI Source, AirPlay, Linked Text with what the stage
+  shows live: Current Slide, Next Slide, Next Label, Clock, Timer, Slide Notes, Song Title,
+  Group, Stage Message; and Screen with the audience screens); under it two lines saying the keyboard edits here. The
   inspector, with nothing picked, is LAYOUT (its name, the stage screens using it); for an item
   the Text tab starts with what it shows and its own settings (which timer, the clock's form,
   lines of notes); a screen picture's Screen tab has its screen, corners and

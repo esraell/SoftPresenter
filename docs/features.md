@@ -1255,8 +1255,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Stage Layouts… and the Stage tab's Edit layouts…) edits them with the slide editor: each thing
   a layout shows live is an object on the canvas (the current and next slide, the next label,
   the clock, a timer, the slide's notes, the song's title and group, the stage message), beside
-  words of its own, shapes, pictures, videos, web pages and screen pictures, all from one Add
-  menu. A video on a stage layout plays there, looping and without its sound (the room hears the
+  words of its own, shapes, pictures, videos, web pages and screen pictures, all from the Add
+  toolbar over the layout (what it shows live under Linked Text, the screens under Screen). A video on a stage layout plays there, looping and without its sound (the room hears the
   slide's), and a web page shows live, while a stage screen shows the layout. Objects are picked (Shift or Command for several, or a box dragged round them), moved,
   resized, nudged with the arrows (10 at a time, Shift for one pixel), lined up, spread out,
   brought forward or sent back, duplicated, copied, deleted, hidden and locked, with undo, and
@@ -1550,11 +1550,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - Text and shape fills can be a colour or a linear (at any angle) or radial gradient to a second
   colour. Every colour well opens a grid of swatches with the full colour picker under it.
 - Shapes (rectangle, rounded rectangle, ellipse, triangles, rhombus, polygon, star, arrows) from
-  the Shapes menu or a single key; fill, stroke, shadow and flip for any object; spreading
+  Shape in the Add toolbar or a single key; fill, stroke, shadow and flip for any object; spreading
   objects out evenly. An object's Opacity slider says how solid it is beside it ("75%", "75 %"
   in Spanish, Russian and Ukrainian), and a percentage can be typed there; the shadows' Opacity
   is written the same way.
-- **Media** on slides (Media… above the slide, Insert > Media…, Shift-Command-I, or dropped on
+- **Media** on slides (Media in the Add toolbar, Insert > Media…, Shift-Command-I, or dropped on
   the editor from the Finder, several at once if you like): a picture,
   copied into the app's Images folder, or a video, which stays where it is and plays in its box,
   looping with its sound, while the slide is on screen (several videos on one slide all play); each can fit, fill or stretch to its
@@ -1565,7 +1565,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   dropped together keep their order.
   The Insert
   menu also adds a text box or any shape.
-- **Web pages** on slides (Web Page above the slide, or `sp slide web SONG N URL`): a box that
+- **Web pages** on slides (Web Page in the Add toolbar, or `sp slide web SONG N URL`): a box that
   shows a live web page (added, it covers the whole slide and goes just under the slide's first
   words, over any picture behind them, or on top when there are none, so a click on the words
   still picks the words; it can then be moved, sized and restacked as any box; until it has
@@ -1593,7 +1593,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   SoftPresenters say to update. Pages are drawn by macOS's own web view on the Mac (moving
   content such as a scrolling ticker can look uneven; a smoother engine is planned), and not
   yet on other systems.
-- **NDI sources** on slides (NDI Source, right after Web Page above the slide, in slides,
+- **NDI sources** on slides (NDI Source in the Add toolbar, in slides,
   props and stage layouts): a box, over the whole slide and under the words when added, and
   see-through until it has a picture, as a web page box is, that shows a live NDI source from the network. It is set up as a web page box is: adding one picks it and gives the inspector's
   Source menu the keyboard. The menu lists the sources found (as "Camera 1 · STREAM-PC"), with
@@ -1623,7 +1623,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   remote page shows the box as drawn and can't add one (there is no remote command for it).
   Songs with an NDI box are saved as version 4 of the song file; older SoftPresenters say to
   update. Not yet: sound, and `sp` has no command to add one (`sp slide SONG N` lists it).
-- **AirPlay** on slides (AirPlay, right after NDI Source above the slide, in slides, props and
+- **AirPlay** on slides (AirPlay in the Add toolbar, in slides, props and
   stage layouts): a box, over the whole slide and under the words when added, and see-through
   until a device shows its screen, as a web page box is, that shows the screen of an iPhone, iPad or Mac whose owner chose this computer in Screen Mirroring
   (Control Centre on the device). **Unofficial:** it works with Screen Mirroring (AirPlay) from
@@ -1670,7 +1670,23 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   foot of the Text tab.
 - **Linked Text**: a text box can show the clock, the date, a timer, the song's title, the
   slide's group, label or notes, the next slide's words, the stage message or the copyright line
-  instead of its own words; the screens keep the time and timers up to date.
+  instead of its own words; the screens keep the time and timers up to date. Linked Text in the
+  Add toolbar adds a box already linked to what is chosen.
+- **The Add toolbar** over the slide, in every editor (a song's slides, props, templates and
+  stage layouts): one rounded well floating over the slide, with the caption ADD and
+  a flat key for each kind of thing the editor can add, its picture beside its name: Text,
+  Shape, Media, Web Page, NDI Source, AirPlay and Linked Text, with Words Box over a template
+  and Screen over a stage layout (the full name is what a screen reader says; the tooltip says
+  what a click does). One click adds; a key with a small ▾ after its name opens its choice
+  under it (which shape, what linked text shows, which box, which screen), and Media asks for
+  the file in a file window. Each key is as wide as its name. The well is centred over the
+  slide, 34 points above it, the two centred together in the canvas. In a window under about
+  1250 points wide the caption is left out and the keys are tighter; where the names still
+  don't all fit (a small window, or longer names in another language), every key shows its
+  picture alone and says its name under the pointer, never some of each. Which it is depends
+  only on the window's size and the language, never on a click. Zoomed in, the well stays at
+  the top left of the canvas while the slide moves under it. Undo takes back anything it
+  added.
 - In the Edit view: rulers numbered in the slide's pixels, showing the selected object's
   extent; Zoom (Fit, 25% to 200%, or pinch) with two-finger scrolling around a zoomed slide; and
   Grid, which shows a grid that boxes snap to.
@@ -1732,8 +1748,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - Themes from before templates said what they were for keep working: the template Bible slides
   used is brought into the main theme as its Bible template, looking as it did, the first time
   the app starts.
-- The theme editor works as the song editor does: Add Text, Shapes, Media… and pictures or
-  videos dragged from the Finder. A template's shapes, pictures and videos (a logo, a bar, a
+- The theme editor works as the song editor does: the Add toolbar and pictures or videos
+  dragged from the Finder. Its Words Box key adds the main language's, the translation's or a
+  reference's box, of those the template has none of yet. A template's shapes, pictures and videos (a logo, a bar, a
   moving background) are drawn behind the words on every slide that uses it, and a video in
   one plays while such a slide is on screen. Dragged above the text boxes in the Objects list
   (or moved there with Bring Forward or Bring to Front), one is drawn in front of the words

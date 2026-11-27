@@ -4,6 +4,7 @@
 // print: `main` joins the console they were typed in (see `sp_winapi::attach_parent_console`).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod add_bar;
 mod announcements;
 mod applog;
 mod audio;
@@ -11514,6 +11515,16 @@ impl App {
                 && let Some(draft) = running.home_state.editing.as_mut()
             {
                 draft.selected = draft.slide.objects.first().map(|object| object.id);
+            }
+            // Testing aid: SOFTPRESENTER_EDIT_ZOOM also zooms a template (SOFTPRESENTER_CAPTURE_THEMES)
+            // or a stage layout (SOFTPRESENTER_CAPTURE_STAGE_LAYOUTS) once it is open, to see the
+            // Add toolbar stay at the top left over them too.
+            if running.frames == GO_LIVE_AT + 4
+                && (std::env::var_os("SOFTPRESENTER_CAPTURE_THEMES").is_some()
+                    || std::env::var_os("SOFTPRESENTER_CAPTURE_STAGE_LAYOUTS").is_some())
+                && let Some(zoom) = std::env::var("SOFTPRESENTER_EDIT_ZOOM").ok().and_then(|z| z.parse().ok())
+            {
+                running.home_state.edit_zoom = zoom;
             }
             // Testing aid: SOFTPRESENTER_CAPTURE_THEMES=version shows the theme's first version's
             // templates; =add-version opens the sheet that adds a version to it.

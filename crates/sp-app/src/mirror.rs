@@ -1462,7 +1462,7 @@ mod tests {
         let named: &[(&'static str, &str)] = &[
             ("settings.pane.mirror", "AirPlay"),
             ("mirror.caption", "AIRPLAY"),
-            ("edit.tools.mirror", "AirPlay"),
+            ("editor.add.key.mirror", "AirPlay"),
             ("editor.add.mirror", "AirPlay"),
             ("editor.mirror.name", "AirPlay"),
             ("editor.mirror.numbered", "AirPlay {n}"),
