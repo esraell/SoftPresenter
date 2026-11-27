@@ -359,7 +359,12 @@ fn draw_objects(
                 draw_screen_label(scene, fonts, placed, label, template, rect, &outline);
             }
         }
-        if let ObjectKind::Text { text, style, spans } = &object.kind {
+        // While the slide's words are hidden, the box (its place, worked out from its words when
+        // it is fitted to them, and its own fill, outline and shadow) is drawn as ever, and its
+        // words are not: their fill, outline and shadow, and the bands behind their lines.
+        if let ObjectKind::Text { text, style, spans } = &object.kind
+            && !slide.words_hidden
+        {
             // The theme's style for the object's role, with the object's own settings over it.
             let Some(style) = template.text_style(object.role.as_ref(), style) else { continue };
             overflow |= draw_text_box(scene, fonts, placed, (text, spans), &style, rect, time, object.shown_paragraphs);

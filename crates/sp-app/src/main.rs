@@ -405,11 +405,11 @@ type AdvanceAt = (sp_engine::SlideRef, usize, Option<(usize, usize)>);
 /// How many slides in a row can set each other going through their actions.
 const MAX_ACTION_CHAIN: u8 = 3;
 
-/// The live slide as the screens and the Program preview draw it: as it is, or while its words
-/// are hidden (Hide the Words), the same slide without them, so its theme's background, its
-/// pictures and the media behind it stay up.
-fn frame_slide(show: &Show, slide: Arc<Slide>) -> Arc<Slide> {
-    if show.words_hidden() { Arc::new(slide.without_words()) } else { slide }
+/// The slide on screen as the screens are sent it (`Frame::slide`): as it is, words and all,
+/// for the stage screens keep them while they are hidden. The audience screens and the Program
+/// preview draw it without them then (`Frame::words_hidden`, `output::drawn_slide`).
+fn frame_slide(show: &Show) -> Option<Arc<Slide>> {
+    show.live_slide().map(|(_, slide)| Arc::new(slide.clone()))
 }
 
 /// The copyright line of the song on screen, on the slides Settings says (`when`), with the
@@ -4989,7 +4989,7 @@ impl App {
         let Some(running) = self.running.as_mut() else {
             return;
         };
-        let slide = self.show.live_slide().map(|(_, slide)| frame_slide(&self.show, Arc::new(slide.clone())));
+        let slide = frame_slide(&self.show);
         // The slide Next would show, in the song's play order, for the stage screens.
         let next = self.show.live().and(self.show.upcoming()).and_then(|at| {
             let song = self.show.presentations().get(at.presentation)?;
@@ -5037,6 +5037,7 @@ impl App {
                 next,
                 about,
                 build_step: self.show.build_step(),
+                words_hidden: self.show.words_hidden(),
             };
             if !output.send(OutputMsg::Show(frame)) {
                 running.home_state.output_has_stopped();
@@ -5094,18 +5095,15 @@ impl App {
             stage_message: state.stage_message_live.then_some(state.stage_message.as_str()),
             copyright: copyright.as_deref(),
         };
-        // The audience's picture shows the slide in the version that is on, as the screens do;
-        // the stage's shows it as it is. Both without its words while they are hidden, as the
-        // screens are sent it.
-        let live = self.show.live_slide().map(|(_, slide)| frame_slide(&self.show, Arc::new(slide.clone())));
-        let slide_in = |version: Option<Uuid>| {
-            live.as_deref().map(|slide| {
-                let in_version = version.and_then(|version| theme.slide_in_version(slide, version));
-                let built = in_version.as_ref().unwrap_or(slide).built(&theme, sp_model::BuildClock::settled(step)).0;
-                Arc::new(links::fill(&built, &values).into_owned())
+        // The audience's picture shows the slide in the version that is on, and without its words
+        // while they are hidden, as the screens do; the stage's shows it as it is, words and all.
+        let slide_in = |version: Option<Uuid>, words_hidden: bool| {
+            self.show.live_slide().map(|(_, slide)| {
+                let clock = sp_model::BuildClock::settled(step);
+                output::drawn_slide(slide, &theme, version, clock, &values, words_hidden)
             })
         };
-        let audience_slide = slide_in(state.version_switch.version());
+        let audience_slide = slide_in(state.version_switch.version(), self.show.words_hidden());
         // The operator's preview shows the props and a message over the slide, as the audience
         // sees them.
         let message = state.message_live.and_then(|(id, _)| {
@@ -5137,7 +5135,7 @@ impl App {
         running.preview_shows_stage = state.preview_stage;
         if state.preview_stage {
             // The stage screens' picture: the time, this slide, the next, a timer, the stage message.
-            let slide = slide_in(None);
+            let slide = slide_in(None, false);
             let next = self.show.live().and(self.show.upcoming()).and_then(|at| {
                 let song = self.show.presentations().get(at.presentation)?;
                 song.slide(at.slide).map(|(_, slide)| slide.clone())
@@ -14828,14 +14826,19 @@ mod tests {
         assert!(keyboard.state.library_search.is_none(), "the find box closed");
     }
 
-    /// The slide on screen as `refresh_output` hands it to the screens.
-    fn framed(show: &Show) -> Option<Arc<Slide>> {
-        show.live_slide().map(|(_, slide)| frame_slide(show, Arc::new(slide.clone())))
+    /// The slide on screen as an audience screen draws it from the frame (`output::drawn_slide`),
+    /// as the Program preview's audience picture does too.
+    fn audience(show: &Show) -> Option<Arc<Slide>> {
+        let values =
+            links::Values { timers: &[], title: None, group: None, next: None, stage_message: None, copyright: None };
+        let clock = sp_model::BuildClock::settled(show.build_step());
+        let theme = Theme::builtin();
+        frame_slide(show).map(|slide| output::drawn_slide(&slide, &theme, None, clock, &values, show.words_hidden()))
     }
 
-    /// The words of a framed slide, its boxes' words joined.
-    fn framed_words(show: &Show) -> Option<String> {
-        framed(show).map(|slide| slide.texts().into_iter().map(|(_, words)| words).collect::<Vec<_>>().join("/"))
+    /// A slide's words, its boxes' words joined.
+    fn words_of(slide: &Slide) -> String {
+        slide.texts().into_iter().map(|(_, words)| words).collect::<Vec<_>>().join("/")
     }
 
     #[test]
@@ -14844,46 +14847,36 @@ mod tests {
         song.theme = Some(Uuid::new_v4());
         let mut show = Show::new(vec![Arc::new(song)]);
         show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
-        let live = Arc::new(show.live_slide().expect("on screen").1.clone());
-        assert!(Arc::ptr_eq(&frame_slide(&show, live.clone()), &live), "with its words, the slide as it is");
-        assert_eq!(framed_words(&show).as_deref(), Some("One/Uno"));
+        let live = show.live_slide().expect("on screen").1.clone();
+        let drawn = audience(&show).expect("on screen");
+        assert_eq!((words_of(&drawn), drawn.words_hidden), ("One/Uno".to_owned(), false));
 
         show.apply(Command::HideWords);
-        let hidden = frame_slide(&show, live.clone());
-        assert_eq!(framed_words(&show).as_deref(), Some("/"), "every box is there, with no words");
-        assert_eq!((hidden.id, hidden.objects.len()), (live.id, live.objects.len()), "the same slide");
+        let drawn = audience(&show).expect("still on screen");
+        assert!(drawn.words_hidden, "the audience screens draw it without its words");
+        // The same slide, its words kept for laying it out (they aren't drawn).
+        assert_eq!((drawn.id, words_of(&drawn)), (live.id, "One/Uno".to_owned()));
         // Both frame builders draw with the theme of the presentation on screen
         // (`show.live()`), the song's, not the songs theme they fall back on with nothing up.
         assert_eq!(show.live().map(|at| at.presentation), Some(0));
 
         show.apply(Command::ShowAgain);
-        assert_eq!(framed_words(&show).as_deref(), Some("One/Uno"), "Show Again brings them back");
+        assert!(!audience(&show).expect("on screen").words_hidden, "Show Again brings them back");
     }
 
     #[test]
-    fn a_linked_box_is_not_filled_in_again_while_the_words_are_hidden() {
-        let mut song = parse_song_text("River Song", "One\n");
-        let mut title = sp_model::Object::text(sp_model::Role("title".to_owned()), "[Song Title]");
-        title.link = Some(sp_model::TextLink::SongTitle);
-        song.groups[0].slides[0].objects.push(title);
-        let mut show = Show::new(vec![Arc::new(song)]);
+    fn while_the_words_are_hidden_the_stage_screens_keep_them() {
+        let mut show = Show::new(vec![Arc::new(parse_song_text("Song", "One\n\nTwo\n"))]);
         show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
-        let values = links::Values {
-            timers: &[],
-            title: Some("River Song"),
-            group: None,
-            next: None,
-            stage_message: None,
-            copyright: None,
-        };
-        // The screens and the preview fill linked boxes in after the frame is made.
-        let filled = |show: &Show| {
-            let slide = framed(show).expect("on screen");
-            links::fill(&slide, &values).texts().into_iter().map(|(_, words)| words).collect::<Vec<_>>()
-        };
-        assert_eq!(filled(&show), ["One", "River Song"]);
         show.apply(Command::HideWords);
-        assert_eq!(filled(&show), ["", ""], "no words, the song's title neither");
+        // The frame's slide is what a stage screen's picture is made from (`content_for`).
+        let sent = frame_slide(&show).expect("on screen");
+        assert!(!sent.words_hidden);
+        let layout = &stage::builtin_layouts()[0];
+        let stage = stage::slide(Some(&sent), None, &output::Overlay::default(), &stage::About::default(), layout);
+        assert!(stage.texts().iter().any(|(_, words)| words == "One"), "{:?}", stage.texts());
+        assert!(!stage.words_hidden, "the stage screens show the words");
+        assert!(audience(&show).expect("on screen").words_hidden, "the room doesn't");
     }
 
     #[test]
@@ -14897,12 +14890,14 @@ mod tests {
         // The media layer is not touched, so `sync_video` keeps the same player going.
         assert!(changes.slides && !changes.media, "{changes:?}");
         assert_eq!(show.live_media(), Some(video), "the video plays on behind");
-        assert_eq!(framed_words(&show).as_deref(), Some(""), "the slide stays up without its words");
+        let drawn = audience(&show).expect("the slide stays up");
+        assert!(drawn.words_hidden, "without its words");
 
         let changes = show.apply(Command::Next);
         assert!(!changes.media, "{changes:?}");
         assert_eq!(show.live_media(), Some(video), "still the same video");
-        assert_eq!(framed_words(&show).as_deref(), Some("Two"), "Next shows the next slide with its words");
+        let drawn = audience(&show).expect("on screen");
+        assert_eq!((words_of(&drawn), drawn.words_hidden), ("Two".to_owned(), false), "Next shows its words");
     }
 
     #[test]

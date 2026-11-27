@@ -66,6 +66,9 @@ pub struct Frame {
     pub about: crate::stage::About,
     /// How many of the slide's click builds have been set going.
     pub build_step: usize,
+    /// The slide's words are hidden (Hide the Words): the audience screens draw it without them
+    /// ([`drawn_slide`]); the stage screens show `slide` as it is, words and all.
+    pub words_hidden: bool,
 }
 
 impl Frame {
@@ -73,6 +76,64 @@ impl Frame {
     fn plays_video(&self) -> bool {
         self.video.is_some() || !self.slide_video.is_empty() || !self.ndi.is_empty()
     }
+}
+
+/// How the screens go on to a new frame from the one they show.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct GoingOn {
+    /// Another slide (another version over the same slide counts, as do the screens switched on
+    /// or off): it gives way by the look, and its builds start again once the look has played.
+    new_slide: bool,
+    /// The same slide, its words hidden or shown again.
+    words: bool,
+    /// Another picture behind the words, or none.
+    new_media: bool,
+    /// How the picture before gives way to the new one.
+    look: sp_model::Transition,
+}
+
+/// How the screens go on from the frame they show (`was`) to a new one (`now`): a slide whose
+/// words are only hidden or shown again is the same slide, so its builds stay where they are.
+fn going_on(was: &Frame, now: &Frame) -> GoingOn {
+    // Another version over the same slide gives way to it as another slide does.
+    let new_slide =
+        was.slide.as_deref() != now.slide.as_deref() || was.enabled != now.enabled || was.version != now.version;
+    let words = !new_slide && was.words_hidden != now.words_hidden;
+    let new_media = match (&was.media, &now.media) {
+        (Some(was), Some(now)) => !was.same(now),
+        (None, None) => false,
+        _ => true,
+    };
+    let look = if words {
+        // Only the words go, or come back: they dissolve, in the usual time, whatever the
+        // slide's own transition, so the background behind them never moves.
+        sp_model::Transition::default()
+    } else if !new_slide && new_media {
+        // Only the media changed: it gives way by the media's own transition.
+        now.media_transition
+    } else {
+        now.transition
+    };
+    GoingOn { new_slide, words, new_media, look }
+}
+
+/// The slide as an audience screen draws it, and the Program preview's picture of one: as far
+/// as its builds have got (`clock`), in the theme version that is on (`version`) when `theme`
+/// has one for it, with its linked text filled in, and while its words are hidden
+/// (`words_hidden`), without them ([`Slide::without_words`]: laid out as ever, not drawn). A
+/// stage screen's picture is made from the slide as it is, words and all.
+pub(crate) fn drawn_slide(
+    slide: &Slide,
+    theme: &Theme,
+    version: Option<Uuid>,
+    clock: sp_model::BuildClock,
+    values: &crate::links::Values,
+    words_hidden: bool,
+) -> Arc<Slide> {
+    let in_version = version.and_then(|version| theme.slide_in_version(slide, version));
+    let (built, _) = in_version.as_ref().unwrap_or(slide).built(theme, clock);
+    let filled = crate::links::fill(&built, values);
+    Arc::new(if words_hidden { filled.without_words() } else { filled.into_owned() })
 }
 
 /// What is shown over the slides: a message on the audience screens; the stage message and the
@@ -1588,6 +1649,7 @@ fn run(
             next: None,
             about: crate::stage::About::default(),
             build_step: 0,
+            words_hidden: false,
         },
         targets: Vec::new(),
         fading: None,
@@ -1880,11 +1942,8 @@ fn run(
                         sp_render::read_ahead(next);
                         output.held.since(Part::Locks, For::Nothing, asking);
                     }
-                    // Another version over the same slide gives way to it as another slide does.
-                    let same_slide = output.frame.slide.as_deref() == frame.slide.as_deref()
-                        && output.frame.enabled == frame.enabled
-                        && output.frame.version == frame.version;
-                    if !same_slide {
+                    let going = going_on(&output.frame, &frame);
+                    if going.new_slide {
                         // Builds that start with the slide wait for its transition to end.
                         output.slide_on = now + Duration::from_secs_f32(frame.transition.duration());
                         output.step_at = now;
@@ -1918,19 +1977,14 @@ fn run(
                             output.held.since(Part::Locks, For::Nothing, forgetting);
                         }
                     }
-                    let same_media = match (&output.frame.media, &frame.media) {
-                        (Some(was), Some(now)) => was.same(now),
-                        (None, None) => true,
-                        _ => false,
-                    };
-                    // Another slide, video or picture behind it: should the GPU be slow with it,
-                    // it gets all its tries. The same picture sent again does not: that would
-                    // put off for good the telling of the operator.
-                    if !same_slide || !same_media || !same_video {
+                    // Another slide, its words hidden or shown again, another video or picture
+                    // behind it: should the GPU be slow with it, it gets all its tries. The same
+                    // picture sent again does not: that would put off for good the telling of
+                    // the operator.
+                    if going.new_slide || going.words || going.new_media || !same_video {
                         output.round.new_picture();
                     }
-                    // Only the media changed: it gives way by the media's own transition.
-                    output.look = if same_slide && !same_media { frame.media_transition } else { frame.transition };
+                    output.look = going.look;
                     output.frame = frame;
                 }
                 OutputMsg::AddSurface { id, name, surface, format, w, h } => {
@@ -2487,12 +2541,12 @@ impl Output {
         under.extend(copyright.filter(|_| look.slides));
         let over = crate::props::overlay(&under, message.as_ref()).map(Arc::new);
         // The slide as far as its builds have got, with its linked text filled in; in the
-        // version that is on, when this screen's theme has it for the slide's kind.
-        let slide = frame.slide.as_ref().filter(|_| look.slides).map(|slide| {
-            let in_version = frame.version.and_then(|version| theme.slide_in_version(slide, version));
-            let (built, _) = in_version.as_ref().unwrap_or(slide).built(&theme, self.build_clock());
-            Arc::new(crate::links::fill(&built, &values).into_owned())
-        });
+        // version that is on, when this screen's theme has it for the slide's kind; without its
+        // words while they are hidden.
+        let slide =
+            frame.slide.as_ref().filter(|_| look.slides).map(|slide| {
+                drawn_slide(slide, &theme, frame.version, self.build_clock(), &values, frame.words_hidden)
+            });
         let media = self.video_picture.clone().or_else(|| frame.media.clone());
         let announcement =
             self.announcement.clone().filter(|shown| look.announcements && (shown.on_slide_screens || !look.slides));
@@ -4703,6 +4757,96 @@ fn capture_wanted() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The frame the app sends the screens for the show as it stands, as `App::refresh_output`
+    /// makes it (the parts these tests look at), with `transition` for the slide's own.
+    fn frame_of(show: &sp_engine::Show, transition: sp_model::Transition) -> Frame {
+        Frame {
+            media: None,
+            video: None,
+            media_fit: sp_model::ImageFit::Fill,
+            slide_video: Vec::new(),
+            ndi: Vec::new(),
+            slide: crate::frame_slide(show),
+            theme: Arc::new(Theme::builtin()),
+            version: None,
+            enabled: true,
+            transition,
+            media_transition: sp_model::Transition::of(sp_model::TransitionKind::Cut),
+            next: None,
+            about: crate::stage::About::default(),
+            build_step: show.build_step(),
+            words_hidden: show.words_hidden(),
+        }
+    }
+
+    fn no_values() -> crate::links::Values<'static> {
+        crate::links::Values { timers: &[], title: None, group: None, next: None, stage_message: None, copyright: None }
+    }
+
+    #[test]
+    fn hide_the_words_and_show_again_dissolve_whatever_the_slides_own_transition() {
+        use sp_engine::{Command, SlideRef};
+        use sp_model::{Transition, TransitionKind};
+        let mut show = sp_engine::Show::new(vec![Arc::new(sp_model::parse_song_text("Song", "One\n\nTwo\n"))]);
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        let push = Transition::of(TransitionKind::Push);
+        let shown = frame_of(&show, push);
+        show.apply(Command::HideWords);
+        let hidden = frame_of(&show, push);
+        let going = going_on(&shown, &hidden);
+        assert!(going.words && !going.new_slide && !going.new_media, "{going:?}");
+        assert_eq!(going.look, Transition::default(), "a dissolve of the usual length, not the push");
+        assert_eq!(going.look.kind, TransitionKind::Dissolve);
+        show.apply(Command::ShowAgain);
+        let back = going_on(&hidden, &frame_of(&show, push));
+        assert!(back.words && !back.new_slide, "{back:?}");
+        assert_eq!(back.look, Transition::default(), "Show Again dissolves too");
+        // Next onto another slide gives way by that slide's own transition, as ever.
+        show.apply(Command::HideWords);
+        let hidden = frame_of(&show, push);
+        show.apply(Command::Next);
+        let next = going_on(&hidden, &frame_of(&show, push));
+        assert!(next.new_slide, "{next:?}");
+        assert_eq!(next.look, push);
+    }
+
+    #[test]
+    fn hiding_the_words_keeps_the_builds_played_so_far() {
+        use sp_engine::{Command, SlideRef};
+        use sp_model::{Build, BuildClock, BuildEffect, Object, Shape, Transition};
+        // Words, then three shapes that come in a click each.
+        let mut song = sp_model::parse_song_text("Song", "One\n");
+        let on_click = Build { on_click: true, ..Build::of(BuildEffect::Fly) };
+        for _ in 0..3 {
+            let mut shape = Object::shape(Shape::Rectangle);
+            shape.build_in = Some(on_click);
+            song.groups[0].slides[0].objects.push(shape);
+        }
+        let mut show = sp_engine::Show::new(vec![Arc::new(song)]);
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        show.apply(Command::Next);
+        show.apply(Command::Next);
+        assert_eq!(show.build_step(), 2, "two of the three built in");
+        let played = frame_of(&show, Transition::default());
+        show.apply(Command::HideWords);
+        let hidden = frame_of(&show, Transition::default());
+        // Not another slide: the screens keep its clocks, so nothing built in plays again.
+        let going = going_on(&played, &hidden);
+        assert!(!going.new_slide && going.words, "{going:?}");
+        assert_eq!(hidden.build_step, 2);
+        // At that step the room sees the same shapes, without the words.
+        let theme = Theme::builtin();
+        let drawn = |frame: &Frame| {
+            let slide = frame.slide.as_deref().expect("on screen");
+            drawn_slide(slide, &theme, None, BuildClock::settled(2), &no_values(), frame.words_hidden)
+        };
+        let (with, without) = (drawn(&played), drawn(&hidden));
+        let shown = |slide: &Slide| slide.objects.iter().map(|object| !object.hidden).collect::<Vec<_>>();
+        assert_eq!(shown(&with), [true, true, true, false]);
+        assert_eq!(shown(&without), shown(&with));
+        assert!(without.words_hidden && !with.words_hidden);
+    }
 
     #[test]
     fn a_problem_that_keeps_coming_is_said_once_then_once_a_minute_with_its_count() {

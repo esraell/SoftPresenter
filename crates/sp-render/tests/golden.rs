@@ -751,6 +751,34 @@ fn a_slide_without_its_words_keeps_the_themes_background_and_picture() {
     assert!(is_about(pixel(&drawn, w, 300, 60), [230, 30, 30]), "the theme's picture: {:?}", pixel(&drawn, w, 300, 60));
 }
 
+/// A box fitted to its words (Container up or down) keeps the size its words give it while
+/// they are hidden: its own fill is drawn as large as with them, with no words on it.
+#[test]
+fn a_box_fitted_to_its_words_keeps_its_size_while_they_are_hidden() {
+    use sp_model::{Rgba, Scaling, SlideRect};
+    let (w, h) = (320, 180);
+    let mut song = slide("Light rises\nover the quiet hills\nand the morning sings", None);
+    let main = &mut song.objects[0];
+    main.frame = Some(SlideRect { x: 160.0, y: 40.0, w: 1600.0, h: 1000.0 });
+    main.fill = Some(Rgba::rgb(0, 200, 0));
+    if let ObjectKind::Text { style, .. } = &mut main.kind {
+        style.scaling = Some(Scaling::ContainerUpOrDown);
+    }
+    // The rows the box's green fill covers, top and bottom.
+    let green_rows = |pixels: &[u8]| -> Option<(u32, u32)> {
+        let green = |y: u32| (0..w).any(|x| is_about(pixel(pixels, w, x, y), [0, 200, 0]));
+        let rows: Vec<u32> = (0..h).filter(|y| green(*y)).collect();
+        Some((*rows.first()?, *rows.last()?))
+    };
+    let with_words = render_with(Some(&song), &Theme::builtin(), w, h);
+    let (top, bottom) = green_rows(&with_words).expect("the box's fill");
+    assert!(bottom - top < 150, "fitted to three lines, not its whole place: {top}..{bottom}");
+    assert!(count_lit(&with_words) > 100, "its words");
+    let hidden = render_with(Some(&song.without_words()), &Theme::builtin(), w, h);
+    assert_eq!(green_rows(&hidden), Some((top, bottom)), "the same size without its words");
+    assert_eq!(count_lit(&hidden), 0, "and no words");
+}
+
 #[test]
 fn a_screens_colour_fills_the_empty_room_and_its_covered_edges() {
     use sp_model::Rgba;

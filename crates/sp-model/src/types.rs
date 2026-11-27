@@ -744,6 +744,11 @@ pub struct Slide {
     /// Kept with the slide, so it survives a restart, until the person marks it as checked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<String>,
+    /// Its words are hidden (Hide the Words): every text box is laid out and placed as ever,
+    /// its own fill, outline and shadow drawn, but its words are not drawn. Set on the copy the
+    /// audience screens draw (see [`Slide::without_words`]), never saved.
+    #[serde(skip)]
+    pub words_hidden: bool,
 }
 
 impl Slide {
@@ -760,6 +765,7 @@ impl Slide {
             hot_key: None,
             advance: None,
             check: None,
+            words_hidden: false,
         }
     }
 
@@ -810,19 +816,14 @@ impl Slide {
         Slide { template: self.template, ..Slide::new(objects) }
     }
 
-    /// The slide as the screens show it while its words are hidden (Hide the Words): the same
-    /// slide, with the same ids, template and objects, so the theme draws it with the same
-    /// template and the same layout behind it. Every text box keeps its place and its look (a
-    /// fill, outline or shadow of its own is still drawn), and its text is empty; a linked box
-    /// loses its link too, which would fill it in again. Pictures, shapes, videos and web pages
-    /// stay as they are. The song itself is never changed.
+    /// The slide as the audience screens show it while its words are hidden (Hide the Words):
+    /// the same slide, its words and all, marked so that its words are not drawn
+    /// ([`Slide::words_hidden`]). Everything that is worked out from the words stays as it is:
+    /// its click builds and their steps, the size of a box fitted to its text, the template the
+    /// theme picks for it. Pictures, shapes, videos and web pages, and each box's own fill,
+    /// outline and shadow, are drawn as ever. The song itself is never changed.
     pub fn without_words(&self) -> Slide {
-        let mut slide = self.clone();
-        for object in slide.objects.iter_mut().filter(|object| object.as_text().is_some()) {
-            object.set_text("");
-            object.link = None;
-        }
-        slide
+        Slide { words_hidden: true, ..self.clone() }
     }
 
     /// The text of the first text object with this role.
@@ -1695,22 +1696,26 @@ mod tests {
     }
 
     #[test]
-    fn without_words_empties_every_text_box_and_keeps_the_rest() {
-        let mut main = Object::text(Role::primary(), "Light rises\nover the quiet hills");
+    fn without_words_marks_the_words_not_drawn_and_keeps_the_rest() {
+        let mut main = Object::text(Role::primary(), "Light rises\nover the quiet hills\nand sings");
         main.frame = Some(SlideRect { x: 100.0, y: 600.0, w: 1720.0, h: 300.0 });
         main.fill = Some(Rgba::rgb(10, 20, 30));
         main.stroke = Some(StrokeLook { width: 4.0, color: Rgba::WHITE });
+        // Delivered a paragraph at a time, a click each: three clicks.
+        main.build_in =
+            Some(crate::Build { on_click: true, by_paragraph: true, ..crate::Build::of(crate::BuildEffect::Dissolve) });
         if let ObjectKind::Text { style, spans, .. } = &mut main.kind {
             style.size = Some(80.0);
             spans.push(crate::TextSpan::new(0, 5, crate::SpanStyle { italic: Some(true), ..Default::default() }));
         }
         let translation = Object::text(Role::translation(), "Свет встаёт");
-        // A box linked to the song's title shows the title in place of its words.
         let mut title = Object::text(Role("title".to_owned()), "[Song Title]");
         title.link = Some(crate::TextLink::SongTitle);
         let bar = Object::shape(Shape::Rectangle);
-        let picture = Object::image("church.png".to_owned(), "Picture".to_owned(), 200, 100);
-        let mut slide = Slide::new(vec![bar, picture, main, translation, title]);
+        // A picture that comes in on the click after the words.
+        let mut picture = Object::image("church.png".to_owned(), "Picture".to_owned(), 200, 100);
+        picture.build_in = Some(crate::Build { on_click: true, ..crate::Build::of(crate::BuildEffect::Dissolve) });
+        let mut slide = Slide::new(vec![bar, main, translation, title, picture]);
         slide.label = Some("Ending".to_owned());
         slide.notes = Some("Slow down".to_owned());
         slide.template = Some(Uuid::new_v4());
@@ -1719,37 +1724,25 @@ mod tests {
         let before = slide.clone();
 
         let shown = slide.without_words();
-        let empty = String::new();
-        assert_eq!(
-            shown.texts(),
-            [
-                (Some(Role::primary()), empty.clone()),
-                (Some(Role::translation()), empty.clone()),
-                (Some(Role("title".to_owned())), empty)
-            ]
-        );
-        // Every box keeps its place and its look; the pictures and shapes are as they were.
-        assert_eq!(shown.objects.len(), slide.objects.len());
-        for (after, was) in shown.objects.iter().zip(&slide.objects) {
-            assert_eq!(
-                (after.id, &after.role, after.frame, after.fill, after.stroke, after.shadow, after.hidden),
-                (was.id, &was.role, was.frame, was.fill, was.stroke, was.shadow, was.hidden)
-            );
-            match (&after.kind, &was.kind) {
-                (ObjectKind::Text { text, style, spans }, ObjectKind::Text { style: had, .. }) => {
-                    assert!(text.is_empty() && spans.is_empty(), "{after:?}");
-                    assert_eq!(style, had);
-                    assert_eq!(after.link, None, "a linked box would be filled in again: {after:?}");
-                }
-                (kind, had) => assert_eq!((after, kind), (was, had)),
-            }
+        assert!(shown.words_hidden && !slide.words_hidden);
+        // Nothing else changes: the words, the boxes, the pictures and shapes, the slide's id,
+        // template, transition and actions are all as they were...
+        assert_eq!(Slide { words_hidden: false, ..shown.clone() }, slide);
+        // ...so its builds keep their steps, three for the paragraphs and one for the picture,
+        // and each step shows what it shows with the words.
+        assert_eq!(shown.click_steps(), slide.click_steps());
+        assert_eq!(shown.click_steps().len(), 4);
+        let theme = crate::Theme::builtin();
+        for step in 0..=4 {
+            let hidden_at = |slide: &Slide| -> Vec<bool> {
+                slide.built(&theme, crate::BuildClock::settled(step)).0.objects.iter().map(|o| o.hidden).collect()
+            };
+            assert_eq!(hidden_at(&shown), hidden_at(&slide), "step {step}");
         }
-        // The slide is the same slide: its id, template, transition, actions, label and notes.
-        assert_eq!(
-            (shown.id, shown.template, shown.transition, &shown.actions, &shown.label, &shown.notes),
-            (slide.id, slide.template, slide.transition, &slide.actions, &slide.label, &slide.notes)
-        );
-        // The song's own words are never changed.
+        // The words are never saved hidden, and the song's own words are never changed.
+        let saved = serde_json::to_string(&shown).unwrap();
+        assert!(!saved.contains("words_hidden"), "{saved}");
+        assert!(!serde_json::from_str::<Slide>(&saved).unwrap().words_hidden);
         assert_eq!(slide, before);
     }
 }
