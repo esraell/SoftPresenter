@@ -204,11 +204,11 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   "Mixed" showing where they differ; Copy style, Paste style, Back to theme, Reset spacing and
   Clear word styles are keys at its foot; in a template, Holds says which of a slide's words the box takes), Shape (which shape, fill, gradient, outline), Picture (how it
   fits), Web Page, NDI Source, AirPlay, Screen. Then Box, the same for every kind (place
-  and size, lining up, rotation, opacity, fill and outline for all but shapes, shadow and flip,
-  order, Rename (which retypes the name in the Objects list), Duplicate, Delete, Undo, Redo, Reset to theme), and Animation (how an object comes on and
+  and size, lining up, rotation with the two flips after the angle, opacity, fill and outline for all but shapes, shadow,
+  order, Rename (which retypes the name in the Objects list), Duplicate and Delete (their names where the three fit one line, else all three as picture keys: `object_keys_named`), Undo, Redo, Reset to theme), and Animation (how an object comes on and
   goes off; not on a theme's template or a stage layout). Several objects of different kinds
   have Box and Animation only, under a line saying how many and what. With nothing picked the
-  column has a plain heading (SLIDE, PROP, THEME SLIDE, LAYOUT); under SLIDE are the slide's own Label, Template, Go to Next and notes (`slide_panel`). Every row is a caption in small
+  column has a plain heading (SLIDE, PROP, THEME SLIDE, LAYOUT); under SLIDE are the slide's own Label, Template and Go to Next (`slide_panel`; its notes are the footer's Slide Notes). Every row is a caption in small
   capitals in a column at the left (`row`), then its controls: separate keys (`square_key`,
   `word_key`), numbers, menus, and colours as a row of swatches that always fits one line, ending
   in a well for any colour (`swatch_row`). A row that belongs to a switch on the same tab

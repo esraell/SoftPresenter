@@ -1094,7 +1094,8 @@ fn tab_style(ui: &mut egui::Ui) {
 }
 
 /// A song's slide with nothing picked: what the slide itself has. Its label, the template it is
-/// drawn with, going on to the next slide by itself, and its notes. A prop has none of these.
+/// drawn with, and going on to the next slide by itself (its notes are the footer's Slide
+/// Notes). A prop has none of these.
 fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     let of_song = state.edit_kind() == Some(crate::home::EditKind::Slides);
     let templates = state.song_templates.clone();
@@ -1180,15 +1181,6 @@ fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     if (label.clone(), template, advance) != before {
         draft.record();
         (draft.slide.label, draft.slide.template, draft.slide.advance) = (label, template, advance);
-    }
-    scope_line(ui, false, t("inspector.notes.heading", "SLIDE NOTES"), "");
-    let mut notes = draft.slide.notes.clone().unwrap_or_default();
-    let field = egui::TextEdit::multiline(&mut notes)
-        .desired_rows(4)
-        .desired_width(f32::INFINITY)
-        .hint_text(t("inspector.notes.placeholder", "Notes for whoever runs the slides"));
-    if ui.add(field).changed() {
-        draft.slide.notes = (!notes.trim().is_empty()).then_some(notes);
     }
     nothing_selected(ui);
 }
@@ -1662,6 +1654,20 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
 
     row(ui, column, rotate, |ui| {
         number(ui, &mut object.rotation, NUMBER, |d| d.speed(0.5).range(-360.0..=360.0).suffix("°").max_decimals(1));
+        // After the angle: mirror it left to right, or top to bottom.
+        for (across, hint) in [
+            (true, t("inspector.flip.across", "Mirror it left to right")),
+            (false, t("inspector.flip.down", "Mirror it top to bottom")),
+        ] {
+            let on = if across { object.flip_h } else { object.flip_v };
+            if square_key(ui, KEY_WIDE, (on, false), hint, |p, cell, ink| flip_mark(p, cell, across, ink)).clicked() {
+                if across {
+                    object.flip_h = !on;
+                } else {
+                    object.flip_v = !on;
+                }
+            }
+        }
     });
 
     row(ui, column, opacity, |ui| {
@@ -1692,19 +1698,6 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         if shadow.clicked() {
             object.shadow = object.shadow.is_none().then_some(BOX_SHADOW);
         }
-        for (across, hint) in [
-            (true, t("inspector.flip.across", "Mirror it left to right")),
-            (false, t("inspector.flip.down", "Mirror it top to bottom")),
-        ] {
-            let on = if across { object.flip_h } else { object.flip_v };
-            if square_key(ui, KEY_WIDE, (on, false), hint, |p, cell, ink| flip_mark(p, cell, across, ink)).clicked() {
-                if across {
-                    object.flip_h = !on;
-                } else {
-                    object.flip_v = !on;
-                }
-            }
-        }
     });
     let mut look = object.shadow.unwrap_or(BOX_SHADOW);
     shadow_rows(ui, column, object.shadow.is_some(), &mut look);
@@ -1732,17 +1725,33 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     // it there does.
     let (mut delete, mut duplicate, mut rename) = (false, false, false);
     row(ui, column, named, |ui| {
-        // Where the three don't fit one line in a language, they wrap.
-        let wrapping = Layout::left_to_right(Align::Min).with_main_wrap(true);
-        ui.allocate_ui_with_layout(vec2(room, KEY), wrapping, |ui| {
-            ui.spacing_mut().item_spacing = vec2(BETWEEN, FOOT_APART);
-            let hint = t("inspector.rename.hint", "Retype its name in the Objects list");
-            rename = word_key(ui, t("inspector.rename", "Rename"), false, true).on_hover_text(hint).clicked();
-            let hint = crate::keys::hint(t("inspector.duplicate.hint", "Make a copy of it beside it"), "D", false);
-            duplicate = word_key(ui, t("inspector.duplicate", "Duplicate"), false, true).on_hover_text(hint).clicked();
-            let hint = t("inspector.delete.hint", "Remove this object from the slide (Delete)");
-            delete = word_key(ui, t("inspector.delete", "Delete"), false, true).on_hover_text(hint).clicked();
-        });
+        // Their names where the three fit the row at the usual size; where they don't, in a
+        // language with longer words, all three are pictures that say their names under the
+        // pointer. Never two lines, and never some of each.
+        let rename_hint = t("inspector.rename.hint", "Retype its name in the Objects list");
+        let duplicate_hint =
+            crate::keys::hint(t("inspector.duplicate.hint", "Make a copy of it beside it"), "D", false);
+        let delete_hint = t("inspector.delete.hint", "Remove this object from the slide (Delete)");
+        let keys: [(&str, &str, crate::icons::Icon); 3] = [
+            (t("inspector.rename", "Rename"), rename_hint, crate::icons::Icon::Pencil),
+            (t("inspector.duplicate", "Duplicate"), duplicate_hint.as_str(), crate::icons::Icon::Stack),
+            (t("inspector.delete", "Delete"), delete_hint, crate::icons::Icon::Trash),
+        ];
+        let mut pressed = [false; 3];
+        if object_keys_named(ui, room) {
+            for (at, (words, hint, _)) in keys.into_iter().enumerate() {
+                pressed[at] = word_key(ui, words, false, true).on_hover_text(hint).clicked();
+            }
+        } else {
+            for (at, (words, _, icon)) in keys.into_iter().enumerate() {
+                let key = square_key(ui, KEY_WIDE, (false, false), words, |painter, cell, ink| {
+                    crate::icons::paint(painter, icon, Rect::from_center_size(cell.center(), vec2(14.0, 14.0)), ink);
+                });
+                key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, words));
+                pressed[at] = key.clicked();
+            }
+        }
+        [rename, duplicate, delete] = pressed;
     });
     let renamed = (object.id, crate::editor::object_name(object));
     let follows_theme =
@@ -1792,6 +1801,16 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     if delete {
         draft.delete_selected();
     }
+}
+
+/// Whether the Box tab's Rename, Duplicate and Delete have their names: where the three fit one
+/// line across `room` at the usual size, in the language set. Otherwise all three are pictures.
+fn object_keys_named(ui: &egui::Ui, room: f32) -> bool {
+    let names =
+        [t("inspector.rename", "Rename"), t("inspector.duplicate", "Duplicate"), t("inspector.delete", "Delete")];
+    let wide: f32 =
+        names.iter().map(|name| crate::studio::flat_button_width(ui, &[name], &word_key_font(), 13.0)).sum();
+    wide + 2.0 * BETWEEN <= room
 }
 
 /// How far apart the keys at the foot of a tab are, side by side and where they wrap.
@@ -2372,21 +2391,21 @@ fn text_look(
     });
     row(ui, column, t("inspector.row.capitals", "Capitals"), |ui| {
         let options = [
-            (Caps::None, t("inspector.caps.none", "None")),
-            (Caps::AllCaps, t("inspector.caps.all", "All Caps")),
-            (Caps::Lowercase, t("inspector.caps.lower", "Lowercase")),
+            (Caps::None, t("inspector.caps.none", "As typed")),
+            (Caps::AllCaps, t("inspector.caps.all", "ALL CAPITALS")),
+            (Caps::Lowercase, t("inspector.caps.lower", "all small")),
+            (Caps::StartCase, t("inspector.caps.start", "Each Word")),
             (Caps::TitleCase, t("inspector.caps.title", "Title Case")),
-            (Caps::StartCase, t("inspector.caps.start", "Start Case")),
         ];
         choice(ui, "caps", room, &mut wanted.caps, &options);
     });
     row(ui, column, t("inspector.row.fitting", "Fitting"), |ui| {
         let options = [
             (Scaling::None, t("inspector.scaling.none", "None")),
-            (Scaling::TextUp, t("inspector.scaling.up", "Text up")),
             (Scaling::TextDown, t("inspector.scaling.down", "Text down")),
+            (Scaling::TextUp, t("inspector.scaling.up", "Text up")),
             (Scaling::TextUpOrDown, t("inspector.scaling.up_or_down", "Text up or down")),
-            (Scaling::ContainerUpOrDown, t("inspector.scaling.container", "Container up or down")),
+            (Scaling::ContainerUpOrDown, t("inspector.scaling.container", "Box up or down")),
         ];
         choice(ui, "scaling", room, &mut wanted.scaling, &options);
     });
@@ -3101,9 +3120,12 @@ mod tests {
                 draft.select_only(None);
             }
             let words = words_drawn(&mut state, &theme);
-            for wanted in ["SLIDE", "LABEL", "GO TO NEXT", "SLIDE NOTES", "None"] {
+            for wanted in ["SLIDE", "LABEL", "GO TO NEXT", "None"] {
                 assert!(words.iter().any(|said| said == wanted), "{wanted} in {words:?}");
             }
+            // Its notes are the footer's Slide Notes, in one place only.
+            assert!(!words.iter().any(|said| said == "SLIDE NOTES"), "{words:?}");
+            assert_eq!(words.iter().filter(|said| *said == "Slide Notes").count(), 1, "{words:?}");
             // A time chosen from Go to Next's menu (the last None drawn) is the slide's, and one
             // Undo step.
             let depth = |state: &HomeState| state.editing.as_ref().map_or(0, EditDraft::undo_depth);
@@ -3153,6 +3175,48 @@ mod tests {
             let words = words_drawn(&mut editing_text(InspectorTab::Own, false, false), &theme);
             assert!(!words.iter().any(|said| said == "HOLDS"), "{words:?}");
         });
+    }
+
+    /// The Box tab's Rename, Duplicate and Delete, in every language: their names all on one
+    /// line, or none drawn and three picture keys in their place. Never two lines, never some
+    /// of each. The inspector is as wide at 1100 x 700 as at 1440 x 900, so one width is both.
+    #[test]
+    fn the_object_rows_keys_have_their_names_on_one_line_or_are_all_pictures() {
+        let theme = Theme::builtin();
+        let mut forms = Vec::new();
+        for language in LANGUAGES {
+            crate::i18n::with_language(language, || {
+                let names = [
+                    t("inspector.rename", "Rename"),
+                    t("inspector.duplicate", "Duplicate"),
+                    t("inspector.delete", "Delete"),
+                ];
+                let words = word_rects(&mut editing_text(InspectorTab::Box, false, false), &theme);
+                let caption = t("inspector.row.object", "Object").to_uppercase();
+                let (_, row) = words.iter().find(|(said, _)| *said == caption).expect("the Object row");
+                let on_row = |place: &Rect| (place.center().y - row.center().y).abs() < KEY / 2.0;
+                let drawn: Vec<Option<Rect>> = names
+                    .iter()
+                    .map(|name| {
+                        words.iter().find(|(said, place)| said == name && on_row(place)).map(|(_, place)| *place)
+                    })
+                    .collect();
+                let named = drawn.iter().flatten().count();
+                assert!(named == 0 || named == 3, "{language:?}: all names or none on the row: {drawn:?}");
+                // No key's words under the row: it is one line.
+                for name in names {
+                    let below = words.iter().any(|(said, place)| said == name && place.min.y > row.max.y + 4.0);
+                    assert!(!below, "{language:?}: {name} on a second line");
+                }
+                if named == 3 {
+                    let ends = drawn[2].expect("Delete").max.x;
+                    assert!(ends <= PANEL_WIDTH, "{language:?}: the names end at {ends}");
+                }
+                forms.push((language, named == 3));
+            });
+        }
+        assert!(forms.contains(&(crate::i18n::Language::English, true)), "English has room for its names");
+        assert!(forms.contains(&(crate::i18n::Language::Russian, false)), "Russian's don't fit: pictures");
     }
 
     #[test]
