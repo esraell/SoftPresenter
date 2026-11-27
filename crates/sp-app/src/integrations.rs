@@ -2121,6 +2121,8 @@ mod tests {
     fn every_page() -> Vec<(&'static str, Services)> {
         let mut refused = voxlive_connected();
         refused.voxlive.status = Status::Refused("VoxLive doesn't know that key: check it in VoxLive.".to_owned());
+        let mut out_of_reach = voxlive_connected();
+        out_of_reach.voxlive.status = Status::Trouble(crate::notices::unreachable("VoxLive"));
         let mut signed_out = Services::default();
         signed_out.voxlive.open = true;
         let mut warned = canva_connected();
@@ -2132,10 +2134,11 @@ mod tests {
         let mut signing_in = canva_signed_out();
         signing_in.canva.phase = crate::canva::Phase::SigningIn;
         let mut trouble = timelychurch_connected();
-        trouble.timelychurch.trouble = Some("TimelyChurch couldn't be reached.".to_owned());
+        trouble.timelychurch.trouble = Some(crate::notices::unreachable("TimelyChurch"));
         vec![
             ("voxlive", voxlive_connected()),
             ("voxlive refused", refused),
+            ("voxlive out of reach", out_of_reach),
             ("voxlive signed out", signed_out),
             ("canva", canva_connected()),
             ("canva warned", warned),

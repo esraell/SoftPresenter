@@ -77,8 +77,12 @@ impl crate::App {
                         &[("church", &church)],
                     )),
                     Said::Disconnected => running.home_state.notices.trouble(super::sync::disconnected_words()),
-                    Said::Trouble(why) => running.home_state.notices.trouble(why),
                 }
+            }
+            // Checks that can't reach TimelyChurch: in the card at once, in the notices once an
+            // outage, after a while.
+            if self.timelychurch.tell_outage(&mut running.home_state.notices) {
+                running.home_window.request_redraw();
             }
         }
         if self.timelychurch.check_due() && self.running.is_some() {

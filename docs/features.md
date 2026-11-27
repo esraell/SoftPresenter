@@ -35,7 +35,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   button, a click elsewhere, or Escape, which then clears nothing and closes nothing else)
   marks everything seen. Clear All keeps a question that waits for its answer; the list keeps
   the last 40. Only trouble (a file that couldn't be read or saved, an output or a player that
-  stopped, VoxLive refusing its key or not answering), questions, and what happened out of sight (added to another playlist, a file read,
+  stopped, VoxLive refusing its key, VoxLive or TimelyChurch out of reach for two minutes), questions, and what happened out of sight (added to another playlist, a file read,
   a Bible installed, written files) earn an entry, and every one goes in the log too; what the
   operator just did and can see is never said. The show keys (← → Space Enter) still run the
   show while the list is open. `sp notices` lists it, `sp notices answer N ANSWER` answers a
@@ -2190,8 +2190,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   first characters with Find Screens Again and Disconnect. With no key, or one VoxLive
   refused, Connect has the field (Return connects too) and where to make a key; a
   key VoxLive refuses stops the asking until another is given, so the church's other devices
-  aren't locked out, and a "wait" answer is waited out. Disconnect forgets the key on this
-  computer, after asking ("Disconnect VoxLive? … This can't be undone.").
+  aren't locked out, and a "wait" answer is waited out. A refused key is said in the notices at
+  once. When VoxLive can't be reached, Connection says so at once in plain words ("VoxLive can't
+  be reached. SoftPresenter keeps trying. Check this computer's internet connection."), and why
+  (a lookup that failed, a timeout) goes in the log only. The notices say it only once VoxLive
+  has been out of reach for two minutes, or at once while a VoxLive screen is on screen; once
+  until VoxLive answers again, when the entry goes by itself, so a Wi-Fi change says nothing.
+  Disconnect forgets the key on this computer, after asking ("Disconnect VoxLive? … This can't
+  be undone.").
 - **Where keys and sign-ins are kept:** one store for every key and token the app holds
   (VoxLive's key, Canva Sync's secret and sign-in), on every system, never a plain file or the
   log. On a Mac it is the Keychain. On Windows it is the signed-in user's Credential Manager,
@@ -2278,7 +2284,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   wait while anything is on screen. A TimelyChurch song put on screen from its service's
   playlist on the service's day is told to TimelyChurch once per service, queued on disk with
   its own idempotency key until sent. A disconnected computer says "This computer was
-  disconnected from TimelyChurch" and stops asking. [timelychurch.md](timelychurch.md) has the
+  disconnected from TimelyChurch" and stops asking. A check that can't reach it is said in the
+  card at once ("TimelyChurch can't be reached. …", why in the log only), and in the notices,
+  as VoxLive's is, only when a check two minutes or more after the first still can't (so the
+  next check, five minutes later), once until a check reaches it, when the entry goes. [timelychurch.md](timelychurch.md) has the
   design.
 - **A VoxLive screen's look**, changed from Settings › Integrations › VoxLive: Change Look › on a
   screen's row opens its look, with a control for each setting VoxLive describes (a menu, a colour, a tick or

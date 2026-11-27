@@ -449,5 +449,6 @@
   "notices.import.damage.row_into_first_page": "один із записів продовжується на першій сторінці",
   "notices.import.damage.value_list": "в одного із записів неправильний список значень",
   "notices.import.damage.unknown_kind": "одне зі значень такого типу, якого не буває в жодному файлі бази даних",
-  "notices.import.damage.table_outside_file": "одна з таблиць починається на сторінці, якої немає у файлі"
+  "notices.import.damage.table_outside_file": "одна з таблиць починається на сторінці, якої немає у файлі",
+  "notices.unreachable": "Немає звʼязку з {service}. SoftPresenter продовжує спроби. Перевірте підключення цього компʼютера до інтернету."
 }

@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use super::client::{self, Paired, Problem, Sent};
 use super::store::{Cached, Files, Settings, UseBook};
 use super::wire::{Id, PairRequest, ServicesReply, Song};
+use crate::notices::{Notices, Outage};
 
 /// How long after the app starts the first check is made.
 const FIRST_CHECK_AFTER: Duration = Duration::from_secs(10);
@@ -96,6 +97,10 @@ pub struct Connection {
     pub status: Status,
     /// The last problem, in a sentence, for the card (cleared by the next good answer).
     pub trouble: Option<String>,
+    /// When the last check failed (it counts while connected with trouble), and what the
+    /// notices have said of it (`tell_outage`).
+    pub failed_at: Option<Instant>,
+    outage: Outage,
     next_check: Option<Instant>,
     checking: bool,
     /// A check was asked for (Check Now) while one was under way.
@@ -130,7 +135,6 @@ pub struct Connection {
 pub enum Said {
     Connected(String),
     Disconnected,
-    Trouble(String),
 }
 
 impl Connection {
@@ -147,6 +151,8 @@ impl Connection {
             token: None,
             status: Status::Off,
             trouble: None,
+            failed_at: None,
+            outage: Outage::default(),
             next_check: None,
             checking: false,
             check_again: false,
@@ -210,6 +216,14 @@ impl Connection {
     /// A check is under way.
     pub fn checking(&self) -> bool {
         self.checking
+    }
+
+    /// What the notices say of checks that can't reach TimelyChurch (`notices::Outage`): once an
+    /// outage, after a while (nothing of TimelyChurch's on screen needs it, so never at once),
+    /// and taken away when a check reaches it again. True when the notices changed.
+    pub fn tell_outage(&mut self, notices: &mut Notices) -> bool {
+        let failing = self.failed_at.filter(|_| self.status == Status::Connected && self.trouble.is_some());
+        self.outage.follow(failing, false, || self.trouble.clone().unwrap_or_default(), notices)
     }
 
     /// A song as TimelyChurch last sent it, kept on this computer.
@@ -525,7 +539,8 @@ impl Connection {
     }
 
     /// What a problem means for the connection.
-    fn trouble_with(&mut self, problem: Problem, checking: bool) {
+    pub(super) fn trouble_with(&mut self, problem: Problem, checking: bool) {
+        let unreachable = matches!(problem, Problem::Unreachable(_));
         match problem {
             Problem::Disconnected => {
                 crate::applog::problem("timelychurch", "the token was refused: disconnected in TimelyChurch");
@@ -550,10 +565,11 @@ impl Connection {
             Problem::Unreachable(why) | Problem::Other(why) => {
                 crate::applog::problem("timelychurch", &why);
                 if checking {
-                    if self.trouble.as_deref() != Some(why.as_str()) {
-                        self.said.push(Said::Trouble(why.clone()));
-                    }
-                    self.trouble = Some(why);
+                    // In the card at once; in the notices once an outage, after a while
+                    // (`tell_outage`). Why it couldn't be reached (a lookup that failed, a
+                    // timeout) is the log's only.
+                    self.trouble = Some(if unreachable { crate::notices::unreachable("TimelyChurch") } else { why });
+                    self.failed_at = Some(Instant::now());
                     self.next_check = Some(Instant::now() + CHECK_EVERY);
                 } else {
                     self.next_send = Some(Instant::now() + SEND_AGAIN);

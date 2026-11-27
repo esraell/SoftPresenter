@@ -22,6 +22,7 @@ use crate::outside::Waiting;
 use crate::studio::{CARD, CARE, LINE, TEXT, TEXT_DIM, TEXT_FAINT};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde::Serialize;
+use std::time::{Duration, Instant};
 
 /// How many entries the list keeps, besides questions waiting for an answer (which stay until
 /// answered).
@@ -391,6 +392,64 @@ impl Notices {
             kept <= KEPT
         });
     }
+}
+
+/// How long a service the app keeps asking (VoxLive's screens, TimelyChurch's services) may stay
+/// out of reach before the notices say so: a network that drops for a moment (a Wi-Fi change, a
+/// move between networks) is nothing to tell the operator about.
+pub const OUTAGE_GRACE: Duration = Duration::from_secs(120);
+
+/// What the notices say of a service the app keeps asking while it can't be reached. Its card in
+/// Settings says so at once; the notices say it once an outage (from its first failed answer
+/// until it answers again): when a failed answer comes [`OUTAGE_GRACE`] or more after the first,
+/// or at once while what the service does is on screen. When it answers again, the entry goes.
+#[derive(Debug, Default)]
+pub struct Outage {
+    /// When this outage's first failed answer came.
+    since: Option<Instant>,
+    /// The entry said for this outage, once it has been: its words, to take it away by.
+    said: Option<String>,
+}
+
+impl Outage {
+    /// Follows the service, each time the app wakes. `failing` is when its last failed answer
+    /// came, while it hasn't answered since (`None` once it answers, or isn't asked any more);
+    /// `in_use` is true while what it does is on screen; `words` are the entry's. True when the
+    /// list changed.
+    pub fn follow(
+        &mut self,
+        failing: Option<Instant>,
+        in_use: bool,
+        words: impl FnOnce() -> String,
+        notices: &mut Notices,
+    ) -> bool {
+        let Some(at) = failing else {
+            self.since = None;
+            let said = self.said.take();
+            if let Some(said) = &said {
+                notices.withdraw(said);
+            }
+            return said.is_some();
+        };
+        let since = *self.since.get_or_insert(at);
+        if self.said.is_some() || !(in_use || at.saturating_duration_since(since) >= OUTAGE_GRACE) {
+            return false;
+        }
+        let words = words();
+        notices.trouble(words.clone());
+        self.said = Some(words);
+        true
+    }
+}
+
+/// What a service's card and the notices say when the app can't reach it. Why (a lookup that
+/// failed, a timeout) goes in the log only.
+pub fn unreachable(service: &str) -> String {
+    crate::i18n::tf(
+        "notices.unreachable",
+        "{service} can't be reached. SoftPresenter keeps trying. Check this computer's internet connection.",
+        &[("service", service)],
+    )
 }
 
 /// When a notice was said, for the list: hours and minutes on the window's clock (12-hour or
@@ -1048,6 +1107,69 @@ mod tests {
         assert_eq!(sent[1]["seen"], false);
         assert!(sent[1]["time"].as_i64().is_some_and(|time| time > 0));
         assert!(sent[0].get("about").is_none());
+    }
+
+    /// The words of the trouble entries in the list, newest first.
+    fn troubles(notices: &Notices) -> Vec<String> {
+        notices.to_vec().into_iter().filter(|notice| notice.kind == Kind::Trouble).map(|notice| notice.text).collect()
+    }
+
+    #[test]
+    fn a_service_out_of_reach_is_said_once_an_outage_after_two_minutes() {
+        let (mut notices, mut outage) = (Notices::default(), Outage::default());
+        let start = Instant::now();
+        let at = |seconds: u64| Some(start + Duration::from_secs(seconds));
+        let words = || "Choir Hub can't be reached.".to_owned();
+        // Failed answers over 90 seconds, each with other words: nothing.
+        for (seconds, said) in [(0, "timed out"), (45, "no address"), (90, "no route")] {
+            assert!(!outage.follow(at(seconds), false, || said.to_owned(), &mut notices));
+        }
+        assert!(troubles(&notices).is_empty(), "a short outage says nothing");
+        // Still failing two minutes after the first: said, once, whatever comes after.
+        assert!(outage.follow(at(120), false, words, &mut notices));
+        for seconds in [120, 150, 600] {
+            assert!(!outage.follow(at(seconds), true, || "other words".to_owned(), &mut notices));
+        }
+        assert_eq!(troubles(&notices), [words()]);
+        // It answers: the entry goes by itself, with nothing said.
+        assert!(outage.follow(None, false, words, &mut notices));
+        assert!(notices.to_vec().is_empty());
+        assert!(!outage.follow(None, false, words, &mut notices));
+        // Out of reach again: a new outage, said after its own two minutes.
+        assert!(!outage.follow(at(700), false, words, &mut notices));
+        assert!(!outage.follow(at(760), false, words, &mut notices));
+        assert!(outage.follow(at(820), false, words, &mut notices));
+        assert_eq!(troubles(&notices), [words()]);
+    }
+
+    #[test]
+    fn a_service_on_screen_is_said_out_of_reach_at_once_and_once() {
+        let (mut notices, mut outage) = (Notices::default(), Outage::default());
+        let start = Instant::now();
+        let words = || "Choir Hub can't be reached.".to_owned();
+        assert!(!outage.follow(Some(start), false, words, &mut notices), "not on screen: it waits");
+        // What it does goes on screen while the outage lasts: said then.
+        assert!(outage.follow(Some(start + Duration::from_secs(30)), true, words, &mut notices));
+        assert!(!outage.follow(Some(start + Duration::from_secs(60)), true, words, &mut notices));
+        assert_eq!(troubles(&notices).len(), 1);
+        // Cleared by the operator meanwhile: not said again in the same outage.
+        notices.clear_all();
+        assert!(!outage.follow(Some(start + Duration::from_secs(200)), true, words, &mut notices));
+        assert!(troubles(&notices).is_empty());
+    }
+
+    #[test]
+    fn a_service_out_of_reach_is_said_in_plain_words() {
+        use crate::i18n::{Language, with_language};
+        for language in [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian] {
+            let words = with_language(language, || unreachable("VoxLive"));
+            assert!(words.starts_with("VoxLive") || words.contains(" VoxLive"), "{words}");
+            assert!(words.contains("SoftPresenter") && !words.contains('{'), "{words}");
+        }
+        assert_eq!(
+            with_language(Language::English, || unreachable("VoxLive")),
+            "VoxLive can't be reached. SoftPresenter keeps trying. Check this computer's internet connection."
+        );
     }
 
     #[test]

@@ -3819,7 +3819,22 @@ impl App {
         {
             self.apply(vec![Command::GoTo(sp_engine::SlideRef { presentation: self.voxlive_slot, slide })]);
         }
+        // A VoxLive screen is on screen: VoxLive out of reach is said at once then.
+        let on_screen = self.show.live().is_some_and(|at| at.presentation == self.voxlive_slot);
         if let Some(running) = self.running.as_mut() {
+            // A key refused, or VoxLive out of reach for a while, is trouble in the notices too
+            // (`voxlive::tell`); the card says so at once.
+            let told = voxlive::tell(
+                &running.home_state.voxlive.status,
+                &self.voxlive.status,
+                self.voxlive.failed_at,
+                on_screen,
+                &mut self.voxlive.outage,
+                &mut running.home_state.notices,
+            );
+            if told {
+                running.home_window.request_redraw();
+            }
             let view = &mut running.home_state.voxlive;
             if view.schema != self.voxlive.schema {
                 view.schema = self.voxlive.schema.clone();
@@ -3828,14 +3843,6 @@ impl App {
                 || view.screens != self.voxlive.screens
                 || !self.voxlive.key_hint_is(view.key_hint.as_deref())
             {
-                // A key refused, or VoxLive no longer answering, is trouble in the notices too
-                // (said when it comes, not again while it stays).
-                if view.status != self.voxlive.status
-                    && let voxlive::Status::Refused(why) | voxlive::Status::Trouble(why) = &self.voxlive.status
-                {
-                    running.home_state.notices.trouble(format!("VoxLive: {why}"));
-                }
-                let view = &mut running.home_state.voxlive;
                 view.status = self.voxlive.status.clone();
                 view.screens = self.voxlive.screens.clone();
                 view.key_hint = self.voxlive.key_hint();

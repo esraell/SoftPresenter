@@ -831,4 +831,32 @@ mod with_the_demo_church {
         assert!(!connection.count_use("s|1", SongUse::default()));
         assert_eq!(connection.tick(), None);
     }
+
+    #[test]
+    fn a_check_that_cant_reach_timelychurch_is_said_plainly_and_once_an_outage() {
+        // Connected, with no token and no files: nothing here asks the network.
+        let mut connection = Connection::new(Some("http://127.0.0.1:9".to_owned()), None);
+        connection.status = Status::Connected;
+        let mut notices = crate::notices::Notices::default();
+        let texts = |notices: &crate::notices::Notices| -> Vec<String> {
+            notices.to_vec().into_iter().map(|notice| notice.text).collect()
+        };
+        let out_of_reach = |reason: &str| Problem::Unreachable(format!("TimelyChurch couldn't be reached ({reason})."));
+        connection.trouble_with(out_of_reach("io: No route to host (os error 65)"), true);
+        let card = connection.trouble.clone().expect("the card says so at once");
+        assert!(!card.contains("io:") && !card.contains("os error"), "plain words: {card}");
+        assert!(connection.said.is_empty(), "nothing said for the notices as it comes: {:?}", connection.said);
+        connection.tell_outage(&mut notices);
+        assert!(texts(&notices).is_empty(), "one check that failed says nothing: {:?}", texts(&notices));
+        // The next check, five minutes on, can't reach it either: said once, in the card's words.
+        connection.trouble_with(out_of_reach("timeout: global"), true);
+        connection.failed_at = connection.failed_at.map(|at| at + Duration::from_secs(300));
+        assert!(connection.tell_outage(&mut notices));
+        assert!(!connection.tell_outage(&mut notices));
+        assert_eq!(texts(&notices), [card]);
+        // A check that reaches it: the entry goes by itself.
+        connection.trouble = None;
+        assert!(connection.tell_outage(&mut notices));
+        assert!(texts(&notices).is_empty());
+    }
 }
