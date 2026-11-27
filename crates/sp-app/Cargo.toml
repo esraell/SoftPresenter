@@ -39,6 +39,9 @@ zip.workspace = true
 roxmltree.workspace = true
 flate2.workspace = true
 fs4.workspace = true
+# Cutting a folder's name by letter (as the toolkit lays text out), which egui and winit bring
+# already.
+unicode-segmentation = "1.13"
 # Remote Control (src/remote): a small HTTPS and WebSocket server on its own thread, running
 # only while switched on. HTTP/1.1 and WebSocket only, no middleware stacks; TLS through the
 # rustls the app already has (ring, as ureq uses), a certificate made here, and argon2id for

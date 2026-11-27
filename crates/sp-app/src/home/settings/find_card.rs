@@ -14,6 +14,7 @@ use super::parts::{self, Key, card, keys_line, note};
 use crate::find_songs::{Ask, Card, Kind, Phase, Source, brought_words, folder_name, row_words};
 use crate::i18n::{t, tf, tn};
 use crate::studio::{CARE, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, fixed_semibold, semibold};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// How many songbooks and libraries were found, as the card says it.
 fn found_words(n: usize) -> String {
@@ -61,23 +62,34 @@ fn find_again() -> &'static str {
 /// language, so choosing a folder moves nothing (the owner: nothing changes size when clicked).
 const SENTENCE_LINES: usize = 3;
 
-/// The least room the line's words keep beside its keys, as the design has it: with less (the
-/// narrowest Settings window leaves 214), the keys go under the sentence and it has the card's
-/// whole width, so it keeps to three lines in every language.
-const WORDS_ROOM: f32 = 320.0;
+/// A folder's name as long as an ordinary one gets, made the hardest to wrap: 28 letters of
+/// Cyrillic (which takes more room than Latin) in one word, which a line can't break. The line's
+/// keys go beside its words only where the sentence with a folder of this name fits in its three
+/// lines there, so an ordinary name never has to be cut. Never shown.
+const ORDINARY_NAME: &str = "песнимолодёжногохорагодовые2";
+
+/// Whether the line's keys go beside its words, which have `room` there: where the sentence with
+/// one folder of an ordinary name's length fits in its three lines. The window's width and the
+/// language decide it, never the folders chosen, so nothing moves as they are.
+fn keys_beside(ui: &egui::Ui, room: f32) -> bool {
+    parts::note_lines(ui, &looks_in_named(&[ORDINARY_NAME.to_owned()], 0), room) <= SENTENCE_LINES
+}
 
 /// Before a search, one line (the owner, 26 November): Look for songs you already have, with
 /// where it looks and that nothing comes in unasked in its sentence, and Choose a Folder… and
-/// Find at its right, or under the sentence in a narrow window. The sentence keeps three lines'
-/// room, a folder's name cut in its middle only where it would take more, with the folders'
-/// whole paths under the pointer.
+/// Find at its right, or under the sentence where the window is too narrow for an ordinary
+/// folder's name beside them. The sentence keeps three lines' room, names the first two folders
+/// added and counts the others, a name cut in its middle only where it would take more, with the
+/// folders' whole paths under the pointer.
 fn before(ui: &mut egui::Ui, state: &mut Card) {
     let label = t("settings.find.look", "Look for songs you already have");
     let keys = [Key::plain(choose_folder()), Key::main(t("settings.find.find", "Find")).at_least(FIND_WIDTH)];
-    let room = parts::keys_row_note_room(ui, ui.available_width(), &keys, WORDS_ROOM);
+    let width = ui.available_width();
+    let beside = keys_beside(ui, parts::room_beside_keys(ui, width, &keys));
+    let room = parts::keys_row_note_room(ui, width, &keys, beside);
     let sentence = looks_in_fitted(ui, &state.added, room, SENTENCE_LINES);
     let (clicked, words) =
-        parts::keys_row_keeping(ui, "find before", label, (&sentence, SENTENCE_LINES), &keys, WORDS_ROOM);
+        parts::keys_row_keeping(ui, "find before", label, (&sentence, SENTENCE_LINES), &keys, beside);
     if !state.added.is_empty() {
         ui.interact(words, ui.scope_id().with("find before folders"), Sense::hover())
             .on_hover_text(added_paths(&state.added));
@@ -89,20 +101,22 @@ fn before(ui: &mut egui::Ui, state: &mut Card) {
     }
 }
 
-/// The folders added, whole, one a line: the hover of the line's words.
+/// Every folder added, whole, one a line: the hover of the line's words.
 fn added_paths(added: &[std::path::PathBuf]) -> String {
     added.iter().map(|folder| folder.display().to_string()).collect::<Vec<_>>().join("\n")
 }
 
-/// Where it looks, as the line's sentence says it: the usual places, then each folder added
-/// with Choose a Folder…, by its own name.
+/// Where it looks, as the line's sentence says it: the usual places, then the first two folders
+/// added with Choose a Folder…, by their own names, and how many more.
 fn looks_in_words(added: &[std::path::PathBuf]) -> String {
-    looks_in_named(&added.iter().map(|folder| folder_name(folder)).collect::<Vec<_>>())
+    let named: Vec<String> = added.iter().take(2).map(|folder| folder_name(folder)).collect();
+    looks_in_named(&named, added.len().saturating_sub(2))
 }
 
-/// The sentence, with these names for the folders added.
-fn looks_in_named(folders: &[String]) -> String {
-    match folders {
+/// The sentence, naming the folders `named` (the first two added, as they are to be said) and
+/// counting `more` others.
+fn looks_in_named(named: &[String], more: usize) -> String {
+    match named {
         [] => t(
             "settings.find.looks_in",
             "Looks in Documents, Downloads, the Desktop and SoftProjector\u{2019}s folder. Nothing comes in until you choose.",
@@ -113,29 +127,37 @@ fn looks_in_named(folders: &[String]) -> String {
             "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder and {folder}. Nothing comes in until you choose.",
             &[("folder", folder)],
         ),
-        [list @ .., last] => tf(
-            "settings.find.looks_in_more",
-            "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder, {list} and {last}. Nothing comes in until you choose.",
-            &[("list", &list.join(", ")), ("last", last)],
+        [first, second, ..] if more == 0 => tf(
+            "settings.find.looks_in_two",
+            "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder, {first} and {second}. Nothing comes in until you choose.",
+            &[("first", first), ("second", second)],
+        ),
+        [first, second, ..] => tn(
+            "settings.find.looks_in_many",
+            more as u64,
+            "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder, {first}, {second} and {n} more folder. Nothing comes in until you choose.",
+            "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder, {first}, {second} and {n} more folders. Nothing comes in until you choose.",
+            &[("first", first), ("second", second)],
         ),
     }
 }
 
-/// The sentence as the line shows it, in `kept` lines at most at `room` wide: the folders' names
+/// The sentence as the line shows it, in `kept` lines at most at `room` wide: the folders named
 /// whole where that fits, else each cut in its middle to the most letters that fit ("Worship
-/// so\u{2026}Elm Street"). Should even "…" for each take more (many folders), the line cuts the
-/// sentence's end.
+/// so…Elm Street"), one letter and "…" at the least. Its end is never cut.
 fn looks_in_fitted(ui: &egui::Ui, added: &[std::path::PathBuf], room: f32, kept: usize) -> String {
     let fits = |sentence: &str| parts::note_lines(ui, sentence, room) <= kept;
     let whole = looks_in_words(added);
     if fits(&whole) {
         return whole;
     }
-    let names: Vec<String> = added.iter().map(|folder| folder_name(folder)).collect();
-    let cut_to = |keep: usize| looks_in_named(&names.iter().map(|name| cut_middle(name, keep)).collect::<Vec<_>>());
-    let longest = names.iter().map(|name| name.chars().count()).max().unwrap_or(0);
-    // The fewest letters kept that don't fit: the sentence grows with what each name keeps.
-    let (mut fit, mut over) = (0, longest);
+    let named: Vec<String> = added.iter().take(2).map(|folder| folder_name(folder)).collect();
+    let more = added.len().saturating_sub(2);
+    let cut_to =
+        |keep: usize| looks_in_named(&named.iter().map(|name| cut_middle(name, keep)).collect::<Vec<_>>(), more);
+    let longest = named.iter().map(|name| name.graphemes(true).count()).max().unwrap_or(1);
+    // The most letters kept that fit: the sentence grows with what each name keeps.
+    let (mut fit, mut over) = (1, longest);
     while over - fit > 1 {
         let keep = (fit + over) / 2;
         if fits(&cut_to(keep)) { fit = keep } else { over = keep }
@@ -143,19 +165,17 @@ fn looks_in_fitted(ui: &egui::Ui, added: &[std::path::PathBuf], room: f32, kept:
     cut_to(fit)
 }
 
-/// `name` in `keep` letters at most: its start and its end, with "…" between them where it is
-/// longer ("…" alone for none).
+/// `name` in `keep` letters at most (as a reader counts them: a letter and its accent are one):
+/// its start and its end, with "…" between them where it is longer, and no space beside it.
 fn cut_middle(name: &str, keep: usize) -> String {
-    let letters: Vec<char> = name.chars().collect();
+    let letters: Vec<&str> = name.graphemes(true).collect();
     if letters.len() <= keep {
         return name.to_owned();
     }
     let end = keep / 2;
-    let start = keep - end;
-    let mut cut: String = letters[..start].iter().collect();
-    cut.push('\u{2026}');
-    cut.extend(&letters[letters.len() - end..]);
-    cut
+    let start = letters[..keep - end].concat();
+    let end = letters[letters.len() - end..].concat();
+    format!("{}\u{2026}{}", start.trim_end(), end.trim_start())
 }
 
 /// Looking: where, how many found so far and Stop, and the rows found, coming in as they are.
@@ -973,19 +993,39 @@ mod tests {
             english(&["Worship songs 2019", "Choir"]),
             "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder, Worship songs 2019 and Choir. Nothing comes in until you choose."
         );
+        // Three or more: the first two by name, and how many more.
         assert_eq!(
             english(&["Worship songs 2019", "Choir", "Youth"]),
-            "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder, Worship songs 2019, Choir and Youth. Nothing comes in until you choose."
+            "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder, Worship songs 2019, Choir and 1 more folder. Nothing comes in until you choose."
         );
-        // Every language has its own words for each, with every folder in them.
+        assert_eq!(
+            english(&["Worship songs 2019", "Choir", "Youth", "Christmas", "Easter"]),
+            "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder, Worship songs 2019, Choir and 3 more folders. Nothing comes in until you choose."
+        );
+        // Every language has its own words for each, with the first two folders in them, and a
+        // count of the others in the form its number takes.
+        let five = ["Worship songs 2019", "Choir", "Youth", "Christmas", "Easter"];
         for language in [Language::Spanish, Language::Russian, Language::Ukrainian] {
-            for names in [&[][..], &["Worship songs 2019"][..], &["Worship songs 2019", "Choir", "Youth"][..]] {
+            for count in 0..=five.len() {
+                let names = &five[..count];
                 let said = with_language(language, || looks_in_words(&folders(names)));
                 assert_ne!(said, english(names), "{language:?} has no words for {names:?}");
                 assert!(!said.contains('{') && !said.contains('}'), "{language:?}: {said}");
-                assert!(names.iter().all(|name| said.contains(name)), "{language:?}: {said}");
+                assert!(names.iter().take(2).all(|name| said.contains(name)), "{language:?}: {said}");
+                assert!(names.iter().skip(2).all(|name| !said.contains(name)), "{language:?}: {said}");
+                if count > 2 {
+                    assert!(said.contains(&(count - 2).to_string()), "{language:?}: {said}");
+                }
             }
         }
+        let russian = |count: usize| {
+            let names: Vec<String> = (0..count).map(|n| format!("Folder {n}")).collect();
+            let names: Vec<&str> = names.iter().map(String::as_str).collect();
+            with_language(Language::Russian, || looks_in_words(&folders(&names)))
+        };
+        assert!(russian(3).contains("и ещё в 1 папке"), "{}", russian(3));
+        assert!(russian(5).contains("и ещё в 3 папках"), "{}", russian(5));
+        assert!(russian(9).contains("и ещё в 7 папках"), "{}", russian(9));
         // The card says it, with the folder added.
         let ctx = crate::studio::tests::styled();
         let show = Show::new(Vec::new());
@@ -996,61 +1036,78 @@ mod tests {
         drawn.drop_without_applying_deltas();
     }
 
+    /// Draws Settings before a search, `width` wide, three frames (the last with `events`, made
+    /// from where the second drew things), and gives what the last drew.
+    fn idle_frame(
+        ctx: &egui::Context,
+        state: &mut HomeState,
+        width: f32,
+        events: &dyn Fn(&Painted) -> Vec<egui::Event>,
+    ) -> Painted {
+        let show = Show::new(Vec::new());
+        let mut drawn = Painted::default();
+        for round in 0..3 {
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 4000.0))),
+                events: if round == 2 { events(&drawn) } else { Vec::new() },
+                ..egui::RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| settings_ui(ui, state, &show));
+            drawn = painted(&output);
+            output.drop_without_applying_deltas();
+        }
+        drawn
+    }
+
+    /// The block of the key that says `words`.
+    fn key_of(drawn: &Painted, words: &str) -> Option<Rect> {
+        let (galley, at) = drawn.text(words)?;
+        let middle = Rect::from_min_size(at, galley.size()).center();
+        drawn.keys.iter().copied().find(|key| key.contains(middle))
+    }
+
+    /// What a frame drew but the words `except`, with where it is: words, blocks and lines.
+    #[allow(clippy::type_complexity)]
+    fn all_but(painted: &Painted, except: &str) -> (Vec<(String, Rect)>, Vec<Rect>, Vec<(f32, f32)>) {
+        let texts = painted
+            .texts
+            .iter()
+            .filter(|(galley, _)| galley.text() != except)
+            .map(|(galley, at)| (galley.text().to_owned(), Rect::from_min_size(*at, galley.size())))
+            .collect();
+        (texts, painted.rects.clone(), painted.rules.clone())
+    }
+
     #[test]
-    fn the_line_before_a_search_holds_still_when_its_keys_are_pressed_or_a_folder_is_chosen() {
-        // Before a search, in every language, in the narrowest Settings window (820), its usual
-        // width (1040) and a wide one:
-        // Choose a Folder… and Find sit at the right of the line, beside its words, Find at least
-        // the design's 84 points wide; pointing at either key or pressing it moves nothing on
-        // the page and changes the size of nothing; and a folder chosen changes only the
-        // sentence, which stays within three lines (below).
+    fn the_line_before_a_search_holds_still_when_its_keys_are_pointed_at_pressed_and_clicked() {
+        // Before a search, in every language, in the narrowest Settings window (820), where the
+        // layout may change (940), its usual width (1040) and a wide one: the keys are under the
+        // sentence at 820 and beside it at 1040 and 1280, Find at least the design's 84 points
+        // wide; pointing at either key, pressing it and letting go (a click, which asks for what
+        // it says) moves nothing on the page and changes the size of nothing.
         use crate::i18n::{Language, with_language};
-        use std::path::PathBuf;
         for language in Language::ALL {
             with_language(language, || {
                 let choose = t("settings.find.choose_folder", "Choose a Folder\u{2026}");
                 let find = t("settings.find.find", "Find");
                 let label = t("settings.find.look", "Look for songs you already have");
-                for width in [820.0, 1040.0, 1280.0] {
+                for width in [820.0, 940.0, 1040.0, 1280.0] {
                     let ctx = crate::studio::tests::styled();
-                    let show = Show::new(Vec::new());
-                    let frame = |state: &mut HomeState, events: &dyn Fn(&Painted) -> Vec<egui::Event>| {
-                        let mut drawn = Painted::default();
-                        for round in 0..3 {
-                            let raw = egui::RawInput {
-                                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 4000.0))),
-                                events: if round == 2 { events(&drawn) } else { Vec::new() },
-                                ..egui::RawInput::default()
-                            };
-                            let output = ctx.run_ui(raw, |ui| settings_ui(ui, state, &show));
-                            drawn = painted(&output);
-                            output.drop_without_applying_deltas();
-                        }
-                        drawn
-                    };
                     let say = |what: &str| format!("{language:?} at {width}: {what}");
                     let mut state = state_in(Phase::Before);
-                    let rest = frame(&mut state, &|_| Vec::new());
+                    let rest = idle_frame(&ctx, &mut state, width, &|_| Vec::new());
                     let sentence = looks_in_words(&[]);
                     let (sentence_galley, sentence_at) =
                         rest.text(&sentence).unwrap_or_else(|| panic!("{}", say("no sentence")));
                     let (label_galley, label_at) = rest.text(label).unwrap_or_else(|| panic!("{}", say("no label")));
-                    let key_of = |drawn: &Painted, words: &str| {
-                        let (galley, at) = drawn.text(words).unwrap_or_else(|| panic!("{}", say(words)));
-                        let middle = Rect::from_min_size(at, galley.size()).center();
-                        drawn
-                            .keys
-                            .iter()
-                            .copied()
-                            .find(|key| key.contains(middle))
-                            .unwrap_or_else(|| panic!("{}", say(&format!("no key under {words}"))))
+                    let key = |drawn: &Painted, words: &str| {
+                        key_of(drawn, words).unwrap_or_else(|| panic!("{}", say(&format!("no key under {words}"))))
                     };
-                    let (choose_key, find_key) = (key_of(&rest, choose), key_of(&rest, find));
+                    let (choose_key, find_key) = (key(&rest, choose), key(&rest, find));
                     assert!(find_key.width() >= 84.0 - 0.01, "{}", say(&format!("Find is {} wide", find_key.width())));
                     assert!(choose_key.max.x < find_key.min.x, "{}", say("Choose a Folder\u{2026} comes before Find"));
-                    // The sentence keeps to three lines in every language, at every width.
                     assert!(
-                        sentence_galley.rows.len() <= SENTENCE_LINES,
+                        sentence_galley.rows.len() <= SENTENCE_LINES && !sentence_galley.elided,
                         "{}",
                         say(&format!("the sentence takes {} lines", sentence_galley.rows.len()))
                     );
@@ -1061,11 +1118,16 @@ mod tests {
                         .max_by(|a, b| a.0.total_cmp(&b.0))
                         .map(|(_, right)| *right)
                         .expect("the line over the row");
-                    if width < 1000.0 {
-                        // The narrowest window leaves the words 214 points beside the keys, less than
-                        // the design's 320: the keys go under the sentence, at its left, 8 below its
-                        // three lines' room, Choose a Folder… first, and the sentence has the
-                        // card's whole width.
+                    let under = choose_key.min.y > sentence_at.y + sentence_galley.size().y;
+                    if width == 820.0 {
+                        assert!(under, "{}", say("the keys are beside the sentence"));
+                    }
+                    if width >= 1040.0 {
+                        assert!(!under, "{}", say("the keys are under the sentence"));
+                    }
+                    if under {
+                        // Under the sentence, at its left, 8 below its three lines' room,
+                        // Choose a Folder… first; the sentence has the card's whole width.
                         let room_bottom = sentence_at.y + SENTENCE_LINES as f32 * 18.0;
                         assert!((choose_key.min.x - label_at.x).abs() < 0.5, "{}", say("the keys start at the left"));
                         assert!(
@@ -1081,8 +1143,7 @@ mod tests {
                             say("the sentence has the card\u{2019}s whole width")
                         );
                     } else {
-                        // At the usual width and wider, at the right of the line, beside its words,
-                        // Find last.
+                        // At the right of the line, beside its words, Find last.
                         let words_right =
                             (sentence_at.x + sentence_galley.size().x).max(label_at.x + label_galley.size().x);
                         assert!(
@@ -1102,94 +1163,27 @@ mod tests {
                             say("the keys are on the line\u{2019}s height")
                         );
                     }
-                    // Pointing at a key, then pressing it, moves nothing.
-                    for words in [choose, find] {
-                        let at = |drawn: &Painted| key_of(drawn, words).center();
-                        let pointed = frame(&mut state, &|drawn| vec![egui::Event::PointerMoved(at(drawn))]);
-                        let pressed = frame(&mut state, &|drawn| {
-                            vec![
-                                egui::Event::PointerMoved(at(drawn)),
-                                egui::Event::PointerButton {
-                                    pos: at(drawn),
-                                    button: egui::PointerButton::Primary,
-                                    pressed: true,
-                                    modifiers: egui::Modifiers::NONE,
-                                },
-                            ]
+                    // Pointing at a key, pressing it and letting go moves nothing; the click asks.
+                    for (words, asked) in [(choose, Ask::AnotherFolder), (find, Ask::Find)] {
+                        let at = |drawn: &Painted| key(drawn, words).center();
+                        let button = |drawn: &Painted, pressed| egui::Event::PointerButton {
+                            pos: at(drawn),
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        };
+                        let pointed =
+                            idle_frame(&ctx, &mut state, width, &|drawn| vec![egui::Event::PointerMoved(at(drawn))]);
+                        let pressed = idle_frame(&ctx, &mut state, width, &|drawn| {
+                            vec![egui::Event::PointerMoved(at(drawn)), button(drawn, true)]
                         });
-                        for (drawn, how) in [(&pointed, "pointed at"), (&pressed, "pressed")] {
+                        let let_go = idle_frame(&ctx, &mut state, width, &|drawn| vec![button(drawn, false)]);
+                        for (drawn, how) in [(&pointed, "pointed at"), (&pressed, "pressed"), (&let_go, "clicked")] {
                             assert!(drawn.same_place(&rest), "{}", say(&format!("{words} {how} moved something")));
                         }
+                        assert_eq!(state.find_songs.asks, [asked], "{}", say(&format!("a click on {words}")));
                         state.find_songs.asks.clear();
-                    }
-                    // A folder chosen joins the sentence, and only the sentence changes, whatever
-                    // its name: the sentence keeps three lines' room from the start, so the keys,
-                    // the card's height and everything under it stay where they are. An ordinary
-                    // name (28 letters or fewer) comes whole; only a very long one is cut, in its
-                    // middle with "…", never past three lines, even in the narrowest window and
-                    // the longest language.
-                    // About as long as a folder's name can be (255 bytes).
-                    let very_long = "Worship songs 2019 from the old church on Elm Street, kept by the choir director before the move to the new building across town, with the youth group's songs, the Christmas cantata and the hymns the choir sang the year the roof was mended, all together";
-                    // As long as an ordinary folder's name is: never cut.
-                    let ordinary = "Youth choir songs, 2019\u{2013}2020";
-                    assert_eq!(ordinary.chars().count(), 28);
-                    for folder in ["Choir", "Worship songs", ordinary, very_long] {
-                        let mut chosen = state_in(Phase::Before);
-                        chosen.find_songs.added = vec![PathBuf::from("/Volumes/Old laptop").join(folder)];
-                        let after = frame(&mut chosen, &|_| Vec::new());
-                        let (shown, shown_at) = after
-                            .texts
-                            .iter()
-                            .find(|(galley, at)| *at == sentence_at && galley.text() != label)
-                            .cloned()
-                            .unwrap_or_else(|| panic!("{}", say(&format!("no sentence for {folder}"))));
-                        let said = shown.text();
-                        assert!(
-                            shown.rows.len() <= SENTENCE_LINES,
-                            "{}",
-                            say(&format!("{} lines for {folder}: {said}", shown.rows.len()))
-                        );
-                        let whole = looks_in_words(&chosen.find_songs.added);
-                        if said != whole {
-                            let cut = (0..folder.chars().count())
-                                .any(|keep| said == looks_in_named(&[cut_middle(folder, keep)]));
-                            assert!(cut, "{}", say(&format!("not {folder} cut in its middle: {said}")));
-                        }
-                        if folder == very_long {
-                            assert_ne!(said, whole, "{}", say("a very long name is cut"));
-                        } else {
-                            assert_eq!(said, whole, "{}", say(&format!("{folder} is cut")));
-                        }
-                        assert_eq!(shown_at, sentence_at);
-                        for words in [choose, find] {
-                            assert_eq!(
-                                key_of(&rest, words),
-                                key_of(&after, words),
-                                "{}",
-                                say(&format!("{words} moved for {folder}"))
-                            );
-                        }
-                        let others = |painted: &Painted, sentence: &str| -> Vec<(String, Rect)> {
-                            painted
-                                .texts
-                                .iter()
-                                .filter(|(galley, _)| galley.text() != sentence)
-                                .map(|(galley, at)| (galley.text().to_owned(), Rect::from_min_size(*at, galley.size())))
-                                .collect()
-                        };
-                        assert_eq!(
-                            others(&after, said),
-                            others(&rest, &sentence),
-                            "{}",
-                            say(&format!("something moved for {folder}"))
-                        );
-                        assert_eq!(
-                            after.rects,
-                            rest.rects,
-                            "{}",
-                            say(&format!("a block moved or changed size for {folder}"))
-                        );
-                        assert_eq!(after.rules, rest.rules, "{}", say(&format!("a line moved for {folder}")));
+                        idle_frame(&ctx, &mut state, width, &|_| vec![egui::Event::PointerGone]);
                     }
                 }
             });
@@ -1197,12 +1191,120 @@ mod tests {
     }
 
     #[test]
-    fn a_folders_name_is_cut_in_its_middle_and_its_whole_path_is_under_the_pointer() {
+    fn a_folder_chosen_moves_nothing_and_the_sentence_is_never_cut_at_any_width() {
+        // In every language, at every width from the narrowest Settings window (820) to 1280, 5
+        // points at a time: where the keys are depends on the width alone (under the sentence up
+        // to a width, beside it from there on); and a folder chosen, or several, changes only the
+        // sentence, which keeps to three lines and is never cut at its end. One folder of an
+        // ordinary name (28 letters or fewer, Latin or Cyrillic) comes whole; only a very long one
+        // is cut, in its middle with "…". With two folders or more, it names the first two (each
+        // whole, or cut in its middle to one letter at the least where the sentence would take
+        // more) and counts the others.
+        use crate::i18n::{Language, with_language};
+        use std::path::PathBuf;
+        // About as long as a folder's name can be (255 bytes).
+        let very_long = "Worship songs 2019 from the old church on Elm Street, kept by the choir director before the move to the new building across town, with the youth group's songs, the Christmas cantata and the hymns the choir sang the year the roof was mended, all together";
+        let ordinary = "Youth choir songs, 2019\u{2013}2020";
+        let ordinary_cyrillic = "Хвала и поклонение 2018\u{2013}2019";
+        assert_eq!((ordinary.chars().count(), ordinary_cyrillic.chars().count()), (28, 28));
+        // Whole, cut, or either (several folders).
+        #[derive(Clone, Copy, PartialEq)]
+        enum Named {
+            Whole,
+            Cut,
+            Either,
+        }
+        let cases: [(&[&str], Named); 9] = [
+            (&["Choir"], Named::Whole),
+            (&["Worship songs"], Named::Whole),
+            (&[ordinary], Named::Whole),
+            (&[ordinary_cyrillic], Named::Whole),
+            (&[very_long], Named::Cut),
+            (&["Choir", "Worship songs"], Named::Either),
+            (&["Choir", "Worship songs", "Youth"], Named::Either),
+            (&["Choir", "Worship songs", "Youth", "Christmas", "Easter"], Named::Either),
+            (&[very_long, ordinary_cyrillic, "Youth", "Christmas", "Easter"], Named::Either),
+        ];
+        for language in Language::ALL {
+            with_language(language, || {
+                let label = t("settings.find.look", "Look for songs you already have");
+                let choose = t("settings.find.choose_folder", "Choose a Folder\u{2026}");
+                let sentence = looks_in_words(&[]);
+                let mut beside_from = None;
+                for width in (820..=1280).step_by(5).map(|width| width as f32) {
+                    let ctx = crate::studio::tests::styled();
+                    let say = |what: &str| format!("{language:?} at {width}: {what}");
+                    let rest = idle_frame(&ctx, &mut state_in(Phase::Before), width, &|_| Vec::new());
+                    let (sentence_galley, sentence_at) =
+                        rest.text(&sentence).unwrap_or_else(|| panic!("{}", say("no sentence")));
+                    let under = key_of(&rest, choose).expect("Choose a Folder\u{2026}").min.y
+                        > sentence_at.y + sentence_galley.size().y;
+                    match (under, beside_from) {
+                        (false, None) => beside_from = Some(width),
+                        (true, Some(from)) => {
+                            panic!("{}", say(&format!("the keys are under again, beside from {from}")))
+                        }
+                        _ => {}
+                    }
+                    for (names, named) in cases {
+                        let mut chosen = state_in(Phase::Before);
+                        chosen.find_songs.added =
+                            names.iter().map(|name| PathBuf::from("/Volumes/Old laptop").join(name)).collect();
+                        let after = idle_frame(&ctx, &mut chosen, width, &|_| Vec::new());
+                        let shown = after
+                            .texts
+                            .iter()
+                            .find(|(galley, at)| *at == sentence_at && galley.text() != label)
+                            .map(|(galley, _)| galley.clone())
+                            .unwrap_or_else(|| panic!("{}", say(&format!("no sentence for {names:?}"))));
+                        let said = shown.text();
+                        assert!(
+                            shown.rows.len() <= SENTENCE_LINES && !shown.elided,
+                            "{}",
+                            say(&format!("{} lines, or cut at its end, for {names:?}: {said}", shown.rows.len()))
+                        );
+                        let whole = looks_in_words(&chosen.find_songs.added);
+                        match named {
+                            Named::Whole => assert_eq!(said, whole, "{}", say(&format!("{names:?} cut"))),
+                            Named::Cut => assert_ne!(said, whole, "{}", say(&format!("{names:?} not cut"))),
+                            Named::Either => {}
+                        }
+                        if said != whole {
+                            // The first two names, each cut in its middle to the same letters (one
+                            // at the least), and the count of the others.
+                            let first_two: Vec<&str> = names.iter().take(2).copied().collect();
+                            let longest = first_two.iter().map(|name| name.chars().count()).max().unwrap_or(0);
+                            let more = names.len().saturating_sub(2);
+                            let cut = (1..longest).any(|keep| {
+                                let cut: Vec<String> = first_two.iter().map(|name| cut_middle(name, keep)).collect();
+                                said == looks_in_named(&cut, more)
+                            });
+                            assert!(cut, "{}", say(&format!("not the first two names cut in their middle: {said}")));
+                        }
+                        assert_eq!(
+                            all_but(&after, said),
+                            all_but(&rest, &sentence),
+                            "{}",
+                            say(&format!("something moved for {names:?}"))
+                        );
+                    }
+                }
+                assert!(beside_from.is_some_and(|from| from <= 1040.0), "{language:?}: beside from {beside_from:?}");
+            });
+        }
+    }
+
+    #[test]
+    fn a_folders_name_is_cut_in_its_middle_by_letter_and_its_whole_path_is_under_the_pointer() {
         assert_eq!(cut_middle("Worship songs 2019", 18), "Worship songs 2019");
         assert_eq!(cut_middle("Worship songs 2019", 7), "Wors\u{2026}019");
-        assert_eq!(cut_middle("Worship songs 2019", 1), "W\u{2026}");
-        assert_eq!(cut_middle("Worship songs 2019", 0), "\u{2026}");
         assert_eq!(cut_middle("Песни хора", 4), "Пе\u{2026}ра", "letters, not bytes");
+        // Never a space beside "…".
+        assert_eq!(cut_middle("Worship songs 2019", 10), "Worsh\u{2026}2019");
+        assert_eq!(cut_middle("Worship songs 2019", 15), "Worship\u{2026}gs 2019");
+        // A letter with its accent written as two characters stays one letter.
+        assert_eq!(cut_middle("ab\u{301}cd", 3), "ab\u{301}\u{2026}d");
+        assert_eq!(cut_middle("Worship songs 2019", 1), "W\u{2026}");
         let added = [std::path::PathBuf::from("/Volumes/Old laptop/Choir"), std::path::PathBuf::from("/Users/a/Youth")];
         assert_eq!(added_paths(&added), "/Volumes/Old laptop/Choir\n/Users/a/Youth");
     }

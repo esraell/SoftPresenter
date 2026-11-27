@@ -3912,6 +3912,7 @@ dependencies = [
  "tower",
  "trash",
  "uds_windows",
+ "unicode-segmentation",
  "ureq",
  "winit",
  "zip",

@@ -212,9 +212,9 @@ pub fn row_greyed(
     inked_row(ui, label, TEXT_FAINT, (why, 0), control, draw);
 }
 
-/// A row's words: its name in `ink` and its note under it (`kept`: in that many lines' room,
-/// however few it takes, and cut short with "…" past them; 0: as many as it takes), both wrapped
-/// `room` wide; and how tall they are together.
+/// A row's words: its name in `ink` and its note under it (`kept`: in that many lines' room
+/// however few it takes; the caller keeps the note within them), both wrapped `room` wide; and
+/// how tall they are together.
 fn row_words(
     ui: &egui::Ui,
     label: &str,
@@ -224,10 +224,7 @@ fn row_words(
 ) -> (Arc<egui::Galley>, Option<Arc<egui::Galley>>, f32) {
     let label = lines(ui, label, semibold(13.0), ink, room, LINE_HEIGHT);
     let font = FontId::proportional(12.5);
-    let note = (!note.is_empty()).then(|| match kept {
-        0 => lines(ui, note, font, TEXT_FAINT, room, LINE_HEIGHT),
-        kept => lines_at_most(ui, note, font, TEXT_FAINT, (room, LINE_HEIGHT), kept),
-    });
+    let note = (!note.is_empty()).then(|| lines(ui, note, font, TEXT_FAINT, room, LINE_HEIGHT));
     let note_height = note.as_ref().map_or(0.0, |note| note.size().y).max(kept as f32 * LINE_HEIGHT);
     let height = label.size().y + note_height;
     (label, note, height)
@@ -274,17 +271,15 @@ fn note_room(width: f32, control: f32) -> f32 {
     (width - control - 16.0).max(80.0)
 }
 
-/// Whether a [`keys_row_keeping`] row `width` wide has its keys beside its words: when they leave
-/// the words `least` at least, else they go under the words. Its width decides it, never what it
-/// says, so the keys never move as its note changes.
-fn keys_beside(ui: &egui::Ui, width: f32, keys: &[Key], least: f32) -> bool {
-    note_room(width, keys_width(ui, keys)) >= least
+/// How wide a row's words wrap beside these keys, in a row `width` wide: what the keys leave.
+pub fn room_beside_keys(ui: &egui::Ui, width: f32, keys: &[Key]) -> f32 {
+    note_room(width, keys_width(ui, keys))
 }
 
 /// How wide a [`keys_row_keeping`]'s note wraps, in a row `width` wide with these keys: in what
-/// they leave beside the words, or across the whole row when they go under the words.
-pub fn keys_row_note_room(ui: &egui::Ui, width: f32, keys: &[Key], least: f32) -> f32 {
-    if keys_beside(ui, width, keys, least) { note_room(width, keys_width(ui, keys)) } else { width }
+/// they leave beside the words (`beside`), or across the whole row when they go under the words.
+pub fn keys_row_note_room(ui: &egui::Ui, width: f32, keys: &[Key], beside: bool) -> f32 {
+    if beside { room_beside_keys(ui, width, keys) } else { width }
 }
 
 /// How many lines a row's note takes, `room` wide.
@@ -456,22 +451,22 @@ pub fn keys_row(
 }
 
 /// A row with keys (no readout) whose note keeps the room of `kept` lines however few it takes,
-/// and is cut short with "…" past them, so the row keeps its height, and its keys their place, as
-/// the note changes. Where the keys leave its words `least` at least, they are at its right, in
-/// the middle of its height; else under its words, at their left, 8 under the note's room, and
-/// the words have the row's whole width. Its width alone decides which. [`keys_row_note_room`]
-/// says how wide the note wraps, for a caller that fits its words to the room. The key clicked,
-/// if any, and where the words are.
+/// so the row keeps its height, and its keys their place, as the note changes; the caller keeps
+/// the note within them ([`keys_row_note_room`] says how wide it wraps). `beside`: the keys at the
+/// row's right, in the middle of its height; else under its words, at their left, 8 under the
+/// note's room, and the words have the row's whole width. The caller decides which from the
+/// row's width ([`room_beside_keys`]), never from what the note says, so nothing moves as it
+/// changes. The key clicked, if any, and where the words are.
 pub fn keys_row_keeping(
     ui: &mut egui::Ui,
     salt: &str,
     label: &str,
     note: (&str, usize),
     keys: &[Key],
-    least: f32,
+    beside: bool,
 ) -> (Option<usize>, Rect) {
     let width = ui.available_width();
-    if keys_beside(ui, width, keys, least) {
+    if beside {
         let mut clicked = None;
         let control = vec2(keys_width(ui, keys), 30.0);
         let words = inked_row(ui, label, TEXT, note, control, |ui, place| {
