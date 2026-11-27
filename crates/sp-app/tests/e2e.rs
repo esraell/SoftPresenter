@@ -917,6 +917,87 @@ fn themes_changed_just_before_quitting_are_saved_and_one_deleted_stays_deleted()
     assert!(note.starts_with("main="), "the note of the theme in use: {note:?}");
 }
 
+/// A song whose save fails (another program holds its file for a moment; here a folder stands
+/// where the save is written, which fails on every system) is said once and tried again until it
+/// is written, and that is said too; one still failing at quit is kept in the library's "Not
+/// saved" folder, so the change isn't lost.
+#[test]
+fn a_failed_save_is_tried_again_and_kept_in_not_saved_if_it_still_fails_at_quit() {
+    let name = "a_failed_save_is_tried_again_and_kept_in_not_saved_if_it_still_fails_at_quit";
+    let Some(run) = Run::new(name) else { return };
+    let file = run.file("Harbour Lights.txt");
+    std::fs::write(&file, song_text(&[("Verse 1", "Lanterns on the water"), ("Chorus", "Bring the boats home")]))
+        .expect("the song's file");
+    let copy = run.start(&[]);
+    copy.ok(&["song", "import", &file.to_string_lossy()]);
+    let wait_until = |what: &str, within: Duration, ready: &dyn Fn() -> bool| {
+        let began = Instant::now();
+        while !ready() {
+            assert!(began.elapsed() < within, "{what} didn't happen within {within:?}{}", run.context());
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    let songs = run.data.join("Songs");
+    let song_path = || {
+        // The song's own file, never its save under way (`.<file>.saving`).
+        std::fs::read_dir(&songs).ok()?.flatten().map(|entry| entry.path()).find(|path| {
+            let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            !name.starts_with('.')
+                && name.ends_with(".sppres")
+                && std::fs::read_to_string(path).is_ok_and(|text| text.contains("Lanterns on the water"))
+        })
+    };
+    wait_until("the song's file", Duration::from_secs(10), &|| song_path().is_some());
+    let song = song_path().expect("the song's file");
+    let saving = song.with_file_name(format!(".{}.saving", song.file_name().unwrap().to_string_lossy()));
+    let on_disk = || std::fs::read_to_string(&song).unwrap_or_default();
+    let told = |words: &str| {
+        copy.ok(&["notices"])
+            .data
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|notice| notice["text"].as_str().is_some_and(|text| text.contains(words)))
+            .count()
+    };
+    const TRYING: &str = "SoftPresenter tries again in a moment";
+    // The save can't be written: said once, while it is tried again.
+    std::fs::create_dir_all(&saving).expect("a folder where the save is written");
+    copy.ok(&["slide", "text", "Harbour Lights", "2", "Bring the boats home tonight"]);
+    wait_until("the failure said", Duration::from_secs(15), &|| told(TRYING) == 1);
+    std::thread::sleep(Duration::from_millis(2500));
+    assert_eq!(told(TRYING), 1, "said once, not at every try{}", run.context());
+    assert!(!on_disk().contains("tonight"), "not written yet");
+    // The other program lets go: the next try writes it, and that is said.
+    std::fs::remove_dir(&saving).expect("the folder taken away");
+    wait_until("the song written on a later try", Duration::from_secs(15), &|| on_disk().contains("tonight"));
+    wait_until("the save said", Duration::from_secs(5), &|| told("\u{201c}Harbour Lights\u{201d} is saved now.") == 1);
+    // Failing again (the notice is the same, and the list holds it once: the log has each), and
+    // still failing at quit: kept in Not saved, never lost.
+    let failures = || run.log().matches("[saving] could not write").count();
+    let before = failures();
+    std::fs::create_dir_all(&saving).expect("a folder where the save is written");
+    copy.ok(&["slide", "text", "Harbour Lights", "2", "Bring the boats home at dawn"]);
+    wait_until("the second failure", Duration::from_secs(15), &|| failures() > before);
+    copy.quit().assert_clean(&run);
+    assert!(!on_disk().contains("at dawn"), "the song's file is as the last save written left it");
+    let kept: Vec<(String, String)> = std::fs::read_dir(run.data.join("Not saved"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| {
+            let text = std::fs::read_to_string(entry.path()).unwrap_or_default();
+            (entry.file_name().to_string_lossy().into_owned(), text)
+        })
+        .collect();
+    assert!(
+        kept.iter().any(|(name, text)| name.starts_with("Harbour Lights ") && text.contains("at dawn")),
+        "the change is kept in Not saved: {:?}{}",
+        kept.iter().map(|(name, _)| name).collect::<Vec<_>>(),
+        run.context()
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // One copy per data folder
 

@@ -44,6 +44,8 @@
   "notices.save.no_place_themes": "No se encontró dónde guardar los temas en este ordenador.",
   "notices.save.theme": "No se pudo guardar el tema: {error}",
   "notices.save.themes_in_use": "No se pudo guardar qué tema está en uso: {error}",
+  "notices.save.saved_now": "{name} ya está guardado.",
+  "notices.save.trying_again": "SoftPresenter lo vuelve a intentar en un momento; si al cerrarse aún no puede, guarda el cambio en la carpeta Not saved de la biblioteca.",
   "notices.delete.theme": "No se pudo eliminar el tema: {error}",
   "notices.images.no_place": "No se encontró dónde guardar las imágenes en este ordenador.",
   "notices.images.no_folder": "No se pudo crear la carpeta de imágenes: {error}",

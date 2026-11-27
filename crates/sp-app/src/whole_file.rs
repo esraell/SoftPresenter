@@ -318,7 +318,7 @@ pub fn set_aside(path: &Path, bytes: Option<&[u8]>, why: &str) -> Result<PathBuf
 
 /// Writes `bytes` to a new file at `path`, flushed to the disk, never over a file there (one that
 /// came meanwhile). A copy that can't be finished is taken away.
-fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
     let written = std::io::Write::write_all(&mut file, bytes).and_then(|()| flush(&file));
     if written.is_err() {

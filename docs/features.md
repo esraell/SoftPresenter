@@ -97,6 +97,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the same for one song, and `sp songs` marks a song whose file changed. Quitting with a change
   that couldn't be saved keeps SoftPresenter's version in the library's "Not saved" folder, so
   neither version is lost.
+- **A save that fails is tried again** (`writer::Retries`). When a song's or theme's file can't
+  be written (another program holds it for a moment: a virus scanner, a sync tool, the search
+  indexer), the notices say so once, and SoftPresenter tries again after a second, then twice as
+  long each time up to a minute, until it is written, which the notices say too ("“Amazing
+  Grace” is saved now."); the log has each try. Quitting tries each once more, and one that
+  still fails is kept in the library's "Not saved" folder, named by its title and the time, so
+  the change isn't lost. A song deleted, or read again from its file, is no longer tried.
 - **A settings file that can't be read is kept** (`whole_file.rs`). If the screens, the settings
   (`preferences.json`, with the transition), the playlists, the libraries, the media bin and
   media playlists, the audio playlists, the macros, the timers, the messages, the props, the

@@ -2287,6 +2287,11 @@ struct App {
     /// The held songs and themes already written to "Not saved" while quitting (see
     /// `keep_held_aside`), so a later look writes only those held since.
     kept_aside: (Vec<usize>, Vec<usize>),
+    /// The files whose failed save was written to "Not saved" while quitting (see
+    /// `keep_failed_aside`), each once.
+    kept_failed: Vec<PathBuf>,
+    /// Songs and themes whose save failed, tried again after a wait (`writer::Retries`).
+    retries: writer::Retries,
     /// The changes made to songs in the Service view, to undo and redo.
     history: ShowHistory,
     /// The song open in the Edit view, if any, and where the song history was when it opened:
@@ -6103,6 +6108,87 @@ impl App {
         }
     }
 
+    /// The song (not deleted) or theme whose file is `path`.
+    fn whose_file(&self, path: &std::path::Path) -> Option<Saved> {
+        let removed = self.running.as_ref().map(|r| r.home_state.removed_songs.clone()).unwrap_or_default();
+        let song = self.sources.iter().enumerate().position(|(at, source)| {
+            !removed.contains(&at) && source.as_ref().is_some_and(|source| load::song_file_for(source) == path)
+        });
+        song.map(Saved::Song).or_else(|| {
+            self.themes.iter().position(|theme| theme_store::file_of(theme).as_deref() == Some(path)).map(Saved::Theme)
+        })
+    }
+
+    /// What a song or theme is called in a notice, by its file.
+    fn saved_name(&self, path: &std::path::Path) -> Option<String> {
+        match self.whose_file(path)? {
+            Saved::Song(index) => self.show.presentations().get(index).map(|song| crate::i18n::quoted(&song.title)),
+            Saved::Theme(index) => self.themes.get(index).map(|theme| {
+                crate::i18n::tf(
+                    "notices.ask.the_theme",
+                    "The theme {name}",
+                    &[("name", &crate::i18n::quoted(&theme_store::shown_theme_name(theme)))],
+                )
+            }),
+        }
+    }
+
+    /// Hands the library's writer a song's or theme's save again, after one failed, from what the
+    /// app has now, keeping the file as it was in `keep_old_in` first as the failed save was to
+    /// (the library tidy's backup: a save that can't make it is left undone). One deleted since,
+    /// or whose file changed outside meanwhile (held for Reload or Keep mine), is no longer tried.
+    fn save_again(&mut self, path: &std::path::Path, keep_old_in: Option<PathBuf>) {
+        match self.whose_file(path) {
+            Some(Saved::Song(index)) => {
+                self.save_song_file(index, keep_old_in);
+                if self.held_songs.contains(&index) {
+                    self.retries.done(path);
+                }
+            }
+            Some(Saved::Theme(index)) if self.stamps.check(path) == outside::Now::Same => {
+                self.write_theme(index, false)
+            }
+            Some(Saved::Theme(index)) => {
+                self.hold_theme(index);
+                self.retries.done(path);
+            }
+            None => {
+                self.retries.done(path);
+            }
+        }
+    }
+
+    /// While quitting, a song or theme whose save failed is written into the library's "Not
+    /// saved" folder instead (named by its title and the time), once, so the change is kept; the
+    /// log says where, or why it couldn't be.
+    fn keep_failed_aside(&mut self, path: &std::path::Path) {
+        let (title, ending, bytes) = match self.whose_file(path) {
+            Some(Saved::Song(index)) => {
+                let Some(song) = self.show.presentations().get(index) else { return };
+                (song.title.clone(), load::SONG_EXTENSION, sp_model::to_json(song))
+            }
+            Some(Saved::Theme(index)) => {
+                let Some(theme) = self.themes.get(index) else { return };
+                (theme.name.clone(), "sptheme", theme.to_json())
+            }
+            None => return,
+        };
+        if self.kept_failed.iter().any(|kept| kept == path) {
+            return;
+        }
+        self.kept_failed.push(path.to_path_buf());
+        match keep_in_not_saved(&title, ending, bytes.as_bytes()) {
+            Ok(kept) => applog::problem(
+                "saving",
+                &format!(
+                    "{title}: could not be saved; SoftPresenter's version is kept in Not saved/{}",
+                    file_name(&kept)
+                ),
+            ),
+            Err(e) => applog::problem("saving", &format!("{title}: changes not saved ({e})")),
+        }
+    }
+
     /// Hands a song to the library's writer, to be written to its file; a song with no file yet
     /// (the sample) is given one in the app's Songs folder, so a change to it is kept like any
     /// other. Bible passages are never saved as songs. A file changed outside the app since it
@@ -6162,10 +6248,24 @@ impl App {
             let said = match done {
                 writer::Done::Written { path, seq, stamp } => {
                     self.stamps.written(&path, seq, Some(stamp));
+                    // Saved at last, after saves of it failed: said, as their failure was.
+                    if let Some(tries) = self.retries.done(&path) {
+                        applog::event("saving", &format!("wrote {} after {tries} failed saves", file_name(&path)));
+                        if let Some(name) = self.saved_name(&path)
+                            && let Some(running) = self.running.as_mut()
+                        {
+                            running.home_state.notices.outcome(Ok(crate::i18n::tf(
+                                "notices.save.saved_now",
+                                "{name} is saved now.",
+                                &[("name", &name)],
+                            )));
+                        }
+                    }
                     continue;
                 }
                 writer::Done::ChangedOutside { path, seq } => {
                     self.stamps.written(&path, seq, None);
+                    self.retries.done(&path);
                     applog::event("outside", &format!("did not save over {}: it changed outside", file_name(&path)));
                     let removed = self.running.as_ref().map(|r| r.home_state.removed_songs.clone()).unwrap_or_default();
                     let song = self.sources.iter().enumerate().position(|(at, source)| {
@@ -6183,9 +6283,32 @@ impl App {
                     }
                     continue;
                 }
-                writer::Done::Failed { path, seq, kind, error } => {
+                writer::Done::Failed { path, seq, kind, error, keep_old_in } => {
                     self.stamps.written(&path, seq, None);
-                    kind.problem(&path, &error)
+                    let retried = matches!(kind, writer::Kind::Song | writer::Kind::Theme);
+                    if retried && self.quitting.is_some() {
+                        // Quitting: never tried again (the quit would wait for ever), but kept
+                        // in the library's "Not saved" folder, so the change isn't lost.
+                        self.retries.done(&path);
+                        self.keep_failed_aside(&path);
+                        kind.problem(&path, &error)
+                    } else if retried {
+                        // Tried again after a wait (another program may have held the file for
+                        // a moment); said the first time, logged each time.
+                        if !self.retries.failed(&path, Instant::now(), keep_old_in) {
+                            continue;
+                        }
+                        format!(
+                            "{} {}",
+                            kind.problem(&path, &error),
+                            crate::i18n::t(
+                                "notices.save.trying_again",
+                                "SoftPresenter tries again in a moment; if it still can't when it quits, it keeps the change in the library's Not saved folder."
+                            )
+                        )
+                    } else {
+                        kind.problem(&path, &error)
+                    }
                 }
                 // A settings file the start could neither read nor keep aside: said the first
                 // time, unless the start's notice said so already.
@@ -6371,9 +6494,11 @@ impl App {
         let target = load::song_file_for(&path);
         // A save still on its way to the file (the app's own, or a song pack's version written
         // over it) is written first, so what is read is the file as it will be (that file alone,
-        // ahead of anything else waiting).
+        // ahead of anything else waiting). One that failed is no longer tried: the file's version
+        // is taken.
         self.writer.flush(&target);
         self.finish_saves();
+        self.retries.done(&target);
         if !target.is_file() {
             return Err(crate::i18n::tf(
                 "notices.reload.file_gone",
@@ -6466,9 +6591,10 @@ impl App {
         let file = theme_store::file_of(theme)
             .ok_or(crate::i18n::t("notices.reload.theme_no_file", "The theme has no file."))?;
         // The app's own saves of it on their way are written first, so the file read is not
-        // taken over by one of them a moment later.
+        // taken over by one of them a moment later; one that failed is no longer tried.
         self.writer.flush(&file);
         self.finish_saves();
+        self.retries.done(&file);
         let theme = self.themes.get(index).ok_or(crate::i18n::t("notices.theme_gone", "That theme is gone."))?;
         let text = std::fs::read_to_string(&file).map_err(|e| {
             crate::i18n::tf(
@@ -11575,6 +11701,11 @@ impl App {
     /// the screens close (their NDI sources stopped, see `NdiOutput::stop`).
     fn begin_quit(&mut self) {
         self.save_unsaved();
+        // A song or theme whose save failed is tried once more, now; if it fails again it is
+        // kept in "Not saved" (`finish_saves`).
+        for (path, keep_old_in) in self.retries.due(Instant::now(), true) {
+            self.save_again(&path, keep_old_in);
+        }
         self.hand_over_choices(true);
         self.hand_over_lists(true);
         self.paced.flush(&self.writer);
@@ -12673,6 +12804,11 @@ impl ApplicationHandler<AppEvent> for App {
         let save_at = self.unsaved_since.map(|since| since + SAVE_AFTER);
         // Settings files whose saves wait for their time (`writer::Paced`) are handed over.
         let settings_at = self.paced.tick(&self.writer, Instant::now());
+        // Songs and themes whose save failed, tried again once their wait is up.
+        for (path, keep_old_in) in self.retries.due(Instant::now(), false) {
+            self.save_again(&path, keep_old_in);
+        }
+        let retry_at = self.retries.next();
         // `status --wait`s held: answered now if anything changed, or their time is up.
         let waiting_at = self.answer_waiting();
         // Remote Control: what Settings asked, the state for pages (when something has happened,
@@ -12712,6 +12848,7 @@ impl ApplicationHandler<AppEvent> for App {
             (thumbs_rest_at, "the thumbnails' painter resting"),
             (save_at, "saving"),
             (settings_at, "settings to save"),
+            (retry_at, "saves tried again"),
             (followed_at, "followed folders"),
             (video_at, "the video"),
             (box_video_at, "videos in boxes"),
@@ -12832,6 +12969,34 @@ mod start_steps {
             .collect::<Vec<_>>()
             .join(", ")
     }
+}
+
+/// A song or theme, by its place, found by its file (`App::whose_file`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Saved {
+    Song(usize),
+    Theme(usize),
+}
+
+/// Writes `bytes` into the library's "Not saved" folder as `<name> <date time>.<ending>` (or
+/// `… 2.<ending>` and on, never over a file there), flushed to the disk. Where it went.
+fn keep_in_not_saved(name: &str, ending: &str, bytes: &[u8]) -> std::io::Result<PathBuf> {
+    let folder = bible_store::data_dir()
+        .map(|dir| dir.join("Not saved"))
+        .ok_or_else(|| std::io::Error::other("no library folder"))?;
+    std::fs::create_dir_all(&folder)?;
+    let when = chrono::Local::now().format("%Y-%m-%d %H.%M.%S");
+    let base = format!("{} {when}", pack::safe_file_name(name));
+    for n in 1..=99 {
+        let more = if n == 1 { String::new() } else { format!(" {n}") };
+        let file = folder.join(format!("{base}{more}.{ending}"));
+        match whole_file::write_new(&file, bytes) {
+            Ok(()) => return Ok(file),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::other("99 copies of it are there already"))
 }
 
 /// Hands a settings file's save to the library's writer, paced (`writer::Paced`), so the window
@@ -13299,6 +13464,8 @@ fn main() -> ExitCode {
         held_songs: Vec::new(),
         held_themes: Vec::new(),
         kept_aside: (Vec::new(), Vec::new()),
+        retries: writer::Retries::default(),
+        kept_failed: Vec::new(),
         media_cycle: None,
         folder_notes: media::FolderNotes::default(),
         folders_checked: Instant::now(),
