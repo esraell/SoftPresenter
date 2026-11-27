@@ -1,9 +1,10 @@
 //! What each key that runs the show does (Settings › Keys): Esc, F1 to F8 (off a Mac), Space,
 //! the arrows, Home and End, each doing one action. A style gives every key the action it comes
 //! with: SoftPresenter's (Esc and F1 clear everything, F2 to F6 one layer each) or SoftProjector's
-//! (Esc hides the words, F5 shows, F2 adds to the playlist). Only the keys changed from their
-//! style's action are kept, with the preferences, by name. A name this copy doesn't know (a newer
-//! copy's key or action) is passed over, and that key does what its style says.
+//! (Esc hides the words, F1 clears everything, F5 shows, F2 adds to the playlist). Only the keys
+//! changed from their style's action are kept, with the preferences, by name. A name this copy
+//! doesn't know (a newer copy's key or action) is passed over, and that key does what its style
+//! says.
 //!
 //! ↑ and ↓, Enter, / and the letters are not in the table: what they do is fixed (`main.rs`).
 
@@ -334,7 +335,8 @@ impl KeyTable {
             (KeyStyle::SoftPresenter, ShowKey::F6) => KeyAction::ClearMessages,
             (KeyStyle::SoftPresenter, ShowKey::F7 | ShowKey::F8) => KeyAction::Nothing,
             (KeyStyle::SoftProjector, ShowKey::Escape) => KeyAction::HideWords,
-            (KeyStyle::SoftProjector, ShowKey::F1 | ShowKey::F8) => KeyAction::Nothing,
+            (KeyStyle::SoftProjector, ShowKey::F1) => KeyAction::ClearAll,
+            (KeyStyle::SoftProjector, ShowKey::F8) => KeyAction::Nothing,
             (KeyStyle::SoftProjector, ShowKey::F2) => KeyAction::AddToPlaylist,
             (KeyStyle::SoftProjector, ShowKey::F3) => KeyAction::RemoveFromPlaylist,
             (KeyStyle::SoftProjector, ShowKey::F4) => KeyAction::ShowAgain,
@@ -392,7 +394,7 @@ mod tests {
         // The key, then what it does in SoftPresenter's style and in SoftProjector's.
         let table = [
             (Escape, ClearAll, HideWords),
-            (F1, ClearAll, Nothing),
+            (F1, ClearAll, ClearAll),
             (F2, ClearSlide, AddToPlaylist),
             (F3, ClearMedia, RemoveFromPlaylist),
             (F4, ClearProps, ShowAgain),
@@ -463,6 +465,10 @@ mod tests {
         table.set(ShowKey::F2, KeyAction::ClearAll);
         assert_eq!(table.keys_for(KeyAction::ClearAll, true), [ShowKey::Escape, ShowKey::F1, ShowKey::F2]);
         assert_eq!(table.keys_for(KeyAction::ClearAll, false), [ShowKey::Escape], "an F row only off a Mac");
+        // SoftProjector's style clears everything with F1 alone, so a Mac has no key for it there.
+        table.set_style(KeyStyle::SoftProjector);
+        assert_eq!(table.keys_for(KeyAction::ClearAll, true), [ShowKey::F1]);
+        assert!(table.keys_for(KeyAction::ClearAll, false).is_empty());
     }
 
     #[test]
