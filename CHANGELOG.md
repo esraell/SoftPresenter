@@ -5,6 +5,10 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.9.0-dev.27 — 27 November 2026 (development build)
+
 A What's new window, a search that stays after a drag, AirPlay by name, a tidier Find songs, and quieter VoxLive notices.
 
 ### New
