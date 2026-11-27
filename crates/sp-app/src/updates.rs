@@ -1734,6 +1734,45 @@ mod tests {
     }
 
     #[test]
+    fn in_every_language_the_row_is_one_height_whatever_its_state() {
+        use crate::studio::tests::drawn;
+        // No heights are named: only that, within a language and a width, no state's row is
+        // taller or shorter than another's, so nothing on the page moves as the state changes.
+        for language in crate::i18n::Language::ALL {
+            crate::i18n::with_language(language, || {
+                for width in [700.0, 440.0] {
+                    for build in [PUBLIC, FETCHES] {
+                        let rows: Vec<(egui::Rect, egui::Rect, Status)> = states()
+                            .into_iter()
+                            .filter(|(_, of, _)| of.fetches == build.fetches)
+                            .map(|(status, of, _)| {
+                                let ctx = crate::studio::tests::styled();
+                                let mut state = crate::home::HomeState::default();
+                                let mut row = None;
+                                drawn(&ctx, vec![], |ui| {
+                                    ui.set_width(width);
+                                    row = Some(draw_row(ui, &mut state, &status, of));
+                                })
+                                .drop_without_applying_deltas();
+                                (row.expect("drawn"), state.updates_key.expect("the key's place"), status)
+                            })
+                            .collect();
+                        let (first, key, _) = &rows[0];
+                        for (row, other_key, status) in &rows {
+                            assert_eq!(
+                                row.height(),
+                                first.height(),
+                                "{language:?} at {width}: the row changes height in {status:?}"
+                            );
+                            assert_eq!(other_key, key, "{language:?} at {width}: the key moves in {status:?}");
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    #[test]
     fn a_download_says_how_much_of_how_much() {
         let form = crate::clock::TimeForm::default();
         let say = |done: u64, total: u64| {

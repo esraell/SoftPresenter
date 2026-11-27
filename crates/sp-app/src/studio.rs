@@ -6827,6 +6827,14 @@ pub(crate) fn media_moves(show: &Show, state: &HomeState, index: usize) -> (Opti
     (at.checked_sub(1), (at + 1 < shown.len()).then_some(at + 2))
 }
 
+/// Why nothing in the strip can be moved, when the media playlist shown follows a folder: what
+/// its greyed Move Left and Move Right say under the pointer. None when things can be moved.
+pub(crate) fn media_order_fixed(state: &HomeState) -> Option<&'static str> {
+    let shown = state.media_playlist_shown.and_then(|id| state.media_playlists.iter().find(|p| p.id == id))?;
+    (!shown.arranged_by_hand())
+        .then(|| t("media.move.follows_a_folder", "This playlist follows a folder; its order is the folder\u{2019}s."))
+}
+
 /// Move Left (or, `right`, Move Right) for the bin's item `index`, as its menu does it; whether
 /// there was a place to go.
 pub(crate) fn move_media_one(state: &mut HomeState, show: &Show, index: usize, right: bool) -> bool {
@@ -7396,10 +7404,17 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
     // One place at a time, as a drag moves it: greyed at either end (and in a media playlist
     // that follows a folder, whose order is the folder's).
     let (left, right) = media_moves(show, state, index);
+    let why = media_order_fixed(state);
     for (to, right, words) in
         [(left, false, t("media.move_left", "Move Left")), (right, true, t("media.move_right", "Move Right"))]
     {
-        if ui.add_enabled(to.is_some(), egui::Button::new(words)).clicked() {
+        let key = ui.add_enabled(to.is_some(), egui::Button::new(words));
+        // Greyed because the folder keeps the order: it says so, as other greyed controls do.
+        let key = match why {
+            Some(why) => key.on_disabled_hover_text(why),
+            None => key,
+        };
+        if key.clicked() {
             move_media_one(state, show, index, right);
             ui.close();
         }

@@ -12185,6 +12185,71 @@ mod tests {
     }
 
     #[test]
+    fn a_tile_held_at_the_strips_end_scrolls_all_media_as_it_does_a_media_playlist() {
+        // More pictures than the strip has room for.
+        let mut show = show(3);
+        for n in 0..14 {
+            let name = format!("{n}.png");
+            show.add_media(sp_model::MediaItem::new(name.clone(), name.into()));
+        }
+        let by_hand = |show: &Show| {
+            let mut playlist = crate::media::Playlist::new("Loop".to_owned());
+            playlist.files = show.media().iter().map(|item| item.path.clone()).collect();
+            HomeState {
+                media_playlist_shown: Some(playlist.id),
+                media_playlists: vec![playlist],
+                ..HomeState::default()
+            }
+        };
+        for mut state in [HomeState::default(), by_hand(&show)] {
+            let ctx = egui::Context::default();
+            let mut clock = 0.0;
+            let mut run = |state: &mut HomeState, events: Vec<Event>| {
+                clock += 0.05;
+                let raw = RawInput { focused: true, time: Some(clock), events, ..input(None) };
+                let output = ctx.run_ui(raw, |ui| {
+                    home_ui(ui, &show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+                });
+                output.drop_without_applying_deltas();
+            };
+            run(&mut state, Vec::new());
+            run(&mut state, Vec::new());
+            let from = state.media_tiles[0].center();
+            let press = |pos, pressed| Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            };
+            run(&mut state, vec![Event::PointerMoved(from)]);
+            run(&mut state, vec![press(from, true)]);
+            run(&mut state, vec![Event::PointerMoved(from + vec2(30.0, 0.0))]);
+            let before = state.media_tiles[1].min.x;
+            // The pointer walks right, resting a few frames at each step, until it is near the
+            // strip's end (wherever this window's layout puts it) and the row starts to move; it
+            // stops if it leaves the strip, where the tile is carried instead.
+            let mut moved = false;
+            let mut x = from.x + 30.0;
+            while x < 1280.0 && !moved {
+                x += 20.0;
+                for _ in 0..3 {
+                    run(&mut state, vec![Event::PointerMoved(pos2(x, from.y))]);
+                }
+                moved = state.media_tiles[1].min.x < before - 1.0;
+                if state.sweep.is_none_or(|sweep| sweep.carried) {
+                    break;
+                }
+            }
+            assert!(
+                moved,
+                "the row scrolls under a tile held at the strip's end (playlist: {})",
+                state.media_playlist_shown.is_some()
+            );
+            assert!(state.media_request.is_none() && !state.media_playlists_changed, "nothing moves before the drop");
+        }
+    }
+
+    #[test]
     fn a_tile_let_go_on_itself_or_beside_where_it_was_moves_nothing() {
         let show = show_with_three_media();
         let mut state = HomeState::default();
@@ -12269,10 +12334,17 @@ mod tests {
         assert!(move_media_one(&mut state, &show, 2, true));
         assert_eq!(state.media_playlists[0].files, [std::path::PathBuf::from("a.png"), "c.png".into()]);
         assert!(state.media_playlists_changed && state.media_request.is_none());
-        // One that follows a folder: both greyed.
+        // One put together by hand has no reason to give; All Media has none either.
+        assert_eq!(crate::studio::media_order_fixed(&state), None);
+        assert_eq!(crate::studio::media_order_fixed(&HomeState::default()), None);
+        // One that follows a folder: both greyed, saying why.
         state.media_playlists[0].folder = Some("/a".into());
         assert_eq!(media_moves(&show, &state, 0), (None, None));
         assert_eq!(media_moves(&show, &state, 2), (None, None));
+        assert_eq!(
+            crate::studio::media_order_fixed(&state),
+            Some("This playlist follows a folder; its order is the folder\u{2019}s.")
+        );
     }
 
     #[test]

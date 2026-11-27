@@ -49,6 +49,7 @@
   "media.playlists": "Listas multimedia",
   "media.move_left": "Mover a la izquierda",
   "media.move_right": "Mover a la derecha",
+  "media.move.follows_a_folder": "Esta lista sigue una carpeta; su orden es el de la carpeta.",
   "media.playlists.none": "Aún no hay listas multimedia. Crea una desde el menú junto a MULTIMEDIA.",
   "media.remove.hint": "Se quita solo de esta lista multimedia",
   "media.delete": "Eliminar…",

@@ -65,6 +65,7 @@
   "media.playlists": "Медіасписки",
   "media.move_left": "Перемістити ліворуч",
   "media.move_right": "Перемістити праворуч",
+  "media.move.follows_a_folder": "Цей список стежить за папкою; його порядок — як у папці.",
   "media.playlists.none": "Медіасписків ще немає. Створіть його в меню біля МЕДІА.",
   "media.remove": "Вилучити з {name}",
   "media.remove.hint": "Вилучається лише з цього медіасписку",

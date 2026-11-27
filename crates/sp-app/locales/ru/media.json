@@ -49,6 +49,7 @@
   "media.playlists": "Медиасписки",
   "media.move_left": "Влево",
   "media.move_right": "Вправо",
+  "media.move.follows_a_folder": "Этот список следует за папкой; его порядок — как в папке.",
   "media.playlists.none": "Медиасписков пока нет. Создайте его в меню рядом с МЕДИА.",
   "media.remove.hint": "Убирается только из этого медиасписка",
   "media.delete": "Удалить…",
