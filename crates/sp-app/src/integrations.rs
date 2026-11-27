@@ -2316,7 +2316,7 @@ mod tests {
     #[test]
     fn every_page_fits_the_narrowest_settings_page_with_nothing_drawn_over_anything() {
         use crate::i18n::Language;
-        for language in [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian] {
+        for language in Language::ALL {
             crate::i18n::with_language(language, || {
                 for (name, mut services) in every_page() {
                     // The least Settings window leaves its page 490 wide; the usual, 740.

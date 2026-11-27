@@ -3544,6 +3544,7 @@ mod tests {
             (crate::i18n::Language::Spanish, "75\u{a0}%", "40\u{a0}%"),
             (crate::i18n::Language::Russian, "75\u{a0}%", "40\u{a0}%"),
             (crate::i18n::Language::Ukrainian, "75\u{a0}%", "40\u{a0}%"),
+            (crate::i18n::Language::German, "75\u{a0}%", "40\u{a0}%"),
         ] {
             crate::i18n::with_language(language, || {
                 // The Box tab: the object's opacity beside its slider, its shadow's in its panel.

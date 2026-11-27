@@ -596,7 +596,7 @@ mod tests {
     #[test]
     fn phone_remote_fits_the_narrowest_settings_page() {
         use crate::i18n::Language;
-        for language in [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian] {
+        for language in Language::ALL {
             crate::i18n::with_language(language, || {
                 let ctx = crate::studio::tests::styled();
                 let mut view = View {

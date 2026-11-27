@@ -108,7 +108,7 @@ Required: `v`, `kind`, `install_id`, `sent_at`, `app` (with `version` and `chann
 | `displays[]` | each display's `w`, `h` (pixels), `scale`, `hz`, `main`; never its name | 16 displays |
 | `outputs` | counts: `audience`, `stage` screens set up, how many are `on`, and how many send to a `display`, a `window`, `ndi`, `decklink` | each up to 64 |
 | `integrations` | whether `ndi`, `decklink`, `ffmpeg` are there | true or false |
-| `language` | the app's language (`en`, `ru`, `uk`, `es`) | like `en` or `pt-BR` |
+| `language` | the app's language (`en`, `ru`, `uk`, `es`, `de`) | like `en` or `pt-BR` |
 | `uptime_s` | seconds since the app started | |
 | `minutes[]` | a row for each minute of running, below | 30 rows |
 | `events[]` | things that happened, below | 200 |

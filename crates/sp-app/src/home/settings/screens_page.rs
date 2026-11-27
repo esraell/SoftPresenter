@@ -940,7 +940,8 @@ mod tests {
     #[test]
     fn screens_fits_the_narrowest_settings_window() {
         use crate::i18n::Language;
-        for language in [Language::English, Language::Russian, Language::Ukrainian, Language::Spanish] {
+        for language in [Language::English, Language::Russian, Language::Ukrainian, Language::Spanish, Language::German]
+        {
             crate::i18n::with_language(language, || {
                 let show = Show::new(Vec::new());
                 let mut state = state();

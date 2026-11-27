@@ -1086,31 +1086,9 @@ mod tests {
     // Ukrainian is translated in full too: every area Spanish has finished, Ukrainian has, so a
     // string wrapped later without its Ukrainian fails here as well.
     const UKRAINIAN_DONE: &[&str] = SPANISH_DONE;
-    // German joins an area at a time, as its tables are written; from then on a string wrapped
-    // without its German fails here as well.
-    const GERMAN_DONE: &[&str] = &[
-        "topbar",
-        "left",
-        "right",
-        "slides",
-        "dock",
-        "keys",
-        "media",
-        "screens",
-        "remote",
-        "settings",
-        "mcp",
-        "reports",
-        "setup",
-        "integrations",
-        "mirror",
-        "tools",
-        "inspector",
-        "edit",
-        "editor",
-        "themes",
-        "menubar",
-    ];
+    // German is translated in full too: every area Spanish has finished, German has, so a
+    // string wrapped later without its German fails here as well.
+    const GERMAN_DONE: &[&str] = SPANISH_DONE;
 
     /// What `language` lacks in the areas `done` lists, as "key (English)".
     fn lacking_in(language: Language, done: &[&str]) -> Vec<String> {
@@ -1135,7 +1113,6 @@ mod tests {
 
     #[test]
     fn the_finished_areas_have_all_their_german() {
-        assert!(GERMAN_DONE.iter().all(|area| SPANISH_DONE.contains(area)), "German is held to Spanish's areas");
         let lacking = lacking_in(Language::German, GERMAN_DONE);
         assert!(lacking.is_empty(), "no German yet for: {lacking:#?}");
     }

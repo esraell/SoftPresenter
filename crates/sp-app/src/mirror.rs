@@ -1504,7 +1504,7 @@ mod tests {
         // Every language still has its words for each, and they say AirPlay too.
         let keys = named.iter().map(|(key, _)| *key).chain(["mirror.how", "mirror.unofficial"]);
         for key in keys {
-            for language in [Language::Spanish, Language::Russian, Language::Ukrainian] {
+            for language in [Language::Spanish, Language::Russian, Language::Ukrainian, Language::German] {
                 // `tg`, not `t`: it remembers nothing, so the stand-in English never reaches
                 // the table that puts replies back into English for the other tests.
                 let said = crate::i18n::with_language(language, || crate::i18n::tg(key, "\u{0}"));

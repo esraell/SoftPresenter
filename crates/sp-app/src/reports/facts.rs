@@ -42,7 +42,7 @@ pub struct Facts {
     pub outputs: OutputCounts,
     pub ndi: bool,
     pub decklink: bool,
-    /// The app's language: `en`, `ru`, `uk`, `es`.
+    /// The app's language: `en`, `ru`, `uk`, `es`, `de`.
     pub language: &'static str,
     /// What kinds of thing are on screen, as codes: `song`, `bible`, `video`, `prop`…
     pub scene: Vec<&'static str>,

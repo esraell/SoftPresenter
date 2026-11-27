@@ -4300,6 +4300,7 @@ mod tests {
         // In Russian it is made with its Russian name.
         assert_eq!(with_language(Language::Russian, chorus_after_name), "Припев после каждого куплета");
         assert_eq!(with_language(Language::Ukrainian, chorus_after_name), "Приспів після кожного куплету");
+        assert_eq!(with_language(Language::German, chorus_after_name), "Refrain nach jeder Strophe");
         // A song without a chorus isn't offered it.
         let verses = parse_song_text("Verses", "[Verse 1]\nA\n\n[Verse 2]\nB\n");
         let ctx = egui::Context::default();

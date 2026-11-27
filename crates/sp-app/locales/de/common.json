@@ -1,0 +1,5 @@
+{
+  "_note": "German (du, lower case; German capitalisation; „…“ for quotation marks), not yet reviewed by a German speaker. The glossary is in docs/translating.md. Words several areas share: the unit of seconds (s) and the notice that a newer SoftPresenter has been installed.",
+  "common.seconds_unit": "s",
+  "common.newer_installed": "Eine neuere Version von SoftPresenter wurde installiert. Beende SoftPresenter und öffne es wieder, um sie zu verwenden."
+}

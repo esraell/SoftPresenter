@@ -259,12 +259,12 @@ mod tests {
 
     #[test]
     fn every_reason_has_its_words_in_every_language_with_no_english_left_in_them() {
-        // Words English sentences are made of, which Spanish has none of.
+        // Words English sentences are made of, which Spanish and German have none of.
         const ENGLISH: [&str; 12] =
             ["the", "is", "it", "its", "has", "and", "of", "which", "isn't", "can't", "doesn't", "file"];
         for reason in sp_model::reasons_one_of_each() {
             let english = reason.to_string();
-            for language in [Language::Spanish, Language::Russian, Language::Ukrainian] {
+            for language in [Language::Spanish, Language::Russian, Language::Ukrainian, Language::German] {
                 let said = with_language(language, || words(&reason));
                 assert_ne!(said, english, "{language:?} has no words for {reason:?}");
                 assert!(!said.contains('{') && !said.contains('}'), "{language:?}: {said}");
@@ -274,12 +274,13 @@ mod tests {
                 for kept in filled_with(&reason).iter().map(String::as_str).chain(KEPT) {
                     rest = rest.replace(kept, " ");
                 }
-                if language == Language::Spanish {
+                // Spanish and German are written in Latin letters too: no English words in them.
+                if matches!(language, Language::Spanish | Language::German) {
                     let english_words: Vec<&str> = rest
                         .split(|c: char| !c.is_alphanumeric() && c != '\'')
                         .filter(|word| ENGLISH.contains(&word.to_lowercase().as_str()))
                         .collect();
-                    assert!(english_words.is_empty(), "English in the Spanish: {said} ({english_words:?})");
+                    assert!(english_words.is_empty(), "English in the {language:?}: {said} ({english_words:?})");
                 } else {
                     assert!(!rest.chars().any(|c| c.is_ascii_alphabetic()), "English in the {language:?}: {said}");
                 }
@@ -312,7 +313,7 @@ mod tests {
             [Why::NotSongbook, Why::NoSongs, Why::NoSongbookInZip, Why::ZipTooMuch, Why::ZipDamaged, Why::NotAllowed]
         {
             let english = why.english();
-            for language in [Language::Spanish, Language::Russian, Language::Ukrainian] {
+            for language in [Language::Spanish, Language::Russian, Language::Ukrainian, Language::German] {
                 let said = with_language(language, || why.words());
                 assert_ne!(said, english, "{language:?} {why:?}");
                 assert_eq!(with_language(language, || why.english()), english);

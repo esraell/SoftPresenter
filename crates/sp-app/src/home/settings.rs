@@ -1535,7 +1535,7 @@ mod tests {
         let place =
             |words: &str| crate::studio::tests::place_on_top(&drawn, words).unwrap_or_else(|| panic!("{words}"));
         let computer = place("This computer\u{2019}s");
-        for name in ["English", "Español", "Русский", "Українська"] {
+        for name in ["English", "Deutsch", "Español", "Русский", "Українська"] {
             assert!(place(name).x > computer.x, "{name} comes after the computer's");
         }
         drawn.drop_without_applying_deltas();

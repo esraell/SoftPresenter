@@ -2487,7 +2487,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   computer's (a small screen, with the computer's language named in that language under it), then
   English, Deutsch, Español, Русский and Українська, each written in itself with the flag it is best
   known by; the setup's first step has the same choice as a menu ("El idioma del ordenador (Español)"). A choice shows at once, with no restart, and is kept with the preferences (`language`).
-  Spanish, Russian and Ukrainian are written for the whole window: the top bar, the keys sheet, the
+  Spanish, Russian, Ukrainian and German are written for the whole window (German not yet read by a
+  German speaker): the top bar, the keys sheet, the
   left column (libraries, playlists and their menus), the slides area (with the slide,
   arrangement and times menus), the bar and the media strip under it, the right column (preview,
   layer keys, Clear All, the tool tabs and what is in them), the Bible view, the Bibles window,
@@ -2516,9 +2517,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   boxes say the sample words in it ("Text", "Texto"); their files keep the
   English (a name retyped as the window shows it changes nothing), and the message for words
   shown once and the start-up macro are found by a mark or an
-  id, never by their names. German has its number and quotation rules (1.234, 0,4, „…“), its
-  plural forms and Germany's flag, and its words come area by area; a computer whose language is
-  German (in Germany, Austria, Switzerland or anywhere else) starts the app in it. Off a Mac the
+  id, never by their names. German has its number and quotation rules (1.234, 0,4, „…“) and its
+  plural forms, speaks to the operator with du, and a computer whose language is German (in
+  Germany, Austria, Switzerland or anywhere else) starts the app in it. Off a Mac the
   keys are named as the language's keyboards print them (Strg+Umschalt+1 in German, Ctrl+Mayús+1
   in Spanish). Controls take the width of their words in the language set, and a place
   with a fixed room (a layer key, the find box, All Songs) uses a short form when the usual word

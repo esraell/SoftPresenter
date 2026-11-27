@@ -1,0 +1,16 @@
+{
+  "_note": "German (du, lower case; German capitalisation; „…“ for quotation marks), not yet reviewed by a German speaker. The glossary is in docs/translating.md. The find box's list of results: the LIED tags beside each result (in capitals, as the English), the song catalog's heading (Worship Leader App is a name), what it says while it looks, and the keys at its foot (Strg off a Mac); after a drop the foot line says the keys run the slides again (the word between ** is set heavier, {key} is the key in a cap).",
+  "find.tag.song": "LIED",
+  "find.tag.song_group": "LIED · {group}",
+  "find.nothing": "Nichts gefunden",
+  "find.looking": "Suche in den Bibeln…",
+  "find.looking.songbooks": "Suche in den Liederbüchern…",
+  "find.catalog.from": "Von Worship Leader App",
+  "find.tag.catalog": "LIED · {language}",
+  "find.keys.mac": "↵ Öffnen    ⌘↵ Zum Ablauf    esc Schließen",
+  "find.keys": "Enter: Öffnen    Strg+Enter: Zum Ablauf    Esc: Schließen",
+  "find.rest.keys": "Die Tasten steuern wieder die Folien.",
+  "find.rest.drag": "**Ziehe** noch eins hinein",
+  "find.rest.again": "{key} oder ein Klick ins Feld, um neu zu suchen",
+  "find.rest.close": "{key} Schließen"
+}

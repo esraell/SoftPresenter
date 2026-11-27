@@ -1312,7 +1312,7 @@ mod tests {
     #[test]
     fn a_service_out_of_reach_is_said_in_plain_words() {
         use crate::i18n::{Language, with_language};
-        for language in [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian] {
+        for language in Language::ALL {
             let words = with_language(language, || unreachable("VoxLive"));
             assert!(words.starts_with("VoxLive") || words.contains(" VoxLive"), "{words}");
             assert!(words.contains("SoftPresenter") && !words.contains('{'), "{words}");
@@ -1321,7 +1321,7 @@ mod tests {
             with_language(Language::English, || unreachable("VoxLive")),
             "VoxLive can't be reached. SoftPresenter keeps trying. Check this computer's internet connection."
         );
-        for language in [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian] {
+        for language in Language::ALL {
             let words = with_language(language, || unreachable_try_again("TimelyChurch"));
             assert!(words.contains("TimelyChurch") && !words.contains('{'), "{words}");
         }

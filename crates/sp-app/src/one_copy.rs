@@ -429,6 +429,7 @@ mod tests {
             (crate::i18n::Language::Spanish, "Administrador de tareas"),
             (crate::i18n::Language::Russian, "Диспетчере задач"),
             (crate::i18n::Language::Ukrainian, "Диспетчері завдань"),
+            (crate::i18n::Language::German, "Task-Manager"),
         ] {
             let said =
                 crate::i18n::with_language(language, || message_box_words(&Settled::NotAnswered, "windows", false));

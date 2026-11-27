@@ -1031,7 +1031,7 @@ mod tests {
         // Every language has its own words for each, with the first two folders in them, and a
         // count of the others in the form its number takes.
         let five = ["Worship songs 2019", "Choir", "Youth", "Christmas", "Easter"];
-        for language in [Language::Spanish, Language::Russian, Language::Ukrainian] {
+        for language in [Language::Spanish, Language::Russian, Language::Ukrainian, Language::German] {
             for count in 0..=five.len() {
                 let names = &five[..count];
                 let said = with_language(language, || looks_in_words(&folders(names)));

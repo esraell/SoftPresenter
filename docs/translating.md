@@ -1,7 +1,7 @@
 # Translating SoftPresenter's own words
 
 SoftPresenter's buttons, menus, tooltips and notices exist in English, Spanish, Russian,
-Ukrainian and German (English, Spanish, Russian and Ukrainian in full; German area by area). Songs, Bible text and Bible book names are
+Ukrainian and German, all five in full. Songs, Bible text and Bible book names are
 content and keep their own languages; the `sp` command line, log lines and dev reports stay in
 English; the phone's remote page has its own tables. The rules for how words may grow are in the design's
 `06-languages.md`; this page is how to do the work in the code.
@@ -141,7 +141,7 @@ start with `_` (`"_note"`) are comments.
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 
-Spanish, Russian and Ukrainian have every area above. What stays in English is what other crates say in their own words
+Spanish, Russian, Ukrainian and German have every area above. What stays in English is what other crates say in their own words
 when something fails (NDI's, the DeckLink driver's and a video file's reasons, shown as they
 come), and the few errors said at startup before the language is known (the home window can't
 open, no graphics device).
@@ -153,10 +153,9 @@ crate and `sp` keep their English. What the system or a library says inside such
 the system couldn't read, the JSON or zip reader's own words) is shown as it comes.
 
 When you finish an area, add its file name to `SPANISH_DONE` in `i18n.rs` (and to the list of
-each other language that has it in full: `RUSSIAN_DONE` and `UKRAINIAN_DONE` are `SPANISH_DONE`,
-and `GERMAN_DONE` lists the areas German has finished), so a string wrapped later without its
-words in that language fails the tests. A new string needs its Spanish, Russian and Ukrainian in
-the same commit, and its German when its area is in `GERMAN_DONE`.
+each other language that has it in full: `RUSSIAN_DONE`, `UKRAINIAN_DONE` and `GERMAN_DONE` are
+`SPANISH_DONE`), so a string wrapped later without its words in that language fails the tests. A
+new string needs its Spanish, Russian, Ukrainian and German in the same commit.
 
 ## Spanish: which Spanish
 
