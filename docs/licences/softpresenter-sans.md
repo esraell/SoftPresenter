@@ -8,8 +8,10 @@ it with nothing to install, and slides wrap the same way on every computer.
 ## The licence
 
 SoftPresenter Sans is a renamed copy of Libertinus Sans 7.051
-(<https://github.com/alerque/libertinus>), copyright the Libertinus Project Authors, with one
-addition: a Bold Italic, made by slanting the Bold. Libertinus Sans continues Linux Biolinum by
+(<https://github.com/alerque/libertinus>), copyright the Libertinus Project Authors, with two
+additions: a Bold Italic, made by slanting the Bold, and a small black square (▪, U+25AA) in
+every face, made from the face's own black square (■), so that each of the seven marks for
+the end of a song is in the font and is drawn the same on every computer. Libertinus Sans continues Linux Biolinum by
 Philipp H. Poll. It is licensed under the SIL Open Font License 1.1, which allows the font to be
 used, changed and shared, alone or bundled with software, and can be combined with the GNU GPL
 version 3.

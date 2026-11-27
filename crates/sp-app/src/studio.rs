@@ -758,6 +758,18 @@ pub fn reading(size: f32) -> FontId {
     FontId::new(size, FontFamily::Name(READING.into()))
 }
 
+/// The name of the face the marks for the end of a song are written in.
+const MARKS: &str = "marks";
+
+/// The face the marks for the end of a song are written in, at a size: SoftPresenter Sans, the
+/// slides' own face, which the app carries and which has all seven, so the window shows on
+/// every computer the mark the screens draw. In a window whose fonts were never set (a test's),
+/// the interface font.
+pub fn marks(ctx: &egui::Context, size: f32) -> FontId {
+    let loaded = ctx.data(|data| data.get_temp::<bool>(egui::Id::unique(MARKS)).unwrap_or(false));
+    if loaded { FontId::new(size, FontFamily::Name(MARKS.into())) } else { FontId::proportional(size) }
+}
+
 /// Uses the computer's own interface font, so the app looks at home on it, with a
 /// wide-coverage font behind it so song titles in any script show as letters. Without either
 /// the app still works with its built-in font.
@@ -837,6 +849,12 @@ fn load_fonts(ctx: &egui::Context) {
         book.insert(0, READING.to_owned());
     }
     fonts.families.insert(FontFamily::Name(READING.into()), book);
+    // The marks for the end of a song: the slides' own face first, then the interface's.
+    let mut marks = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    fonts.font_data.insert(MARKS.to_owned(), Arc::new(egui::FontData::from_static(sp_render::bundled_regular())));
+    marks.insert(0, MARKS.to_owned());
+    fonts.families.insert(FontFamily::Name(MARKS.into()), marks);
+    ctx.data_mut(|data| data.insert_temp(egui::Id::unique(MARKS), true));
     if let Some(bytes) = WIDE.iter().find_map(|path| std::fs::read(path).ok()) {
         fonts.font_data.insert("wide".to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
         for family in fonts.families.values_mut() {

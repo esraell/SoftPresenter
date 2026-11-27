@@ -2250,7 +2250,18 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     it will be, and Mark, Size, Colour and Place at its right; a change applies at once and
     Done closes it. It opens from Settings › Slides' **Change how it looks…** (the main
     theme's) and from **Song end** › Change… among a theme's own rows in Edit › Themes (a song
-    template open, nothing picked). Nothing in it moves as choices change.
+    template open, nothing picked). Nothing in it moves as choices change. Each mark's chip
+    shows three of it, in chips of one width; the window writes the marks in SoftPresenter
+    Sans, which has all seven, so it shows the same marks on every computer. A theme's look
+    is the window's from the start of the app (`HomeState::list_themes`). A change is written
+    to the theme's file once the clicks pause for a second, and at quitting. Opened in the
+    Theme Editor, the window holds the keys that run the show only while the editor is there,
+    and goes with the editor however it is left (a view asked for by a key, a menu, `sp` or
+    the phone).
+  - **While a last slide is up.** A change of the look dissolves on the screens, as switching
+    the mark on does, and the slide's own transition isn't played again; the same on a screen
+    with a theme of its own. With the Theme Editor open, nothing reaches the screens until it
+    is left, as with every change to a theme.
   - **Which slide.** The last place in the order the song is sung in whose slide has the song's
     words and isn't disabled (`end_mark::last_sung`). The song's words are those in its main
     language's and translation's boxes: a caption, a clock or a title in another box is not.

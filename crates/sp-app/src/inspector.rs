@@ -772,7 +772,8 @@ fn theme_slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
                     "The mark under the last slide of a song drawn with this theme, when Settings \u{203a} Slides has it on",
                 ));
             let ink = look.colour.map_or(INK, crate::home::color32);
-            ui.label(egui::RichText::new(crate::end_look::chip_words(look.mark)).size(13.0).color(ink));
+            let face = crate::studio::marks(ui.ctx(), 13.0);
+            ui.label(egui::RichText::new(crate::end_look::chip_words(look.mark)).font(face).color(ink));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 change = ui.button(t("inspector.theme.song_end.change", "Change\u{2026}")).clicked();
             });

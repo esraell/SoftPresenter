@@ -61,6 +61,12 @@ const BUNDLED: [&[u8]; 4] = [
     include_bytes!("../fonts/SoftPresenterSans-BoldItalic.ttf"),
 ];
 
+/// SoftPresenter Sans Regular's file, for the operator's window to write the marks for the end
+/// of a song in (its own font may lack some of them, and a system's fall-back draws another).
+pub fn bundled_regular() -> &'static [u8] {
+    BUNDLED[0]
+}
+
 /// Adds the bundled fonts to a collection. Their data is the program's own, so nothing is read
 /// from a file and nothing can change under it.
 fn add_bundled(collection: &mut Collection) {
@@ -543,6 +549,45 @@ mod tests {
         // Letters are laid out in it, not drawn as missing ones.
         let letters = glyphs(&mut only, DEFAULT_FONT_FAMILY, "Свет ґ ї Light");
         assert!(letters.iter().all(|glyph| glyph.0 != 0));
+    }
+
+    /// Each of the seven marks for the end of a song is in SoftPresenter Sans itself, in all four
+    /// of its faces, so a theme set in it draws the same mark on every computer: none is left to
+    /// whatever font a system falls back to (the small square once was: Libertinus Sans has only
+    /// the large one, so the family's build adds it).
+    #[test]
+    fn the_bundled_typeface_has_every_mark_for_the_end_of_a_song() {
+        let mut only = Fonts::bundled_only();
+        for (weight, italic) in [(400, false), (700, false), (400, true), (700, true)] {
+            let mut style = Theme::builtin().templates[0].boxes[0].clone();
+            style.font_family = DEFAULT_FONT_FAMILY.to_owned();
+            (style.weight, style.italic) = (weight, italic);
+            let mut widths = Vec::new();
+            for mark in sp_model::EndMark::ALL {
+                let layout = lay_out(&mut only, &mark.text(), &[], &style, 60.0, 10_000.0);
+                let mut ids = Vec::new();
+                for line in layout.lines() {
+                    for item in line.items() {
+                        if let PositionedLayoutItem::GlyphRun(run) = item {
+                            ids.extend(run.positioned_glyphs().map(|glyph| glyph.id));
+                        }
+                    }
+                }
+                assert_eq!(ids.len(), 11, "{mark:?}: three marks and eight spaces, on one line");
+                assert!(ids.iter().all(|id| *id != 0), "{mark:?} at {weight}, italic {italic}: {ids:?}");
+                assert!(ids[0] == ids[5] && ids[5] == ids[10] && ids[0] != ids[1], "{mark:?}: {ids:?}");
+                widths.push((mark, ids[0], layout.width()));
+            }
+            // Seven marks of their own: the small square is not the large one, nor the dot the
+            // bullet, and each small one is narrower than its large one.
+            let mut own: Vec<u32> = widths.iter().map(|(_, id, _)| *id).collect();
+            own.sort_unstable();
+            own.dedup();
+            assert_eq!(own.len(), 7, "{widths:?}");
+            let wide = |mark: sp_model::EndMark| widths.iter().find(|(have, _, _)| *have == mark).expect("laid out").2;
+            assert!(wide(sp_model::EndMark::SmallSquare) < wide(sp_model::EndMark::Square), "{widths:?}");
+            assert!(wide(sp_model::EndMark::Bullet) < wide(sp_model::EndMark::Dot), "{widths:?}");
+        }
     }
 
     /// Fonts this computer has, with pair kerning, to copy and spoil. Empty on a computer with

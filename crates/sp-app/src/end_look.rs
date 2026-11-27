@@ -168,11 +168,26 @@ pub fn chip_words(mark: EndMark) -> String {
     format!("{glyph}\u{a0}\u{a0}{glyph}\u{a0}\u{a0}{glyph}")
 }
 
-/// The face a mark is written in at a size: the reading face the small slide's words are in
-/// where it has the mark (a book face may lack the squares), else the interface's.
-pub fn mark_font(ctx: &egui::Context, mark: EndMark, size: f32) -> FontId {
-    let reading = crate::studio::reading(size);
-    if ctx.fonts_mut(|fonts| fonts.has_glyph(&reading, mark.glyph())) { reading } else { FontId::proportional(size) }
+/// A mark's chip writes its three marks at this size, with the two spaces between them drawn
+/// narrower by this part of the size each, as the design has them: large enough that the round
+/// mark and the small square read apart, and close enough that three of the widest fit the chip.
+const CHIP_MARK: f32 = 16.0;
+const CHIP_SPACE_LESS: f32 = 0.22;
+
+/// A mark's three, as its chip writes them ([`chip_words`], so the chip is found by them), in
+/// the marks' face.
+fn chip_marks(ui: &egui::Ui, mark: EndMark, ink: Color32) -> std::sync::Arc<egui::Galley> {
+    let font = crate::studio::marks(ui.ctx(), CHIP_MARK);
+    let glyph = mark.glyph().to_string();
+    let (glyph, spaces) = (glyph.as_str(), "\u{a0}\u{a0}");
+    let plain = egui::TextFormat { font_id: font.clone(), color: ink, ..Default::default() };
+    let closer = egui::TextFormat { extra_letter_spacing: -CHIP_SPACE_LESS * CHIP_MARK, ..plain.clone() };
+    let mut job = egui::text::LayoutJob::default();
+    for part in [glyph, spaces, glyph, spaces, glyph] {
+        job.append(part, 0.0, if part == spaces { closer.clone() } else { plain.clone() });
+    }
+    job.wrap.max_width = f32::INFINITY;
+    ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
 }
 
 /// The sentence under the rows: the no-room rule while the mark is on, or that it is switched
@@ -235,7 +250,7 @@ pub fn sample(ui: &egui::Ui, place: Rect, show: &Show, look: &EndLook, on: bool)
     }
     let size = words_size * f32::from(look.size) / 100.0;
     let ink = look.colour.map_or(TEXT, crate::home::color32);
-    let mark = parts::one_line(ui, &look.mark.text(), mark_font(ui.ctx(), look.mark, size), ink, f32::INFINITY);
+    let mark = parts::one_line(ui, &look.mark.text(), crate::studio::marks(ui.ctx(), size), ink, f32::INFINITY);
     let top = match look.place {
         EndPlace::Under => y - gap + words_size * 0.5,
         // As low as it may go: 3% above the slide's bottom.
@@ -244,15 +259,31 @@ pub fn sample(ui: &egui::Ui, place: Rect, show: &Show, look: &EndLook, on: bool)
     painter.galley(pos2(place.center().x - mark.size().x / 2.0, top), mark, ink);
 }
 
-/// A chip: the well's grey with its words, outlined in the one accent when it is the choice.
-fn chip(ui: &egui::Ui, rect: Rect, id: egui::Id, words: &str, font: FontId, chosen: bool) -> egui::Response {
+/// A chip's block: the well's grey, outlined in the one accent when it is the choice. With it,
+/// the ink its words are written in.
+fn chip_block(ui: &egui::Ui, rect: Rect, id: egui::Id, chosen: bool) -> (egui::Response, Color32) {
     let response = ui.interact(rect, id, Sense::click());
     ui.painter().rect_filled(rect, 8.0, BUTTON);
     if chosen {
         ui.painter().rect_stroke(rect, 8.0, Stroke::new(1.0, TALLY), StrokeKind::Inside);
     }
     let ink = if chosen || response.hovered() { TEXT } else { TEXT_DIM };
+    (response, ink)
+}
+
+/// A chip with words in its middle.
+fn chip(ui: &egui::Ui, rect: Rect, id: egui::Id, words: &str, font: FontId, chosen: bool) -> egui::Response {
+    let (response, ink) = chip_block(ui, rect, id, chosen);
     ui.painter().text(rect.center(), Align2::CENTER_CENTER, words, font, ink);
+    response
+}
+
+/// A mark's chip: its three marks in its middle ([`chip_marks`]), in a chip of the one width
+/// every mark's has.
+fn mark_chip(ui: &egui::Ui, rect: Rect, id: egui::Id, mark: EndMark, chosen: bool) -> egui::Response {
+    let (response, ink) = chip_block(ui, rect, id, chosen);
+    let marks = chip_marks(ui, mark, ink);
+    ui.painter().with_clip_rect(rect).galley(rect.center() - marks.size() / 2.0, marks, ink);
     response
 }
 
@@ -360,8 +391,7 @@ pub fn window(ctx: &egui::Context, state: &mut HomeState, show: &Show, door: Doo
                 vec2(MARK_CHIP, CHIP),
             );
             let id = ui.scope_id().with(("mark", at));
-            let font = FontId::proportional(14.0);
-            if chip(ui, rect, id, &chip_words(mark), font, look.mark == mark).clicked() {
+            if mark_chip(ui, rect, id, mark, look.mark == mark).clicked() {
                 chosen = Some(EndLook { mark, ..look });
             }
         }
@@ -823,13 +853,60 @@ mod tests {
     }
 
     #[test]
-    fn end_look_every_mark_has_its_glyph_in_the_faces_the_window_writes_it_in() {
+    fn end_look_every_mark_is_written_in_the_slides_own_face_which_has_them_all() {
         let ctx = crate::studio::tests::styled();
+        // The marks' face is there once the window's fonts are set, and has every mark (the
+        // font itself is checked in sp-render: `the_bundled_typeface_has_every_mark_…`).
+        let face = crate::studio::marks(&ctx, CHIP_MARK);
+        assert!(matches!(&face.family, egui::FontFamily::Name(_)), "{face:?}");
         for mark in EndMark::ALL {
-            let chip = FontId::proportional(14.0);
-            assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&chip, mark.glyph())), "{mark:?} on its chip");
-            let slide = mark_font(&ctx, mark, 12.0);
-            assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&slide, mark.glyph())), "{mark:?} on the small slide");
+            assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&face, mark.glyph())), "{mark:?}");
+        }
+        // A window whose fonts were never set writes them in what it has.
+        assert_eq!(crate::studio::marks(&egui::Context::default(), 12.0), FontId::proportional(12.0));
+    }
+
+    #[test]
+    fn end_look_three_marks_fit_every_chip_and_the_round_mark_and_the_small_square_read_apart() {
+        for language in Language::ALL {
+            crate::i18n::with_language(language, || {
+                let ctx = crate::studio::tests::styled();
+                let mut state = opened();
+                // The seven chips are blocks of one size, in one line.
+                let (words, blocks) = drawn(&ctx, &mut state, USUAL);
+                let (wide, tall) = ((MARK_CHIP * 10.0) as i32, (CHIP * 10.0) as i32);
+                let chips: Vec<[i32; 4]> =
+                    blocks.into_iter().filter(|block| block[2] == wide && block[3] == tall).collect();
+                assert_eq!(chips.len(), 7, "{language:?}: {chips:?}");
+                assert!(chips.iter().all(|chip| chip[0] == chips[0][0]), "{language:?}: one line: {chips:?}");
+                // Each chip's three marks are inside its block, with room at either side.
+                let mut widths = Vec::new();
+                for mark in EndMark::ALL {
+                    let at = words.iter().rfind(|(have, _)| *have == chip_words(mark)).expect("its chip").1;
+                    let block = chips
+                        .iter()
+                        .map(|chip| {
+                            Rect::from_min_size(
+                                pos2(chip[1] as f32 / 10.0, chip[0] as f32 / 10.0),
+                                vec2(MARK_CHIP, CHIP),
+                            )
+                        })
+                        .find(|block| block.contains(at.center()))
+                        .unwrap_or_else(|| panic!("{language:?}: {mark:?} is in no chip"));
+                    assert!(
+                        at.min.x >= block.min.x + 4.0 && at.max.x <= block.max.x - 4.0,
+                        "{language:?}: {mark:?} at {at:?} in {block:?}"
+                    );
+                    assert!(at.min.y >= block.min.y && at.max.y <= block.max.y, "{language:?}: {mark:?} {at:?}");
+                    widths.push((mark, at.width()));
+                }
+                // The round mark is plainly wider than the small square, and the large square
+                // than the small one: no two chips look alike.
+                let wide = |mark: EndMark| widths.iter().find(|(have, _)| *have == mark).expect("measured").1;
+                assert!(wide(EndMark::Dot) >= wide(EndMark::SmallSquare) * 1.2, "{language:?}: {widths:?}");
+                assert!(wide(EndMark::Square) >= wide(EndMark::SmallSquare) * 1.2, "{language:?}: {widths:?}");
+                assert!(wide(EndMark::Dot) >= wide(EndMark::Bullet) * 1.2, "{language:?}: {widths:?}");
+            });
         }
     }
 

@@ -14,7 +14,7 @@ mod yuv;
 
 pub use close_mark::{CloseMark, MarkLook, Square};
 pub use fade_blend::{FadeBlend, Weights, blend_weights};
-pub use fonts::{Fonts, copy_large_fonts_into_caches};
+pub use fonts::{Fonts, bundled_regular, copy_large_fonts_into_caches};
 pub use gpu::{
     CachedSide, MovingPicture, PaintError, Painter, early_stages_on_processor, read_pixels, read_pixels_gently,
     target_texture,
