@@ -183,10 +183,10 @@ pub enum EditKind {
     Stage,
 }
 
-/// For how many frames after a drop the slides keep the item that was at their top there
-/// ([`HomeState::slides_hold`]): a passage put in may take a frame or two to be made, and
-/// change its height when it is.
-pub const SLIDES_HOLD_FRAMES: u8 = 6;
+/// For how many passes of the window after a drop the slides keep the item that was at their
+/// top there ([`HomeState::slides_hold`]; the toolkit may draw a frame twice, a pass each): a
+/// passage put in may take a frame or two to be made, and change its height when it is.
+pub const SLIDES_HOLD_PASSES: u8 = 6;
 
 pub struct HomeState {
     /// How slides are laid out, and how many fit across the grid (2 to 7).
@@ -354,18 +354,16 @@ pub struct HomeState {
     /// that it is at the top, once.
     pub slides_jump_to: Option<usize>,
     /// The playlist item at the top of the slides, and how far into it the view is, as they
-    /// were last drawn; and, for a few frames after a result of the find box is dropped into
-    /// the playlist, the one to keep there (with how many frames are left), so an item put in
-    /// above it doesn't push the slides down (`slides::keep_top`).
+    /// were last drawn; for a few passes after a result of the find box is dropped into the
+    /// playlist, the one to keep there (with how many passes are left), so an item put in above
+    /// it doesn't push the slides down (`slides::keep_top`); and where the view is to be as the
+    /// next pass begins, for that.
     pub slides_top: Option<(usize, f32)>,
     pub slides_hold: Option<(usize, f32, u8)>,
+    pub slides_set_offset: Option<f32>,
     /// The playlist item a result of the find box was just dropped into, by its id, and when:
     /// its row flashes for a moment (`studio::drop_flash`).
     pub drop_flash: Option<(sp_model::Uuid, f64)>,
-    /// Motion is kept to a minimum: a row just dropped into is tinted for a moment instead of
-    /// flashing and fading. Nothing sets it yet: the app has no such setting, and the window
-    /// library doesn't say whether the computer asks for less motion.
-    pub reduce_motion: bool,
     /// The slide on screen, and its place in its song as played, when the slides last looked:
     /// the view goes to the slide once, when that changes, and otherwise stays where the
     /// operator scrolled it.
@@ -442,6 +440,10 @@ pub struct HomeState {
     /// The library search pop-up (Command-F), while it is open: what is typed, and the row
     /// picked out with the arrow keys.
     pub library_search: Option<(String, usize)>,
+    /// The search is open but its box has given the keyboard back (a result was dropped in the
+    /// left column): its words and what they found stay, and the keys run the show, until a
+    /// click on the box, `/` or Command-F gives it the keyboard again (`HomeState::open_find`).
+    pub search_resting: bool,
     /// Where the find box is in the bar along the top, when the window is wide enough for it:
     /// what a search finds is listed under it.
     pub find_rect: Option<Rect>,
@@ -1987,8 +1989,8 @@ impl Default for HomeState {
             slides_jump_to: None,
             slides_top: None,
             slides_hold: None,
+            slides_set_offset: None,
             drop_flash: None,
-            reduce_motion: false,
             live_seen: None,
             open_seen: None,
             passages: slides::PassageDecks::default(),
@@ -1997,6 +1999,7 @@ impl Default for HomeState {
             copies: Vec::new(),
             media_request: None,
             library_search: None,
+            search_resting: false,
             find_rect: None,
             find_rows: Vec::new(),
             finder: crate::find::Finder::default(),
@@ -2339,6 +2342,58 @@ impl HomeState {
             || self.slides_sheet
     }
 
+    /// Whether the find box is being typed in: its search is open and it has the keyboard, or
+    /// is about to (not given back after a drop: [`HomeState::search_resting`]). Then every key
+    /// is the box's.
+    pub fn typing_in_find(&self) -> bool {
+        self.library_search.is_some() && !self.search_resting
+    }
+
+    /// `/`, Command-F or Find in the menu: the find box takes the keyboard, empty; or, with a
+    /// search left open after a drop gave the keys back, with its words still there.
+    pub fn open_find(&mut self) {
+        if !self.search_resting || self.library_search.is_none() {
+            self.library_search = Some((String::new(), 0));
+        }
+        self.search_resting = false;
+    }
+
+    /// An item went into the playlist in front at `at`: everything that names one of its items
+    /// by its place moves down one from there, so it still names the same item. Moved here: the
+    /// items picked out and the one a Shift-click counts from (`item_picks`, which must be of the
+    /// playlist as it was), the item last put on screen (`live_item`), the row of the item on
+    /// screen the list last followed (`live_row_seen`), the open item the slides last saw
+    /// (`open_seen`), an item the slides are to jump to (`slides_jump_to`), the item at the top
+    /// of the slides and one they hold there (`slides_top`, `slides_hold`), a row the list is to
+    /// bring into view (`playlist_scroll_to`), a header or placeholder being renamed
+    /// (`renaming_header`), and the item last on screen and the one a theme version is on for
+    /// (`version_switch`). The open item itself (`services.chosen`) is moved by what put the
+    /// item in ([`crate::service::Services::put_at`]).
+    pub fn item_put_in(&mut self, at: usize) {
+        let down = |place: &mut usize| {
+            if *place >= at {
+                *place += 1;
+            }
+        };
+        self.item_picks.kept_across(Some(at), &self.services);
+        let places =
+            [&mut self.live_item, &mut self.live_row_seen, &mut self.slides_jump_to, &mut self.playlist_scroll_to];
+        places.into_iter().flatten().for_each(down);
+        if let Some((_, open, _)) = self.open_seen.as_mut() {
+            open.iter_mut().for_each(down);
+        }
+        if let Some((top, _)) = self.slides_top.as_mut() {
+            down(top);
+        }
+        if let Some((top, ..)) = self.slides_hold.as_mut() {
+            down(top);
+        }
+        if let Some((place, _)) = self.renaming_header.as_mut() {
+            down(place);
+        }
+        self.version_switch.item_put_in(at);
+    }
+
     /// Whether an Escape pressed now belongs to something over the window (a menu, a question,
     /// a sheet, the find box, the list of keys, the setup), which takes it before the chooser or
     /// the Reflow editor under it.
@@ -2575,7 +2630,7 @@ fn home_view(
     }
     // Command-F searches the library (on the Mac the menu bar's Find does this).
     if ui.input(|input| command_key(input, egui::Key::F, false)) {
-        state.library_search = Some((String::new(), 0));
+        state.open_find();
     }
     // Command-N makes a new song, wherever the keyboard is not in a field.
     if !ui.ctx().text_edit_focused() && ui.input(|input| command_key(input, egui::Key::N, false)) {
@@ -5533,6 +5588,9 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     for (id, bible) in state.finder.take_read() {
         state.bible.shelf.keep(&id, bible);
     }
+    // Given the keyboard back after a drop: ↑, ↓ and Return are the show's and the list's, not
+    // the results'; Escape still ends the search.
+    let typing = !state.search_resting;
     let Some((query, picked)) = state.library_search.as_mut() else { return };
     // Worked out again only when what is typed, or the songs, change: not on every frame the
     // list is open (the cursor blinking, the mouse moving).
@@ -5587,9 +5645,9 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     *picked = (*picked).min(total.saturating_sub(1));
     let (up, down, enter, command, escape) = ui.input(|input| {
         (
-            input.key_pressed(egui::Key::ArrowUp),
-            input.key_pressed(egui::Key::ArrowDown),
-            input.key_pressed(egui::Key::Enter),
+            typing && input.key_pressed(egui::Key::ArrowUp),
+            typing && input.key_pressed(egui::Key::ArrowDown),
+            typing && input.key_pressed(egui::Key::Enter),
             input.modifiers.command,
             input.key_pressed(egui::Key::Escape),
         )
@@ -5943,10 +6001,20 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
 
 /// Ends the find box's search: the list under it goes, and the box gives the keyboard back, so
 /// the keys run the show again. A result dropped on the left column leaves it open, for the next
-/// one.
+/// one (see [`rest_search`]).
 pub fn end_search(ctx: &egui::Context, state: &mut HomeState) {
     state.library_search = None;
+    state.search_resting = false;
     state.find_rows.clear();
+    ctx.memory_mut(|memory| memory.surrender_focus(crate::studio::find_box_id()));
+}
+
+/// A result of the find box has been dropped in the left column: the search stays open, its
+/// words and what they found listed for the next one, but the box gives the keyboard back, so
+/// Space, the arrows and a clicker run the show at once. A click on the box, `/` or Command-F
+/// gives it the keyboard again ([`HomeState::open_find`]); Escape ends the search.
+pub fn rest_search(ctx: &egui::Context, state: &mut HomeState) {
+    state.search_resting = state.library_search.is_some();
     ctx.memory_mut(|memory| memory.surrender_focus(crate::studio::find_box_id()));
 }
 
@@ -7860,7 +7928,7 @@ fn target_menu(
 /// or the list of keys, or with a search's verses listed in place of the slides.
 fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
     let free = !ui.ctx().text_edit_focused()
-        && state.library_search.is_none()
+        && !state.typing_in_find()
         && state.edit_kind().is_none()
         && !state.key_sheet
         && !state.alert_open()
@@ -9010,7 +9078,7 @@ fn has_chapter(typed: &str) -> bool {
 /// keyboard and nothing open over the view.
 fn next_reference_typed(ui: &egui::Ui, state: &HomeState) -> Option<String> {
     let free = !ui.ctx().text_edit_focused()
-        && state.library_search.is_none()
+        && !state.typing_in_find()
         && !state.key_sheet
         && state.numbers.is_none()
         && !state.alert_open()
@@ -14359,12 +14427,13 @@ mod tests {
         to: impl Fn(&Drawn) -> egui::Pos2,
     ) -> (Vec<Command>, Drawn, egui::Context) {
         let ctx = egui::Context::default();
-        let (commands, over) = drag_found_in(&ctx, 0.0, show, state, words, place, to);
+        let (commands, over, _) = drag_found_in(&ctx, 0.0, show, state, words, place, to);
         (commands, over, ctx)
     }
 
     /// `drag_found` in a window already drawn (`ctx`), from the time `start`: it is let go 0.7
-    /// seconds after, and the window drawn once more 0.1 after that.
+    /// seconds after, and the window drawn once more 0.1 after that. Also returns what the frame
+    /// it was let go in drew.
     fn drag_found_in(
         ctx: &egui::Context,
         start: f64,
@@ -14373,7 +14442,7 @@ mod tests {
         words: &str,
         place: usize,
         to: impl Fn(&Drawn) -> egui::Pos2,
-    ) -> (Vec<Command>, Drawn) {
+    ) -> (Vec<Command>, Drawn, Drawn) {
         let press = |at: egui::Pos2, pressed: bool| Event::PointerButton {
             pos: at,
             button: egui::PointerButton::Primary,
@@ -14396,10 +14465,10 @@ mod tests {
         assert!(state.library_search.is_some(), "the list stays open while it is carried");
         let at = to(&carrying);
         let over = step(vec![Event::PointerMoved(at)], 0.6, show, state);
-        step(vec![press(at, false)], 0.7, show, state);
+        let let_go = step(vec![press(at, false)], 0.7, show, state);
         step(vec![], 0.8, show, state);
         assert!(!egui::DragAndDrop::has_any_payload(ctx), "the drag has ended");
-        (commands, over)
+        (commands, over, let_go)
     }
 
     /// Nothing went on the screens: the commands put nothing on, and Alpha's first slide is
@@ -14574,9 +14643,10 @@ mod tests {
         assert_eq!(titles, ["Alpha", "Gamma", "Beta"]);
         // Not opened: Alpha, on screen, is still the open item, and the slides show what they did.
         assert_eq!((state.services.chosen, show.selected()), (Some(0), shown));
-        // The find box keeps its words, what they found, and the keyboard, for the next one.
+        // The find box keeps its words and what they found, for the next one, but gives the
+        // keyboard back to the show.
         assert_eq!(state.library_search.as_ref().map(|(words, _)| words.as_str()), Some("gamma"));
-        assert!(!state.find_rows.is_empty() && ctx.text_edit_focused());
+        assert!(!state.find_rows.is_empty() && !ctx.text_edit_focused());
         nothing_went_live(&show, &commands);
     }
 
@@ -14611,7 +14681,7 @@ mod tests {
         assert_eq!(state.item_picks.places, [0, 2], "Alpha and Beta are still picked out, where they are now");
         assert_eq!(show.selected(), shown, "the slides show what they did");
         let lit = |drawn: &Drawn, title: &str, age: f64| {
-            let flash = crate::studio::drop_flash(age, false).expect("still flashing");
+            let flash = crate::studio::drop_flash(age).expect("still flashing");
             let row = drawn.left(title).center();
             drawn
                 .rects
@@ -14660,6 +14730,54 @@ mod tests {
     }
 
     #[test]
+    fn a_drop_above_the_item_on_screen_keeps_its_place_and_its_version_through_next() {
+        use crate::service::Item;
+        use crate::versions::Showing;
+        let (mut show, mut state) = find_drag_setting();
+        // Alpha twice: on screen from its second place.
+        state.services.list[0].items.push(Item::song("alpha".to_owned(), "Alpha".to_owned()));
+        (state.services.chosen, state.live_item) = (Some(2), Some(2));
+        let (ctx, mut commands, mut time) = (egui::Context::default(), Vec::new(), 0.0);
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        assert_eq!(state.live_item, Some(2));
+        // Beta opened, and a version switched on from the dock for the Alpha on screen.
+        click_holding(
+            &ctx,
+            (&mut show, &mut state),
+            drawn.left("Beta").center(),
+            Modifiers::NONE,
+            &mut time,
+            &mut commands,
+        );
+        assert_eq!(state.services.chosen, Some(1));
+        let version = sp_model::Uuid::from_u128(7);
+        let here = |state: &HomeState| Showing { song: 0, item: state.live_item };
+        state.version_switch.use_version(Some(version), false, Some(here(&state)));
+        state.version_switch.slide_on(here(&state), None);
+        // Gamma dropped above the first Alpha, at the top.
+        let first_alpha = |drawn: &Drawn| {
+            let row = drawn.texts.iter().find(|(text, rect)| text == "Alpha" && rect.max.x < crate::studio::LEFT_WIDTH);
+            let row = row.expect("Alpha's first row").1;
+            pos2(row.center().x, row.center().y - 8.0)
+        };
+        let (dragged, ..) = drag_found_in(&ctx, time + 0.1, &mut show, &mut state, "gamma", 0, first_alpha);
+        commands.extend(dragged);
+        let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
+        assert_eq!(titles, ["Gamma", "Alpha", "Beta", "Alpha"]);
+        // Every place moved with its item: Beta still open, the second Alpha still on screen,
+        // and the version still on for it.
+        assert_eq!((state.services.chosen, state.live_item), (Some(2), Some(3)));
+        assert!(state.version_switch.lights(3, version), "the version is on for the Alpha on screen");
+        // Next: the second Alpha goes on, from its own place, still in the version.
+        show.apply(Command::Next);
+        found_step(&ctx, &mut show, &mut state, vec![], time + 1.5, &mut commands);
+        assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 1 }));
+        assert_eq!(state.live_item, Some(3), "the same copy of Alpha");
+        assert!(!state.version_switch.slide_on(here(&state), None), "the version goes on");
+        assert_eq!(state.version_switch.version(), Some(version));
+    }
+
+    #[test]
     fn a_song_found_dropped_on_a_placeholder_fills_it_and_flashes_the_same_way() {
         use crate::service::Item;
         let (mut show, mut state) = find_drag_setting();
@@ -14670,7 +14788,7 @@ mod tests {
         assert_eq!(titles, ["Alpha", "Beta", "Gamma"]);
         assert_eq!(state.services.chosen, Some(0), "not opened: Alpha, on screen, is still the open item");
         let drawn = found_step(&ctx, &mut show, &mut state, vec![], 0.9, &mut commands);
-        let flash = crate::studio::drop_flash(0.2, false).expect("still flashing");
+        let flash = crate::studio::drop_flash(0.2).expect("still flashing");
         let row = drawn.left("Gamma").center();
         assert!(
             drawn
@@ -14724,9 +14842,12 @@ mod tests {
         assert!((beta.min.y - top).abs() < 1.0, "Beta at the top: {beta:?}, the top at {top}");
         assert_eq!(state.services.chosen, Some(1));
         // Gamma dropped between Alpha and Beta, above the top of the view: the slides stay on
-        // Beta, as they were, and it stays open.
-        let (dragged, _) = drag_found_in(&ctx, time + 0.1, &mut show, &mut state, "gamma", 0, above_beta);
+        // Beta, as they were, and it stays open; even in the picture of the frame it was let go
+        // in (the pass drawn with Beta pushed down is thrown away).
+        let (dragged, _, let_go) = drag_found_in(&ctx, time + 0.1, &mut show, &mut state, "gamma", 0, above_beta);
         commands.extend(dragged);
+        let then = drawn_middle(&let_go, "Beta");
+        assert!((then.min.y - beta.min.y).abs() < 0.5, "Beta in its place as it is let go: {then:?}");
         let after = found_step(&ctx, &mut show, &mut state, vec![], time + 1.5, &mut commands);
         assert!((drawn_middle(&after, "Beta").min.y - beta.min.y).abs() < 0.5, "Beta hasn't moved");
         assert_eq!(state.services.chosen, Some(2));

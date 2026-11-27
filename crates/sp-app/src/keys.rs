@@ -303,7 +303,7 @@ pub fn frame(ctx: &egui::Context, state: &mut HomeState, voxlive: bool) -> Optio
         || !state.bible.options.details.is_empty()
         || state.alert_open()
         || state.setup.is_some()
-        || state.library_search.is_some()
+        || state.typing_in_find()
         || state.settings_open
     {
         return None;

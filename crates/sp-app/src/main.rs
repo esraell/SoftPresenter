@@ -1081,7 +1081,8 @@ fn template_names(theme: &Theme) -> Vec<(Uuid, String)> {
 /// Bible page's Options or Bibles window, the sheet asking what a Bible file is, the setup, the
 /// playlist chooser, the Reflow editor), which it closes instead of clearing the screens.
 fn escape_closes_something(state: &home::HomeState, ctx: &egui::Context) -> bool {
-    something_over_the_window(state, ctx) || state.show_view_overlay_open()
+    // A search left open after a drop gave the keys back closes too.
+    something_over_the_window(state, ctx) || state.show_view_overlay_open() || state.library_search.is_some()
 }
 
 /// Whether something is open over the window: a pop-up, the Settings window, the Bible page's
@@ -1098,7 +1099,7 @@ fn window_over_the_window(state: &home::HomeState) -> bool {
         || state.bible.options.manage_open
         || !state.bible.options.details.is_empty()
         || state.setup.is_some()
-        || state.library_search.is_some()
+        || state.typing_in_find()
         || state.free_songbooks.open
 }
 
@@ -1151,11 +1152,12 @@ fn show_key_command_on(key: &Key, show: &Show, f_keys: bool) -> Option<Command> 
 /// view a letter or a number starts the next reference in Scripture Lookup (see `bible_area` in
 /// `home.rs`), never a jump to a group of the song on screen: after Return has picked a verse and
 /// given the keyboard back, typing "ps 23" must not put the song's second verse up with its "s".
-/// While the find box is open every key is the box's, before the box has drawn with the keyboard
-/// too: a letter typed straight after `/` is typed in it, never a slide's hot key or a group's
-/// letter, and Escape closes it, clearing nothing.
+/// While the find box is being typed in every key is the box's, before the box has drawn with the
+/// keyboard too: a letter typed straight after `/` is typed in it, never a slide's hot key or a
+/// group's letter, and Escape closes it, clearing nothing. A search left open after a drop has
+/// given the keys back to the show (`HomeState::search_resting`).
 fn show_key_held_back(state: &home::HomeState, ctx: &egui::Context, key: &Key) -> bool {
-    if state.key_sheet || state.library_search.is_some() {
+    if state.key_sheet || state.typing_in_find() {
         return true;
     }
     if state.bible_open && matches!(key, Key::Character(_)) && !opens_find(key) {
@@ -1236,7 +1238,8 @@ fn enter_key_is_free(state: &home::HomeState, ctx: &egui::Context) -> bool {
 /// it was last drawn.
 #[derive(Clone, Debug, PartialEq)]
 enum KeyGoes {
-    /// `/`: the find box opens, empty (`find_key_is_free`).
+    /// `/`: the find box opens, empty, or with the words of a search a drop left open
+    /// (`find_key_is_free`, `HomeState::open_find`).
     Find,
     /// A key that runs the show, acted on at once (`home_key_command`): Space, the arrows, a hot
     /// key, Escape.
@@ -4471,7 +4474,11 @@ impl App {
                 at(state.pick(&self.show)),
                 self.show.selected() + 1,
                 at(self.show.live()),
-                if state.library_search.is_some() { "open" } else { "closed" },
+                match (&state.library_search, state.search_resting) {
+                    (Some(_), false) => "open",
+                    (Some(_), true) => "open, keys given back",
+                    (None, _) => "closed",
+                },
             ),
         );
     }
@@ -11216,7 +11223,7 @@ impl App {
                 state.bible.focus_lookup = true;
             }
             A::ThemesView => state.view_request = Some(3),
-            A::Find => state.library_search = Some((String::new(), 0)),
+            A::Find => state.open_find(),
             A::ReflowView => {
                 let song = self.show.selected();
                 // A song of the song catalog being looked at joins the library to be changed.
@@ -12085,7 +12092,7 @@ impl ApplicationHandler<AppEvent> for App {
             );
             match &goes {
                 KeyGoes::Find => {
-                    running.home_state.library_search = Some((String::new(), 0));
+                    running.home_state.open_find();
                     running.home_window.request_redraw();
                 }
                 KeyGoes::Show(command) => {
@@ -13863,7 +13870,7 @@ mod tests {
                 self.draw();
             }
             match home_key_goes(&self.state, &self.ctx, &self.show, &key, false, Default::default(), false) {
-                KeyGoes::Find => self.state.library_search = Some((String::new(), 0)),
+                KeyGoes::Find => self.state.open_find(),
                 KeyGoes::Show(command) => {
                     self.show.apply(command);
                 }
@@ -13984,6 +13991,84 @@ mod tests {
         keyboard.draw();
         let slot = keyboard.state.bible.slots.map(|slots| slots[keyboard.state.bible.showing]);
         assert_eq!(keyboard.live(), slot.map(|slot| (slot, 15)), "John 3:16 on screen");
+    }
+
+    /// Alpha in the playlist listed, "beta" typed in the find box, and Beta's result carried into
+    /// the playlist under Alpha's row and let go there.
+    fn beta_dropped() -> Keyboard {
+        let mut state = home::HomeState {
+            playlist_open: true,
+            library_search: Some(("beta".to_owned(), 0)),
+            ..home::HomeState::default()
+        };
+        state.services.add(crate::service::Item::song("title:Alpha".to_owned(), "Alpha".to_owned()));
+        let mut keyboard = Keyboard::new(state);
+        keyboard.draw();
+        assert!(keyboard.ctx.text_edit_focused(), "the find box has the keyboard");
+        let from = keyboard.state.find_rows.first().expect("Beta is found").center();
+        let to = egui::pos2(120.0, 420.0);
+        let button = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let moved = egui::Event::PointerMoved;
+        for events in [
+            vec![moved(from)],
+            vec![button(from, true)],
+            vec![moved(from + egui::vec2(-4.0, 12.0))],
+            vec![moved(from + egui::vec2(-60.0, 40.0))],
+            vec![moved(to)],
+            vec![button(to, false)],
+            vec![],
+        ] {
+            keyboard.waiting.extend(events);
+            keyboard.draw();
+        }
+        let titles: Vec<&str> = keyboard.state.services.front().items.iter().map(|item| item.title()).collect();
+        assert_eq!(titles, ["Alpha", "Beta"]);
+        keyboard
+    }
+
+    fn find_words(keyboard: &Keyboard) -> Option<String> {
+        keyboard.state.library_search.as_ref().map(|(words, _)| words.clone())
+    }
+
+    #[test]
+    fn after_a_find_result_is_dropped_the_keys_run_the_show_and_slash_gives_the_box_its_words_back() {
+        let mut keyboard = beta_dropped();
+        // The words and what they found stay, but the keyboard is the show's again.
+        assert_eq!(find_words(&keyboard).as_deref(), Some("beta"));
+        assert!(!keyboard.state.find_rows.is_empty() && !keyboard.ctx.text_edit_focused());
+        // Space goes on to Alpha's next slide at once, and types nothing.
+        keyboard.press(Key::Named(NamedKey::Space));
+        keyboard.draw();
+        assert_eq!(keyboard.live(), Some((0, 1)), "Space ran the show");
+        assert_eq!(find_words(&keyboard).as_deref(), Some("beta"), "and typed nothing in the box");
+        // `/` gives the box the keyboard again, with its words: what is typed now goes in it.
+        keyboard.press(Key::Character("/".into()));
+        keyboard.draw();
+        keyboard.draw();
+        assert!(keyboard.ctx.text_edit_focused(), "the find box has the keyboard again");
+        assert_eq!(find_words(&keyboard).as_deref(), Some("beta"), "with its words");
+        keyboard.press(Key::Named(NamedKey::Space));
+        keyboard.draw();
+        assert_eq!(keyboard.live(), Some((0, 1)), "Space is the box's again");
+        let typed = find_words(&keyboard).unwrap_or_default();
+        assert_eq!((typed.trim(), typed.len()), ("beta", 5), "a space typed in it");
+    }
+
+    #[test]
+    fn after_a_find_result_is_dropped_escape_closes_the_search_and_clears_nothing() {
+        let mut keyboard = beta_dropped();
+        keyboard.press(Key::Named(NamedKey::Escape));
+        keyboard.draw();
+        assert_eq!(find_words(&keyboard), None, "the search has ended");
+        assert_eq!(keyboard.live(), Some((0, 0)), "Alpha's slide is still on screen");
+        // And then Escape is the show's again.
+        keyboard.press(Key::Named(NamedKey::Escape));
+        assert_eq!(keyboard.live(), None, "the screens cleared");
     }
 
     #[test]

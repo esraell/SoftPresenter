@@ -74,6 +74,19 @@ impl Switch {
         self.on = version.map(|version| On { version, from: showing, keep });
     }
 
+    /// An item went into the playlist in front at `at`: the item last on screen and the one the
+    /// version is on for move down with the items from there on, so they are still the same.
+    pub fn item_put_in(&mut self, at: usize) {
+        let from = self.on.as_mut().and_then(|on| on.from.as_mut());
+        for showing in [self.last.as_mut(), from].into_iter().flatten() {
+            if let Some(item) = showing.item.as_mut()
+                && *item >= at
+            {
+                *item += 1;
+            }
+        }
+    }
+
     /// Kept after its item, or not, for the version on now.
     pub fn set_keep(&mut self, keep: bool) {
         if let Some(on) = self.on.as_mut() {
@@ -536,6 +549,21 @@ mod tests {
 
     fn item(song: usize, item: usize) -> Showing {
         Showing { song, item: Some(item) }
+    }
+
+    #[test]
+    fn an_item_put_in_above_moves_the_item_a_version_is_on_for_and_the_last_one_on_screen() {
+        let mut switch = Switch::default();
+        switch.use_version(Some(OFFERING), false, Some(item(1, 2)));
+        switch.slide_on(item(1, 2), None);
+        // Put in below: nothing moves.
+        switch.item_put_in(3);
+        assert!(switch.lights(2, OFFERING));
+        // Put in above: both move down with the item.
+        switch.item_put_in(0);
+        assert!(switch.lights(3, OFFERING));
+        assert!(!switch.slide_on(item(1, 3), None), "the same item: the version goes on");
+        assert_eq!(switch.version(), Some(OFFERING));
     }
 
     #[test]

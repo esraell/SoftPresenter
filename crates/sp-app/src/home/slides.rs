@@ -205,22 +205,25 @@ const TAIL_GAP: f32 = 6.0;
 const TAIL_IN: f32 = 3.0;
 
 /// Keeps the playlist item that was at the top of the slides there, as far into it as the view
-/// was, for a few frames after a drop put something in above it ([`HomeState::slides_hold`]),
+/// was, for a few passes after a drop put something in above it ([`HomeState::slides_hold`]),
 /// unless the view is being taken elsewhere (`going`) or scrolled. The pass drawn with the view
-/// pushed down is thrown away and drawn again, so it is never seen. Otherwise it notes which
-/// item is at the top, and how far into it the view is, for the next drop.
+/// pushed down is thrown away, and the next begins with the view where it is to be
+/// (`slides_set_offset`), so it is never seen. Otherwise it notes which item is at the top, and
+/// how far into it the view is, for the next drop.
 fn keep_top(ui: &egui::Ui, state: &mut HomeState, decks: &[Deck], places: &[Place], viewport: Rect, going: bool) {
     let scrolled = ui.input(|input| input.smooth_scroll_delta.y != 0.0);
     if going || scrolled {
         state.slides_hold = None;
     }
-    if let Some((item, into, frames)) = state.slides_hold.take() {
-        state.slides_hold = frames.checked_sub(1).filter(|left| *left > 0).map(|left| (item, into, left));
+    if let Some((item, into, passes)) = state.slides_hold.take() {
+        state.slides_hold = passes.checked_sub(1).filter(|left| *left > 0).map(|left| (item, into, left));
         ui.ctx().request_repaint();
         if let Some(place) = decks.iter().position(|deck| deck.item() == Some(item)).map(|at| places[at]) {
             let to = place.top + into;
             if (to - viewport.min.y).abs() > 0.5 {
-                ui.scroll_with_delta_animation(vec2(0.0, viewport.min.y - to), ScrollAnimation::none());
+                // Set as the next pass begins: a scroll asked for now would only be under way
+                // by then.
+                state.slides_set_offset = Some(to);
                 ui.ctx().request_discard("the slides keep the item at their top after a drop");
             }
         }
@@ -871,7 +874,11 @@ pub fn slide_scroll(
     let mut ask: Option<ItemAsk> = None;
     let mut asks = SongAsks::default();
     let alone = matches!(decks, [Deck::Slides(SlideDeck { item: None, .. })]);
-    let area = egui::ScrollArea::vertical().id_salt("slide grid").auto_shrink([false, false]);
+    let mut area = egui::ScrollArea::vertical().id_salt("slide grid").auto_shrink([false, false]);
+    // Where a drop's hold wants the view, before anything is laid out (`keep_top`).
+    if let Some(offset) = state.slides_set_offset.take() {
+        area = area.vertical_scroll_offset(offset);
+    }
     area.show_viewport(ui, |ui, viewport| {
         let origin = ui.max_rect().min;
         let across = (ui.available_width() - 2.0 * EDGE).max(60.0);
