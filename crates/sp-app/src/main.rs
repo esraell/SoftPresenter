@@ -6367,10 +6367,7 @@ impl App {
             cycle.shown = at;
         }
         if let Some(running) = self.running.as_mut() {
-            let state = &mut running.home_state;
-            state.picked_media =
-                state.picked_media.iter().filter_map(|at| media::place_after_move(*at, &order)).collect();
-            state.media_anchor = state.media_anchor.and_then(|at| media::place_after_move(at, &order));
+            running.home_state.media_moved(&order);
             running.home_window.request_redraw();
         }
         self.save_media_list();

@@ -2524,6 +2524,16 @@ impl HomeState {
             || self.free_songbooks.open
     }
 
+    /// The media bin was put in another order (`order`: each place it had, in the order they
+    /// have now): everything here that names a bin item by its place follows it, so the same
+    /// pictures stay picked out, and a Delete question open meanwhile still asks about them.
+    pub fn media_moved(&mut self, order: &[usize]) {
+        let now = |at: &usize| crate::media::place_after_move(*at, order);
+        self.picked_media = self.picked_media.iter().filter_map(now).collect();
+        self.media_anchor = self.media_anchor.as_ref().and_then(now);
+        self.confirm_delete_media = self.confirm_delete_media.iter().filter_map(now).collect();
+    }
+
     /// Whether an Escape pressed in the Edit view has something there to do, which it does
     /// instead of clearing the screens: a box's words being typed in (Escape puts them back), a
     /// name being retyped (it keeps the old one), objects picked on the canvas (it lets go of
@@ -12211,6 +12221,21 @@ mod tests {
         drag_in_grid(&mut state, &show, tiles[1].center(), tiles[0].left_center() + vec2(3.0, 0.0));
         assert_eq!(files(&state), [std::path::PathBuf::from("a.png"), "c.png".into()]);
         assert!(!state.media_playlists_changed && state.media_request.is_none());
+    }
+
+    #[test]
+    fn a_move_keeps_the_same_pictures_picked_out_and_asked_about() {
+        let mut state = HomeState {
+            picked_media: vec![0, 2],
+            media_anchor: Some(2),
+            confirm_delete_media: vec![2],
+            ..HomeState::default()
+        };
+        // The third dragged to the front: it is the first now, and the first the second.
+        state.media_moved(&crate::media::moved_order(3, &[2], 0));
+        assert_eq!(state.picked_media, vec![1, 0]);
+        assert_eq!(state.media_anchor, Some(0));
+        assert_eq!(state.confirm_delete_media, vec![0], "Delete still asks about the picture it asked about");
     }
 
     #[test]
