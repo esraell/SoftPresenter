@@ -2261,10 +2261,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Words only or Table, how a song's slides are laid out in the window, and Interface size.
 - **The end of a song's mark** (Settings › Slides › End of a song, or `sp settings set
   end_mark=on|off`; off until switched on): three stars, `*    *    *`, under the words of a
-  song's last slide, as SoftProjector draws them. The card shows a small slide with the first
+  song's last slide. The card shows a small slide with the first
   song's last words (and the last line of their translation, when it has one) and the mark
   under them, beside Mark the end of a song, On or Off.
-  - **Its look is the theme's.** Which mark (SoftProjector's seven: `* * *`, `- - -`, `° ° °`,
+  - **Its look is the theme's.** Which mark (one of seven: `* * *`, `- - -`, `° ° °`,
     `• • •`, `● ● ●`, `▪ ▪ ▪`, `■ ■ ■`), its size (40% to 160% of the words' size in steps of 10,
     80% as it comes), its colour (the words' own, or one of eight) and its place (under the
     last line, or the bottom of the screen: as low as the no-room limit allows, 3% above the

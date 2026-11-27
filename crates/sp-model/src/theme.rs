@@ -514,7 +514,7 @@ pub struct Theme {
     pub end_look: EndLook,
 }
 
-/// Which mark ends a song: SoftProjector's seven, in its order.
+/// Which mark ends a song: one of seven, in their order.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum EndMark {
     #[default]
@@ -1521,7 +1521,7 @@ mod tests {
         let back = Theme::from_json(&saved).expect("read");
         assert_eq!(back.end_look, chosen);
         assert_eq!(back, dotted, "and the rest of the theme with it");
-        // SoftProjector's seven, in its order, each three of its mark four spaces apart.
+        // The seven, in their order, each three of its mark four spaces apart.
         let marks: String = EndMark::ALL.iter().map(|mark| mark.glyph()).collect();
         assert_eq!(marks, "*-\u{b0}\u{2022}\u{25cf}\u{25aa}\u{25a0}");
         for mark in EndMark::ALL {

@@ -1,5 +1,5 @@
 //! The end of a song's mark: three stars under the words of a song's last slide as it is sung,
-//! on the audience screens, as SoftProjector draws them. Here is when the mark is due and how
+//! on the audience screens. Here is when the mark is due and how
 //! far down the slide it may reach; the painter puts it under the words as each screen's theme
 //! lays them out (`sp_model::Slide::end_mark`), with the look that theme gives it: which mark,
 //! its size, colour and place (`sp_model::EndLook`, set in `end_look`'s window).
