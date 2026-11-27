@@ -568,7 +568,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   menu on its bar, and in the File menu.
 - While the left column lists a playlist, the middle shows **the whole playlist as one scroll**,
   item after item, each under a bar with its name that stays at the top while its slides
-  scroll under it. The open item's bar has a dot; a song's bar carries its tools (details,
+  scroll under it. Under the last item there is room, as tall as the view less that item, so
+  any item, even a short last one, can be scrolled to the top, and a click on it in the
+  playlist brings it there as for any other; a faint line across starts that room, so the end
+  reads as an end and not as slides still to come. The open item's bar has a dot; a song's bar carries its tools (details,
   Edit Words, arrangement, the theme version button once a theme has a version, notes, and
   ⋯ for the song's menu, Add Slide and its place in the playlist), and a song played in an arrangement has a row of pills under its bar and its
   slides in the order sung (see Arrangements above). Other items say what they are in a small label. A **Bible passage** kept
@@ -981,15 +984,19 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   with its first slide or verse picked for Enter (see "A slide picked waits for Enter"), and
   Command-Return adds it to the playlist in front. Any result can also be **dragged** (a press
   that barely moves is still a click): its name follows the pointer, its row goes faint and
-  the list stays open, and the chooser shows above the left column's list. Dropped on the open
+  the list stays open, and it goes only into what the left column shows. Dropped on the open
   playlist's items it goes in where the ink line shows (above or below a row by which half of
-  it the pointer is over), or takes a placeholder's place; on a playlist in the chooser, at its
-  end; a song on a library (its row in the chooser, or its song list, outlined in ink) goes
-  into it. A song found by a line of its words brings the whole song, as playlists hold songs;
+  it the pointer is over), or takes a placeholder's place; on a playlist in the chooser, if it
+  is open, at its end, with a notice saying where it went; a song on a library (its row in the
+  chooser, or its song list, outlined in ink) goes into it. A song found by a line of its words brings the whole song, as playlists hold songs;
   a passage or verse goes in with the Bible view's translations and choices, as
   Command-Return adds it, and no library takes one (the pointer says so). After a drop the
-  search ends, the keyboard is the show's again, and what went into the playlist listed is
-  opened as a click on its row opens it; nothing goes on the screens. Dropped anywhere else,
+  search stays, with its words and what they found, for the next one (Escape, clearing the
+  box, or Return ends it, as before). What went in is not opened: the open item stays open,
+  what is picked stays picked, and the slides stay where they were, even when it went in above
+  the item at their top. Its row in the playlist flashes orange for 1.2 seconds (held for 0.4,
+  then fading) and is brought into view; a click on it opens it. One the playlist has already is refused with a cue under it, and a song dropped on a library
+  is neither picked nor opened. Nothing goes on the screens. Dropped anywhere else,
   nothing happens and the search stays open. The find box does not search playlists or media), a
   running timer's name and time just before the clock (in room nothing else uses, so nothing
   moves when it starts or stops), the clock (on a 12-hour or a

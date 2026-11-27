@@ -72,6 +72,27 @@ impl ItemPicks {
         self.of = Some((services.current, services.front().items.clone()));
     }
 
+    /// Keeps the picks, made in the playlist in front as it was, across an item put into it at
+    /// `at` (the places from there on move down one) or into a placeholder's place (`None`,
+    /// which moves nothing): what was picked stays picked.
+    pub fn kept_across(&mut self, at: Option<usize>, services: &crate::service::Services) {
+        if self.of.is_none() {
+            return;
+        }
+        if let Some(at) = at {
+            let shift = |place: &mut usize| {
+                if *place >= at {
+                    *place += 1;
+                }
+            };
+            self.places.iter_mut().for_each(shift);
+            if let Some(anchor) = self.anchor.as_mut() {
+                shift(anchor);
+            }
+        }
+        self.made_in(services);
+    }
+
     /// Whether several are picked, so that they are lit together and move together.
     pub fn several(&self) -> bool {
         self.places.len() > 1
@@ -161,6 +182,11 @@ pub enum EditKind {
     /// The stage screens' layouts.
     Stage,
 }
+
+/// For how many frames after a drop the slides keep the item that was at their top there
+/// ([`HomeState::slides_hold`]): a passage put in may take a frame or two to be made, and
+/// change its height when it is.
+pub const SLIDES_HOLD_FRAMES: u8 = 6;
 
 pub struct HomeState {
     /// How slides are laid out, and how many fit across the grid (2 to 7).
@@ -327,6 +353,19 @@ pub struct HomeState {
     /// A playlist item just opened (a click on its row, ↑ or ↓): the slides are scrolled so
     /// that it is at the top, once.
     pub slides_jump_to: Option<usize>,
+    /// The playlist item at the top of the slides, and how far into it the view is, as they
+    /// were last drawn; and, for a few frames after a result of the find box is dropped into
+    /// the playlist, the one to keep there (with how many frames are left), so an item put in
+    /// above it doesn't push the slides down (`slides::keep_top`).
+    pub slides_top: Option<(usize, f32)>,
+    pub slides_hold: Option<(usize, f32, u8)>,
+    /// The playlist item a result of the find box was just dropped into, by its id, and when:
+    /// its row flashes for a moment (`studio::drop_flash`).
+    pub drop_flash: Option<(sp_model::Uuid, f64)>,
+    /// Motion is kept to a minimum: a row just dropped into is tinted for a moment instead of
+    /// flashing and fading. Nothing sets it yet: the app has no such setting, and the window
+    /// library doesn't say whether the computer asks for less motion.
+    pub reduce_motion: bool,
     /// The slide on screen, and its place in its song as played, when the slides last looked:
     /// the view goes to the slide once, when that changes, and otherwise stays where the
     /// operator scrolled it.
@@ -1946,6 +1985,10 @@ impl Default for HomeState {
             picking: Picking::Nothing,
             sweep: None,
             slides_jump_to: None,
+            slides_top: None,
+            slides_hold: None,
+            drop_flash: None,
+            reduce_motion: false,
             live_seen: None,
             open_seen: None,
             passages: slides::PassageDecks::default(),
@@ -5899,7 +5942,8 @@ fn library_search(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
 }
 
 /// Ends the find box's search: the list under it goes, and the box gives the keyboard back, so
-/// the keys run the show again. A result dropped on the left column ends it too.
+/// the keys run the show again. A result dropped on the left column leaves it open, for the next
+/// one.
 pub fn end_search(ctx: &egui::Context, state: &mut HomeState) {
     state.library_search = None;
     state.find_rows.clear();
@@ -14232,11 +14276,13 @@ mod tests {
         (show, state)
     }
 
-    /// What one frame of a drag drew: each piece of text and where, and the pointer's shape.
+    /// What one frame of a drag drew: each piece of text and where, each rectangle filled or
+    /// outlined (with its fill and its line), and the pointer's shape.
     struct Drawn {
         texts: Vec<(String, Rect)>,
         /// Where each piece of text starts (its top left), by the words it has.
         starts: Vec<(String, egui::Pos2)>,
+        rects: Vec<(Rect, egui::Color32, egui::Stroke)>,
         cursor: egui::CursorIcon,
     }
 
@@ -14275,13 +14321,14 @@ mod tests {
         time: f64,
         commands: &mut Vec<Command>,
     ) -> Drawn {
-        fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect)>, starts: &mut Vec<(String, egui::Pos2)>) {
+        fn walk(shape: &egui::Shape, drawn: &mut Drawn) {
             match shape {
                 egui::Shape::Text(text) => {
-                    into.push((text.galley.text().to_owned(), text.visual_bounding_rect()));
-                    starts.push((text.galley.text().to_owned(), text.pos));
+                    drawn.texts.push((text.galley.text().to_owned(), text.visual_bounding_rect()));
+                    drawn.starts.push((text.galley.text().to_owned(), text.pos));
                 }
-                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into, starts)),
+                egui::Shape::Rect(rect) => drawn.rects.push((rect.rect, rect.fill, rect.stroke)),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, drawn)),
                 _ => {}
             }
         }
@@ -14291,13 +14338,13 @@ mod tests {
         let output = ctx.run_ui(raw, |ui| {
             asked.extend(home_ui(ui, show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None));
         });
-        let (mut texts, mut starts) = (Vec::new(), Vec::new());
-        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts, &mut starts));
         let cursor = output.platform_output.cursor_icon;
+        let mut drawn = Drawn { texts: Vec::new(), starts: Vec::new(), rects: Vec::new(), cursor };
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut drawn));
         output.drop_without_applying_deltas();
         as_the_app_does(show, state, asked.clone());
         commands.extend(asked);
-        Drawn { texts, starts, cursor }
+        drawn
     }
 
     /// Types `words` in the find box, presses on the result at `place` in its list and drags it
@@ -14312,6 +14359,21 @@ mod tests {
         to: impl Fn(&Drawn) -> egui::Pos2,
     ) -> (Vec<Command>, Drawn, egui::Context) {
         let ctx = egui::Context::default();
+        let (commands, over) = drag_found_in(&ctx, 0.0, show, state, words, place, to);
+        (commands, over, ctx)
+    }
+
+    /// `drag_found` in a window already drawn (`ctx`), from the time `start`: it is let go 0.7
+    /// seconds after, and the window drawn once more 0.1 after that.
+    fn drag_found_in(
+        ctx: &egui::Context,
+        start: f64,
+        show: &mut Show,
+        state: &mut HomeState,
+        words: &str,
+        place: usize,
+        to: impl Fn(&Drawn) -> egui::Pos2,
+    ) -> (Vec<Command>, Drawn) {
         let press = |at: egui::Pos2, pressed: bool| Event::PointerButton {
             pos: at,
             button: egui::PointerButton::Primary,
@@ -14319,23 +14381,25 @@ mod tests {
             modifiers: Modifiers::NONE,
         };
         let mut commands = Vec::new();
+        let mut step = |events: Vec<Event>, at: f64, show: &mut Show, state: &mut HomeState| {
+            found_step(ctx, show, state, events, start + at, &mut commands)
+        };
         state.library_search = Some((words.to_owned(), 0));
-        found_step(&ctx, show, state, vec![], 0.0, &mut commands);
-        found_step(&ctx, show, state, vec![], 0.1, &mut commands);
+        step(vec![], 0.0, show, state);
+        step(vec![], 0.1, show, state);
         let from = state.find_rows.get(place).expect("the result is listed").center();
-        found_step(&ctx, show, state, vec![Event::PointerMoved(from)], 0.2, &mut commands);
-        found_step(&ctx, show, state, vec![press(from, true)], 0.3, &mut commands);
-        found_step(&ctx, show, state, vec![Event::PointerMoved(from + vec2(-4.0, 12.0))], 0.4, &mut commands);
-        let carrying =
-            found_step(&ctx, show, state, vec![Event::PointerMoved(from + vec2(-60.0, 40.0))], 0.5, &mut commands);
-        assert!(egui::DragAndDrop::has_payload_of_type::<FoundDrag>(&ctx), "the result is carried");
+        step(vec![Event::PointerMoved(from)], 0.2, show, state);
+        step(vec![press(from, true)], 0.3, show, state);
+        step(vec![Event::PointerMoved(from + vec2(-4.0, 12.0))], 0.4, show, state);
+        let carrying = step(vec![Event::PointerMoved(from + vec2(-60.0, 40.0))], 0.5, show, state);
+        assert!(egui::DragAndDrop::has_payload_of_type::<FoundDrag>(ctx), "the result is carried");
         assert!(state.library_search.is_some(), "the list stays open while it is carried");
         let at = to(&carrying);
-        let over = found_step(&ctx, show, state, vec![Event::PointerMoved(at)], 0.6, &mut commands);
-        found_step(&ctx, show, state, vec![press(at, false)], 0.7, &mut commands);
-        found_step(&ctx, show, state, vec![], 0.8, &mut commands);
-        assert!(!egui::DragAndDrop::has_any_payload(&ctx), "the drag has ended");
-        (commands, over, ctx)
+        let over = step(vec![Event::PointerMoved(at)], 0.6, show, state);
+        step(vec![press(at, false)], 0.7, show, state);
+        step(vec![], 0.8, show, state);
+        assert!(!egui::DragAndDrop::has_any_payload(ctx), "the drag has ended");
+        (commands, over)
     }
 
     /// Nothing went on the screens: the commands put nothing on, and Alpha's first slide is
@@ -14496,9 +14560,10 @@ mod tests {
     }
 
     #[test]
-    fn a_song_found_dragged_between_two_playlist_items_goes_in_there_and_opens() {
+    fn a_song_found_dragged_between_two_playlist_items_goes_in_there_and_the_search_stays() {
         use crate::service::Item;
         let (mut show, mut state) = find_drag_setting();
+        let shown = show.selected();
         // Over the upper half of Beta's row: the ink line is between Alpha and Beta.
         let (commands, over, ctx) = drag_found(&mut show, &mut state, "gamma", 0, |drawn| {
             let beta = drawn.left("Beta");
@@ -14507,9 +14572,164 @@ mod tests {
         assert_eq!(over.cursor, egui::CursorIcon::Grabbing, "a place it can go");
         let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
         assert_eq!(titles, ["Alpha", "Gamma", "Beta"]);
-        // Opened, as a click on its row opens it; the search is over and the keys are free.
-        assert_eq!((state.services.chosen, show.selected()), (Some(1), 2));
-        assert!(state.library_search.is_none() && !ctx.text_edit_focused());
+        // Not opened: Alpha, on screen, is still the open item, and the slides show what they did.
+        assert_eq!((state.services.chosen, show.selected()), (Some(0), shown));
+        // The find box keeps its words, what they found, and the keyboard, for the next one.
+        assert_eq!(state.library_search.as_ref().map(|(words, _)| words.as_str()), Some("gamma"));
+        assert!(!state.find_rows.is_empty() && ctx.text_edit_focused());
+        nothing_went_live(&show, &commands);
+    }
+
+    /// Where these words were drawn in the middle column (the slides), first.
+    fn drawn_middle(drawn: &Drawn, words: &str) -> Rect {
+        let middle = crate::studio::LEFT_WIDTH + 20.0..1280.0 - crate::studio::RIGHT_WIDTH - 20.0;
+        drawn
+            .texts
+            .iter()
+            .find(|(text, rect)| text == words && middle.contains(&rect.min.x))
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{words} is drawn in the middle column"))
+    }
+
+    /// Over the upper half of Beta's row in the left column: between Alpha and Beta.
+    fn above_beta(drawn: &Drawn) -> egui::Pos2 {
+        let beta = drawn.left("Beta");
+        pos2(beta.center().x, beta.center().y - 8.0)
+    }
+
+    #[test]
+    fn a_song_found_dropped_in_the_playlist_flashes_its_row_and_the_open_item_and_the_picks_stay() {
+        let (mut show, mut state) = find_drag_setting();
+        // Alpha and Beta picked out (Alpha, on screen, is the open item).
+        state.item_picks.places = vec![0, 1];
+        state.item_picks.anchor = Some(0);
+        state.item_picks.made_in(&state.services);
+        let shown = show.selected();
+        // Let go between Alpha and Beta 0.7 seconds in.
+        let (mut commands, _, ctx) = drag_found(&mut show, &mut state, "gamma", 0, above_beta);
+        assert_eq!(state.services.chosen, Some(0), "Alpha is still the open item");
+        assert_eq!(state.item_picks.places, [0, 2], "Alpha and Beta are still picked out, where they are now");
+        assert_eq!(show.selected(), shown, "the slides show what they did");
+        let lit = |drawn: &Drawn, title: &str, age: f64| {
+            let flash = crate::studio::drop_flash(age, false).expect("still flashing");
+            let row = drawn.left(title).center();
+            drawn
+                .rects
+                .iter()
+                .any(|(rect, fill, line)| rect.contains(row) && *fill == flash.fill && *line == flash.edge)
+        };
+        // Gamma's row, and only it, is orange with an orange line for its first 0.4 seconds
+        // (when the window is drawn again for it, `studio`'s tests say), then fades...
+        let held = found_step(&ctx, &mut show, &mut state, vec![], 0.9, &mut commands);
+        assert!(lit(&held, "Gamma", 0.2), "Gamma's row flashes");
+        assert!(!lit(&held, "Alpha", 0.2) && !lit(&held, "Beta", 0.2));
+        let fading = found_step(&ctx, &mut show, &mut state, vec![], 1.3, &mut commands);
+        assert!(lit(&fading, "Gamma", 0.6), "fading");
+        // ...and is gone at 1.2 seconds.
+        let gone = found_step(&ctx, &mut show, &mut state, vec![], 2.0, &mut commands);
+        let orange = |fill: egui::Color32| fill.r() > fill.g().saturating_mul(2);
+        let row = gone.left("Gamma");
+        assert!(!gone.rects.iter().any(|(rect, fill, _)| rect.contains(row.center()) && orange(*fill)));
+        assert!(state.drop_flash.is_none());
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn a_drop_above_the_item_on_screen_leaves_the_playlist_scrolled_where_it_was() {
+        use crate::service::Item;
+        let (mut show, mut state) = find_drag_setting();
+        // A long playlist with Beta on screen at its end, out of sight, and the list at its top.
+        let parts = (1..=30).map(|n| Item::Header { name: format!("Part {n}") });
+        state.services.list[0].items.splice(1..1, parts);
+        show.apply(Command::GoTo(SlideRef { presentation: 1, slide: 0 }));
+        state.live_row_seen = Some(31);
+        // Over the lower half of Alpha's row: between it and the first part.
+        let (mut commands, over, ctx) = drag_found(&mut show, &mut state, "gamma", 0, |drawn| {
+            let alpha = drawn.left("Alpha");
+            pos2(alpha.center().x, alpha.center().y + 8.0)
+        });
+        assert_eq!(state.services.front().items[1].title(), "Gamma");
+        // The list doesn't go to Beta, which only moved down one: Gamma's row stays in sight,
+        // where it was let go.
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], 0.9, &mut commands);
+        let (was, now) = (over.left("Alpha"), drawn.left("Alpha"));
+        assert!((now.min.y - was.min.y).abs() < 0.5, "the list hasn't moved: {was:?}, {now:?}");
+        assert!(drawn.left("Gamma").min.y > now.max.y, "Gamma is in sight, under Alpha");
+        assert_eq!(show.live(), Some(SlideRef { presentation: 1, slide: 0 }));
+        assert!(!goes_on_screen(&commands));
+    }
+
+    #[test]
+    fn a_song_found_dropped_on_a_placeholder_fills_it_and_flashes_the_same_way() {
+        use crate::service::Item;
+        let (mut show, mut state) = find_drag_setting();
+        state.services.list[0].items.push(Item::Placeholder { name: "Closing hymn".to_owned() });
+        let (mut commands, _, ctx) =
+            drag_found(&mut show, &mut state, "gamma", 0, |drawn| drawn.left("Closing hymn").center());
+        let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
+        assert_eq!(titles, ["Alpha", "Beta", "Gamma"]);
+        assert_eq!(state.services.chosen, Some(0), "not opened: Alpha, on screen, is still the open item");
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], 0.9, &mut commands);
+        let flash = crate::studio::drop_flash(0.2, false).expect("still flashing");
+        let row = drawn.left("Gamma").center();
+        assert!(
+            drawn
+                .rects
+                .iter()
+                .any(|(rect, fill, line)| rect.contains(row) && *fill == flash.fill && *line == flash.edge)
+        );
+        assert!(state.library_search.is_some());
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn a_song_found_that_the_playlist_has_already_is_refused_with_a_cue_and_nothing_opens() {
+        let (mut show, mut state) = find_drag_setting();
+        let before = state.services.list.clone();
+        let (commands, ..) = drag_found(&mut show, &mut state, "alpha", 0, above_beta);
+        assert_eq!(state.services.list, before);
+        assert_eq!(state.services.chosen, Some(0), "Alpha, on screen, is still the open item");
+        assert!(state.notices.refused().is_some_and(|said| said.contains("Alpha is already in")));
+        assert!(state.drop_flash.is_none() && state.library_search.is_some());
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn a_song_found_dropped_on_a_playlist_in_the_chooser_goes_at_its_end_and_a_notice_says_so() {
+        use crate::service::Item;
+        let (mut show, mut state) = find_drag_setting();
+        state.chooser_open = true;
+        let (commands, ..) = drag_found(&mut show, &mut state, "gamma", 0, |drawn| drawn.left("Evening").center());
+        let titles: Vec<&str> = state.services.list[1].items.iter().map(Item::title).collect();
+        assert_eq!(titles, ["Gamma"]);
+        assert!(state.notices.newest().is_some_and(|said| said.contains("Added Gamma to Evening")));
+        assert!(state.library_search.is_some(), "the search stays");
+        assert_eq!(state.services.chosen, Some(0), "Alpha, on screen, is still the open item");
+        nothing_went_live(&show, &commands);
+    }
+
+    #[test]
+    fn the_last_item_clicked_comes_to_the_top_of_the_slides_and_a_drop_above_it_leaves_it_there() {
+        let (mut show, mut state) = find_drag_setting();
+        let (ctx, mut commands, mut time) = (egui::Context::default(), Vec::new(), 0.0);
+        let drawn = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        // The first item's bar, at the top of the slides.
+        let top = drawn_middle(&drawn, "Alpha").min.y;
+        // A click on Beta, the last item, opens it and brings it to the top, as for any other.
+        let beta_row = drawn.left("Beta").center();
+        click_holding(&ctx, (&mut show, &mut state), beta_row, Modifiers::NONE, &mut time, &mut commands);
+        time += 0.1;
+        let opened = found_step(&ctx, &mut show, &mut state, vec![], time, &mut commands);
+        let beta = drawn_middle(&opened, "Beta");
+        assert!((beta.min.y - top).abs() < 1.0, "Beta at the top: {beta:?}, the top at {top}");
+        assert_eq!(state.services.chosen, Some(1));
+        // Gamma dropped between Alpha and Beta, above the top of the view: the slides stay on
+        // Beta, as they were, and it stays open.
+        let (dragged, _) = drag_found_in(&ctx, time + 0.1, &mut show, &mut state, "gamma", 0, above_beta);
+        commands.extend(dragged);
+        let after = found_step(&ctx, &mut show, &mut state, vec![], time + 1.5, &mut commands);
+        assert!((drawn_middle(&after, "Beta").min.y - beta.min.y).abs() < 0.5, "Beta hasn't moved");
+        assert_eq!(state.services.chosen, Some(2));
         nothing_went_live(&show, &commands);
     }
 
@@ -14530,7 +14750,7 @@ mod tests {
         let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
         assert_eq!(titles, ["Alpha", "Beta", "Gamma"]);
         assert!(state.services.list[1].items.is_empty(), "the other playlist is as it was");
-        assert_eq!((state.services.chosen, show.selected()), (Some(2), 2));
+        assert_eq!((state.services.chosen, show.selected()), (Some(0), 0), "Alpha is still the open item");
         nothing_went_live(&show, &commands);
     }
 
@@ -14550,8 +14770,9 @@ mod tests {
         // Bible view's translations and choices, as Command-Return adds it.
         let (lookup, numbering) = ("John 3:16".to_owned(), Some("english".to_owned()));
         assert_eq!(saved, &crate::service::SavedPassage { lookup, numbering, ..state.bible.settings() });
-        assert_eq!(state.services.chosen, Some(2));
-        assert!(!state.bible_open && state.library_search.is_none());
+        // Not opened (Alpha, on screen, is still the open item), and the search stays.
+        assert_eq!(state.services.chosen, Some(0));
+        assert!(!state.bible_open && state.library_search.is_some());
         nothing_went_live(&show, &commands);
     }
 
@@ -14569,11 +14790,13 @@ mod tests {
         assert_eq!(state.services.list, before.list);
         assert!(state.library_search.is_some(), "dropped where it can't go, the search goes on");
         nothing_went_live(&show, &commands);
-        // ...and a song goes in, picked out in the list.
+        // ...and a song goes in, with nothing picked or opened, and the search stays.
         let (commands, ..) = drag_found(&mut show, &mut state, "gamma", 0, |_| pos2(120.0, 600.0));
         assert_eq!(state.libraries[0].songs, ["gamma"]);
-        assert!(state.libraries_changed && state.library_search.is_none());
-        assert_eq!(show.selected(), 2, "picked out in the list, as a click on it does");
+        assert!(state.libraries_changed && state.library_search.is_some());
+        assert_eq!(show.selected(), 0, "the slides show what they did");
+        assert!(state.picked_songs.is_empty(), "nothing picked out");
+        assert!(state.notices.newest().is_some_and(|said| said.contains("Added Gamma to Hymns")));
         nothing_went_live(&show, &commands);
     }
 
@@ -14595,7 +14818,7 @@ mod tests {
         }
         let titles: Vec<&str> = state.services.front().items.iter().map(Item::title).collect();
         assert_eq!(titles, ["Alpha", "Gamma", "Beta"]);
-        assert!(state.library_search.is_none());
+        assert!(state.library_search.is_some(), "the search stays");
         nothing_went_live(&show, &commands);
     }
 
@@ -14732,7 +14955,7 @@ mod tests {
     }
 
     #[test]
-    fn a_catalog_song_joins_the_library_when_dropped_in_a_playlist_and_is_opened_there() {
+    fn a_catalog_song_joins_the_library_when_dropped_in_a_playlist_and_its_item_names_it() {
         use crate::service::Item;
         let (mut show, mut state) = catalog_setting("drop");
         // After Beta, at the end.
@@ -14744,8 +14967,9 @@ mod tests {
         assert_eq!(titles, ["Alpha", "Beta", "Lantern of the bay"]);
         let (at, key) = filed_catalog_song(&show, &state).expect("it joined the library");
         assert!(matches!(state.services.front().items.last(), Some(Item::Song { key: named, .. }) if *named == key));
-        // Opened where it went, as a click on its row opens it (once it is filed).
-        assert_eq!((state.services.chosen, show.selected()), (Some(2), at));
+        assert_eq!(crate::studio::playlist_song(&show, &state, &key), Some(at), "the item names the song filed");
+        // Not opened: Alpha, on screen, is still the open item, and the slides show what they did.
+        assert_eq!((state.services.chosen, show.selected()), (Some(0), 0));
         nothing_went_live(&show, &commands);
     }
 

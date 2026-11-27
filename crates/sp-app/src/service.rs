@@ -493,6 +493,23 @@ impl Services {
         self.chosen = Some(at);
     }
 
+    /// Puts an item into the service in front at a place (`slot` items above it) without
+    /// opening it: the open item stays open where it now is. A song or passage already in the
+    /// service is not added again. Returns where the item went, if it went in.
+    pub fn put_at(&mut self, slot: usize, item: Item) -> Option<usize> {
+        if self.place_of(self.front_at(), &item).is_some() {
+            return None;
+        }
+        let at = slot.min(self.front().items.len());
+        self.front_mut().items.insert(at, item);
+        if let Some(open) = self.chosen.as_mut()
+            && *open >= at
+        {
+            *open += 1;
+        }
+        Some(at)
+    }
+
     /// Puts items into a playlist (by its place), one after another in their order: after the
     /// item `after` when it is the playlist in front (the last one put in is chosen), else at
     /// its end. A song or passage it has already isn't added again. Returns, for each, whether
@@ -1591,6 +1608,27 @@ mod tests {
         assert_eq!(services.fill_in(0, 3, song("a")), None);
         assert_eq!(services.list[0].items[..3], [song("a"), song("b"), song("c")]);
         assert_eq!(services.chosen, Some(2), "c is still open");
+    }
+
+    #[test]
+    fn an_item_put_in_without_opening_it_leaves_the_open_item_open_where_it_now_is() {
+        let mut services = Services::default();
+        services.list[0].items = vec![song("a"), song("b"), song("c")];
+        services.chosen = Some(1);
+        // Above the open item: it moves down one, and is still the open one.
+        assert_eq!(services.put_at(1, song("x")), Some(1));
+        assert_eq!(services.list[0].items, [song("a"), song("x"), song("b"), song("c")]);
+        assert_eq!(services.chosen, Some(2), "b is still open");
+        // Below it, or past the end: it stays.
+        assert_eq!(services.put_at(9, song("y")), Some(4));
+        assert_eq!(services.chosen, Some(2));
+        // A song it has already isn't added again, and nothing is opened.
+        assert_eq!(services.put_at(0, song("c")), None);
+        assert_eq!((services.list[0].items.len(), services.chosen), (5, Some(2)));
+        // With nothing open, nothing is opened.
+        services.chosen = None;
+        assert_eq!(services.put_at(0, song("z")), Some(0));
+        assert_eq!(services.chosen, None);
     }
 
     #[test]

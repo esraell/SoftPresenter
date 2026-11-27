@@ -181,6 +181,59 @@ pub fn lay_out(shapes: &[Shape], grid: &Grid) -> (Vec<Place>, f32) {
     (places, top + FOOT)
 }
 
+/// How tall the scroll's contents are, for items laid out at `places`, `total` tall with the
+/// room under the last (see [`lay_out`]), in a view `view` tall: with room under a song by
+/// itself (`alone`) to drop a picture or video on; under a playlist's last item, room as tall
+/// as the view less that item, so that any item, the last too, can be scrolled to the top.
+fn scroll_height(places: &[Place], total: f32, view: f32, alone: bool) -> f32 {
+    match places.last() {
+        _ if alone => (total + 90.0).max(view),
+        Some(last) => total.max(last.top + view),
+        None => total,
+    }
+}
+
+/// Where the faint line across goes that starts the room under a playlist's last item (from
+/// the top of the scroll's contents), so the end reads as an end and not as slides still to
+/// come: a little under the item. None under a song by itself, and in an empty playlist.
+fn tail_line(places: &[Place], alone: bool) -> Option<f32> {
+    places.last().filter(|_| !alone).map(|last| last.bottom() + TAIL_GAP)
+}
+
+/// How far under a playlist's last item the line across is, and how far in from either side.
+const TAIL_GAP: f32 = 6.0;
+const TAIL_IN: f32 = 3.0;
+
+/// Keeps the playlist item that was at the top of the slides there, as far into it as the view
+/// was, for a few frames after a drop put something in above it ([`HomeState::slides_hold`]),
+/// unless the view is being taken elsewhere (`going`) or scrolled. The pass drawn with the view
+/// pushed down is thrown away and drawn again, so it is never seen. Otherwise it notes which
+/// item is at the top, and how far into it the view is, for the next drop.
+fn keep_top(ui: &egui::Ui, state: &mut HomeState, decks: &[Deck], places: &[Place], viewport: Rect, going: bool) {
+    let scrolled = ui.input(|input| input.smooth_scroll_delta.y != 0.0);
+    if going || scrolled {
+        state.slides_hold = None;
+    }
+    if let Some((item, into, frames)) = state.slides_hold.take() {
+        state.slides_hold = frames.checked_sub(1).filter(|left| *left > 0).map(|left| (item, into, left));
+        ui.ctx().request_repaint();
+        if let Some(place) = decks.iter().position(|deck| deck.item() == Some(item)).map(|at| places[at]) {
+            let to = place.top + into;
+            if (to - viewport.min.y).abs() > 0.5 {
+                ui.scroll_with_delta_animation(vec2(0.0, viewport.min.y - to), ScrollAnimation::none());
+                ui.ctx().request_discard("the slides keep the item at their top after a drop");
+            }
+        }
+        return;
+    }
+    state.slides_top = decks
+        .iter()
+        .zip(places)
+        .rev()
+        .find(|(deck, place)| deck.item().is_some() && place.top <= viewport.min.y + 0.5)
+        .and_then(|(deck, place)| Some((deck.item()?, viewport.min.y - place.top)));
+}
+
 /// Where the view is to be scrolled so that the slide on screen is in sight: `offset` is how
 /// far the view is scrolled now, `height` how tall it is, and `slide` the slide's top and
 /// bottom in the scroll's contents. The slide is kept clear of the top of the view, where
@@ -827,9 +880,19 @@ pub fn slide_scroll(
         let columns = ListColumns::new(view, left, across);
         let shapes: Vec<Shape> = decks.iter().map(|deck| shape_of(ui, state, deck, &grid, &columns)).collect();
         let (places, total) = lay_out(&shapes, &grid);
-        // The scroll is as tall as its items, with room under a song by itself to drop a
-        // picture or video on.
-        let total = if alone { (total + 90.0).max(viewport.height()) } else { total };
+        let total = scroll_height(&places, total, viewport.height(), alone);
+        // Anything that takes the view elsewhere this frame goes before keeping its top item.
+        let live_now = show.live().map(|live| (live, show.position().map(|(step, _)| step)));
+        let going = state.slides_jump_to.is_some()
+            || state.spotlight_scroll > 0
+            || state.pick_scroll > 0
+            || state.live_menu.is_some()
+            || live_now != state.live_seen;
+        if alone {
+            (state.slides_top, state.slides_hold) = (None, None);
+        } else {
+            keep_top(ui, state, decks, &places, viewport, going);
+        }
         ui.allocate_rect(Rect::from_min_size(origin, vec2(ui.available_width(), total)), Sense::hover());
         // Only the scroll's own width: a scroll area that scrolls up and down leaves the
         // width of its clip to whatever holds it, which can be wider.
@@ -929,7 +992,6 @@ pub fn slide_scroll(
                 None => ui.ctx().request_repaint(),
             }
         }
-        let live_now = show.live().map(|live| (live, show.position().map(|(step, _)| step)));
         // The menu of the slide on screen asked for (modifier-O): its slide is brought into view
         // too, without making its item the open one again.
         let changed = live_now != state.live_seen;
@@ -1111,6 +1173,13 @@ pub fn slide_scroll(
             if let Some(dropped) = response.dnd_release_payload::<MediaDrag>() {
                 state.media_request = Some(MediaRequest::AddAsSlide(dropped.0));
             }
+        }
+        // Under a playlist's last item: a faint line across, 1 point of the divider grey at 70%,
+        // then nothing in the room under it.
+        if let Some(y) = tail_line(&places, alone) {
+            let y = ui.painter().round_to_pixel_center(sheet.y(y));
+            let across_line = egui::Rangef::new(left + TAIL_IN, left + across - TAIL_IN);
+            ui.painter().hline(across_line, y, Stroke::new(1.0, LINE.gamma_multiply(0.7)));
         }
         // The bars, after what is under them, so that a bar takes the clicks on it and covers
         // the slides that scroll under it. The bar of the item at the top of the view stays
@@ -3261,6 +3330,32 @@ mod tests {
         assert_eq!(disabled, [(1, false)]);
         let deleted = slide_menu_click(&show, &mut state, at(0, 1), "Delete");
         assert_eq!(deleted, Some(SlideRequest::DeleteMany(vec![1])));
+    }
+
+    #[test]
+    fn under_a_playlists_last_item_there_is_room_for_it_to_reach_the_top_and_a_line_starts_it() {
+        let grid = Grid::new(SlideView::Grid, 760.0, 3);
+        let shapes = [
+            Shape { bar: SONG_BAR, strip: 0.0, body: Body::Tiles(7) },
+            Shape { bar: ITEM_BAR, strip: 0.0, body: Body::Line },
+        ];
+        let (places, total) = lay_out(&shapes, &grid);
+        let last = places[1];
+        // As tall as the view less the last item: scrolled to the end, the last is at the top.
+        assert_eq!(scroll_height(&places, total, 700.0, false), last.top + 700.0);
+        // In a view shorter than the last item, the items' own height (with the room under
+        // the last) is enough already.
+        let short = last.bottom() - last.top - 10.0;
+        assert_eq!(scroll_height(&places, total, short, false), total);
+        // The faint line is a little under the last item, in either case.
+        assert_eq!(tail_line(&places, false), Some(last.bottom() + TAIL_GAP));
+        // A song shown by itself keeps its room to drop a picture or video on, and no line.
+        let alone = &places[..1];
+        let (_, alone_total) = lay_out(&shapes[..1], &grid);
+        assert_eq!(scroll_height(alone, alone_total, 700.0, true), (alone_total + 90.0).max(700.0));
+        assert_eq!(tail_line(alone, true), None);
+        // An empty playlist: nothing to reach the top, no line.
+        assert_eq!((scroll_height(&[], FOOT, 700.0, false), tail_line(&[], false)), (FOOT, None));
     }
 
     #[test]

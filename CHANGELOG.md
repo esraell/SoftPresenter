@@ -5,11 +5,17 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-What's new opens a window with each version's changes.
+What's new opens a window with each version's changes, and in the Service view the find box keeps its search after a drag.
 
 ### New
 
 - **What's new window.** Settings › About › What's new (and Help › What's New in SoftPresenter on a Mac) now opens a window with this version's changes, in New, Better and Fixed, and the versions before it under them to scroll through. Each change is a short name and one plain sentence. Before, the key opened the list of changes on GitHub in the browser; the window needs no internet, as the changes come with SoftPresenter.
+
+### Better
+
+- **Search stays after a drag.** After you drag a song or passage from the find box, its words and results stay, ready for the next one. This is so for a drop into the playlist, onto a placeholder, or onto a playlist or library in the left column. Escape, clearing the box, or Return closes it, as before.
+- **Dropped songs wait.** A song or passage dropped from the find box no longer opens or moves the slides; its row flashes orange instead. What you had open stays open, and the slides stay where they were, even when it goes in above them. The row is brought into view if it landed out of sight; click it when you want it.
+- **Last item reaches the top.** The last item of a playlist can now be scrolled to the top of the slides, like any other. Clicking it in the playlist takes it there, and a faint line under it marks the end of the playlist.
 
 ## 0.9.0-dev.26 — 26 November 2026 (development build)
 

@@ -41,7 +41,8 @@ pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x8f, 0x8f, 0x88);
 pub const ACCENT: Color32 = Color32::from_rgb(0xb9, 0xb9, 0xb2);
 /// Switched on or chosen: the fill of a chosen tab or button. A lighter grey, never white.
 pub const SELECTED: Color32 = Color32::from_rgb(0x50, 0x50, 0x50);
-/// On screen right now. Used for nothing else.
+/// On screen right now; and, for a moment, the row of an item just dropped into the playlist
+/// (see [`drop_flash`]). Used for nothing else.
 pub const TALLY: Color32 = Color32::from_rgb(0xff, 0x4a, 0x1a);
 /// Take care; the tags that show an action's key.
 pub const CARE: Color32 = Color32::from_rgb(0xff, 0xc4, 0x00);
@@ -2038,6 +2039,8 @@ struct ListRow<'a> {
     /// The theme version a playlist item shows in, as a small pill on a second line under its
     /// title, and whether it is lit: the item on screen in that version.
     version: Option<(&'a str, bool)>,
+    /// Just dropped into: how its flash looks now, over the row and under its words.
+    flash: Option<Flash>,
 }
 
 /// How far apart a title's lines are, and the room above and below them in a row.
@@ -2206,6 +2209,9 @@ fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
         painter.rect_filled(row, RADIUS, CARD);
     } else if response.hovered() {
         painter.rect_filled(row, RADIUS, ROW_HOVER);
+    }
+    if let Some(flash) = look.flash {
+        painter.add(egui::epaint::RectShape::new(row, RADIUS, flash.fill, flash.edge, StrokeKind::Inside));
     }
     if let Some(number) = look.number {
         let cell = Rect::from_min_size(pos2(row.min.x + 10.0, row.center().y - 12.8), vec2(28.0, 25.6));
@@ -2495,68 +2501,29 @@ fn add_to_library(state: &mut HomeState, id: sp_model::Uuid, keys: &[String]) ->
     added
 }
 
-/// A result of the find box (`found`) has been dropped on a playlist (`index` among the
-/// playlists) and `item` added at its end (`added`), or found there already. The search ends.
-/// In the playlist listed in the left column the item is opened, as a click on its row opens it
-/// (nothing goes on the screens); in another playlist, an entry in the notices says where it
-/// went. A song of the song catalog that went in joins the library.
-#[allow(clippy::too_many_arguments)]
-fn found_added_to_playlist(
-    ctx: &egui::Context,
-    show: &Show,
-    state: &mut HomeState,
-    commands: &mut Vec<Command>,
-    index: usize,
-    item: &crate::service::Item,
-    added: bool,
-    found: &crate::home::FoundDrag,
-) {
-    crate::home::end_search(ctx, state);
+/// A result of the find box (`found`) has been dropped on a playlist in the chooser (`index`
+/// among the playlists) and added at its end (`added`), or found there already. The search
+/// stays, for the next one, and nothing is opened: with the chooser over the list, the notices
+/// say where it went, or a cue that it was there already. A song of the song catalog that went
+/// in joins the library.
+fn found_added_to_playlist(state: &mut HomeState, index: usize, added: bool, found: &crate::home::FoundDrag) {
     if added {
         crate::home::found_placed(state, found);
     }
     let name = found.name.as_str();
     let Some(playlist) = state.services.list.get(index) else { return };
-    let playlist_name = playlist.name.clone();
-    let place = if added {
-        playlist.items.len().checked_sub(1)
+    let list = playlist.name.clone();
+    if added {
+        state.notices.info(tf("left.added", "Added {item} to {list}.", &[("item", name), ("list", &list)]));
     } else {
-        // Only a song or a passage is ever refused, being there already: it is opened where it is.
-        state.services.place_of(index, item)
-    };
-    if index == state.services.current && state.playlist_open {
-        if let Some(place) = place {
-            carry_out_item_ask(show, state, commands, ItemAsk::Open(place));
-        }
-        if !added {
-            state.notices.refuse(tf(
-                "left.already_in",
-                "{item} is already in {list}.",
-                &[("item", name), ("list", &playlist_name)],
-            ));
-        }
-    } else if added {
-        state.notices.info(tf("left.added", "Added {item} to {list}.", &[("item", name), ("list", &playlist_name)]));
-    } else {
-        state.notices.refuse(tf(
-            "left.already_in",
-            "{item} is already in {list}.",
-            &[("item", name), ("list", &playlist_name)],
-        ));
+        state.notices.refuse(tf("left.already_in", "{item} is already in {list}.", &[("item", name), ("list", &list)]));
     }
 }
 
 /// A song found with the find box (`found`) has been dropped on a library (`added` to it, or
-/// there already): the search ends, and the notices say where it went (or a cue that it was
-/// there). A song of the song catalog that went in joins the library.
-fn found_added_to_library(
-    ctx: &egui::Context,
-    state: &mut HomeState,
-    id: sp_model::Uuid,
-    added: bool,
-    found: &crate::home::FoundDrag,
-) {
-    crate::home::end_search(ctx, state);
+/// there already): the search stays, for the next one, and the notices say where it went (or
+/// a cue that it was there). A song of the song catalog that went in joins the library.
+fn found_added_to_library(state: &mut HomeState, id: sp_model::Uuid, added: bool, found: &crate::home::FoundDrag) {
     if added {
         crate::home::found_placed(state, found);
     }
@@ -2571,6 +2538,40 @@ fn found_added_to_library(
             &[("item", name), ("list", &library)],
         ));
     }
+}
+
+/// How the row of an item just dropped into looks at a moment of its flash: what lies over the
+/// row, the line inside its edge, and in how many seconds it changes next (0: at every frame).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Flash {
+    pub fill: Color32,
+    pub edge: Stroke,
+    pub again: f64,
+}
+
+/// How long the row of an item just dropped into flashes, and for how long of that it holds
+/// before it fades.
+const FLASH_FOR: f64 = 1.2;
+const FLASH_HOLD: f64 = 0.4;
+
+/// How the row looks `age` seconds after the drop; `None` once it is over. The orange at 30%
+/// over the row with a 1-point orange line inside its edge, held, then fading out evenly; with
+/// less motion (`reduced`), an 18% tint all through, with no line and no fade.
+pub fn drop_flash(age: f64, reduced: bool) -> Option<Flash> {
+    if !(0.0..FLASH_FOR).contains(&age) {
+        return None;
+    }
+    if reduced {
+        return Some(Flash { fill: TALLY.gamma_multiply(0.18), edge: Stroke::NONE, again: FLASH_FOR - age });
+    }
+    let (strength, again) =
+        if age < FLASH_HOLD { (1.0, FLASH_HOLD - age) } else { ((FLASH_FOR - age) / (FLASH_FOR - FLASH_HOLD), 0.0) };
+    let strength = strength as f32;
+    Some(Flash {
+        fill: TALLY.gamma_multiply(0.3 * strength),
+        edge: Stroke::new(1.0, TALLY.gamma_multiply(strength)),
+        again,
+    })
 }
 
 /// What is carried beside the pointer while it is dragged: its name (or how many), on a small
@@ -2799,7 +2800,7 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         if state.chooser_open {
             // Only things to open: the list and the foot are put away.
             egui::ScrollArea::vertical().id_salt("chooser").auto_shrink([false, false]).show(ui, |ui| {
-                chooser(ui, show, state, commands);
+                chooser(ui, show, state);
             });
             return;
         }
@@ -2812,7 +2813,7 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         if carrying || crate::file_drop::wants_chooser(state) {
             let most = ui.available_height() * 0.6;
             egui::ScrollArea::vertical().id_salt("chooser").max_height(most).show(ui, |ui| {
-                chooser(ui, show, state, commands);
+                chooser(ui, show, state);
             });
             let (line, _) = ui.allocate_exact_size(vec2(width, 9.0), Sense::hover());
             ui.painter().hline(line.x_range(), line.center().y, Stroke::new(1.0, LINE));
@@ -3106,7 +3107,7 @@ fn chooser_head(ui: &mut egui::Ui, text: &str, add_hint: &str, second: bool) -> 
 /// line (All Songs, then each library); the one that is open has the lighter row, a heavier
 /// name and a tick. Songs carried from the list, a picture or video from the media bin, and a
 /// result of the find box can be dropped on a row that takes them (see `Carried`).
-fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
+fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     use crate::service::Item;
     ui.spacing_mut().item_spacing = vec2(0.0, 1.0);
     if chooser_head(ui, t("left.playlists", "Playlists"), t("left.playlists.new", "New playlist"), false) {
@@ -3174,9 +3175,12 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
         // Songs, a picture or video, or a result of the find box go at the playlist's end.
         if let Some(carried) = dropped_on(&response, &target) {
             let items = carried.items(show, state);
+            state.item_picks.check(&state.services);
             let added: Vec<bool> = items.iter().map(|item| state.services.add_to(index, item.clone())).collect();
-            if let (Some(found), Some(item)) = (carried.found(), items.first()) {
-                found_added_to_playlist(ui.ctx(), show, state, commands, index, item, added == [true], found);
+            if let Some(found) = carried.found() {
+                // At the end, under every item picked out, which stay picked.
+                state.item_picks.kept_across(None, &state.services);
+                found_added_to_playlist(state, index, added == [true], found);
             }
         }
         let several = playlists.len() > 1;
@@ -3316,7 +3320,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut
         if let Some(carried) = dropped_on(&response, &target) {
             let added = add_to_library(state, id, &carried.song_keys(state));
             if let Some(found) = carried.found() {
-                found_added_to_library(ui.ctx(), state, id, added > 0, found);
+                found_added_to_library(state, id, added > 0, found);
             }
         }
         let mut menu = |ui: &mut egui::Ui| {
@@ -3721,17 +3725,9 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
             && carried.lands_on(&target)
         {
             egui::DragAndDrop::clear_payload(ui.ctx());
+            // Nothing is picked or opened: the slides stay on what they show.
             let added = add_to_library(state, id, &carried.song_keys(state));
-            // Picked out and opened in the list, as a click on its row does; nothing goes on screen.
-            if let Some(song) = found.song {
-                state.picking = crate::home::Picking::Songs;
-                state.picked_songs = vec![song];
-                state.song_anchor = Some(song);
-                commands.push(Command::Select(song));
-                state.bible_open = false;
-                state.services.chosen = None;
-            }
-            found_added_to_library(ui.ctx(), state, id, added > 0, found);
+            found_added_to_library(state, id, added > 0, found);
         }
     }
     // Songs being dragged say what they are beside the pointer from the first move, and until
@@ -4667,6 +4663,62 @@ pub fn fill_placeholder(state: &mut HomeState, index: usize, item: crate::servic
     state.services.fill(index, item)
 }
 
+/// A result of the find box (`found`, as `item`) has been let go over the playlist in front:
+/// onto the placeholder at `onto`, or else between rows, `slot` items above it. It goes in
+/// without being opened, and the search stays for the next one: the open item stays open,
+/// what is picked stays picked, and the slides stay on what they show. Its row flashes, and is
+/// brought into view. A song or passage the playlist has already is refused with a cue. A
+/// song of the song catalog that went in joins the library.
+fn found_dropped_in_playlist(
+    ctx: &egui::Context,
+    state: &mut HomeState,
+    onto: Option<usize>,
+    slot: usize,
+    item: crate::service::Item,
+    found: &crate::home::FoundDrag,
+) {
+    state.item_picks.check(&state.services);
+    let front = state.services.front_at();
+    // Where it went, and where the items under it moved down from (none for a placeholder).
+    let (went, pushed) = match onto {
+        Some(onto) => (state.services.fill_in(front, onto, item), None),
+        None => {
+            let at = state.services.put_at(slot, item);
+            (at, at)
+        }
+    };
+    let Some(at) = went else {
+        state.notices.refuse(tf(
+            "left.already_in",
+            "{item} is already in {list}.",
+            &[("item", &found.name), ("list", &state.services.front().name)],
+        ));
+        return;
+    };
+    state.item_picks.kept_across(pushed, &state.services);
+    // The row of the item on screen moved down with the rest, which is no reason for the list
+    // to go to it (and away from the row just dropped into).
+    if let (Some(pushed), Some(seen)) = (pushed, state.live_row_seen.as_mut())
+        && *seen >= pushed
+    {
+        *seen += 1;
+    }
+    crate::home::found_placed(state, found);
+    // Put in above the item at the top of the slides, or into a placeholder above it, it would
+    // push that item down: the slides keep it where it is.
+    if let Some((top, into)) = state.slides_top {
+        if pushed.is_some_and(|pushed| pushed <= top) {
+            state.slides_hold = Some((top + 1, into, crate::home::SLIDES_HOLD_FRAMES));
+        } else if onto.is_some_and(|onto| onto < top) {
+            state.slides_hold = Some((top, into, crate::home::SLIDES_HOLD_FRAMES));
+        }
+    }
+    let uid = state.services.front().uids().get(at).copied();
+    state.drop_flash = uid.map(|uid| (uid, ctx.input(|input| input.time)));
+    state.playlist_scroll_to = Some(at);
+    ctx.request_repaint();
+}
+
 /// The items of the playlist in front a menu opened on the item at `index` acts on: those
 /// picked out, in order, when it is one of several picked; else it alone.
 fn items_acted_on(state: &HomeState, index: usize) -> Vec<usize> {
@@ -4754,6 +4806,25 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
     // Items picked out let go once the playlist has changed under them.
     state.item_picks.check(&state.services);
     let mods = ui.input(|input| input.modifiers);
+    // The row of an item just dropped into flashes, by its place now; the window is drawn
+    // again only while it does.
+    let flash_at = match state.drop_flash {
+        Some((uid, since)) => match drop_flash(ui.input(|input| input.time) - since, state.reduce_motion) {
+            Some(flash) => {
+                if flash.again > 0.0 {
+                    ui.ctx().request_repaint_after_secs(flash.again as f32);
+                } else {
+                    ui.ctx().request_repaint();
+                }
+                state.services.front().place_of_uid(uid).map(|at| (at, flash))
+            }
+            None => {
+                state.drop_flash = None;
+                None
+            }
+        },
+        None => None,
+    };
 
     // What a click on a row asks for, carried out after the list is drawn.
     let mut ask: Option<ItemAsk> = None;
@@ -4919,6 +4990,7 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 faint: missing,
                 icon,
                 version,
+                flash: flash_at.filter(|(at, _)| *at == index).map(|(_, flash)| flash),
                 ..ListRow::default()
             };
             let (mut response, more) = list_row(ui, &look);
@@ -5058,34 +5130,18 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
         }
         if ui.input(|input| input.pointer.any_released()) {
             egui::DragAndDrop::clear_payload(ui.ctx());
-            let count = state.services.front().items.len();
-            let placed = match onto {
-                Some((_, place)) => fill_placeholder(state, *place, item.clone()),
-                None => {
-                    // `slot` counts rows shown, which are every item while nothing filters.
-                    let place = row_items.get(slot).copied().unwrap_or(items.len());
-                    state.services.insert(place, item.clone());
-                    state.services.front().items.len() > count
-                }
-            };
-            // A result of the find box ends the search, and what it put in the playlist (or
-            // the song already there, which isn't added twice) is opened, as a click on its
-            // row opens it: nothing goes on the screens. A song of the song catalog that went
-            // in joins the library.
-            if let Some(found) = carried.found() {
-                crate::home::end_search(ui.ctx(), state);
-                if placed {
-                    crate::home::found_placed(state, found);
-                }
-                let refused = onto.is_none() && !placed;
-                if refused {
-                    state.notices.refuse(tf(
-                        "left.already_in",
-                        "{item} is already in {list}.",
-                        &[("item", &found.name), ("list", &state.services.front().name)],
-                    ));
-                }
-                ask = state.services.chosen.map(ItemAsk::Open);
+            // `slot` counts rows shown, which are every item while nothing filters.
+            let place = row_items.get(slot).copied().unwrap_or(items.len());
+            let onto = onto.map(|(_, place)| *place);
+            match carried.found() {
+                Some(found) => found_dropped_in_playlist(ui.ctx(), state, onto, place, item.clone(), found),
+                // A picture or video from the media bin is the chosen item where it goes.
+                None => match onto {
+                    Some(onto) => {
+                        fill_placeholder(state, onto, item.clone());
+                    }
+                    None => state.services.insert(place, item.clone()),
+                },
             }
         }
     }
@@ -7195,6 +7251,86 @@ pub mod tests {
         }
     }
 
+    #[test]
+    fn a_row_just_dropped_into_flashes_orange_holds_then_fades_evenly_and_is_gone_at_1_2_seconds() {
+        let look = |age| drop_flash(age, false).map(|flash| (flash.fill, flash.edge));
+        // The orange at 30% over the row, with a 1-point orange line inside its edge.
+        let full = (TALLY.gamma_multiply(0.3), Stroke::new(1.0, TALLY));
+        assert_eq!(look(0.0), Some(full), "at once");
+        assert_eq!(look(0.4), Some(full), "held for the first 0.4 seconds");
+        let half = (TALLY.gamma_multiply(0.15), Stroke::new(1.0, TALLY.gamma_multiply(0.5)));
+        assert_eq!(look(0.8), Some(half), "half way through an even fade");
+        assert_eq!(look(1.2), None, "gone at 1.2 seconds");
+        assert_eq!(look(3.0), None, "and after");
+        // The window is drawn again only while it runs: once when the fade starts, then for
+        // every frame of the fade.
+        let again = |age| drop_flash(age, false).map(|flash| flash.again);
+        assert_eq!(again(0.0), Some(0.4));
+        assert_eq!(again(0.4), Some(0.0));
+        assert_eq!(again(0.8), Some(0.0));
+        assert_eq!(again(1.2), None);
+    }
+
+    #[test]
+    fn with_reduced_motion_a_row_just_dropped_into_is_tinted_18_percent_for_1_2_seconds_without_fading() {
+        let tint = Flash { fill: TALLY.gamma_multiply(0.18), edge: Stroke::NONE, again: 1.2 };
+        assert_eq!(drop_flash(0.0, true), Some(tint));
+        for age in [0.4, 0.8, 1.1] {
+            let flash = drop_flash(age, true).expect("still tinted");
+            assert_eq!((flash.fill, flash.edge), (tint.fill, tint.edge), "the same tint at {age}");
+            assert!((flash.again - (1.2 - age)).abs() < 1e-9, "drawn again only when it ends: {flash:?}");
+        }
+        assert_eq!(drop_flash(1.2, true), None);
+    }
+
+    #[test]
+    fn the_playlist_is_drawn_again_for_a_flash_only_when_its_fade_starts_and_while_it_fades() {
+        use crate::service::Item;
+        use std::time::Duration;
+        let ctx = styled();
+        let show = Show::new(Vec::new());
+        let mut state = HomeState { playlist_open: true, ..HomeState::default() };
+        let place = |name: &str| Item::Placeholder { name: name.to_owned() };
+        state.services.list[0].items = vec![place("Offering"), place("Sermon")];
+        let uid = state.services.front().uids()[1];
+        let mut commands = Vec::new();
+        // How soon the list asks to be drawn again at a time, and whether a row was orange.
+        let mut frame = |state: &mut HomeState, time: f64| {
+            let raw = RawInput {
+                time: Some(time),
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(LEFT_WIDTH, 800.0))),
+                ..RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| playlist_items(ui, &show, state, &mut commands));
+            let again = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+            let orange = output.shapes.iter().any(|clipped| {
+                matches!(&clipped.shape, egui::Shape::Rect(rect) if rect.fill.r() > rect.fill.g().saturating_mul(2))
+            });
+            output.drop_without_applying_deltas();
+            (again, orange)
+        };
+        frame(&mut state, 9.0);
+        let near = |again: Duration, secs: f64| (again.as_secs_f64() - secs).abs() < 0.001;
+        state.drop_flash = Some((uid, 10.0));
+        // Held: drawn again once, when the fade starts...
+        let (again, orange) = frame(&mut state, 10.1);
+        assert!(orange && near(again, 0.3), "{again:?}");
+        // ...then at every frame while it fades...
+        assert_eq!(frame(&mut state, 10.5), (Duration::ZERO, true));
+        assert_eq!(frame(&mut state, 11.1), (Duration::ZERO, true));
+        // ...and not for it once it is over (after the one frame more that egui draws after it
+        // was last asked to).
+        let (_, orange) = frame(&mut state, 11.3);
+        assert!(!orange && state.drop_flash.is_none());
+        let (again, _) = frame(&mut state, 11.4);
+        assert!(again > Duration::from_secs(1), "{again:?}");
+        // With less motion, the tint is drawn again only when it ends.
+        state.reduce_motion = true;
+        state.drop_flash = Some((uid, 20.0));
+        let (again, orange) = frame(&mut state, 20.4);
+        assert!(orange && near(again, 0.8), "{again:?}");
+    }
+
     fn rows() -> Vec<(usize, Rect)> {
         (0..3).map(|n| (5 + n, Rect::from_min_size(pos2(0.0, n as f32 * 32.0), vec2(200.0, 30.0)))).collect()
     }
@@ -8526,7 +8662,7 @@ pub mod tests {
         state.services.current = 1;
         state.services.chosen = Some(0);
         let frame = |state: &mut HomeState, events: Vec<Event>| {
-            drawn(&ctx, events, |ui| chooser(ui, &show, state, &mut Vec::new())).drop_without_applying_deltas();
+            drawn(&ctx, events, |ui| chooser(ui, &show, state)).drop_without_applying_deltas();
         };
         state.renaming_service = Some((0, "Morning".to_owned()));
         state.rename_started = true;
@@ -8550,7 +8686,7 @@ pub mod tests {
         let height = std::cell::Cell::new(0.0);
         let chooser_frame = |state: &mut HomeState, events: Vec<Event>| {
             drawn(&ctx, events, |ui| {
-                chooser(ui, &show, state, &mut Vec::new());
+                chooser(ui, &show, state);
                 height.set(ui.min_rect().height());
             })
         };
