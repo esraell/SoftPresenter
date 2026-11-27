@@ -71,6 +71,15 @@ mod tests {
         // The chorus after the first verse isn't the end; the same slide sung last is. The
         // written last slide (verse 2) never is.
         assert_eq!(marked, [(Some(0), false), (Some(1), false), (Some(2), false), (Some(1), true)]);
+        // The chorus clicked takes its next place in the order, as Next would reach it: from
+        // the first verse that is the chorus sung first, and after the second verse the end.
+        let mut clicked = Show::new(vec![Arc::new(song.clone())]);
+        clicked.apply(at(0));
+        clicked.apply(at(1));
+        assert!(!due_on(&clicked), "the chorus clicked after verse 1");
+        clicked.apply(at(2));
+        clicked.apply(at(1));
+        assert!(due_on(&clicked), "the chorus clicked after verse 2");
         // Its words hidden, the mark goes with them, and comes back with them.
         show.apply(Command::HideWords);
         assert!(show.words_hidden() && !due_on(&show));
