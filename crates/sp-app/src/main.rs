@@ -100,6 +100,7 @@ mod timelychurch;
 mod timers;
 mod updates;
 mod versions;
+mod video_wait;
 mod voxlive;
 mod whats_new;
 mod whole_file;
@@ -2314,8 +2315,10 @@ struct App {
     /// The picture behind the words the screens were last told to show, and how it fills them:
     /// what they keep while a video's first picture is still to come.
     media_on_screens: (Option<sp_render::Picture>, sp_model::ImageFit),
-    /// The screens are keeping what they showed until the video's first picture comes.
-    screens_wait_for_video: bool,
+    /// The wait for the video on screen's first picture, from when it was opened: the screens
+    /// keep what they showed until it comes, for at most `video_wait::LIMIT` (`None` for a video
+    /// ready at once, or none).
+    video_wait: Option<video_wait::FirstPicture>,
     /// A video in a box on the slide on screen, by the file the box names, playing.
     slide_videos: Vec<(String, sp_video::Player)>,
     /// Box videos neither the system nor FFmpeg could play, so they aren't tried again.
@@ -3257,6 +3260,7 @@ impl App {
                 self.video_leaving = Some(player);
             }
         }
+        self.video_wait = None;
         if live.is_none() {
             self.video_leaving = None;
         }
@@ -3298,6 +3302,9 @@ impl App {
                     looping: loops,
                     muted: false,
                 });
+                // The screens wait for its first picture from now, for so long at most.
+                self.video_wait =
+                    (!player.ready()).then(|| video_wait::FirstPicture::new(started, video_wait::limit()));
                 self.video = Some((item.id, player));
             }
             Err(problem) => {
@@ -3943,17 +3950,93 @@ impl App {
         Some(Instant::now() + wait)
     }
 
+    /// Looks again whether the video on screen has given its first picture, and says what that
+    /// changed (see `video_wait`). When the limit passes with none, the operator is told once,
+    /// naming the file, and the log says why the screens went on without it; a picture that
+    /// comes after that (or FFmpeg saying the video can't play) takes the notice back.
+    fn look_at_first_picture(&mut self) -> video_wait::Change {
+        use video_wait::Change;
+        let Some((_, player)) = self.video.as_ref() else {
+            self.video_wait = None;
+            return Change::Nothing;
+        };
+        let Some(wait) = self.video_wait.as_mut() else { return Change::Nothing };
+        let now = Instant::now();
+        let change = wait.look(player.ready(), now);
+        if matches!(change, Change::Nothing | Change::Came) {
+            return change;
+        }
+        let name = file_name(player.path());
+        let waited = format!("{:.1} s", wait.waited(now).as_secs_f64());
+        if change == Change::GaveUp {
+            applog::event(
+                "video",
+                &format!(
+                    "no picture of {name} came in {waited}, the most the screens wait for a video's first picture: \
+                     they stop keeping what they showed and go on without it (its still, if it has one); FFmpeg \
+                     goes on opening it, and its pictures go on screen if they come"
+                ),
+            );
+            let seconds = wait.limit().as_secs_f64().round().max(1.0) as u64;
+            let text = format!(
+                "{name}: {}",
+                crate::i18n::tn(
+                    "notices.media.video_not_started",
+                    seconds,
+                    "this video hasn\u{2019}t started after {n} second, so the screens went on without it. It will \
+                     show as soon as it starts.",
+                    "this video hasn\u{2019}t started after {n} seconds, so the screens went on without it. It will \
+                     show as soon as it starts.",
+                    &[],
+                )
+            );
+            wait.notice = Some(text.clone());
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.notices.trouble(text);
+            }
+        } else {
+            let said = if player.problem().is_some() {
+                format!(
+                    "FFmpeg said why {name} can't play {waited} after it was asked for, after the screens stopped \
+                     waiting"
+                )
+            } else {
+                format!(
+                    "the first picture of {name} came {waited} after it was asked for, after the screens stopped \
+                     waiting: it goes on screen as it comes"
+                )
+            };
+            applog::event("video", &said);
+            if let (Some(text), Some(running)) = (wait.notice.take(), self.running.as_mut()) {
+                running.home_state.notices.withdraw(&text);
+            }
+        }
+        change
+    }
+
     /// Keeps the video on screen going (a looping one starts again at its end) and the
     /// operator's view of it up to date. Says when to look again.
     fn tick_video(&mut self) -> Option<Instant> {
         // The screens kept what they showed while the video opened: its first picture has
-        // come (or it is known that none will), so they are told of it now, and the video that
-        // played on meanwhile is let go.
-        if self.screens_wait_for_video && self.video.as_ref().is_none_or(|(_, player)| player.ready()) {
+        // come (or it is known that none will), or it has been too long, so they are told of
+        // it now, and the video that played on meanwhile is let go.
+        let kept = self.video_wait.as_ref().is_some_and(video_wait::FirstPicture::keeps);
+        let change = self.look_at_first_picture();
+        if kept && (change != video_wait::Change::Nothing || self.video_wait.is_none()) {
             self.refresh_output();
         }
+        // Looked at again by the end of the wait at the latest; once it is over with no picture
+        // yet, a few times a second, not fifty (its pictures go on screen as they come, without
+        // it).
+        let looked = Instant::now();
+        let due = self.video_wait.as_ref().and_then(|wait| Some((wait.due(looked)?, wait.overdue())));
         let (id, player) = self.video.as_mut()?;
-        let wait = player.tick();
+        let wait = match (looked + player.tick(), due) {
+            (at, Some((due, true))) => at.max(due),
+            (at, Some((due, false))) => at.min(due),
+            (at, None) => at,
+        }
+        .saturating_duration_since(looked);
         say_video_pace(player, false);
         while let Some(note) = player.take_note() {
             applog::event("video", &note);
@@ -4003,6 +4086,8 @@ impl App {
                             fallback.set_volume(0.0);
                         }
                         fallback.play();
+                        self.video_wait = (!fallback.ready())
+                            .then(|| video_wait::FirstPicture::new(Instant::now(), video_wait::limit()));
                         self.video = Some((id, fallback));
                         // The screens take their pictures from the new player.
                         self.refresh_output();
@@ -4743,6 +4828,8 @@ impl App {
         self.remote.stir();
         self.follow_version();
         self.sync_video();
+        // Whether the screens still keep what they showed for the video's first picture.
+        self.look_at_first_picture();
         self.sync_slide_video();
         self.sync_web_pages();
         let video = self.video.as_ref().map(|(_, player)| player.frames());
@@ -4779,9 +4866,9 @@ impl App {
         // busy computer can take seconds) isn't shown yet: the screens keep the picture, or the
         // video still playing, that they had, and are told of the new one when its first
         // picture is there (`tick_video`), so they go from the one to the other with nothing
-        // between.
-        let waits = self.video.as_ref().is_some_and(|(_, player)| !player.ready());
-        self.screens_wait_for_video = waits;
+        // between. Not for ever: once `video_wait::LIMIT` has passed they go on without it
+        // (its still, if it has one), and its pictures follow as they come.
+        let waits = self.video_wait.as_ref().is_some_and(video_wait::FirstPicture::keeps);
         let (video, media, media_fit) = if waits {
             let leaving = self.video_leaving.as_ref().map(sp_video::Player::frames);
             (leaving, self.media_on_screens.0.clone(), self.media_on_screens.1)
@@ -13564,7 +13651,7 @@ fn main() -> ExitCode {
         video: None,
         video_leaving: None,
         media_on_screens: (None, sp_model::ImageFit::Fill),
-        screens_wait_for_video: false,
+        video_wait: None,
         slide_videos: Vec::new(),
         slide_video_refused: std::collections::HashSet::new(),
         web_pages: Vec::new(),

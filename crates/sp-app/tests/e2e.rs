@@ -1512,6 +1512,187 @@ fn a_video_slow_to_open_holds_up_neither_sp_nor_the_window() {
     assert!(long.is_empty(), "the window's thread was held up while the video opened: {long:?}");
 }
 
+/// The notices that say a video hasn't started in time (`video_wait`), as `sp notices` lists
+/// them.
+fn not_started_notices(copy: &Copy) -> Vec<String> {
+    let listed = copy.ok(&["notices"]).data;
+    listed
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|notice| notice["kind"] == "trouble")
+        .filter_map(|notice| notice["text"].as_str())
+        .filter(|text| text.contains("hasn\u{2019}t started after"))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// How many of a video's pictures the screens showed, as the log's last line of its pace says.
+fn pictures_shown(log: &str, file: &str) -> Option<u64> {
+    let line = log.lines().rev().find(|line| line.contains(&format!("{file} at ")) && line.contains(" shown, "))?;
+    line.split_once(" shown, ")?.0.rsplit([' ', ',']).next()?.parse().ok()
+}
+
+/// A video that never gives a picture (nor says it can't play) doesn't leave the screens on what
+/// they showed: once the wait for its first picture is over they go on without it, the operator
+/// is told once, naming the file, the log says why, `sp` is answered all along, and the screens
+/// go on to whatever is shown next.
+#[test]
+fn a_video_that_never_gives_a_picture_leaves_the_screens_free_after_the_limit() {
+    let name = "a_video_that_never_gives_a_picture_leaves_the_screens_free_after_the_limit";
+    let Some(run) = Run::new(name) else { return };
+    let Some(video) = video_for_ffmpeg(&run, name) else { return };
+    let picture = run.file("Blue.png");
+    write_png(&picture, [30, 90, 200]);
+    const LIMIT: Duration = Duration::from_secs(2);
+    let on_screen = run.file("on-screen.png");
+    // Testing aids: SOFTPRESENTER_VIDEO_OPEN_SLOW holds FFmpeg back ten minutes, so no picture
+    // ever comes; SOFTPRESENTER_VIDEO_WAIT makes the screens wait 2 s for it, not 10 s; and the
+    // picture of the first screen is taken 9 s after the screens first drew, past the limit.
+    let copy = run.start(&[
+        ("SOFTPRESENTER_VIDEO_OPEN_SLOW", "600000"),
+        ("SOFTPRESENTER_VIDEO_WAIT", "2000"),
+        ("SOFTPRESENTER_CAPTURE_OUTPUT", &on_screen.to_string_lossy()),
+        ("SOFTPRESENTER_CAPTURE_OUTPUT_AFTER", "9"),
+    ]);
+    copy.ok(&["media", "add", &picture.to_string_lossy(), &video.to_string_lossy()]);
+    copy.ok(&["media", "show", "blue"]);
+    let began = Instant::now();
+    copy.ok(&["media", "show", "grey"]);
+    // Within the limit nothing is said.
+    let early = not_started_notices(&copy);
+    if began.elapsed() < LIMIT {
+        assert!(early.is_empty(), "a notice came before the limit: {early:?}{}", run.context());
+    }
+    // At the limit the operator is told, naming the file.
+    let told = loop {
+        let told = not_started_notices(&copy);
+        if !told.is_empty() {
+            break told;
+        }
+        assert!(began.elapsed() < Duration::from_secs(30), "nothing was said at the limit{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    let taken_too_soon = on_screen.exists();
+    assert!(began.elapsed() >= LIMIT, "told {:?} after the video was asked for, before the limit", began.elapsed());
+    assert_eq!(
+        told,
+        ["Grey.mkv: this video hasn\u{2019}t started after 2 seconds, so the screens went on without it. It will \
+          show as soon as it starts."],
+        "{}",
+        run.context()
+    );
+    assert!(run.log().contains("no picture of Grey.mkv came in"), "the log says why{}", run.context());
+    assert_eq!(copy.status()["media"], "Grey.mkv", "the video is still the one chosen");
+    // The screens went on: not the blue picture any more (the video's still, or nothing).
+    let taken = Instant::now();
+    while !on_screen.exists() && taken.elapsed() < Duration::from_secs(30) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    if on_screen.exists() && !taken_too_soon {
+        // Read once written in full.
+        std::thread::sleep(Duration::from_millis(300));
+        let shown = image::open(&on_screen).expect("the picture of the screen").to_rgb8();
+        let [r, g, b] = shown.get_pixel(shown.width() / 2, shown.height() / 2).0;
+        assert!(
+            !(b > 150 && r < 80 && g < 140),
+            "past the limit the screen's middle was still the blue picture ({r},{g},{b}){}",
+            run.context()
+        );
+    } else {
+        say_skipped(
+            &format!("{name}: what the screens show past the limit"),
+            "this computer was too slow for the screen's picture to be taken at the right moment",
+        );
+    }
+    // Said once, however long it stays on screen.
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(not_started_notices(&copy).len(), 1, "{}", run.context());
+    // The screens go on to the next thing at once; the video that never opened is let go.
+    let next = copy.ok(&["media", "show", "blue"]);
+    assert!(next.took < Duration::from_secs(5), "showing a picture took {:?}", next.took);
+    assert_eq!(copy.status()["media"], "Blue.png");
+    let quitted = copy.quit();
+    quitted.assert_clean(&run);
+}
+
+/// A video whose first picture comes after the limit (FFmpeg slow to open, as on a PC whose
+/// virus scanner reads it first) still plays: the screens go on without it at the limit and the
+/// operator is told, then its pictures go on the screens as they come and the notice is taken
+/// back.
+#[test]
+fn a_video_whose_first_picture_comes_after_the_limit_still_plays_and_the_notice_goes() {
+    let name = "a_video_whose_first_picture_comes_after_the_limit_still_plays_and_the_notice_goes";
+    let Some(run) = Run::new(name) else { return };
+    let Some(video) = video_for_ffmpeg(&run, name) else { return };
+    let picture = run.file("Blue.png");
+    write_png(&picture, [30, 90, 200]);
+    // Testing aids: FFmpeg held back 5 s, the screens' wait 1 s.
+    let copy = run.start(&[("SOFTPRESENTER_VIDEO_OPEN_SLOW", "5000"), ("SOFTPRESENTER_VIDEO_WAIT", "1000")]);
+    copy.ok(&["media", "add", &picture.to_string_lossy(), &video.to_string_lossy()]);
+    copy.ok(&["media", "show", "blue"]);
+    let began = Instant::now();
+    copy.ok(&["media", "show", "grey"]);
+    copy.ok(&["video", "loop", "on"]);
+    // Between the limit and the first picture, the operator is told.
+    let mut told = Vec::new();
+    while !run.log().contains("the first picture of Grey.mkv came") {
+        assert!(began.elapsed() < Duration::from_secs(40), "the video never gave a picture{}", run.context());
+        let now = not_started_notices(&copy);
+        if !now.is_empty() {
+            told = now;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(
+        told,
+        ["Grey.mkv: this video hasn\u{2019}t started after 1 second, so the screens went on without it. It will \
+          show as soon as it starts."],
+        "the notice while it opened{}",
+        run.context()
+    );
+    // Its picture came: the log says it came late, and the notice is taken back.
+    let came = Instant::now();
+    loop {
+        let log = run.log();
+        let (gave_up, late) = (
+            log.find("no picture of Grey.mkv came in"),
+            log.find("after the screens stopped waiting: it goes on screen as it comes"),
+        );
+        if let Some(late) = late {
+            assert!(
+                gave_up.is_some_and(|gave_up| gave_up < late),
+                "the log says the wait ended first{}",
+                run.context()
+            );
+            break;
+        }
+        assert!(came.elapsed() < Duration::from_secs(10), "the late picture wasn't noticed{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let withdrawn = Instant::now();
+    while !not_started_notices(&copy).is_empty() {
+        assert!(withdrawn.elapsed() < Duration::from_secs(5), "the notice stayed{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(began.elapsed() >= Duration::from_secs(5), "the video opened sooner than the testing aid makes it");
+    assert_eq!(copy.status()["media"], "Grey.mkv");
+    // The screens took its pictures: the log's count of them as it stops.
+    std::thread::sleep(Duration::from_millis(1500));
+    copy.ok(&["clear", "media"]);
+    let stopped = Instant::now();
+    let shown = loop {
+        if let Some(shown) = pictures_shown(&run.log(), "Grey.mkv") {
+            break shown;
+        }
+        assert!(stopped.elapsed() < Duration::from_secs(10), "the log never counted its pictures{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert!(shown > 0, "the screens showed none of the late video's pictures{}", run.context());
+    let quitted = copy.quit();
+    quitted.assert_clean(&run);
+}
+
 #[test]
 fn a_song_from_text_runs_slide_by_slide_and_each_layer_clears() {
     let Some(run) = Run::new("a_song_from_text_runs_slide_by_slide_and_each_layer_clears") else { return };

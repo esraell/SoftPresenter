@@ -796,7 +796,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   reading it, a processor kept busy by something else) the operator's window and `sp` go on at
   once, and `sp media show` answers at once. Until the first picture of a video behind the words
   has come, the screens keep what they showed, the video that played before still playing; then
-  they go to the new one by the media's transition. A file FFmpeg can't play says so in the
+  they go to the new one by the media's transition. They keep it for ten seconds at most: a
+  video whose first picture hasn't come by then is named in the notices, the screens go on
+  without it (to its still, if it has one), and its pictures go on screen if they come later,
+  which takes the notice back. A file FFmpeg can't play says so in the
   notices a moment after it was shown. A video the Mac's player plays
   behind the words goes to the screens as the decoder's own picture memory, with no copy through
   the processor (a video whose format can carry clear parts, and a video in a box on a slide or
@@ -1983,7 +1986,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **How smoothly a video plays is in the log.** As a video behind the words opens, the log says
   its pictures a second (`30 fps`, `29.97 fps`); for one FFmpeg plays, how long opening took
   and where the time went (FFmpeg saying what the video is, the sound output, starting FFmpeg),
-  and how long after it was asked for its first picture came. A video picture that takes a
+  and how long after it was asked for its first picture came (and, when that was more than the
+  ten seconds the screens wait for it, that they went on without it, and when it came after). A video picture that takes a
   tenth of a second or more to hand to the GPU says where that time went (making its texture,
   making the textures its planes go into, handing over their bytes, asking for the colours).
   Once a minute while it plays, and for the part
