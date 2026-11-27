@@ -854,7 +854,7 @@ fn language_page(ui: &mut egui::Ui) {
 /// Settings › Keys, top to bottom: the switch for the keys on the buttons; Running the show,
 /// what each key that runs the show does (`keys_card`); and Always the same, a line for each
 /// key that can't be changed, from the list the list of keys (`?`) is made from, and for each
-/// of the menus' shortcuts after them.
+/// of the menus' shortcuts after them, each group under its name (`fixed_groups`).
 fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
     card(
         ui,
@@ -873,15 +873,7 @@ fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
         },
     );
     keys_card::keys_card(ui, state);
-    // What each line says, and its keys: the fixed keys as the list of keys has them, then the
-    // menus' shortcuts.
-    let mut lines: Vec<(String, Vec<String>)> = Vec::new();
-    for (_, rows) in crate::keys::fixed_keys() {
-        lines.extend(rows.into_iter().map(|(keys, what)| (what, keys)));
-    }
-    for (_, command, key) in crate::menubar::shortcuts() {
-        lines.push((command.trim_end_matches('…').to_owned(), vec![key]));
-    }
+    let groups = fixed_groups();
     // Testing aid: SOFTPRESENTER_CAPTURE_PREFERENCES=keys-fixed opens Keys scrolled on to Always
     // the same, which is under the table of keys, to see it in a capture.
     if std::env::var("SOFTPRESENTER_CAPTURE_PREFERENCES").as_deref() == Ok("keys-fixed") {
@@ -895,14 +887,44 @@ fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
         t("settings.keys.fixed.about", "Fixed keys \u{b7} press ? anywhere for the whole list"),
         Some(every),
         |ui| {
-            for (what, keys) in &lines {
-                fixed_line(ui, what, keys);
+            for (at, (name, lines)) in groups.iter().enumerate() {
+                parts::group_caption(ui, name, at == 0);
+                for (what, keys) in lines {
+                    fixed_line(ui, what, keys);
+                }
             }
             ui.add_space(6.0);
         },
     ) {
         state.key_sheet = true;
     }
+}
+
+/// A line of Always the same: what its keys do, and the keys.
+type FixedLine = (String, Vec<String>);
+
+/// Always the same's lines in their groups, each under its name: the fixed keys in the groups
+/// the list of keys (`?`) has them in, under the list's own names for them, so that "Move",
+/// "Choose" and "Close" say where they work (under Menus and windows) and don't read as keys
+/// for everywhere; then the menus' shortcuts, each menu's under the menu's own name.
+fn fixed_groups() -> Vec<(String, Vec<FixedLine>)> {
+    let mut groups: Vec<(String, Vec<FixedLine>)> = crate::keys::fixed_keys()
+        .into_iter()
+        .map(|(group, rows)| {
+            (crate::keys::group_title(group).to_owned(), rows.into_iter().map(|(keys, what)| (what, keys)).collect())
+        })
+        .collect();
+    let mut menu_before = None;
+    for (menu, command, key) in crate::menubar::shortcuts() {
+        if menu_before != Some(menu) {
+            groups.push((menu.to_owned(), Vec::new()));
+            menu_before = Some(menu);
+        }
+        if let Some((_, lines)) = groups.last_mut() {
+            lines.push((command.trim_end_matches('\u{2026}').to_owned(), vec![key]));
+        }
+    }
+    groups
 }
 
 /// A line of Always the same, as the design draws it: a line across its top, what the keys do
@@ -1568,13 +1590,30 @@ mod tests {
                     }
                     // Every fixed key and every menu shortcut has a line: what it does at the
                     // left, and each of its keys as a cap of its own at the right.
-                    let mut lines: Vec<(String, Vec<String>)> = Vec::new();
-                    for (_, rows) in crate::keys::fixed_keys() {
-                        lines.extend(rows.into_iter().map(|(keys, what)| (what, keys)));
+                    let groups = fixed_groups();
+                    let names: Vec<&str> = groups.iter().map(|(name, _)| name.as_str()).collect();
+                    for group in ["Running the slides", "Going places", "Menus and windows", "Changing things"] {
+                        assert!(names.contains(&crate::keys::group_title(group)), "{said}: {names:?}");
                     }
-                    for (_, command, key) in crate::menubar::shortcuts() {
-                        lines.push((command.trim_end_matches('\u{2026}').to_owned(), vec![key]));
+                    assert!(groups.iter().all(|(name, lines)| !name.is_empty() && !lines.is_empty()), "{names:?}");
+                    // The keys for moving in a menu are under Menus and windows, where they work.
+                    let menus = &groups.iter().find(|(name, _)| name == crate::keys::group_title("Menus and windows"));
+                    let menus = &menus.expect("the group").1;
+                    for general in [t("keys.menus.1", "Move"), t("keys.menus.3", "Choose"), t("keys.menus.4", "Close")]
+                    {
+                        assert!(menus.iter().any(|(what, _)| what == general), "{said}: {general} in {menus:?}");
                     }
+                    let lines: Vec<(String, Vec<String>)> =
+                        groups.iter().flat_map(|(_, lines)| lines.iter().cloned()).collect();
+                    // The first line of each group, by its place among all the lines.
+                    let mut firsts: Vec<(usize, &str)> = Vec::new();
+                    let mut count = 0;
+                    for (name, group) in &groups {
+                        firsts.push((count, name));
+                        count += group.len();
+                    }
+                    let mut tops: Vec<f32> = Vec::new();
+                    let mut lefts: Vec<f32> = Vec::new();
                     // The lines are under the card's title, in the list's order.
                     let title = t("settings.keys.fixed.title", "Always the same");
                     let under = drawn.iter().find(|(words, _)| words == title).expect("the card").1.max.y;
@@ -1601,7 +1640,27 @@ mod tests {
                             last_end = last_end.max(cap.max.x);
                         }
                         ends.push(last_end);
+                        tops.push(label.min.y);
+                        lefts.push(label.min.x);
                         above = label.min.y;
+                    }
+                    // Each group's name is a small caption line of capitals over its first line,
+                    // under the group before it, starting where the lines' words start.
+                    for (first, name) in &firsts {
+                        let (before, after) = (if *first == 0 { under } else { tops[first - 1] }, tops[*first]);
+                        let caption = drawn
+                            .iter()
+                            .find(|(words, rect)| {
+                                *words == name.to_uppercase() && rect.min.y > before && rect.max.y <= after
+                            })
+                            .unwrap_or_else(|| panic!("{said}: the caption {name} between {before} and {after}"))
+                            .1;
+                        let left = lefts[*first];
+                        assert!(
+                            (caption.min.x - left).abs() <= 1.0,
+                            "{said}: {name} starts at {}, its lines at {left}",
+                            caption.min.x
+                        );
                     }
                     // Every line's caps end at one place, the right edge of the card's inside
                     // (which is 18 inside the card, and the card never passes the page): the last

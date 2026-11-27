@@ -1121,7 +1121,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **Settings › Keys** says what each key that runs the show does, and changes it. Its page
   has three cards: On the buttons (Show keys on buttons, On or Off); Running the show; and
   Always the same, a plain line for each key that can't be changed and for each of the menus'
-  shortcuts: what it does at the left, its keys as caps at the right.
+  shortcuts: what it does at the left, its keys as caps at the right, each group under its
+  name in a small line of capitals (the list of keys' own names: Running the slides, Going
+  places, The live tools, Menus and windows, Changing things; then each menu's shortcuts under
+  the menu's name), so that Move, Choose and Close say where they work.
   - **Running the show** has one row a key: Esc, F1 to F12 (not on a Mac, whose F keys are the
     system's), Space, → and ←, Page Down and Page Up (a clicker's forward and back), Home, End
     and "." (the blank-screen button most clickers send). Each row has the key's cap and a

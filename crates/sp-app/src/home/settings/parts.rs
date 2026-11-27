@@ -200,6 +200,17 @@ pub fn row(ui: &mut egui::Ui, label: &str, note: &str, control: egui::Vec2, draw
     inked_row(ui, label, TEXT, (note, 0), control, true, draw);
 }
 
+/// The name of a group of lines in a card, as a small caption line over them: the card's
+/// capitals, 14 above it (6 under the card's head, for the first) and 6 under it, as the design
+/// has it. The lines after it draw their own dividing lines.
+pub fn group_caption(ui: &mut egui::Ui, name: &str, first: bool) {
+    let width = ui.available_width();
+    let caption = words(ui, &name.to_uppercase(), fixed(CAPS), TEXT_FAINT, CAPS_SPACING, width);
+    let above = if first { 6.0 } else { 14.0 };
+    let (place, _) = ui.allocate_exact_size(vec2(width, above + caption.size().y + 6.0), Sense::hover());
+    ui.painter().galley(pos2(place.min.x, place.min.y + above), caption, TEXT_FAINT);
+}
+
 /// A row as [`row`] with no line across its top: for one that stands beside a picture, not
 /// under another row.
 pub fn row_unlined(
