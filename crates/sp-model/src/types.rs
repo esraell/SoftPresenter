@@ -749,6 +749,11 @@ pub struct Slide {
     /// audience screens draw (see [`Slide::without_words`]), never saved.
     #[serde(skip)]
     pub words_hidden: bool,
+    /// The end of a song's mark is drawn under its words (see [`Slide::with_end_mark`]): how
+    /// far down the slide the mark may reach, in slide units. Set on the copy the audience
+    /// screens draw, never saved.
+    #[serde(skip)]
+    pub end_mark: Option<f32>,
 }
 
 impl Slide {
@@ -766,6 +771,7 @@ impl Slide {
             advance: None,
             check: None,
             words_hidden: false,
+            end_mark: None,
         }
     }
 
@@ -824,6 +830,15 @@ impl Slide {
     /// outline and shadow, are drawn as ever. The song itself is never changed.
     pub fn without_words(&self) -> Slide {
         Slide { words_hidden: true, ..self.clone() }
+    }
+
+    /// The slide as the audience screens show a song's last slide when the end of a song is
+    /// marked: the same slide, marked so that the painter draws the mark under its words, on a
+    /// layer of its own, wherever the screen's theme puts and fits them. `floor` is how far
+    /// down the slide the mark may reach, in slide units: with no room above it, the mark is
+    /// left out. The words are laid out as ever, and the song itself is never changed.
+    pub fn with_end_mark(&self, floor: f32) -> Slide {
+        Slide { end_mark: Some(floor), ..self.clone() }
     }
 
     /// The text of the first text object with this role.

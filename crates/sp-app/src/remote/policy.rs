@@ -478,6 +478,7 @@ mod tests {
             "screen set Front output=window",
             "song reload Amazing",
             "settings set continuous=on",
+            "settings set end_mark=on",
             "media next",
             "voxlive show 1",
             "notices",

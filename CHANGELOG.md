@@ -13,6 +13,7 @@ Your changes are safer, keys you can set yourself (with a layout like SoftProjec
 - **Set what each key does.** Settings › Keys lists what each key that runs the show does, with a chooser beside each to change it. Esc, F1 to F12 (not on a Mac), Space, the arrows, Page Down and Page Up, Home, End and "." each do one thing or nothing; a changed row says what it did at first, and Reset to Defaults puts them all back.
 - **Key list follows your keys.** The `?` list and the clear buttons' hints name the keys as Settings › Keys has them now. A clear that no key does is marked "Button only" there.
 - **Add a Key.** Any other key, or a clicker's button, can be added in Settings › Keys and given something to do. Click Add a Key… and press it: it joins the top of the list set to Nothing, and its × takes it out again. Enter, Tab, ↑, ↓, /, ? and Delete are kept for what they always do, and it says so.
+- **Song end mark.** Settings › Slides can mark the end of a song with three stars under the words of its last slide, as SoftProjector does. It is off until you switch it on, in the End of a song card or with `sp settings set end_mark=on`. The stars are drawn on the audience screens only, in the words' own face and colour at 80% of their size, and follow the order the song is sung in: a chorus sung last gets them, a song that loops never does. They go with the words when the words are hidden, and are left out where there is no room under the words; the words are never moved or made smaller for them.
 
 ### Better
 

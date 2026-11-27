@@ -874,6 +874,9 @@ pub struct Prefs {
     pub start_audience_off: bool,
     /// Next at the end of a song goes on to the next song in the service.
     pub continuous: bool,
+    /// The end of a song is marked on the audience screens: three stars under the words of its
+    /// last slide as sung (`end_mark`).
+    pub end_mark: bool,
     /// From before start-up was a macro: what played by itself when the app opened. Read once,
     /// to make a macro that does it (`macros::from_opening_choice`); no longer written.
     #[serde(skip_serializing)]
@@ -977,6 +980,7 @@ impl Default for Prefs {
             ccli_licence: String::new(),
             start_audience_off: false,
             continuous: false,
+            end_mark: false,
             start_with: StartWith::Nothing,
             setup_done: false,
             bible_lists_hidden: false,

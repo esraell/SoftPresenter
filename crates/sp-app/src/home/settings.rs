@@ -18,7 +18,7 @@ use crate::studio::{
     BG, CARD, Flat, GAP, PANEL, RADIUS, RADIUS_PANEL, READY, ROW_HOVER, TEXT, TEXT_DIM, TEXT_FAINT, fixed,
     fixed_semibold, flat_button, paint_light, paint_spaced, semibold, spaced, within,
 };
-use parts::{Pick, Picture, card, note, on_off, on_off_size, picks, row};
+use parts::{Pick, Picture, card, note, on_off, on_off_size, picks, row, row_unlined};
 
 /// A page of Settings.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -433,7 +433,8 @@ fn pane_contents(ui: &mut egui::Ui, state: &mut HomeState, show: &Show, pane: Pa
 }
 
 /// Settings › Slides: what the room sees with every song, shown. The copyright line drawn on a
-/// small slide, with where it falls as four keys and the church's CCLI licence beside them; how one
+/// small slide, with where it falls as four keys and the church's CCLI licence beside them; the
+/// end of a song's mark on a small slide, with its switch; how one
 /// slide gives way to the next, the first three kinds as keys with a picture and More… for every
 /// kind, then Carry on to the next item; and how a song's slides are laid out in the window.
 fn slides_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
@@ -443,6 +444,13 @@ fn slides_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
         t("settings.copyright.about", "Where the small line under a song\u{2019}s words shows"),
         None,
         |ui| copyright(ui, state, show),
+    );
+    card(
+        ui,
+        t("settings.slides.end.title", "End of a song"),
+        t("settings.slides.end.caption", "What the room sees under a song\u{2019}s last slide"),
+        None,
+        |ui| end_of_a_song(ui, state, show),
     );
     card(
         ui,
@@ -652,6 +660,89 @@ fn sample_slide(ui: &mut egui::Ui, state: &HomeState, show: &Show, size: egui::V
         "settings.copyright.details",
         "A song's writer, publisher and CCLI song number are set with the Info icon in its header.",
     ));
+}
+
+/// The mark of the end of a song, as the small slide draws it: three stars kept together and
+/// apart by no-break spaces, as the screens draw them.
+const END_MARK: &str = "*\u{a0}\u{a0}\u{a0}\u{a0}*\u{a0}\u{a0}\u{a0}\u{a0}*";
+
+/// The End of a song card's insides: a small slide with a song's last words and the mark under
+/// them, beside the switch and what it does (under the slide when the page is narrow).
+fn end_of_a_song(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
+    let width = ui.available_width();
+    // A smaller slide than the copyright line's: two lines and the mark need no more, and the
+    // page stays short.
+    let slide = vec2(192.0, 108.0);
+    let switch = |ui: &mut egui::Ui, state: &mut HomeState| {
+        let size = on_off_size(ui);
+        row_unlined(
+            ui,
+            t("settings.slides.end.line", "Mark the end of a song"),
+            t(
+                "settings.slides.end.note",
+                "Three stars under the words of a song\u{2019}s last slide as sung, on the audience screens, as SoftProjector draws them",
+            ),
+            size,
+            |ui, place| {
+                if on_off(ui, place, ui.scope_id().with("end mark"), state.end_mark).clicked() {
+                    state.end_mark = !state.end_mark;
+                }
+            },
+        );
+    };
+    ui.add_space(4.0);
+    if width - 212.0 >= 320.0 {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 20.0;
+            end_sample(ui, state, show, slide);
+            ui.vertical(|ui| {
+                ui.set_width(ui.available_width());
+                switch(ui, state);
+            });
+        });
+    } else {
+        end_sample(ui, state, show, slide);
+        ui.add_space(8.0);
+        switch(ui, state);
+    }
+    ui.add_space(10.0);
+}
+
+/// The small slide the end of a song is shown on: the last two lines of the first song's last
+/// slide as sung, and under them the mark as the screens draw it (80% of the words' size, half a
+/// line under them) while it is on. The words keep their place either way.
+fn end_sample(ui: &mut egui::Ui, state: &HomeState, show: &Show, size: egui::Vec2) {
+    const WORDS: f32 = 15.0;
+    let (place, _) = ui.allocate_exact_size(size, Sense::hover());
+    let painter = ui.painter().with_clip_rect(place);
+    painter.rect_filled(place, RADIUS, egui::Color32::BLACK);
+    let words: Vec<String> = show
+        .presentations()
+        .first()
+        .and_then(|song| song.slide(*song.order().last()?))
+        .and_then(|(_, slide)| slide.texts().into_iter().next())
+        .map(|(_, words)| {
+            let lines: Vec<&str> = words.lines().filter(|line| !line.trim().is_empty()).collect();
+            lines[lines.len().saturating_sub(2)..].iter().map(|line| (*line).to_owned()).collect()
+        })
+        .unwrap_or_default();
+    let lines: Vec<_> = words
+        .iter()
+        .map(|line| parts::one_line(ui, line, crate::studio::reading(WORDS), TEXT, place.width() - 28.0))
+        .collect();
+    let height: f32 = lines.iter().map(|line| line.size().y).sum::<f32>() + 2.0 * lines.len().saturating_sub(1) as f32;
+    // The words sit a little above the middle, where they stay with the mark on or off.
+    let mut y = place.center().y - 8.0 - height / 2.0;
+    for line in lines {
+        let line_height = line.size().y;
+        painter.galley(pos2(place.center().x - line.size().x / 2.0, y), line, TEXT);
+        y += line_height + 2.0;
+    }
+    if state.end_mark {
+        let font = crate::studio::reading(WORDS * 0.8);
+        let mark = parts::one_line(ui, END_MARK, font, TEXT, place.width());
+        painter.galley(pos2(place.center().x - mark.size().x / 2.0, y - 2.0 + WORDS * 0.5), mark, TEXT);
+    }
 }
 
 /// The Between slides keys: Cut, Dissolve and Fade, each with a picture of how it looks, and More…
@@ -1248,14 +1339,72 @@ mod tests {
         assert_eq!(state.transition.kind, K::Cut);
         assert!(click(&ctx, &mut state, &show, "Fade"));
         assert_eq!(state.transition, sp_model::Transition::of(K::Fade), "a new kind takes its usual time");
-        let continuous = state.continuous;
+        // The page's last On/Off: the End of a song card's is above it.
+        let (continuous, end_mark) = (state.continuous, state.end_mark);
         let words = if continuous { "On" } else { "Off" };
-        assert!(click(&ctx, &mut state, &show, words));
+        assert!(click_last(&ctx, &mut state, &show, words));
         assert_eq!(state.continuous, !continuous, "Carry on to the next item switches Continuous");
+        assert_eq!(state.end_mark, end_mark, "and nothing else");
+        // In your window is under the fold of this 800-point frame since the End of a song
+        // card came in above it: scrolled to, as the Interface size row's link does.
+        state.show_interface_size = true;
+        for _ in 0..60 {
+            // The page glides there over some frames.
+            crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show))
+                .drop_without_applying_deltas();
+        }
         assert!(click(&ctx, &mut state, &show, "Table"));
         assert_eq!(state.slide_view, crate::home::SlideView::Table);
         assert!(click(&ctx, &mut state, &show, "Words only"));
         assert_eq!(state.slide_view, crate::home::SlideView::Easy);
+    }
+
+    #[test]
+    fn slides_turns_the_end_mark_on_and_off() {
+        let ctx = crate::studio::tests::styled();
+        let song = sp_model::parse_song_text("Song", "One\nTwo\n\nThree\nFour\nThe last line\n");
+        let show = Show::new(vec![std::sync::Arc::new(song)]);
+        let mut state = HomeState { preferences_pane: Pane::Slides, ..HomeState::default() };
+        assert!(!state.end_mark, "off until asked for");
+        let mark = "*\u{a0}\u{a0}\u{a0}\u{a0}*\u{a0}\u{a0}\u{a0}\u{a0}*";
+        let page = |state: &mut HomeState| {
+            let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, state, &show));
+            let place = |words: &str| crate::studio::tests::place_of(&drawn, words);
+            let places = (
+                ["Copyright line", "End of a song", "Between slides", "Mark the end of a song", "The last line"]
+                    .map(|words| place(words).unwrap_or_else(|| panic!("{words}"))),
+                place(mark),
+                place("Four"),
+                place("Three"),
+            );
+            drawn.drop_without_applying_deltas();
+            places
+        };
+        let ([copyright, card, between, line, last], no_mark, above, third_last) = page(&mut state);
+        // The card is between Copyright line and Between slides, and says what it is.
+        assert!(copyright.y < card.y && card.y < between.y, "{copyright:?} {card:?} {between:?}");
+        assert!(card.y < line.y && line.y < between.y);
+        // Its slide shows the song's last slide's last two lines, and no mark while it is off.
+        assert!(above.is_some() && third_last.is_none() && no_mark.is_none());
+        // The card's key is the page's first On/Off.
+        assert!(click(&ctx, &mut state, &show, "Off"));
+        assert!(state.end_mark, "on");
+        assert!(!state.continuous, "Carry on to the next item is another switch");
+        let ([.., line_on, last_on], mark_on, ..) = page(&mut state);
+        let mark_on = mark_on.expect("the mark is drawn on the small slide");
+        // Under the words, centred as they are; nothing moved or changed size for it.
+        assert!(mark_on.y > last_on.y && (mark_on.x - last_on.x).abs() < 1.0, "{mark_on:?} under {last_on:?}");
+        assert_eq!((last_on, line_on), (last, line), "the words and the line stay where they were");
+        assert!(click(&ctx, &mut state, &show, "On"));
+        assert!(!state.end_mark, "off again");
+        let ([.., line_off, last_off], mark_off, ..) = page(&mut state);
+        assert!(mark_off.is_none());
+        assert_eq!((last_off, line_off), (last, line));
+        // Saved with the other choices, and off in a file from before it.
+        state.end_mark = true;
+        assert!(state.prefs().end_mark);
+        let before: crate::service::Prefs = serde_json::from_str("{}").expect("an older file");
+        assert!(!before.end_mark);
     }
 
     #[test]

@@ -69,6 +69,11 @@ pub struct Frame {
     /// The slide's words are hidden (Hide the Words): the audience screens draw it without them
     /// ([`drawn_slide`]); the stage screens show `slide` as it is, words and all.
     pub words_hidden: bool,
+    /// The end of a song's mark is due under this slide's words (`end_mark::due`), and may
+    /// reach this far down the slide (`end_mark::floor`). It comes with the slide, in the same
+    /// frame, so it goes on and off with the slide's own transition; only the audience screens
+    /// draw it ([`drawn_slide`]).
+    pub end_mark: Option<f32>,
 }
 
 impl Frame {
@@ -84,7 +89,8 @@ struct GoingOn {
     /// Another slide (another version over the same slide counts, as do the screens switched on
     /// or off): it gives way by the look, and its builds start again once the look has played.
     new_slide: bool,
-    /// The same slide, its words hidden or shown again.
+    /// The same slide, its words hidden or shown again, or the end of a song's mark put under
+    /// them or taken off (Settings' switch, while the slide is up).
     words: bool,
     /// Another picture behind the words, or none.
     new_media: bool,
@@ -98,7 +104,7 @@ fn going_on(was: &Frame, now: &Frame) -> GoingOn {
     // Another version over the same slide gives way to it as another slide does.
     let new_slide =
         was.slide.as_deref() != now.slide.as_deref() || was.enabled != now.enabled || was.version != now.version;
-    let words = !new_slide && was.words_hidden != now.words_hidden;
+    let words = !new_slide && (was.words_hidden != now.words_hidden || was.end_mark != now.end_mark);
     let new_media = match (&was.media, &now.media) {
         (Some(was), Some(now)) => !was.same(now),
         (None, None) => false,
@@ -120,7 +126,9 @@ fn going_on(was: &Frame, now: &Frame) -> GoingOn {
 /// The slide as an audience screen draws it, and the Program preview's picture of one: as far
 /// as its builds have got (`clock`), in the theme version that is on (`version`) when `theme`
 /// has one for it, with its linked text filled in, and while its words are hidden
-/// (`words_hidden`), without them ([`Slide::without_words`]: laid out as ever, not drawn). A
+/// (`words_hidden`), without them ([`Slide::without_words`]: laid out as ever, not drawn); with
+/// the end of a song's mark under its words when that is due (`end_mark`: how far down it may
+/// reach, see [`Slide::with_end_mark`]), which goes with the words while they are hidden. A
 /// stage screen's picture is made from the slide as it is, words and all.
 pub(crate) fn drawn_slide(
     slide: &Slide,
@@ -129,11 +137,15 @@ pub(crate) fn drawn_slide(
     clock: sp_model::BuildClock,
     values: &crate::links::Values,
     words_hidden: bool,
+    end_mark: Option<f32>,
 ) -> Arc<Slide> {
     let in_version = version.and_then(|version| theme.slide_in_version(slide, version));
     let (built, _) = in_version.as_ref().unwrap_or(slide).built(theme, clock);
     let filled = crate::links::fill(&built, values);
-    Arc::new(if words_hidden { filled.without_words() } else { filled.into_owned() })
+    let mut drawn = filled.into_owned();
+    drawn.words_hidden = words_hidden;
+    drawn.end_mark = end_mark.filter(|_| !words_hidden);
+    Arc::new(drawn)
 }
 
 /// The copyright line over the slide on an audience screen (and the Program preview's picture
@@ -1658,6 +1670,7 @@ fn run(
             about: crate::stage::About::default(),
             build_step: 0,
             words_hidden: false,
+            end_mark: None,
         },
         targets: Vec::new(),
         fading: None,
@@ -2549,11 +2562,12 @@ impl Output {
         let over = crate::props::overlay(&under, message.as_ref()).map(Arc::new);
         // The slide as far as its builds have got, with its linked text filled in; in the
         // version that is on, when this screen's theme has it for the slide's kind; without its
-        // words while they are hidden.
-        let slide =
-            frame.slide.as_ref().filter(|_| look.slides).map(|slide| {
-                drawn_slide(slide, &theme, frame.version, self.build_clock(), &values, frame.words_hidden)
-            });
+        // words while they are hidden; with the end of a song's mark when it is due. (A stage
+        // screen never gets here: no mark, as no copyright line.)
+        let slide = frame.slide.as_ref().filter(|_| look.slides).map(|slide| {
+            let clock = self.build_clock();
+            drawn_slide(slide, &theme, frame.version, clock, &values, frame.words_hidden, frame.end_mark)
+        });
         let media = self.video_picture.clone().or_else(|| frame.media.clone());
         let announcement =
             self.announcement.clone().filter(|shown| look.announcements && (shown.on_slide_screens || !look.slides));
@@ -4784,6 +4798,7 @@ mod tests {
             about: crate::stage::About::default(),
             build_step: show.build_step(),
             words_hidden: show.words_hidden(),
+            end_mark: None,
         }
     }
 
@@ -4896,6 +4911,52 @@ mod tests {
     }
 
     #[test]
+    fn the_end_mark_comes_with_the_slide_dissolves_under_it_and_never_reaches_the_stage() {
+        use sp_engine::{Command, SlideRef};
+        use sp_model::{BuildClock, Transition, TransitionKind};
+        let mut show = sp_engine::Show::new(vec![Arc::new(sp_model::parse_song_text("Song", "One\n\nTwo\n"))]);
+        let push = Transition::of(TransitionKind::Push);
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        let first = frame_of(&show, push);
+        show.apply(Command::Next);
+        let floor = crate::end_mark::floor(false);
+        let plain = frame_of(&show, push);
+        let marked = Frame { end_mark: Some(floor), ..plain.clone() };
+        // Onto the last slide, the mark comes with it in the slide's own transition; leaving,
+        // it goes with it.
+        let on = going_on(&first, &marked);
+        assert!(on.new_slide && !on.words && on.look == push, "{on:?}");
+        let off = going_on(&marked, &first);
+        assert!(off.new_slide && !off.words && off.look == push, "{off:?}");
+        // Switched on or off while the slide is up, it dissolves under the words: the slide
+        // itself doesn't move.
+        for (was, now) in [(&plain, &marked), (&marked, &plain)] {
+            let going = going_on(was, now);
+            assert!(going.words && !going.new_slide && !going.new_media, "{going:?}");
+            assert_eq!(going.look, Transition::default());
+        }
+        // An audience screen draws the slide with the mark, and without it while the words
+        // are hidden: it goes with them, in the same dissolve.
+        let theme = Theme::builtin();
+        let drawn = |frame: &Frame| {
+            let slide = frame.slide.as_ref().expect("on screen");
+            drawn_slide(slide, &theme, None, BuildClock::settled(0), &no_values(), frame.words_hidden, frame.end_mark)
+        };
+        assert_eq!(drawn(&marked).end_mark, Some(floor));
+        assert_eq!(drawn(&plain).end_mark, None);
+        let hidden = Frame { words_hidden: true, ..marked.clone() };
+        assert_eq!((drawn(&hidden).end_mark, drawn(&hidden).words_hidden), (None, true));
+        assert!(going_on(&marked, &hidden).words);
+        // The words are the song's own either way.
+        assert_eq!(drawn(&marked).texts(), drawn(&plain).texts());
+        // The slide the frame carries, which the stage screens show, never has it.
+        assert_eq!(marked.slide.as_ref().expect("on screen").end_mark, None);
+        let layout = crate::stage::builtin_layouts().remove(0);
+        let stage = crate::stage::slide(marked.slide.as_deref(), None, &Overlay::default(), &marked.about, &layout);
+        assert_eq!(stage.end_mark, None);
+    }
+
+    #[test]
     fn hiding_the_words_keeps_the_builds_played_so_far() {
         use sp_engine::{Command, SlideRef};
         use sp_model::{Build, BuildClock, BuildEffect, Object, Shape, Transition};
@@ -4923,7 +4984,7 @@ mod tests {
         let theme = Theme::builtin();
         let drawn = |frame: &Frame| {
             let slide = frame.slide.as_deref().expect("on screen");
-            drawn_slide(slide, &theme, None, BuildClock::settled(2), &no_values(), frame.words_hidden)
+            drawn_slide(slide, &theme, None, BuildClock::settled(2), &no_values(), frame.words_hidden, None)
         };
         let (with, without) = (drawn(&played), drawn(&hidden));
         let shown = |slide: &Slide| slide.objects.iter().map(|object| !object.hidden).collect::<Vec<_>>();

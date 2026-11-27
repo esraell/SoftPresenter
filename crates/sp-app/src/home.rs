@@ -556,6 +556,8 @@ pub struct HomeState {
     pub renaming_library: Option<(sp_model::Uuid, String)>,
     /// Next at the end of a song goes on to the next song in the service.
     pub continuous: bool,
+    /// The end of a song is marked on the audience screens (`end_mark`).
+    pub end_mark: bool,
     /// A test pattern shown on the audience screens in place of everything else.
     pub test_pattern: Option<crate::props::TestPattern>,
     /// True while the notes of the slide on screen are shown above the slides.
@@ -2068,6 +2070,7 @@ impl Default for HomeState {
             renaming_library: None,
             renaming_header: None,
             continuous: false,
+            end_mark: false,
             test_pattern: None,
             props: Vec::new(),
             props_changed: false,
@@ -2493,6 +2496,7 @@ impl HomeState {
             .to_owned(),
 
             continuous: self.continuous,
+            end_mark: self.end_mark,
             copyright_show: self.copyright_show,
             ccli_licence: self.ccli_licence.clone(),
             start_audience_off: false,
@@ -2541,6 +2545,7 @@ impl HomeState {
         };
 
         self.continuous = prefs.continuous;
+        self.end_mark = prefs.end_mark;
         self.copyright_show = prefs.copyright_show;
         self.ccli_licence = prefs.ccli_licence.clone();
         self.stage_on = !prefs.stage_off;

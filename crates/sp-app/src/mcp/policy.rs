@@ -371,6 +371,7 @@ mod tests {
         assert!(said(&["menu", "Quit"]).contains("menu bar"));
         assert!(said(&["menu"]).contains("menu bar"));
         assert!(said(&["settings", "set", "continuous=on"]).contains("Settings"));
+        assert!(said(&["settings", "set", "end_mark=on"]).contains("Settings"));
         assert!(said(&["remote", "password"]).contains("Remote Control"));
         assert!(said(&["update", "check"]).contains("newer version"));
         assert!(said(&["update"]).contains("newer version"));

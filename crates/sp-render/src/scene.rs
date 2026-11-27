@@ -173,7 +173,7 @@ fn paint_over(
         if let Some(behind) = layout_layer(slide, theme, false) {
             draw_objects(scene, fonts, to_target, &behind, theme, layers.time);
         }
-        overflow |= draw_objects(scene, fonts, to_target, slide, theme, layers.time);
+        overflow |= draw_objects(scene, fonts, to_target, slide, theme, layers.time).overflow;
         if let Some(front) = layout_layer(slide, theme, true) {
             draw_objects(scene, fonts, to_target, &front, theme, layers.time);
         }
@@ -251,7 +251,65 @@ pub fn build_overlay(fonts: &mut Fonts, slide: &Slide, theme: &Theme, target_w: 
     scene
 }
 
-/// Draws a slide's objects. Returns whether any text overflowed its box.
+/// Where a box's words came to lie when they were drawn, in slide units: the size they were
+/// fitted to, the middle of their box across the slide, and their first line's top and last
+/// line's bottom.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Laid {
+    pub size: f32,
+    pub centre: f32,
+    pub top: f32,
+    pub bottom: f32,
+}
+
+/// The end of a song's mark as it is drawn: its letters' size, its top, and the place across
+/// the slide it is centred on, in slide units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct EndMark {
+    pub size: f32,
+    pub top: f32,
+    pub centre: f32,
+}
+
+/// The mark itself: three stars, kept together and apart by no-break spaces.
+const END_MARK: &str = "*\u{a0}\u{a0}\u{a0}\u{a0}*\u{a0}\u{a0}\u{a0}\u{a0}*";
+
+/// The mark's size beside the largest words', and how far under the lowest words its top is, in
+/// lines of the largest words.
+const END_MARK_SIZE: f32 = 0.8;
+const END_MARK_GAP: f32 = 0.5;
+
+/// Where the end of a song's mark goes under a slide's words as they were laid out (`words`,
+/// each with the place of its object on the slide): at 80% of the size the largest words were
+/// fitted to, its top half a line of theirs under the lowest words' last line, centred on that
+/// box's middle. With it, which words are the largest: the mark takes their look. `None` when
+/// the slide has no words, or the mark would pass `floor`: the words are never moved or made
+/// smaller for it.
+fn end_mark_place(words: &[(usize, Laid)], floor: f32) -> Option<(usize, EndMark)> {
+    // The first of the largest, and the last of the lowest: as the slide lists its boxes.
+    let (largest, sized) =
+        words.iter().copied().reduce(|best, next| if next.1.size > best.1.size { next } else { best })?;
+    let (_, lowest) =
+        words.iter().copied().reduce(|best, next| if next.1.bottom >= best.1.bottom { next } else { best })?;
+    let size = sized.size * END_MARK_SIZE;
+    let mark = EndMark { size, top: lowest.bottom + sized.size * END_MARK_GAP, centre: lowest.centre };
+    // The mark is one line as tall as its letters' size.
+    (mark.top + size <= floor).then_some((largest, mark))
+}
+
+/// What drawing a slide's objects came to: whether any text overflowed its box, where each
+/// box's words lie (with the place of its object on the slide), and the end of a song's mark,
+/// if it was drawn.
+pub(crate) struct Painted {
+    pub overflow: bool,
+    #[cfg_attr(not(test), expect(dead_code, reason = "the tests compare the words with the mark on and off"))]
+    pub words: Vec<(usize, Laid)>,
+    #[cfg_attr(not(test), expect(dead_code, reason = "the tests look at where the mark went"))]
+    pub end_mark: Option<EndMark>,
+}
+
+/// Draws a slide's objects, and under its words the end of a song's mark when the slide asks
+/// for it ([`Slide::end_mark`]).
 fn draw_objects(
     scene: &mut Scene,
     fonts: &mut Fonts,
@@ -259,12 +317,13 @@ fn draw_objects(
     slide: &Slide,
     theme: &Theme,
     time: f32,
-) -> bool {
+) -> Painted {
     let mut overflow = false;
+    let mut words = Vec::new();
     // The slide is drawn with one of the theme's templates: the one it names, or the one
     // that suits what is on it.
     let template = theme.template_for(slide);
-    for object in slide.objects.iter().filter(|object| !object.hidden) {
+    for (at, object) in slide.objects.iter().enumerate().filter(|(_, object)| !object.hidden) {
         let Some(template) = template else { continue };
         let rect = object.frame.unwrap_or_else(|| template.place_for(object.role.as_ref()));
         // A text box set to fit its text grows or shrinks about its middle to the text's height.
@@ -367,13 +426,70 @@ fn draw_objects(
         {
             // The theme's style for the object's role, with the object's own settings over it.
             let Some(style) = template.text_style(object.role.as_ref(), style) else { continue };
-            overflow |= draw_text_box(scene, fonts, placed, (text, spans), &style, rect, time, object.shown_paragraphs);
+            let (spilt, laid) =
+                draw_text_box(scene, fonts, placed, (text, spans), &style, rect, time, object.shown_paragraphs);
+            overflow |= spilt;
+            // Words in a box that is turned or flipped lie somewhere else on the slide than
+            // their layout says: the mark is never put under those.
+            let straight = object.rotation == 0.0 && !object.flip_h && !object.flip_v;
+            words.extend(laid.filter(|_| straight).map(|laid| (at, laid)));
         }
         if faded {
             scene.pop_layer();
         }
     }
-    overflow
+    // The end of a song's mark, on a layer of its own over the slide's objects: the words above
+    // were laid out and drawn without it.
+    let mut end_mark = None;
+    if let (Some(floor), Some(template)) = (slide.end_mark, template)
+        && !slide.words_hidden
+        && let Some((largest, mark)) = end_mark_place(&words, floor)
+        && let Some(object) = slide.objects.get(largest)
+        && let ObjectKind::Text { style, .. } = &object.kind
+        && let Some(look) = template.text_style(object.role.as_ref(), style)
+    {
+        draw_end_mark(scene, fonts, to_target, &look, mark);
+        end_mark = Some(mark);
+    }
+    Painted { overflow, words, end_mark }
+}
+
+/// Draws the end of a song's mark in the face, weight, colour, outline and shadow of the words
+/// it follows (`look`), on one line of its own that nothing else of their look changes.
+fn draw_end_mark(scene: &mut Scene, fonts: &mut Fonts, to_target: Affine, look: &BoxStyle, mark: EndMark) {
+    let style = BoxStyle {
+        size: mark.size,
+        min_size: mark.size,
+        align: Align::Center,
+        valign: VAlign::Top,
+        scaling: Scaling::None,
+        line_height: 1.0,
+        ..plain_look(look.clone())
+    };
+    // Room for the three stars whatever the face: they are centred in it and never wrap.
+    let room = mark.size * 20.0;
+    let rect = SlideRect { x: mark.centre - room / 2.0, y: mark.top, w: room, h: mark.size };
+    draw_text_box(scene, fonts, to_target, (END_MARK, &[]), &style, rect, 0.0, None);
+}
+
+/// A box's look with everything that changes its words or moves them taken off: no capitals,
+/// list marks, bands, scrolling, margins, spacing or baseline shift, and no underline. Its face,
+/// weight, slant, colour, outline and shadow stay.
+fn plain_look(look: BoxStyle) -> BoxStyle {
+    BoxStyle {
+        caps: sp_model::Caps::None,
+        list: sp_model::ListStyle::None,
+        line_transform: sp_model::LineTransform::None,
+        line_fill: sp_model::LineFill { on: false, ..look.line_fill },
+        scroll: sp_model::Scroll::None,
+        underline: false,
+        strike: false,
+        letter_spacing: 0.0,
+        paragraph_spacing: 0.0,
+        baseline: 0.0,
+        margins: [0.0; 4],
+        ..look
+    }
 }
 
 thread_local! {
@@ -1352,7 +1468,9 @@ fn color(c: Rgba) -> Color {
     Color::from_rgba8(c.r, c.g, c.b, c.a)
 }
 
-/// Draws one box: soft shadow, then outline, then fill. Returns whether the text overflowed.
+/// Draws one box: soft shadow, then outline, then fill. Returns whether the text overflowed,
+/// and where the words it drew lie: `None` when it drew none (no words, or none of their
+/// paragraphs shown yet), or when they scroll and so lie nowhere for long.
 #[allow(clippy::too_many_arguments)]
 fn draw_text_box(
     scene: &mut Scene,
@@ -1363,7 +1481,7 @@ fn draw_text_box(
     rect: SlideRect,
     time: f32,
     paragraphs: Option<usize>,
-) -> bool {
+) -> (bool, Option<Laid>) {
     // Text moving sideways runs on one long line.
     let drawn = style.drawn(words.0, words.1, style.scroll.sideways());
     let (text, spans) = (&*drawn.text, &*drawn.spans);
@@ -1404,6 +1522,17 @@ fn draw_text_box(
     }
     // The baseline raises (or lowers) the whole block, in proportion to the size it is drawn at.
     top -= f64::from(style.baseline * size / style.size.max(1.0));
+    // Where the words lie: from the first line shown to the last, each with the gaps above it.
+    let mut laid: Option<Laid> = None;
+    if scroll == sp_model::Scroll::None && !text.trim().is_empty() {
+        for line in layout.lines().filter(|line| shows(line.text_range().start)) {
+            let (metrics, gap) = (line.metrics(), gap_before(line.text_range().start));
+            let line_top = (top + f64::from(metrics.block_min_coord) + gap) as f32;
+            let bottom = (top + f64::from(metrics.block_max_coord) + gap) as f32;
+            let top = laid.map_or(line_top, |above| above.top);
+            laid = Some(Laid { size, centre: rect.x + rect.w / 2.0, top, bottom });
+        }
+    }
     // Scrolling text shows only inside its box.
     let clipped = scroll != sp_model::Scroll::None;
     if clipped {
@@ -1534,7 +1663,7 @@ fn draw_text_box(
     if clipped {
         scene.pop_layer();
     }
-    overflow
+    (overflow, laid)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1923,6 +2052,114 @@ mod tests {
         assert!(grown.h > 300.0, "{grown:?}");
         assert!((grown.y + grown.h / 2.0 - 450.0).abs() < 0.5, "about its middle");
         assert_eq!((grown.x, grown.w), (place.x, place.w));
+    }
+
+    /// A song's last slide as an audience screen draws it with the end of a song marked, the
+    /// mark free to reach `floor`; what drawing it came to.
+    fn drawn_with_mark(slide: &Slide, theme: &Theme, floor: Option<f32>) -> Painted {
+        let slide = floor.map_or_else(|| slide.clone(), |floor| slide.with_end_mark(floor));
+        draw_objects(&mut Scene::new(), &mut Fonts::new(), Affine::IDENTITY, &slide, theme, 0.0)
+    }
+
+    const FLOOR: f32 = SLIDE_HEIGHT * 0.97;
+
+    #[test]
+    fn the_mark_sits_half_a_line_under_the_lowest_words_at_80_percent() {
+        let theme = Theme::builtin();
+        // Lines enough that the words are fitted smaller than the box's own size.
+        let words = "One\nTwo\nThree\nFour\nFive\nSix\nSeven\nEight";
+        let drawn = drawn_with_mark(&slide(words, None), &theme, Some(FLOOR));
+        let [(_, laid)] = drawn.words[..] else { panic!("one box of words: {:?}", drawn.words) };
+        let nominal = theme.templates[0].boxes[0].size;
+        assert!(laid.size < nominal, "fitted to {} from {nominal}", laid.size);
+        let mark = drawn.end_mark.expect("room under the words");
+        assert!((mark.size - 0.8 * laid.size).abs() < 0.01, "80% of the fitted size: {mark:?} under {laid:?}");
+        assert!((mark.top - (laid.bottom + 0.5 * laid.size)).abs() < 0.01, "half a line under: {mark:?}, {laid:?}");
+        let place = theme.templates[0].place_for(Some(&Role::primary()));
+        assert!((mark.centre - (place.x + place.w / 2.0)).abs() < 0.01, "centred on the box: {mark:?} in {place:?}");
+        assert_eq!(mark.centre, laid.centre);
+
+        // Two languages: the look of the largest words, under the lower block.
+        let drawn = drawn_with_mark(&slide("One\nTwo", Some("Uno\nDos")), &theme, Some(FLOOR));
+        let [(_, first), (_, second)] = drawn.words[..] else { panic!("two boxes: {:?}", drawn.words) };
+        let (largest, lowest) = (first.size.max(second.size), first.bottom.max(second.bottom));
+        assert!(first.size != second.size && first.bottom != second.bottom, "{first:?} {second:?}");
+        let mark = drawn.end_mark.expect("room under the words");
+        assert!((mark.size - 0.8 * largest).abs() < 0.01, "{mark:?}");
+        assert!((mark.top - (lowest + 0.5 * largest)).abs() < 0.01, "{mark:?}");
+
+        // A box of its own place: the mark is centred on that box, not on the slide.
+        let mut aside = slide("One\nTwo", None);
+        aside.objects[0].frame = Some(SlideRect { x: 100.0, y: 100.0, w: 800.0, h: 500.0 });
+        let mark = drawn_with_mark(&aside, &theme, Some(FLOOR)).end_mark.expect("room");
+        assert!((mark.centre - 500.0).abs() < 0.01, "{mark:?}");
+    }
+
+    #[test]
+    fn the_words_keep_their_size_and_place_with_the_mark_on() {
+        let theme = Theme::builtin();
+        for words in ["One\nTwo", "One\nTwo\nThree\nFour\nFive\nSix\nSeven\nEight"] {
+            for translation in [None, Some("Uno\nDos")] {
+                let slide = slide(words, translation);
+                let off = drawn_with_mark(&slide, &theme, None);
+                let on = drawn_with_mark(&slide, &theme, Some(FLOOR));
+                assert!(off.end_mark.is_none() && on.end_mark.is_some(), "{words:?}");
+                assert!(!off.words.is_empty());
+                assert_eq!(on.words, off.words, "{words:?}: the words' size and place");
+                assert_eq!(on.overflow, off.overflow);
+            }
+        }
+    }
+
+    #[test]
+    fn no_mark_when_the_words_fill_to_the_bottom_or_meet_the_copyright_line() {
+        let theme = Theme::builtin();
+        let short = slide("One\nTwo", None);
+        let laid = drawn_with_mark(&short, &theme, None).words[0].1;
+        let bottom = laid.bottom + 0.5 * laid.size + 0.8 * laid.size;
+        // Room to a hair, and none a hair less: the slide's own 3%, or the copyright line's top.
+        assert!(drawn_with_mark(&short, &theme, Some(bottom + 0.01)).end_mark.is_some());
+        assert!(drawn_with_mark(&short, &theme, Some(bottom - 0.01)).end_mark.is_none());
+        // Words that fill their box to the foot of the slide leave it no room, and stay as they are.
+        let mut full = slide("One\nTwo\nThree\nFour\nFive\nSix\nSeven\nEight", None);
+        full.objects[0].frame = Some(SlideRect { x: 60.0, y: 40.0, w: 1800.0, h: 1000.0 });
+        let (off, on) = (drawn_with_mark(&full, &theme, None), drawn_with_mark(&full, &theme, Some(FLOOR)));
+        assert!(on.end_mark.is_none(), "{:?} under {:?}", on.end_mark, on.words);
+        assert_eq!(on.words, off.words);
+    }
+
+    #[test]
+    fn the_mark_is_left_out_with_hidden_words_no_words_and_words_that_lie_elsewhere() {
+        let theme = Theme::builtin();
+        let song = slide("One\nTwo", None);
+        assert!(drawn_with_mark(&song, &theme, Some(FLOOR)).end_mark.is_some());
+        // Hide the Words: the mark goes with them.
+        assert!(drawn_with_mark(&song.without_words(), &theme, Some(FLOOR)).end_mark.is_none());
+        // A picture slide, or a box with no words in it.
+        assert!(
+            drawn_with_mark(&Slide::new(vec![Object::shape(Shape::Rectangle)]), &theme, Some(FLOOR)).end_mark.is_none()
+        );
+        assert!(drawn_with_mark(&slide("  ", None), &theme, Some(FLOOR)).end_mark.is_none());
+        // Words that scroll, or in a box that is turned.
+        let mut turned = song.clone();
+        turned.objects[0].rotation = 90.0;
+        assert!(drawn_with_mark(&turned, &theme, Some(FLOOR)).end_mark.is_none());
+        let mut moving = song.clone();
+        if let Some(style) = moving.objects[0].text_style_mut() {
+            style.scroll = Some(sp_model::Scroll::Up);
+        }
+        assert!(drawn_with_mark(&moving, &theme, Some(FLOOR)).end_mark.is_none());
+        // A build that has shown one paragraph of two: under that one.
+        let mut building = song.clone();
+        building.objects[0].shown_paragraphs = Some(1);
+        let whole = drawn_with_mark(&song, &theme, Some(FLOOR)).end_mark.expect("room");
+        let part = drawn_with_mark(&building, &theme, Some(FLOOR)).end_mark.expect("room");
+        assert!(part.top < whole.top, "{part:?} above {whole:?}");
+        // The scene with the mark has more in it than the scene without, and builds whole.
+        let plain = build_scene(&mut Fonts::new(), Some(&song), &theme, 1920, 1080);
+        let marked = build_scene(&mut Fonts::new(), Some(&song.with_end_mark(FLOOR)), &theme, 1920, 1080);
+        let runs = |built: &Built| built.scene.encoding().resources.patches.len();
+        assert!(runs(&marked) > runs(&plain), "{} and {}", runs(&marked), runs(&plain));
     }
 
     #[test]

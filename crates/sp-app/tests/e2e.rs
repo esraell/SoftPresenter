@@ -1921,6 +1921,44 @@ fn a_song_from_text_runs_slide_by_slide_and_each_layer_clears() {
     assert!(!saved.contains("the day is new"), "{saved}");
 }
 
+/// `sp settings set end_mark=on|off` switches the end of a song's mark as Settings › Slides
+/// does: off until asked for, said by `sp settings`, kept between runs; and with it on, a song
+/// runs to its last slide, its words are hidden and shown again, and the copy quits cleanly.
+/// (What the mark looks like and where it goes is the renderer's tests'.)
+#[test]
+fn sp_settings_sets_end_mark() {
+    let Some(run) = Run::new("sp_settings_sets_end_mark") else { return };
+    let file = run.file("Hill Road.txt");
+    let words = song_text(&[("Verse 1", "Morning light on the hill"), ("Ending", "Evening comes with gentle rain")]);
+    std::fs::write(&file, words).expect("the song's file");
+    let copy = run.start(&[]);
+    let settings = copy.ok(&["settings"]);
+    assert!(settings.text.contains("end mark: off"), "off until asked for: {}", settings.text);
+    assert_eq!(settings.data["end_mark"], false, "{}", settings.data);
+    let said = copy.ok(&["settings", "set", "end_mark=on"]);
+    assert!(said.text.contains("end mark on"), "{}", said.text);
+    let settings = copy.ok(&["settings"]);
+    assert!(settings.text.contains("end mark: on"), "{}", settings.text);
+    assert_eq!(settings.data["end_mark"], true, "{}", settings.data);
+    copy.refused(&["settings", "set", "end_mark=maybe"], "end_mark is on or off");
+    // With the mark on, the song's last slide goes up, loses its words and gets them back.
+    copy.ok(&["song", "import", &file.to_string_lossy()]);
+    copy.ok(&["go", "Hill Road"]);
+    copy.ok(&["last"]);
+    copy.assert_live("Hill Road", 2);
+    copy.ok(&["settings", "set", "end_mark=off"]);
+    copy.ok(&["settings", "set", "end_mark=on"]);
+    copy.assert_live("Hill Road", 2);
+    copy.quit().assert_clean(&run);
+    // Kept between runs.
+    let copy = run.start(&[]);
+    let settings = copy.ok(&["settings"]);
+    assert_eq!(settings.data["end_mark"], true, "kept between runs: {}", settings.data);
+    copy.ok(&["settings", "set", "end_mark=off"]);
+    assert_eq!(copy.ok(&["settings"]).data["end_mark"], false);
+    copy.quit().assert_clean(&run);
+}
+
 #[test]
 fn a_bible_passage_goes_on_screen_and_steps_verse_by_verse() {
     let Some(run) = Run::new("a_bible_passage_goes_on_screen_and_steps_verse_by_verse") else { return };

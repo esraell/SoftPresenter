@@ -581,7 +581,7 @@ impl crate::App {
     /// `settings`, and `settings set key=value…`: the choices kept between runs.
     pub(crate) fn ctl_settings(&mut self, args: &[String]) -> Result<Reply, String> {
         let usage = "settings | settings set transition=KIND[:SECONDS] media_transition=… copyright=never|first|last|every \
-                     ccli_licence=NUMBER continuous=on|off view=grid|words|table columns=1-12 \
+                     ccli_licence=NUMBER continuous=on|off end_mark=on|off view=grid|words|table columns=1-12 \
                      language=auto|en|es|ru|uk interface_size=auto|100|125|150|175";
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
         if args.get(1).is_none() {
@@ -603,6 +603,7 @@ impl crate::App {
                     }
                 ),
                 format!("continuous: {}", if prefs.continuous { "on" } else { "off" }),
+                format!("end mark: {}", if prefs.end_mark { "on" } else { "off" }),
                 format!("slides: {}, {} across", view_words(&prefs.slide_view), prefs.columns),
                 format!("language: {}", prefs.language),
                 interface_size_words(state.interface_size, state.zoom_now),
@@ -665,6 +666,11 @@ impl crate::App {
                     let on = on_off(key, value)?;
                     said.push(format!("continuous {}", if on { "on" } else { "off" }));
                     changes.push(Box::new(move |state| state.continuous = on));
+                }
+                "end_mark" => {
+                    let on = on_off(key, value)?;
+                    said.push(format!("end mark {}", if on { "on" } else { "off" }));
+                    changes.push(Box::new(move |state| state.end_mark = on));
                 }
                 "start_with" => {
                     return Err("What plays when SoftPresenter opens is a macro now: macro new NAME, macro add NAME \

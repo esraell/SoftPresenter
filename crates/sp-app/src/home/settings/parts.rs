@@ -197,7 +197,19 @@ fn card_head(ui: &mut egui::Ui, title: &str, about: &str, aside: Option<&str>) {
 /// and a control `control` large at the right, both in the middle of the row's height. `draw`
 /// draws the control in the place given.
 pub fn row(ui: &mut egui::Ui, label: &str, note: &str, control: egui::Vec2, draw: impl FnOnce(&mut egui::Ui, Rect)) {
-    inked_row(ui, label, TEXT, (note, 0), control, draw);
+    inked_row(ui, label, TEXT, (note, 0), control, true, draw);
+}
+
+/// A row as [`row`] with no line across its top: for one that stands beside a picture, not
+/// under another row.
+pub fn row_unlined(
+    ui: &mut egui::Ui,
+    label: &str,
+    note: &str,
+    control: egui::Vec2,
+    draw: impl FnOnce(&mut egui::Ui, Rect),
+) {
+    inked_row(ui, label, TEXT, (note, 0), control, false, draw);
 }
 
 /// A row as [`row`] that can't be used yet: its name faint, and its note saying why. The design
@@ -209,7 +221,7 @@ pub fn row_greyed(
     control: egui::Vec2,
     draw: impl FnOnce(&mut egui::Ui, Rect),
 ) {
-    inked_row(ui, label, TEXT_FAINT, (why, 0), control, draw);
+    inked_row(ui, label, TEXT_FAINT, (why, 0), control, true, draw);
 }
 
 /// A row's words: its name in `ink` and its note under it (`kept`: in that many lines' room
@@ -247,6 +259,7 @@ fn inked_row(
     ink: Color32,
     note: (&str, usize),
     control: egui::Vec2,
+    lined: bool,
     draw: impl FnOnce(&mut egui::Ui, Rect),
 ) -> Rect {
     let width = ui.available_width();
@@ -254,7 +267,9 @@ fn inked_row(
     let (label, note, text) = row_words(ui, label, ink, note, room);
     let inner = text.max(control.y);
     let (place, _) = ui.allocate_exact_size(vec2(width, inner + 24.0), Sense::hover());
-    ui.painter().hline(place.x_range(), place.min.y + 0.5, Stroke::new(1.0, LINE));
+    if lined {
+        ui.painter().hline(place.x_range(), place.min.y + 0.5, Stroke::new(1.0, LINE));
+    }
     let top = place.min.y + 12.0 + (inner - text) / 2.0;
     paint_row_words(ui, pos2(place.min.x, top), ink, label, note);
     let at = pos2(place.max.x - control.x, place.min.y + 12.0 + (inner - control.y) / 2.0);
@@ -423,7 +438,7 @@ pub fn keys_row(
     let control = vec2(readout_wide + keys_wide, if keys.is_empty() { 24.0 } else { 30.0 });
     if control.x + 16.0 + LABEL_ROOM <= width {
         let mut clicked = None;
-        inked_row(ui, label, TEXT, (note, 0), control, |ui, place| {
+        inked_row(ui, label, TEXT, (note, 0), control, true, |ui, place| {
             if let Some(text) = readout {
                 let size = readout_size(ui, text);
                 paint_readout(ui, Rect::from_min_size(pos2(place.min.x, place.center().y - 12.0), size), text);
@@ -432,7 +447,7 @@ pub fn keys_row(
         });
         return clicked;
     }
-    inked_row(ui, label, TEXT, (note, 0), vec2(0.0, 0.0), |_, _| {});
+    inked_row(ui, label, TEXT, (note, 0), vec2(0.0, 0.0), true, |_, _| {});
     let together = readout_wide + keys_wide <= width;
     if let Some(text) = readout.filter(|_| !together) {
         let size = readout_size(ui, text);
@@ -469,7 +484,7 @@ pub fn keys_row_keeping(
     if beside {
         let mut clicked = None;
         let control = vec2(keys_width(ui, keys), 30.0);
-        let words = inked_row(ui, label, TEXT, note, control, |ui, place| {
+        let words = inked_row(ui, label, TEXT, note, control, true, |ui, place| {
             clicked = draw_keys(ui, place.max.x, place.center().y, salt, keys);
         });
         return (clicked, words);

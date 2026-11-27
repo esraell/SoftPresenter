@@ -62,6 +62,10 @@ pub fn overlay(props: &[Slide], message: Option<&Slide>) -> Option<Slide> {
     Some(Slide::new(objects))
 }
 
+/// Where the copyright line's top is on the slide, in slide units: the end of a song's mark
+/// stops there on the slides that show the line (`end_mark::floor`).
+pub const COPYRIGHT_TOP: f32 = 1020.0;
+
 /// A song's copyright line, small along the bottom of the screen.
 pub fn copyright_slide(line: &str) -> Slide {
     let builtin = sp_model::Theme::builtin();
@@ -73,7 +77,7 @@ pub fn copyright_slide(line: &str) -> Slide {
     look.align = sp_model::Align::Left;
     look.outline_width = 0.0;
     let mut words = Object::text(Role("copyright".to_owned()), line);
-    words.frame = Some(SlideRect { x: 60.0, y: 1020.0, w: 1800.0, h: 44.0 });
+    words.frame = Some(SlideRect { x: 60.0, y: COPYRIGHT_TOP, w: 1800.0, h: 44.0 });
     if let Some(style) = words.text_style_mut() {
         *style = TextStyle::all(&look);
     }

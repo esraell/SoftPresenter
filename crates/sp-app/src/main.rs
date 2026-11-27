@@ -27,6 +27,7 @@ mod deck;
 mod dialogs;
 mod displays;
 mod editor;
+mod end_mark;
 mod ffmpeg_fetch;
 mod file_drop;
 mod find;
@@ -2317,6 +2318,10 @@ struct Running {
     themes_sent: Vec<(Uuid, Arc<Theme>)>,
     /// What the output was last told to show over the slides.
     overlay_sent: Option<output::Overlay>,
+    /// The end of a song's mark as the screens were last told of it with the slide
+    /// (`Frame::end_mark`): when it comes to differ (Settings' switch, the song set to go round,
+    /// its order changed), the slide is sent again.
+    end_mark_sent: Option<f32>,
     output: Option<OutputHandle>,
     /// The Screens and Settings windows, while they are open.
     panels: Vec<PanelWindow>,
@@ -3023,6 +3028,7 @@ impl App {
             stage_sent: None,
             themes_sent: Vec::new(),
             overlay_sent: None,
+            end_mark_sent: None,
             output: Some(output),
             panels: Vec::new(),
             capture_look_opened: false,
@@ -5250,9 +5256,11 @@ impl App {
         let media_fit = self.live_media_fit();
         let theme = frame_theme(&self.show, &self.theme, |at| self.theme_of(at)).clone();
         let about = self.stage_about();
+        let end_mark = self.end_mark_now();
         let Some(running) = self.running.as_mut() else {
             return;
         };
+        running.end_mark_sent = end_mark;
         let slide = frame_slide(&self.show);
         // The slide Next would show, in the song's play order, for the stage screens.
         let next = self.show.live().and(self.show.upcoming()).and_then(|at| {
@@ -5302,6 +5310,7 @@ impl App {
                 about,
                 build_step: self.show.build_step(),
                 words_hidden: self.show.words_hidden(),
+                end_mark,
             };
             if !output.send(OutputMsg::Show(frame)) {
                 running.home_state.output_has_stopped();
@@ -5329,6 +5338,7 @@ impl App {
     /// it fade from the last picture as the screens do; a clock's tick doesn't fade.
     fn refresh_preview(&mut self, fade: bool) {
         let media_fit = self.live_media_fit();
+        let end_mark = self.end_mark_now();
         // The preview shows a screen that shows slides: without announcements a slide took off.
         let announcement = self.announcing.as_ref().filter(|a| a.shown.on_slide_screens).map(|a| a.shown.clone());
         let theme = frame_theme(&self.show, &self.theme, |at| self.theme_of(at)).clone();
@@ -5361,13 +5371,14 @@ impl App {
         };
         // The audience's picture shows the slide in the version that is on, and without its words
         // while they are hidden, as the screens do; the stage's shows it as it is, words and all.
-        let slide_in = |version: Option<Uuid>, words_hidden: bool| {
+        // The end of a song's mark is the audience's too: the stage's picture never has it.
+        let slide_in = |version: Option<Uuid>, words_hidden: bool, end_mark: Option<f32>| {
             self.show.live_slide().map(|(_, slide)| {
                 let clock = sp_model::BuildClock::settled(step);
-                output::drawn_slide(slide, &theme, version, clock, &values, words_hidden)
+                output::drawn_slide(slide, &theme, version, clock, &values, words_hidden, end_mark)
             })
         };
-        let audience_slide = slide_in(state.version_switch.version(), self.show.words_hidden());
+        let audience_slide = slide_in(state.version_switch.version(), self.show.words_hidden(), end_mark);
         // The operator's preview shows the props and a message over the slide, as the audience
         // sees them.
         let message = state.message_live.and_then(|(id, _)| {
@@ -5399,7 +5410,7 @@ impl App {
         running.preview_shows_stage = state.preview_stage;
         if state.preview_stage {
             // The stage screens' picture: the time, this slide, the next, a timer, the stage message.
-            let slide = slide_in(None, false);
+            let slide = slide_in(None, false, None);
             let next = self.show.live().and(self.show.upcoming()).and_then(|at| {
                 let song = self.show.presentations().get(at.presentation)?;
                 song.slide(at.slide).map(|(_, slide)| slide.clone())
@@ -9206,6 +9217,21 @@ impl App {
             || self.catalog_slots.contains(&presentation)
     }
 
+    /// The end of a song's mark for the slide on screen: how far down the slide it may reach
+    /// (`end_mark::floor`: the copyright line's top, on the slides that show one), or `None`
+    /// when no mark is due (`end_mark::due`). What the screens are told with the slide
+    /// (`Frame::end_mark`) and what the Program preview draws.
+    fn end_mark_now(&self) -> Option<f32> {
+        let state = &self.running.as_ref()?.home_state;
+        let at = self.show.live()?;
+        let song = self.show.presentations().get(at.presentation)?;
+        let step = self.show.position().map(|(step, _)| step);
+        let due = end_mark::due(state.end_mark, self.app_made(at.presentation), self.show.words_hidden(), song, step);
+        let copyright =
+            || copyright_line(&self.show, |at| self.app_made(at), state.copyright_show, state.ccli_licence.trim());
+        due.then(|| end_mark::floor(copyright().is_some()))
+    }
+
     /// The theme a presentation's slides are drawn with: the Bible theme for a Bible passage,
     /// the song's own theme if it names one, otherwise the songs theme.
     pub(crate) fn theme_of(&self, presentation: usize) -> &Arc<Theme> {
@@ -10879,6 +10905,11 @@ impl App {
                 let presentation = self.show.selected();
                 commands.push(Command::GoToStep { presentation, step: step.saturating_sub(1) });
             }
+            // Testing aid: SOFTPRESENTER_CAPTURE_HIDE_WORDS=1 hides the words of the slide the
+            // capture run put on screen, as Hide the Words does, for a picture of what stays.
+            if running.frames == GO_LIVE_AT + 10 && std::env::var_os("SOFTPRESENTER_CAPTURE_HIDE_WORDS").is_some() {
+                commands.push(Command::HideWords);
+            }
             // Testing aid: SOFTPRESENTER_LOOK_AT=NAME has the Program preview look at the screen of
             // that name, as its menu does.
             if running.frames == GO_LIVE_AT + 2
@@ -11620,6 +11651,13 @@ impl App {
     /// Saves the timers and messages when they change, takes a message off when its time is up,
     /// and tells the output what to show over the slides when that changes.
     fn sync_overlay(&mut self) {
+        // The end of a song's mark goes with the slide, not with what is over it: when it is
+        // no longer as the screens were told (Settings' switch, the song set to go round, its
+        // order or the copyright line's slides changed), the slide is sent again, and the mark
+        // dissolves on or off under the words.
+        if self.running.as_ref().is_some_and(|running| running.end_mark_sent != self.end_mark_now()) {
+            self.refresh_output();
+        }
         // Linked text showing the time or a timer keeps the preview ticking.
         let links_tick = self.show.live_slide().is_some_and(|(_, slide)| links::ticks(slide));
         // The copyright line of the song on screen, on the slides Settings says.
@@ -16282,7 +16320,8 @@ mod tests {
             links::Values { timers: &[], title: None, group: None, next: None, stage_message: None, copyright: None };
         let clock = sp_model::BuildClock::settled(show.build_step());
         let theme = Theme::builtin();
-        frame_slide(show).map(|slide| output::drawn_slide(&slide, &theme, None, clock, &values, show.words_hidden()))
+        frame_slide(show)
+            .map(|slide| output::drawn_slide(&slide, &theme, None, clock, &values, show.words_hidden(), None))
     }
 
     /// A slide's words, its boxes' words joined.

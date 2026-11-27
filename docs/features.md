@@ -2229,10 +2229,27 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   its first two lines and its line as the screens show it), First slide, Last slide, Every slide
   and Nowhere as four keys, each with three small slides marking where the line falls, and the
   licence beside them (under the slide when the window is narrow, so no word is ever broken);
-  then Between slides, the transition for all slides as the bar under the slides has it (Cut,
+  then End of a song (below); then Between slides, the transition for all slides as the bar under the slides has it (Cut,
   Dissolve and Fade as keys with a picture of each, and More… for every kind with its time and
   direction), and Carry on to the next item (Continuous) On or Off; then In your window, Grid,
   Words only or Table, how a song's slides are laid out in the window, and Interface size.
+- **The end of a song's mark** (Settings › Slides › End of a song, or `sp settings set
+  end_mark=on|off`; off until switched on): three stars, `*    *    *`, under the words of a
+  song's last slide, as SoftProjector draws them. The card shows a small slide with a song's last
+  words and the mark under them, beside Mark the end of a song, On or Off. On the screens the
+  mark takes the face, weight, colour, outline and shadow of the largest words on the slide, at
+  80% of the size those words were fitted to, its top half a line of theirs under the last line
+  of the lowest words (the lower block, with two languages), centred on that box. It is a layer
+  of its own, drawn by the painter after each screen's own theme has laid the words out
+  (`sp-render`'s `end_mark_place`), so the words keep their size and place with it on or off,
+  and it goes on and off with the slide's own transition (`Frame::end_mark`). The last slide is
+  the last one sung: with an arrangement, the slide the order ends on, each time it is sung last
+  and not when the same slide is sung earlier; a slide clicked takes its next place in the
+  order, as Next does. No mark: on a song that loops, on what the app makes (a Bible passage,
+  VoxLive's captions, a song of the song catalog), on a slide with no words, on words that
+  scroll or sit in a turned box, while the words are hidden (it dissolves out and back with
+  them), on stage screens and thumbnails, and where it would reach into the lowest 3% of the
+  slide, or past the copyright line's top on the slides that show one.
 - **Interface size** (Settings › Slides › In your window, or `sp settings set interface_size=`):
   how large the operator's windows draw everything. **Automatic**, the usual, draws a window
   bigger than 1440 × 900 points (the size the layout was drawn for) larger in proportion, by the
