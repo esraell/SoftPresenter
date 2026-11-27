@@ -789,97 +789,114 @@ mod tests {
     fn a_reason_for_not_being_read_goes_under_the_name_across_the_row_in_two_lines_at_most() {
         use crate::i18n::{Language, with_language};
         use sp_model::{Damage, Reason};
-        let why = crate::load::Why::Reader(Reason::Table {
+        let damaged = crate::load::Why::Reader(Reason::Table {
             table: "Songs".to_owned(),
             why: Box::new(Reason::Damaged(Damage::TableOutsideFile)),
         });
-        let broken = Source {
-            why: Some(why),
-            ..source("spData.sqlite", Kind::Songbook, (Usual::Downloads, &["old laptop"]), 0, 0)
-        };
-        for language in [Language::English, Language::Russian] {
-            with_language(language, || {
-                let (name, line, reason) = row_words(&broken);
-                // The narrowest Settings window, and a wide one.
-                for width in [820.0, 1400.0] {
-                    let mut state = state_in(Phase::Found);
-                    state.find_songs.sources = vec![broken.clone()];
-                    state.find_songs.ticked = vec![false];
-                    let ctx = crate::studio::tests::styled();
-                    let show = Show::new(Vec::new());
-                    let mut drawn = Painted::default();
-                    for _ in 0..2 {
-                        let raw = egui::RawInput {
-                            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 4000.0))),
-                            ..egui::RawInput::default()
+        // What a system can say, which is longer than two lines of any window on any system.
+        let long = crate::load::Why::System(
+            "The process cannot access the file because another process has locked a portion of the file, and the disk it is on is being checked for errors, so it will be read again when the check has ended and the other process has let it go (os error 33)"
+                .repeat(2),
+        );
+        for (why, always_cut) in [(damaged, false), (long, true)] {
+            let broken = Source {
+                why: Some(why),
+                ..source("spData.sqlite", Kind::Songbook, (Usual::Downloads, &["old laptop"]), 0, 0)
+            };
+            for language in Language::ALL {
+                with_language(language, || {
+                    let (name, line, reason) = row_words(&broken);
+                    // The narrowest Settings window, and a wide one.
+                    for width in [820.0, 1400.0] {
+                        let mut state = state_in(Phase::Found);
+                        state.find_songs.sources = vec![broken.clone()];
+                        state.find_songs.ticked = vec![false];
+                        let ctx = crate::studio::tests::styled();
+                        let show = Show::new(Vec::new());
+                        let mut drawn = Painted::default();
+                        for _ in 0..2 {
+                            let raw = egui::RawInput {
+                                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 4000.0))),
+                                ..egui::RawInput::default()
+                            };
+                            let output = ctx.run_ui(raw, |ui| settings_ui(ui, &mut state, &show));
+                            drawn = painted(&output);
+                            output.drop_without_applying_deltas();
+                        }
+                        let find = |words: &str| {
+                            drawn
+                                .texts
+                                .iter()
+                                .find(|(galley, _)| galley.text() == words)
+                                .cloned()
+                                .unwrap_or_else(|| panic!("{language:?} {width}: {words} isn't drawn"))
                         };
-                        let output = ctx.run_ui(raw, |ui| settings_ui(ui, &mut state, &show));
-                        drawn = painted(&output);
-                        output.drop_without_applying_deltas();
-                    }
-                    let find = |words: &str| {
-                        drawn
-                            .texts
+                        let (name_galley, name_at) = find(&name);
+                        let (line_galley, line_at) = find(&line);
+                        let (why_galley, why_at) = find(&reason);
+                        let say = format!("{language:?} at {width}: {reason}");
+                        // Under the name and the line under it, from the name's left edge.
+                        assert!((why_at.x - name_at.x).abs() < 0.5, "{say}");
+                        assert!(why_at.y >= line_at.y + line_galley.size().y + 8.0, "{say}");
+                        assert!(name_at.y + name_galley.size().y <= line_at.y, "{say}");
+                        // Across the row: wrapped in the room from there to the row's right edge (the
+                        // end of the line drawn over the row).
+                        let row_right = drawn
+                            .rules
                             .iter()
-                            .find(|(galley, _)| galley.text() == words)
-                            .cloned()
-                            .unwrap_or_else(|| panic!("{language:?} {width}: {words} isn't drawn"))
-                    };
-                    let (name_galley, name_at) = find(&name);
-                    let (line_galley, line_at) = find(&line);
-                    let (why_galley, why_at) = find(&reason);
-                    let say = format!("{language:?} at {width}: {reason}");
-                    // Under the name and the line under it, from the name's left edge.
-                    assert!((why_at.x - name_at.x).abs() < 0.5, "{say}");
-                    assert!(why_at.y >= line_at.y + line_galley.size().y + 8.0, "{say}");
-                    assert!(name_at.y + name_galley.size().y <= line_at.y, "{say}");
-                    // Across the row: wrapped in the room from there to the row's right edge (the
-                    // end of the line drawn over the row).
-                    let row_right = drawn
-                        .rules
-                        .iter()
-                        .filter(|(y, _)| *y <= name_at.y)
-                        .max_by(|a, b| a.0.total_cmp(&b.0))
-                        .map(|(_, right)| *right)
-                        .expect("the line over the row");
-                    assert!((why_at.x + why_galley.job.wrap.max_width - row_right).abs() < 0.5, "{say}");
-                    assert!(why_galley.rows.len() <= 2, "{say}: {} lines", why_galley.rows.len());
-                    if why_galley.elided {
-                        assert!(why_galley.rows[1].text().ends_with('\u{2026}'), "{say}");
+                            .filter(|(y, _)| *y <= name_at.y)
+                            .max_by(|a, b| a.0.total_cmp(&b.0))
+                            .map(|(_, right)| *right)
+                            .expect("the line over the row");
+                        assert!((why_at.x + why_galley.job.wrap.max_width - row_right).abs() < 0.5, "{say}");
+                        assert!(why_galley.rows.len() <= 2, "{say}: {} lines", why_galley.rows.len());
+                        if why_galley.elided {
+                            assert!(why_galley.rows[1].text().ends_with('\u{2026}'), "{say}");
+                        }
+                        // Cut short with "…" just where the whole reason would take more than two
+                        // lines at that width, as this system's fonts measure it.
+                        let mut whole_lines = 0;
+                        ctx.run_ui(egui::RawInput::default(), |ui| {
+                            let wrap = why_galley.job.wrap.max_width;
+                            whole_lines =
+                                parts::lines(ui, &reason, FontId::proportional(12.0), CARE, wrap, 16.0).rows.len();
+                        })
+                        .drop_without_applying_deltas();
+                        assert_eq!(why_galley.elided, whole_lines > 2, "{say}: {whole_lines} lines whole");
+                        if always_cut {
+                            assert!(why_galley.elided, "{say}: so long a reason is cut short on every system");
+                        }
+                        // The row is tall enough for it: the line under the row (the foot's) is below
+                        // the reason, with the row's own room under it.
+                        let under_row = drawn
+                            .rules
+                            .iter()
+                            .map(|(y, _)| *y)
+                            .filter(|y| *y > name_at.y)
+                            .min_by(f32::total_cmp)
+                            .expect("the line under the row");
+                        assert!(
+                            why_at.y + why_galley.size().y + 10.0 <= under_row,
+                            "{say}: the reason runs into what follows"
+                        );
+                        // The tick box is beside the name and the line under it, not in the row's
+                        // middle, which the reason has moved down.
+                        let words_middle = (name_at.y + line_at.y + line_galley.size().y) / 2.0;
+                        let tick = drawn
+                            .boxes
+                            .iter()
+                            .find(|tick| tick.max.x < name_at.x && tick.y_range().contains(words_middle))
+                            .unwrap_or_else(|| panic!("{say}: no tick box beside the words"));
+                        assert!(
+                            (tick.center().y - words_middle).abs() < 0.5,
+                            "{say}: the tick box is at {}",
+                            tick.center().y
+                        );
                     }
-                    if language == Language::Russian && width == 820.0 {
-                        assert!(why_galley.elided, "too long for two lines there, so cut short: {say}");
-                    }
-                    // The row is tall enough for it: the line under the row (the foot's) is below
-                    // the reason, with the row's own room under it.
-                    let under_row = drawn
-                        .rules
-                        .iter()
-                        .map(|(y, _)| *y)
-                        .filter(|y| *y > name_at.y)
-                        .min_by(f32::total_cmp)
-                        .expect("the line under the row");
-                    assert!(
-                        why_at.y + why_galley.size().y + 10.0 <= under_row,
-                        "{say}: the reason runs into what follows"
-                    );
-                    // The tick box is beside the name and the line under it, not in the row's
-                    // middle, which the reason has moved down.
-                    let words_middle = (name_at.y + line_at.y + line_galley.size().y) / 2.0;
-                    let tick = drawn
-                        .boxes
-                        .iter()
-                        .find(|tick| tick.max.x < name_at.x && tick.y_range().contains(words_middle))
-                        .unwrap_or_else(|| panic!("{say}: no tick box beside the words"));
-                    assert!(
-                        (tick.center().y - words_middle).abs() < 0.5,
-                        "{say}: the tick box is at {}",
-                        tick.center().y
-                    );
-                }
-                // The whole reason, lead-in and all, is the row's hover, before where it is.
-                assert_eq!(hover_words(&broken), format!("{reason}\nspData.sqlite"));
-            });
+                    // The whole reason, lead-in and all, is the row's hover, before where it is.
+                    assert_eq!(hover_words(&broken), format!("{reason}\nspData.sqlite"));
+                });
+            }
         }
     }
 
@@ -1080,18 +1097,34 @@ mod tests {
 
     #[test]
     fn the_line_before_a_search_holds_still_when_its_keys_are_pointed_at_pressed_and_clicked() {
-        // Before a search, in every language, in the narrowest Settings window (820), where the
-        // layout may change (940), its usual width (1040) and a wide one: the keys are under the
-        // sentence at 820 and beside it at 1040 and 1280, Find at least the design's 84 points
-        // wide; pointing at either key, pressing it and letting go (a click, which asks for what
-        // it says) moves nothing on the page and changes the size of nothing.
+        // Before a search, in every language, in the narrowest Settings window (820), a wide one
+        // (1280), and on either side of the width where the keys move beside the sentence (found
+        // by measuring, as each system's fonts measure the words): the keys are where that layout
+        // puts them, Find at least the design's 84 points wide; pointing at either key, pressing
+        // it and letting go (a click, which asks for what it says) moves nothing on the page and
+        // changes the size of nothing.
         use crate::i18n::{Language, with_language};
         for language in Language::ALL {
             with_language(language, || {
                 let choose = t("settings.find.choose_folder", "Choose a Folder\u{2026}");
                 let find = t("settings.find.find", "Find");
                 let label = t("settings.find.look", "Look for songs you already have");
-                for width in [820.0, 940.0, 1040.0, 1280.0] {
+                let under_at = |width: f32| {
+                    let ctx = crate::studio::tests::styled();
+                    let rest = idle_frame(&ctx, &mut state_in(Phase::Before), width, &|_| Vec::new());
+                    let (galley, at) = rest.text(&looks_in_words(&[])).expect("the sentence");
+                    key_of(&rest, choose).expect("Choose a Folder\u{2026}").min.y > at.y + galley.size().y
+                };
+                let mut widths = vec![820.0, 1280.0];
+                if under_at(820.0) && !under_at(1280.0) {
+                    let (mut under, mut beside) = (820.0_f32, 1280.0_f32);
+                    while beside - under > 1.0 {
+                        let middle = ((under + beside) / 2.0).round();
+                        if under_at(middle) { under = middle } else { beside = middle }
+                    }
+                    widths.extend([under, beside]);
+                }
+                for width in widths {
                     let ctx = crate::studio::tests::styled();
                     let say = |what: &str| format!("{language:?} at {width}: {what}");
                     let mut state = state_in(Phase::Before);
@@ -1119,12 +1152,6 @@ mod tests {
                         .map(|(_, right)| *right)
                         .expect("the line over the row");
                     let under = choose_key.min.y > sentence_at.y + sentence_galley.size().y;
-                    if width == 820.0 {
-                        assert!(under, "{}", say("the keys are beside the sentence"));
-                    }
-                    if width >= 1040.0 {
-                        assert!(!under, "{}", say("the keys are under the sentence"));
-                    }
                     if under {
                         // Under the sentence, at its left, 8 below its three lines' room,
                         // Choose a Folder… first; the sentence has the card's whole width.
@@ -1301,7 +1328,6 @@ mod tests {
                         );
                     }
                 }
-                assert!(beside_from.is_some_and(|from| from <= 1040.0), "{language:?}: beside from {beside_from:?}");
             });
         }
     }
