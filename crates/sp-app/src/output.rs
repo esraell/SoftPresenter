@@ -90,12 +90,21 @@ struct GoingOn {
     /// or off): it gives way by the look, and its builds start again once the look has played.
     new_slide: bool,
     /// The same slide, its words hidden or shown again, or the end of a song's mark put under
-    /// them or taken off (Settings' switch, while the slide is up).
+    /// them, taken off (Settings' switch, while the slide is up) or given another look by its
+    /// theme (the mark's window, while the slide is up).
     words: bool,
     /// Another picture behind the words, or none.
     new_media: bool,
     /// How the picture before gives way to the new one.
     look: sp_model::Transition,
+}
+
+/// Whether two themes differ in the look of the end of a song's mark and in nothing else: the
+/// words, the background and the layouts are the same, so only the mark is drawn anew. (By what
+/// they hold, not by which copy they are: the app makes the themes' copies again at every
+/// change.)
+fn only_end_look_differs(was: &Theme, now: &Theme) -> bool {
+    was.end_look != now.end_look && Theme { end_look: now.end_look, ..was.clone() } == *now
 }
 
 /// How the screens go on from the frame they show (`was`) to a new one (`now`): a slide whose
@@ -104,7 +113,12 @@ fn going_on(was: &Frame, now: &Frame) -> GoingOn {
     // Another version over the same slide gives way to it as another slide does.
     let new_slide =
         was.slide.as_deref() != now.slide.as_deref() || was.enabled != now.enabled || was.version != now.version;
-    let words = !new_slide && (was.words_hidden != now.words_hidden || was.end_mark != now.end_mark);
+    // The mark under the words given another look, and nothing else of the theme changed: only
+    // the mark changes, so it dissolves as it does when it is switched on, and the slide's own
+    // transition isn't played again.
+    let mark_looks_new =
+        was.end_mark.is_some() && now.end_mark.is_some() && only_end_look_differs(&was.theme, &now.theme);
+    let words = !new_slide && (was.words_hidden != now.words_hidden || was.end_mark != now.end_mark || mark_looks_new);
     let new_media = match (&was.media, &now.media) {
         (Some(was), Some(now)) => !was.same(now),
         (None, None) => false,
@@ -2082,7 +2096,20 @@ fn run(
                 }
                 OutputMsg::Overlay(overlay) => output.overlay = overlay,
                 OutputMsg::Looks(looks) => output.looks = looks,
-                OutputMsg::Themes(themes) => output.themes = themes,
+                OutputMsg::Themes(themes) => {
+                    // A screen's own theme given another look for the end of a song's mark
+                    // while a marked slide is up: the mark dissolves there too, as on the
+                    // screens that follow the slide's theme.
+                    let mark_looks_new = output.frame.end_mark.is_some()
+                        && output.frame.slide.is_some()
+                        && own_end_look_changed(&output.themes, &themes);
+                    output.themes = themes;
+                    if mark_looks_new {
+                        output.round.new_picture();
+                        output.look = sp_model::Transition::default();
+                        new_picture = true;
+                    }
+                }
                 OutputMsg::Stage { screens, on } => {
                     output.stage = screens;
                     output.stage_on = on;
@@ -4775,6 +4802,13 @@ fn ndi_sent(see_through: Option<crate::screens::Alpha>) -> sp_ndi::Sent {
     }
 }
 
+/// Whether a screen that keeps a theme of its own was given, in the new list, the same theme
+/// with another look for the end of a song's mark and nothing else changed
+/// ([`only_end_look_differs`]).
+fn own_end_look_changed(was: &[(Uuid, Arc<Theme>)], now: &[(Uuid, Arc<Theme>)]) -> bool {
+    now.iter().any(|(screen, now)| was.iter().any(|(have, was)| have == screen && only_end_look_differs(was, now)))
+}
+
 /// The theme a screen's slides are drawn with: its own, if it has one, or the one the slide
 /// came with (the main theme, or a song's own).
 fn screen_theme(themes: &[(Uuid, Arc<Theme>)], screen: Uuid, slide_theme: &Arc<Theme>) -> Arc<Theme> {
@@ -4951,6 +4985,37 @@ mod tests {
             assert!(going.words && !going.new_slide && !going.new_media, "{going:?}");
             assert_eq!(going.look, Transition::default());
         }
+        // Its theme gives it another look while it is up (the mark's window): only the mark
+        // changes, so it dissolves, and the slide's own transition isn't played again. The
+        // theme comes as a new copy each time, so it is told by what it holds.
+        let squares = sp_model::EndLook { mark: sp_model::EndMark::Square, size: 120, ..sp_model::EndLook::default() };
+        let restyled = Frame { theme: Arc::new(Theme { end_look: squares, ..Theme::builtin() }), ..marked.clone() };
+        for (was, now) in [(&marked, &restyled), (&restyled, &marked)] {
+            let going = going_on(was, now);
+            assert!(going.words && !going.new_slide && !going.new_media, "{going:?}");
+            assert_eq!(going.look, Transition::default(), "a dissolve, not the slide\u{2019}s Push");
+        }
+        // The same theme in a new copy is no change at all, and a slide with no mark due has
+        // none to dissolve: the look waits in the theme for a last slide.
+        let copy = Frame { theme: Arc::new(Theme::builtin()), ..marked.clone() };
+        assert!(!going_on(&marked, &copy).words);
+        let unmarked = Frame { theme: restyled.theme.clone(), ..plain.clone() };
+        assert!(!going_on(&plain, &unmarked).words);
+        // A theme changed in more than its mark (its name here, as any other part) is another
+        // theme: that is not the mark's dissolve.
+        let renamed = Theme { name: "Evening".to_owned(), end_look: squares, ..Theme::builtin() };
+        assert!(!only_end_look_differs(&marked.theme, &renamed));
+        assert!(!going_on(&marked, &Frame { theme: Arc::new(renamed), ..marked.clone() }).words);
+        // A screen with a theme of its own: its list of themes says the same of each screen.
+        let (hall, lobby) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let own = vec![(hall, marked.theme.clone()), (lobby, marked.theme.clone())];
+        let hall_restyled = vec![(hall, restyled.theme.clone()), (lobby, Arc::new(Theme::builtin()))];
+        assert!(own_end_look_changed(&own, &hall_restyled));
+        assert!(!own_end_look_changed(&own, &[(hall, Arc::new(Theme::builtin()))]), "new copies only");
+        assert!(
+            !own_end_look_changed(&[], &hall_restyled),
+            "a theme of its own just given: not the mark\u{2019}s change"
+        );
         // An audience screen draws the slide with the mark, and without it while the words
         // are hidden: it goes with them, in the same dissolve.
         let theme = Theme::builtin();

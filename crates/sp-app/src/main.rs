@@ -9382,7 +9382,10 @@ impl App {
                     if !self.themes_unsaved.contains(&index) {
                         self.themes_unsaved.push(index);
                     }
-                    self.save_unsaved();
+                    // The theme is written once the clicks pause for a second (as a theme
+                    // changed in its editor is), and on quitting: not at every click of A+,
+                    // on the window's thread, with every song that waits to be saved.
+                    self.unsaved_since = Some(Instant::now());
                     self.themes_changed();
                     // A last slide on screen takes the look at once (not from the Theme Editor,
                     // which shows the audience its theme when it is left).
