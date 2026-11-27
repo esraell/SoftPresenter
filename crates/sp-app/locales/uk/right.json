@@ -1,7 +1,7 @@
 {
   "_note": "Ukrainian; see topbar.json and docs/translating.md. The right column: preview, layer keys, Clear All, tool tabs. The layer keys' names (right.layer.*) are set in capitals in a room of about ten letters; where the usual word is too long for the key, its .short form is used.",
   "right.clear_all": "Очистити все",
-  "right.clear_all.hint": "Очистити все: прибрати все з екранів (Esc)",
+  "right.clear_all.hint": "Очистити все: прибрати все з екранів",
   "right.layer.slide": "Слайд",
   "right.layer.slide.short": "Слайд",
   "right.layer.slide.clear": "Прибрати слайд: зняти слова з екранів",

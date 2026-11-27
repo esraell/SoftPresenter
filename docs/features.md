@@ -1118,9 +1118,34 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   between its choices, Right opens a group of them, Left goes back, Enter chooses and Escape
   closes; Space and the arrows don't run the show while a menu is open. After a slider or a
   menu is used, the keyboard goes back to running the show.
-- **Clearing from the keyboard**: Escape clears everything. On a Mac no F key is used (they
+- **Settings › Keys** says what each key that runs the show does, and changes it. Its page
+  has three cards: On the buttons (Show keys on buttons, On or Off); Running the show; and
+  Always the same, the keys that can't be changed and the menus' shortcuts.
+  - **Running the show** has one row a key: Esc, F1 to F12 (not on a Mac, whose F keys are the
+    system's), Space, → and ←, Page Down and Page Up (a clicker's forward and back), Home, End
+    and "." (the blank-screen button most clickers send). Each row has the key's cap and a
+    chooser of one width listing the actions in three groups (Clear, Slides, Playlist and
+    views), then Nothing. A changed row says what it did at first ("Default: Clear All");
+    choosing that again puts it back. Two keys may do the same thing. When no key is left
+    doing Next Slide, Previous Slide, First Slide or Last Slide, a line under the table says
+    so.
+  - **Key layout** is a switch of two halves, Standard and Like SoftProjector, on the card's
+    first line, with a line saying what the layout is. Standard: Esc, F1 and "." clear
+    everything and F2 to F6 clear one layer each. Like SoftProjector: Esc and "." hide the
+    words and leave the background up, F1 clears everything, F2 and F3 add to and take out of
+    the playlist, F4 shows again, F5 shows what is picked, F6 and F7 go to Bible and Service.
+    Choosing the other layout sets every row; clicking the one already chosen does nothing.
+    **Reset to Defaults**, in the card's head, goes back to the layout chosen; it is greyed
+    while nothing differs.
+  - **The list of keys (`?`)** writes these keys as the table has them now: one row for each
+    action that has keys, "Button only" for a clear no key does, and one row for the keys set
+    to Nothing. The clear buttons' hints (the six layer keys, Clear All, a message's Hide) name
+    the keys that do each now, or none.
+  - Nothing on the page changes size when a choice or the layout changes. In a window too
+    narrow for a line beside its control, the line goes under it.
+- **Clearing from the keyboard**, as it comes (the Standard layout): Escape clears everything. On a Mac no F key is used (they
   are the system's: brightness, volume, Mission Control), so clearing one layer is its key
-  under the preview, and the list of keys and Settings › Keys say "Button only" for
+  under the preview, and the list of keys says "Button only" for
   it. On Windows and Linux F1 clears everything too, and F2, F3, F4, F5 and F6 clear the slide,
   the media, the props, the audio and the message; the layer keys' tooltips name them there.
   In the Edit view (its slides, themes, props and stage layouts alike) the keyboard is the

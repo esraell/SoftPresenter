@@ -101,7 +101,7 @@ pub fn card_with_key(
 }
 
 /// A card's block, its head, then what it holds.
-fn framed(ui: &mut egui::Ui, head: impl FnOnce(&mut egui::Ui), add: impl FnOnce(&mut egui::Ui)) {
+pub fn framed(ui: &mut egui::Ui, head: impl FnOnce(&mut egui::Ui), add: impl FnOnce(&mut egui::Ui)) {
     let width = ui.available_width();
     Frame::new()
         .fill(CARD)

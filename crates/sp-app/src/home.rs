@@ -660,6 +660,8 @@ pub struct HomeState {
     pub catalog: crate::catalog_songs::CatalogSongs,
     /// Settings › Command line: where the sp command stands, and what it said.
     pub command_line: crate::cli_install::Card,
+    /// Settings › Keys › Running the show: whether Add a Key is listening, and what it said.
+    pub keys_card: settings::keys_card::Card,
     /// Settings › Song files › Find songs on this computer: where it looks, what it found, and
     /// what was asked of it (`find_songs`).
     pub find_songs: crate::find_songs::Card,
@@ -2119,6 +2121,7 @@ impl Default for HomeState {
             free_songbooks: crate::free_songbooks::View::default(),
             catalog: crate::catalog_songs::CatalogSongs::default(),
             command_line: crate::cli_install::Card::default(),
+            keys_card: settings::keys_card::Card::default(),
             find_songs: crate::find_songs::Card::default(),
             mcp: crate::mcp::pane::View::load(),
             ndi_draft: None,
@@ -16616,7 +16619,7 @@ mod tests {
         assert!(!state.preferences_open, "the setup opens over the home window");
         // Settings > Keys has the switch for the keys beside the buttons.
         let mut keys = HomeState { preferences_open: true, preferences_pane: Pane::Keys, ..HomeState::default() };
-        assert!(click_word(&ctx, &mut keys, "Show keys on buttons", &settings));
+        assert!(click_word(&ctx, &mut keys, "Off", &settings), "its On/Off key");
         assert!(keys.keys_on_buttons);
         // Settings > About: the version, and a new issue that carries it.
         let version = crate::updates::VERSION;
@@ -16763,7 +16766,7 @@ mod tests {
     }
 
     #[test]
-    fn key_mappings_list_every_key_the_list_of_keys_has() {
+    fn settings_keys_has_a_row_for_each_show_key_and_lists_the_fixed_ones() {
         fn words(shape: &egui::Shape, into: &mut Vec<String>) {
             match shape {
                 egui::Shape::Text(text) => into.push(text.galley.text().to_owned()),
@@ -16787,16 +16790,19 @@ mod tests {
         }
         // A key's own words are drawn with spaces that never break ("Button only").
         let drawn: Vec<String> = drawn.iter().map(|words| words.replace('\u{a0}', " ")).collect();
-        for (group, rows) in crate::keys::every_key() {
+        // The keys that are always the same, as the list of keys has them.
+        for (group, rows) in crate::keys::fixed_keys() {
             for (keys, what) in rows {
                 assert!(drawn.contains(&what), "{group}: {what}");
                 assert!(drawn.contains(&keys.join("  ")), "{group}: {keys:?}");
             }
         }
-        // Among them the audio's F5 off a Mac, and on a Mac "Button only" for clearing one
-        // layer; and Delete as it is.
-        assert_eq!(drawn.iter().any(|words| words.contains("F5")), crate::keys::f_keys());
-        assert_eq!(drawn.iter().any(|words| words.contains(crate::keys::BUTTON_ONLY)), !crate::keys::f_keys());
+        // And over them a row for each key that can be changed: F5 off a Mac only.
+        for key in crate::key_table::rows(crate::keys::f_keys()) {
+            assert!(drawn.contains(&key.cap()), "{key:?} has its row");
+        }
+        assert_eq!(drawn.iter().any(|words| words == "F5"), crate::keys::f_keys());
+        assert!(!drawn.iter().any(|words| words.contains(crate::keys::BUTTON_ONLY)), "the list of keys says that");
         assert!(drawn.iter().any(|words| words.contains("what Undo brings back goes at once")));
     }
 

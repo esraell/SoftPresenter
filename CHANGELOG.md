@@ -5,7 +5,13 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-Your changes are safer, opening a video no longer holds up the window, Remote Control uses less of the computer, and Delete, Undo and Escape in the Edit view act on the box you mean.
+Your changes are safer, keys you can set yourself (with a layout like SoftProjector's), a mark for the end of a song, opening a video no longer holds up the window, and Remote Control uses less of the computer.
+
+### New
+
+- **Key layout.** Settings › Keys has a switch, Standard or Like SoftProjector, that gives Esc and the F keys the jobs they have in SoftProjector. In Like SoftProjector, Esc hides the words and leaves the background up, F5 shows what is picked, F2 adds to the playlist and F1 clears everything; on a Mac, where the F keys are the system's, only Esc and "." change.
+- **Set what each key does.** Settings › Keys lists what each key that runs the show does, with a chooser beside each to change it. Esc, F1 to F12 (not on a Mac), Space, the arrows, Page Down and Page Up, Home, End and "." each do one thing or nothing; a changed row says what it did at first, and Reset to Defaults puts them all back.
+- **Key list follows your keys.** The `?` list and the clear buttons' hints name the keys as Settings › Keys has them now. A clear that no key does is marked "Button only" there.
 
 ### Better
 

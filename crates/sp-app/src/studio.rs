@@ -5349,19 +5349,28 @@ pub fn right_column(
         // the announcements, the props, the message on top; then the audio, which is heard.
         let keys_top = block.max.y + 12.0;
         let each = (width - 2.0 * 7.0) / 3.0;
-        let hint = crate::keys::clear_hint;
+        // Each key's hint names the keys that clear its layer now, as Settings › Keys has them.
+        let table = state.keys.clone();
+        use crate::key_table::KeyAction;
+        let hint = |what: &str, action: KeyAction| crate::keys::action_hint(&table, what, action);
         let layers = [
             (
                 tk("right.layer.media", "Media"),
                 Layer::Media,
                 media,
-                hint(t("right.layer.media.clear", "Clear the media: take the picture or video off the screens"), "F3"),
+                hint(
+                    t("right.layer.media.clear", "Clear the media: take the picture or video off the screens"),
+                    KeyAction::ClearMedia,
+                ),
             ),
             (
                 tk("right.layer.slide", "Slide"),
                 Layer::Slides,
                 slide,
-                hint(t("right.layer.slide.clear", "Clear the slide: take the words off the screens"), "F2"),
+                hint(
+                    t("right.layer.slide.clear", "Clear the slide: take the words off the screens"),
+                    KeyAction::ClearSlide,
+                ),
             ),
             (
                 tk("right.layer.announce", "Announce"),
@@ -5373,19 +5382,22 @@ pub fn right_column(
                 tk("right.layer.props", "Props"),
                 Layer::Props,
                 props,
-                hint(t("right.layer.props.clear", "Clear the props: take them off the screens"), "F4"),
+                hint(t("right.layer.props.clear", "Clear the props: take them off the screens"), KeyAction::ClearProps),
             ),
             (
                 tk("right.layer.messages", "Messages"),
                 Layer::Messages,
                 message,
-                hint(t("right.layer.messages.clear", "Clear the message: take it off the screens"), "F6"),
+                hint(
+                    t("right.layer.messages.clear", "Clear the message: take it off the screens"),
+                    KeyAction::ClearMessages,
+                ),
             ),
             (
                 tk("right.layer.audio", "Audio"),
                 Layer::Audio,
                 audio,
-                hint(t("right.layer.audio.clear", "Clear the audio: stop it playing"), "F5"),
+                hint(t("right.layer.audio.clear", "Clear the audio: stop it playing"), KeyAction::ClearAudio),
             ),
         ];
         for (place, ((name_key, name_english), layer, lit, hint)) in layers.into_iter().enumerate() {
@@ -5417,7 +5429,10 @@ pub fn right_column(
         let (response, face) = raised_key(ui, rect, ui.scope_id().with("clear all"), fill, edge);
         ui.painter().text(face.center(), Align2::CENTER_CENTER, t("right.clear_all", "Clear All"), semibold(15.0), ink);
         if response
-            .on_hover_text(t("right.clear_all.hint", "Clear All: take everything off the screens (Escape)"))
+            .on_hover_text(hint(
+                t("right.clear_all.hint", "Clear All: take everything off the screens"),
+                KeyAction::ClearAll,
+            ))
             .clicked()
         {
             commands.push(Command::ClearAll);

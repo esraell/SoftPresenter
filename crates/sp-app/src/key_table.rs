@@ -470,8 +470,13 @@ impl ShowKey {
 
     /// The key as its cap says it (a US keyboard's legend for a mark), as the list of keys and
     /// Settings › Keys write it.
-    #[allow(dead_code)] // Settings › Keys reads it, next.
     pub fn cap(self) -> String {
+        self.cap_for(cfg!(target_os = "macos"))
+    }
+
+    /// The cap as a Mac's keyboard prints it (`mac`) or as a PC's does: they differ for the key
+    /// beside Z on an ISO keyboard.
+    pub fn cap_for(self, mac: bool) -> String {
         let cap = match self {
             ShowKey::Escape => "Esc",
             ShowKey::Space => t("keys.cap.space", "Space"),
@@ -482,7 +487,7 @@ impl ShowKey {
             ShowKey::Home => t("keys.cap.home", "Home"),
             ShowKey::End => t("keys.cap.end", "End"),
             ShowKey::Period => ".",
-            ShowKey::Other(code) => return other_cap(code, self.name()),
+            ShowKey::Other(code) => return other_cap(code, self.name(), mac),
             // The F keys, F1 to F12.
             f_key => return f_key.name().to_uppercase(),
         };
@@ -512,7 +517,6 @@ impl ShowKey {
     /// Added, these do their row in the Service view in place of a slide's hot key or a group's
     /// letter (Settings › Keys says so in their note). In the Bible view what a key types decides
     /// (`show_key_held_back` in `main.rs`): a letter or a digit always starts a reference.
-    #[allow(dead_code)] // Settings › Keys' notes read it, next.
     pub fn is_letter_or_digit(self) -> bool {
         let ShowKey::Other(code) = self else { return false };
         // a to z and 0 to 9 are named by themselves.
@@ -533,8 +537,9 @@ impl ShowKey {
     }
 }
 
-/// The cap of a key added (`ShowKey::Other`), named `name` in the preferences file.
-fn other_cap(code: KeyCode, name: &str) -> String {
+/// The cap of a key added (`ShowKey::Other`), named `name` in the preferences file, on a Mac's
+/// keyboard (`mac`) or a PC's.
+fn other_cap(code: KeyCode, name: &str, mac: bool) -> String {
     let mark = match code {
         KeyCode::Backquote => "`",
         KeyCode::Backslash => "\\",
@@ -542,7 +547,10 @@ fn other_cap(code: KeyCode, name: &str) -> String {
         KeyCode::BracketRight => "]",
         KeyCode::Comma => ",",
         KeyCode::Equal => "=",
-        KeyCode::IntlBackslash => "\u{a7}",
+        // The key beside Z on an ISO keyboard: § on a Mac's, < > on most PCs' (a British one
+        // prints \ and | there, which its place alone can't tell).
+        KeyCode::IntlBackslash if mac => "\u{a7}",
+        KeyCode::IntlBackslash => "<>",
         KeyCode::IntlRo => "\u{308d}",
         KeyCode::IntlYen => "\u{a5}",
         KeyCode::Minus => "-",
@@ -656,7 +664,7 @@ pub enum Refusal {
 impl Refusal {
     /// What Add a Key says, in its line in the table's head (`None` for no key). `mac` is for the
     /// Mac's modifiers (⌘, ⌃, ⌥) and its Delete key, at Backspace's place.
-    #[allow(dead_code)] // Settings › Keys says it, next.
+    #[allow(dead_code)] // Add a Key says it, next.
     pub fn reason(self, mac: bool) -> Option<String> {
         let words = match self {
             Refusal::NoKey => return None,
@@ -794,7 +802,6 @@ impl KeyAction {
     }
 
     /// The action in words, as its chooser says it.
-    #[allow(dead_code)] // Settings › Keys reads it, next.
     pub fn words(self) -> String {
         match self {
             KeyAction::ClearAll => t("settings.keys.do.clear_all", "Clear All"),
@@ -961,7 +968,6 @@ impl KeyTable {
     }
 
     /// Whether `key` was added (Add a Key…).
-    #[allow(dead_code)] // Settings › Keys reads it, next.
     pub fn is_added(&self, key: ShowKey) -> bool {
         self.added.iter().any(|name| name == key.name())
     }
@@ -969,7 +975,6 @@ impl KeyTable {
     /// Every row of Settings › Keys, in order: the keys added, newest first, then the rows every
     /// layout lists (`rows`). A key added that is a layout's row here (an F key added on a Mac,
     /// read off one) is listed once, in its row's place.
-    #[allow(dead_code)] // Settings › Keys lists its rows from it, next.
     pub fn listed(&self, f_keys: bool) -> Vec<ShowKey> {
         let rows = rows(f_keys);
         let mut listed: Vec<ShowKey> = Vec::new();
@@ -985,7 +990,7 @@ impl KeyTable {
     /// Adds the key pressed at the top of the list (Add a Key…), set to Nothing, or an F key on
     /// a Mac (no row there, `f_keys` false) to what the layout gives it off one; or says why not.
     /// The key added is returned.
-    #[allow(dead_code)] // Settings › Keys adds with it, next.
+    #[allow(dead_code)] // Add a Key adds with it, next.
     pub fn add(&mut self, pressed: &Pressed, f_keys: bool) -> Result<ShowKey, Refusal> {
         let key = ShowKey::to_add(pressed)?;
         if self.is_listed(key, f_keys) {
@@ -999,7 +1004,6 @@ impl KeyTable {
 
     /// Takes a key added out of the list (its ×), with what it was set to. A row every layout
     /// lists can't be taken out.
-    #[allow(dead_code)] // Settings › Keys takes keys out with it, next.
     pub fn remove(&mut self, key: ShowKey) {
         if !self.is_added(key) {
             return;
@@ -1010,7 +1014,6 @@ impl KeyTable {
 
     /// Sets what `key` does. For a row, its style's own action is no change, so the row is
     /// forgotten; a key added keeps what it is set to, so that a style chosen leaves it be.
-    #[allow(dead_code)] // Settings › Keys changes the table with it, next.
     pub fn set(&mut self, key: ShowKey, action: KeyAction) {
         if action == KeyTable::default_action(self.style, key) && !self.is_added(key) {
             self.changed.remove(key.name());
@@ -1021,7 +1024,6 @@ impl KeyTable {
 
     /// Chooses a style: every row does what it says, and the rows changed are changed no more.
     /// The keys added stay, each doing what it was set to.
-    #[allow(dead_code)] // Settings › Keys changes the table with it, next.
     pub fn set_style(&mut self, style: KeyStyle) {
         self.style = style;
         let added = &self.added;
@@ -1029,21 +1031,19 @@ impl KeyTable {
     }
 
     /// Every row back to what its style says, and the keys added taken out (Reset to Defaults).
-    #[allow(dead_code)] // Settings › Keys changes the table with it, next.
     pub fn reset(&mut self) {
         self.changed.clear();
         self.added.clear();
     }
 
     /// Whether `key` does something other than its style says.
-    #[allow(dead_code)] // Settings › Keys reads it, next.
     pub fn is_changed(&self, key: ShowKey) -> bool {
         self.action(key) != KeyTable::default_action(self.style, key)
     }
 
     /// Whether Reset to Defaults would change anything: a row does something other than its
     /// style says (an F key on a Mac too), or a key was added.
-    #[allow(dead_code)] // Settings › Keys reads it, next.
+    #[allow(dead_code)] // The setup's question weighs it.
     pub fn any_changed(&self) -> bool {
         ShowKey::ALL.into_iter().any(|key| self.is_changed(key))
             || self.added.iter().any(|name| ShowKey::from_name(name).is_some())
@@ -1051,7 +1051,6 @@ impl KeyTable {
 
     /// The keys listed (`listed`: the F rows only with `f_keys`, keys added first) that do
     /// `action`, in the list's order.
-    #[allow(dead_code)] // Settings › Keys reads it, next.
     pub fn keys_for(&self, action: KeyAction, f_keys: bool) -> Vec<ShowKey> {
         self.listed(f_keys).into_iter().filter(|key| self.action(*key) == action).collect()
     }
@@ -1112,6 +1111,16 @@ mod tests {
             assert_eq!(KeyTable::default().action(key), softpresenter, "a new table is SoftPresenter's: {key:?}");
         }
         assert_eq!(table.map(|row| row.0).to_vec(), rows(true), "every row is in the table");
+    }
+
+    #[test]
+    fn the_key_beside_z_reads_as_the_systems_keyboards_print_it() {
+        let pressed = Pressed::at(Key::Character("\u{a7}".into()), KeyCode::IntlBackslash);
+        let added = KeyTable::default().add(&pressed, true).expect("added");
+        assert_eq!(added.cap_for(false), "<>", "a PC\u{2019}s ISO keyboard");
+        assert_eq!(added.cap_for(true), "\u{a7}", "a Mac\u{2019}s");
+        assert_eq!(added.cap(), added.cap_for(cfg!(target_os = "macos")));
+        assert_eq!(ShowKey::PageDown.cap_for(false), "Page Down");
     }
 
     #[test]

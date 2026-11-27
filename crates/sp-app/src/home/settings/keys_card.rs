@@ -1,0 +1,955 @@
+//! Settings › Keys › Running the show, as the design draws it (26 November): what each key that
+//! runs the show does, one row a key, from the table in `key_table`.
+//!
+//! - The head has Reset to Defaults at its right, always there, greyed while nothing differs.
+//! - The first line is the Key layout switch, Standard or Like SoftProjector, with a line saying
+//!   what the layout is. Choosing the other layout sets every row.
+//! - Each row has the key's cap, a chooser of one width, and a place for a note: a changed row's
+//!   default, or, for a key added to the table, that it was, with a × to take it out.
+//! - Nothing here changes size when a choice changes: where the window is too narrow for a
+//!   line beside its control, the line goes under it, by the window's width and the language
+//!   alone, never by what is chosen.
+
+use egui::{Align, Align2, FontId, Layout, Rect, Sense, Stroke, pos2, vec2};
+
+use super::parts;
+use crate::home::HomeState;
+use crate::i18n::{t, tf, tk};
+use crate::icons::Icon;
+use crate::key_table::{ActionGroup, KeyAction, KeyStyle, KeyTable, ShowKey, rows};
+use crate::studio::{
+    Flat, LINE, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, even_switch, fixed_semibold, flat_button, icon_key, paint_spaced,
+    semibold, spaced, widest,
+};
+
+/// The key's column, the room between columns, and how tall a row is, as the design has them.
+const KEY_COLUMN: f32 = 84.0;
+const BETWEEN: f32 = 16.0;
+const ROW: f32 = 44.0;
+/// How wide the Key layout switch is: two halves of one width.
+const SWITCH: f32 = 300.0;
+/// The least a chooser is wide; it is as wide as the longest action's name needs.
+const CHOOSER: f32 = 200.0;
+/// The most a chooser's list is tall: room for its 22 lines.
+const LIST: f32 = 640.0;
+/// The small capitals of the headings, and the room between their letters.
+const CAPS: f32 = 11.5;
+const CAPS_SPACING: f32 = 0.575;
+/// How tall a line of the small words is.
+const LINE_HEIGHT: f32 = 18.0;
+
+/// What the card keeps between frames.
+#[derive(Default)]
+pub struct Card {
+    /// For the tests, which are built on a Mac: the F rows as off a Mac, or not.
+    #[cfg(test)]
+    pub f_keys: Option<bool>,
+}
+
+impl Card {
+    /// Whether the table has the F rows here: off a Mac (`keys::f_keys`).
+    pub fn f_keys(&self) -> bool {
+        #[cfg(test)]
+        if let Some(f_keys) = self.f_keys {
+            return f_keys;
+        }
+        // Testing aid: SOFTPRESENTER_KEYS_F_ROWS=1 (or 0), in a copy with a data folder of its
+        // own, draws this card with the F rows as off a Mac (or without them, as on one), so
+        // either system's page can be pictured on the other. The keys go on as this system's do.
+        static ASKED: std::sync::OnceLock<Option<bool>> = std::sync::OnceLock::new();
+        let asked = ASKED.get_or_init(|| {
+            std::env::var_os("SOFTPRESENTER_DATA")?;
+            match std::env::var("SOFTPRESENTER_KEYS_F_ROWS").ok()?.as_str() {
+                "1" => Some(true),
+                "0" => Some(false),
+                _ => None,
+            }
+        });
+        asked.unwrap_or_else(crate::keys::f_keys)
+    }
+}
+
+/// What the layout chosen is, in a line: off a Mac, or on one (`mac`), where the F keys have no
+/// rows.
+pub fn style_line(style: KeyStyle, mac: bool) -> &'static str {
+    match (style, mac) {
+        (KeyStyle::SoftPresenter, false) => {
+            t("settings.keys.style.line.sp.other", "Esc and F1 clear everything; F2 to F6 clear one layer each.")
+        }
+        (KeyStyle::SoftPresenter, true) => t(
+            "settings.keys.style.line.sp.mac",
+            "Esc clears everything; the layer keys under the preview clear one layer each.",
+        ),
+        (KeyStyle::SoftProjector, false) => t(
+            "settings.keys.style.line.spj.other",
+            "As in SoftProjector: Esc hides the words, F5 shows, F2 adds to the playlist; F1 clears all.",
+        ),
+        (KeyStyle::SoftProjector, true) => t(
+            "settings.keys.style.line.spj.mac",
+            "As in SoftProjector, Esc hides the words and leaves the background up.",
+        ),
+    }
+}
+
+/// Whether Reset to Defaults has anything to do: a row listed here does something other than
+/// its layout says, or a key was added. A row this computer doesn't list (a Mac's F rows,
+/// changed in a file from a PC) doesn't count.
+pub fn differs(table: &KeyTable, f_keys: bool) -> bool {
+    let rows = rows(f_keys);
+    rows.iter().any(|key| table.is_changed(*key)) || table.listed(f_keys).len() > rows.len()
+}
+
+/// What Reset to Defaults says under the pointer: what it does, naming the layout, or that
+/// there is nothing to reset.
+pub fn reset_hint(table: &KeyTable, f_keys: bool) -> String {
+    match (differs(table, f_keys), table.style) {
+        (true, KeyStyle::SoftPresenter) => {
+            t("settings.keys.reset.hint.sp", "Every key back to the Standard layout; added keys go")
+        }
+        (true, KeyStyle::SoftProjector) => {
+            t("settings.keys.reset.hint.spj", "Every key back to the SoftProjector layout; added keys go")
+        }
+        (false, KeyStyle::SoftPresenter) => {
+            t("settings.keys.reset.none.sp", "Every key is as the Standard layout has it")
+        }
+        (false, KeyStyle::SoftProjector) => {
+            t("settings.keys.reset.none.spj", "Every key is as the SoftProjector layout has it")
+        }
+    }
+    .to_owned()
+}
+
+/// Reset to Defaults: every row back to what the layout chosen says, and the keys added out.
+pub fn reset(state: &mut HomeState) {
+    state.keys.reset();
+}
+
+/// A changed row's note: "Default: Clear All".
+pub fn default_words(action: KeyAction) -> String {
+    tf("settings.keys.default", "Default: {action}", &[("action", &action.words())])
+}
+
+/// The line under the table when a slides' action has no key left: "No key does Next Slide
+/// now." It names only Next, Previous, First and Last: the clears have their buttons, and the
+/// newer actions have no key as they come, so naming them would never let the line go.
+pub fn none_line(table: &KeyTable, f_keys: bool) -> String {
+    let none = [KeyAction::Next, KeyAction::Previous, KeyAction::First, KeyAction::Last]
+        .into_iter()
+        .filter(|action| table.keys_for(*action, f_keys).is_empty())
+        .map(KeyAction::words)
+        .reduce(|all, action| tf("keys.list.or", "{a} or {b}", &[("a", &all), ("b", &action)]));
+    none.map(|actions| tf("settings.keys.none", "No key does {actions} now.", &[("actions", &actions)]))
+        .unwrap_or_default()
+}
+
+/// What an added row says of itself: a letter takes over from the group it jumped to; other
+/// letters, and digits, still type a reference in Bible.
+fn added_note(key: ShowKey) -> String {
+    if !key.is_letter_or_digit() {
+        return t("settings.keys.added", "Added").to_owned();
+    }
+    let group = sp_model::GROUP_KEYS.iter().find(|(letter, _)| letter.to_string() == key.name());
+    match group {
+        Some((_, names)) => tf(
+            "settings.keys.added.group",
+            "Added \u{b7} no longer jumps to {group}",
+            &[("group", &super::group_shown(names))],
+        ),
+        None => t("settings.keys.added.types", "Added \u{b7} in Bible it still types").to_owned(),
+    }
+}
+
+/// The note under the table: what Esc does first, and on a Mac where its F keys are.
+fn foot_note(mac: bool) -> String {
+    let esc =
+        t("settings.keys.esc_first", "Whatever Esc does here, it closes an open menu, window or the find box first.");
+    if !mac {
+        return esc.to_owned();
+    }
+    let f_keys = t(
+        "settings.keys.mac_f_keys",
+        "The F keys are the Mac\u{2019}s own (brightness, sound), so they aren\u{2019}t here.",
+    );
+    format!("{esc} {f_keys}")
+}
+
+/// The card.
+pub fn keys_card(ui: &mut egui::Ui, state: &mut HomeState) {
+    let f_keys = state.keys_card.f_keys();
+    let mut asked = Asked::default();
+    parts::framed(
+        ui,
+        |_| {},
+        |ui| {
+            head(ui, state, f_keys, &mut asked);
+            layout_line(ui, state, f_keys, &mut asked);
+            let chooser = chooser_width(ui);
+            table_head(ui);
+            // A chooser's list is as tall as its 22 lines where the window has the room. The
+            // toolkit gives a new list's area 400 points whatever its chooser asks for
+            // (`default_area_size`), so that is raised while the choosers are made, and put back.
+            let ctx = ui.ctx().clone();
+            let usual = ctx.global_style().spacing.default_area_size;
+            ctx.global_style_mut(|style| style.spacing.default_area_size.y = usual.y.max(LIST + 60.0));
+            for key in state.keys.listed(f_keys) {
+                key_row(ui, state, f_keys, key, chooser, &mut asked);
+            }
+            ctx.global_style_mut(|style| style.spacing.default_area_size = usual);
+            notes(ui, state, f_keys);
+        },
+    );
+    if asked.reset {
+        reset(state);
+    }
+    if let Some(style) = asked.style
+        && style != state.keys.style
+    {
+        state.keys.set_style(style);
+    }
+    if let Some((key, action)) = asked.set {
+        state.keys.set(key, action);
+    }
+    if let Some(key) = asked.remove {
+        state.keys.remove(key);
+    }
+}
+
+/// What was asked of the card in a frame, carried out once it is drawn.
+#[derive(Default)]
+struct Asked {
+    reset: bool,
+    style: Option<KeyStyle>,
+    set: Option<(ShowKey, KeyAction)>,
+    remove: Option<ShowKey>,
+}
+
+/// The card's head: its title and its line in small capitals, and at the right Reset to
+/// Defaults, which never moves. Where the window is too narrow for all of them on one line,
+/// the line in capitals goes under the title, and then the key under that.
+fn head(ui: &mut egui::Ui, state: &HomeState, f_keys: bool, asked: &mut Asked) {
+    let width = ui.available_width();
+    let font = FontId::proportional(12.5);
+    let reset_words = t("settings.keys.reset", "Reset to Defaults");
+    let reset_wide = parts::key_size(ui, reset_words).x;
+    let keys_wide = reset_wide;
+    let title =
+        parts::lines(ui, t("settings.keys.show.title", "Running the show"), semibold(15.0), TEXT, f32::INFINITY, 21.0);
+    let about = t("settings.keys.show.about", "What each key does").to_uppercase();
+    let about_font = crate::studio::fixed(CAPS);
+    let about_wide = spaced(ui, &about, about_font.clone(), TEXT_FAINT, CAPS_SPACING).size().x;
+    let title_wide = title.size().x;
+    let one_line = title_wide + 10.0 + about_wide + 10.0 + keys_wide <= width;
+    let keys_beside = title_wide + 10.0 + keys_wide <= width;
+    let (place, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
+    ui.painter().galley(pos2(place.min.x, place.center().y - title.size().y / 2.0), title, TEXT);
+    let about_at = |ui: &egui::Ui, at: egui::Pos2| {
+        paint_spaced(ui, at, Align2::LEFT_CENTER, &about, about_font.clone(), TEXT_FAINT, CAPS_SPACING);
+    };
+    let keys_place = if one_line {
+        about_at(ui, pos2(place.min.x + title_wide + 10.0, place.center().y + 1.0));
+        place
+    } else {
+        let (line, _) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+        about_at(ui, pos2(line.min.x, line.center().y));
+        if keys_beside {
+            place
+        } else {
+            ui.add_space(4.0);
+            ui.allocate_exact_size(vec2(width, 30.0), Sense::hover()).0
+        }
+    };
+    let reset_at = Rect::from_min_size(pos2(keys_place.max.x - reset_wide, keys_place.min.y), vec2(reset_wide, 30.0));
+    // Reset to Defaults: always there, greyed while there is nothing to reset.
+    let lit = differs(&state.keys, f_keys);
+    let reset = flat_button(ui, reset_at, ui.scope_id().with("reset keys"), reset_words, font, Flat::Plain, lit);
+    asked.reset = reset.on_hover_text(reset_hint(&state.keys, f_keys)).clicked();
+    ui.add_space(10.0);
+}
+
+/// The Key layout line: its caption in the key's column, the switch of two halves, and a line
+/// saying what the layout chosen is, which keeps the room of the longer of the two; beside the
+/// switch, or under it where the window leaves it too little room there.
+fn layout_line(ui: &mut egui::Ui, state: &HomeState, f_keys: bool, asked: &mut Asked) {
+    let width = ui.available_width();
+    let font = FontId::proportional(12.0);
+    let line_left = KEY_COLUMN + BETWEEN + SWITCH + BETWEEN;
+    let beside = width - line_left >= 220.0;
+    let room = if beside { width - line_left } else { width };
+    let line_of = |ui: &egui::Ui, style| {
+        parts::lines(ui, style_line(style, !f_keys), font.clone(), TEXT_FAINT, room, LINE_HEIGHT)
+    };
+    // Two lines' room at least, and as much as the longer layout's line takes.
+    let line_room = [KeyStyle::SoftPresenter, KeyStyle::SoftProjector]
+        .into_iter()
+        .map(|style| line_of(ui, style).size().y)
+        .fold(2.0 * LINE_HEIGHT, f32::max);
+    let first = if beside { line_room.max(30.0) } else { 30.0 };
+    let (place, _) = ui.allocate_exact_size(vec2(width, first), Sense::hover());
+    let middle = place.center().y;
+    // The language's usual words, or its short form where they are too long for the column.
+    let (key, english) = tk("settings.keys.style.caption", "Key layout");
+    let caption = crate::studio::within(ui, key, english, fixed_semibold(CAPS), CAPS_SPACING, KEY_COLUMN, true);
+    paint_spaced(
+        ui,
+        pos2(place.min.x, middle),
+        Align2::LEFT_CENTER,
+        &caption,
+        fixed_semibold(CAPS),
+        TEXT_DIM,
+        CAPS_SPACING,
+    );
+    let track = Rect::from_min_size(pos2(place.min.x + KEY_COLUMN + BETWEEN, middle - 15.0), vec2(SWITCH, 30.0));
+    let halves = [
+        t("settings.keys.style.softpresenter", "Standard"),
+        t("settings.keys.style.softprojector", "Like SoftProjector"),
+    ];
+    let styles = [KeyStyle::SoftPresenter, KeyStyle::SoftProjector];
+    let chosen = styles.iter().position(|style| *style == state.keys.style);
+    let clicked = even_switch(ui, "key layout", track, &halves, &[], chosen, FontId::proportional(12.5));
+    if let Some(at) = clicked {
+        asked.style = Some(styles[at]);
+    }
+    let line = line_of(ui, state.keys.style);
+    if beside {
+        ui.painter().galley(pos2(place.min.x + line_left, middle - line.size().y / 2.0), line, TEXT_FAINT);
+    } else {
+        ui.add_space(6.0);
+        let (under, _) = ui.allocate_exact_size(vec2(width, line_room), Sense::hover());
+        ui.painter().galley(pos2(under.min.x, under.center().y - line.size().y / 2.0), line, TEXT_FAINT);
+    }
+    ui.add_space(12.0);
+}
+
+/// How wide every chooser is: what the longest action's name needs in the language set, with
+/// the arrow, and 200 at least, so that no choice ever changes its size.
+fn chooser_width(ui: &egui::Ui) -> f32 {
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let names: Vec<String> = KeyAction::ALL.iter().map(|action| action.words()).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let spacing = ui.spacing();
+    let around = 2.0 * spacing.button_padding.x + spacing.icon_spacing + spacing.icon_width;
+    (widest(ui, &names, &font) + around + 2.0).ceil().max(CHOOSER)
+}
+
+/// The table's head: KEY and DOES over their columns.
+fn table_head(ui: &mut egui::Ui) {
+    let width = ui.available_width();
+    let (place, _) = ui.allocate_exact_size(vec2(width, 28.0), Sense::hover());
+    let middle = place.min.y + 12.0;
+    let heading = |left: f32, words: &str| {
+        paint_spaced(
+            ui,
+            pos2(place.min.x + left, middle),
+            Align2::LEFT_CENTER,
+            &words.to_uppercase(),
+            fixed_semibold(CAPS),
+            TEXT_DIM,
+            CAPS_SPACING,
+        );
+    };
+    heading(0.0, t("settings.keys.col.key", "Key"));
+    heading(KEY_COLUMN + BETWEEN, t("settings.keys.col.does", "Does"));
+}
+
+/// A line of a chooser's list.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Line {
+    Heading(&'static str),
+    Action(KeyAction),
+    Separator,
+}
+
+/// What every chooser lists: the actions in their three groups, each under its heading, then a
+/// separator and Nothing.
+fn chooser_list() -> Vec<Line> {
+    let mut list = Vec::new();
+    for (group, heading) in [
+        (ActionGroup::Clear, t("settings.keys.group.clear", "Clear")),
+        (ActionGroup::Slides, t("settings.keys.group.slides", "Slides")),
+        (ActionGroup::PlaylistViews, t("settings.keys.group.playlist_views", "Playlist and views")),
+    ] {
+        list.push(Line::Heading(heading));
+        list.extend(KeyAction::ALL.into_iter().filter(|action| action.group() == group).map(Line::Action));
+    }
+    list.push(Line::Separator);
+    list.push(Line::Action(KeyAction::Nothing));
+    list
+}
+
+/// One key's row: a line over it, the key's cap, its chooser, and at the right a changed row's
+/// default or an added key's note, and an added key's ×.
+fn key_row(ui: &mut egui::Ui, state: &mut HomeState, f_keys: bool, key: ShowKey, chooser: f32, asked: &mut Asked) {
+    let width = ui.available_width();
+    let (place, _) = ui.allocate_exact_size(vec2(width, ROW), Sense::hover());
+    ui.painter().hline(place.x_range(), place.min.y + 0.5, Stroke::new(1.0, LINE));
+    let middle = place.center().y;
+    // The cap, as the list of keys draws one; a name too long for its column is cut short, and
+    // said whole under the pointer.
+    let cap = key.cap_for(!f_keys);
+    let cap_font = fixed_semibold(11.0);
+    let galley = parts::one_line(ui, &cap, cap_font, TEXT, KEY_COLUMN - 14.0);
+    let cap_at = Rect::from_min_size(pos2(place.min.x, middle - 12.0), vec2((galley.size().x + 14.0).max(44.0), 24.0));
+    ui.painter().rect_filled(cap_at, 6.0, SELECTED);
+    if galley.elided {
+        ui.interact(cap_at, ui.scope_id().with(("key cap", key.name())), Sense::hover()).on_hover_text(cap.as_str());
+    }
+    ui.painter().galley(cap_at.center() - galley.size() / 2.0, galley, TEXT);
+    // The chooser, one width on every row.
+    let now = state.keys.action(key);
+    let cell =
+        Rect::from_min_size(pos2(place.min.x + KEY_COLUMN + BETWEEN, place.min.y + 1.0), vec2(chooser, ROW - 1.0));
+    let mut inside = ui.new_child(egui::UiBuilder::new().max_rect(cell).layout(Layout::left_to_right(Align::Center)));
+    // As tall as the whole list where the window has that much under the row or over it.
+    let window = ui.ctx().content_rect();
+    let list_room = ((window.max.y - cell.max.y).max(cell.min.y - window.min.y) - 24.0).clamp(160.0, LIST);
+    let shown = egui::ComboBox::from_id_salt(("key does", key.name()))
+        .selected_text(now.words())
+        .width(chooser)
+        .height(list_room)
+        .show_ui(&mut inside, |ui| {
+            let mut chosen = None;
+            for line in chooser_list() {
+                match line {
+                    Line::Heading(heading) => {
+                        ui.add_space(4.0);
+                        let heading =
+                            egui::RichText::new(heading.to_uppercase()).font(fixed_semibold(10.5)).color(TEXT_FAINT);
+                        ui.add(egui::Label::new(heading).selectable(false));
+                    }
+                    Line::Separator => {
+                        ui.separator();
+                    }
+                    Line::Action(action) => {
+                        if ui.add(egui::Button::selectable(now == action, action.words())).clicked() {
+                            chosen = Some(action);
+                        }
+                    }
+                }
+            }
+            chosen
+        });
+    if let Some(action) = shown.inner.flatten() {
+        asked.set = Some((key, action));
+    }
+    // The note, in a column of one width on every row, and an added key's ×.
+    let added = state.keys.is_added(key) && !rows(f_keys).contains(&key);
+    let note = if added {
+        added_note(key)
+    } else if state.keys.is_changed(key) {
+        default_words(KeyTable::default_action(state.keys.style, key))
+    } else {
+        String::new()
+    };
+    let note_left = place.min.x + KEY_COLUMN + BETWEEN + chooser + BETWEEN;
+    let note_right = if added { place.max.x - 28.0 - 10.0 } else { place.max.x };
+    if !note.is_empty() && note_right - note_left > 20.0 {
+        let galley = parts::one_line(ui, &note, FontId::proportional(12.0), TEXT_DIM, note_right - note_left);
+        let cut = galley.elided;
+        let at = Rect::from_min_size(pos2(note_left, middle - galley.size().y / 2.0), galley.size());
+        ui.painter().galley(at.min, galley, TEXT_DIM);
+        if cut {
+            ui.interact(at, ui.scope_id().with(("key note", key.name())), Sense::hover()).on_hover_text(note.as_str());
+        }
+    }
+    if added {
+        let at = Rect::from_min_size(pos2(place.max.x - 28.0, middle - 14.0), vec2(28.0, 28.0));
+        let hint = tf("settings.keys.remove", "Take {key} out of the list", &[("key", &cap)]);
+        if icon_key(ui, at, ui.scope_id().with(("remove key", key.name())), Icon::Close, 10.0, true)
+            .on_hover_text(hint)
+            .clicked()
+        {
+            asked.remove = Some(key);
+        }
+    }
+}
+
+/// Under the table: what Esc does first (and, on a Mac, where its F keys are), and a line of
+/// its own, always kept, for a slides' action no key does.
+fn notes(ui: &mut egui::Ui, state: &HomeState, f_keys: bool) {
+    let width = ui.available_width();
+    let top = ui.cursor().min;
+    ui.painter().hline(top.x..=top.x + width, top.y + 0.5, Stroke::new(1.0, LINE));
+    ui.add_space(10.0);
+    let font = FontId::proportional(12.0);
+    let note = parts::lines(ui, &foot_note(!f_keys), font.clone(), TEXT_FAINT, width, LINE_HEIGHT);
+    let (place, _) = ui.allocate_exact_size(vec2(width, note.size().y), Sense::hover());
+    ui.painter().galley(place.min, note, TEXT_FAINT);
+    let (place, _) = ui.allocate_exact_size(vec2(width, LINE_HEIGHT), Sense::hover());
+    let none = none_line(&state.keys, f_keys);
+    if !none.is_empty() {
+        let galley = parts::one_line(ui, &none, font, TEXT_DIM, width);
+        let cut = galley.elided;
+        ui.painter().galley(pos2(place.min.x, place.center().y - galley.size().y / 2.0), galley, TEXT_DIM);
+        if cut {
+            ui.interact(place, ui.scope_id().with("no key does"), Sense::hover()).on_hover_text(none.as_str());
+        }
+    }
+    ui.add_space(8.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::home::settings::{Pane, settings_ui};
+    use crate::i18n::Language;
+    use crate::key_table::Pressed;
+    use egui::{pos2, vec2};
+    use sp_engine::Show;
+    use winit::keyboard::{Key, KeyCode, NamedKey};
+
+    /// Settings at Keys, as on a computer with the F rows (`f_keys`) or a Mac.
+    fn state_on(f_keys: bool) -> HomeState {
+        let mut state = HomeState { preferences_pane: Pane::Keys, ..HomeState::default() };
+        state.keys_card.f_keys = Some(f_keys);
+        state
+    }
+
+    /// What two frames of the page drew in a window `width` wide and tall enough for all of it:
+    /// every piece of words with its place, and every block (a card, a key, a chooser).
+    fn page(ctx: &egui::Context, state: &mut HomeState, width: f32) -> (Vec<(String, Rect)>, Vec<[i32; 4]>) {
+        fn blocks(shape: &egui::Shape, into: &mut Vec<[i32; 4]>) {
+            match shape {
+                egui::Shape::Rect(block) => {
+                    let tenths = |x: f32| (x * 10.0).round() as i32;
+                    let rect = block.rect;
+                    into.push([tenths(rect.min.y), tenths(rect.min.x), tenths(rect.width()), tenths(rect.height())]);
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| blocks(shape, into)),
+                _ => {}
+            }
+        }
+        let show = Show::new(Vec::new());
+        let (mut words, mut drawn_blocks) = (Vec::new(), Vec::new());
+        for _ in 0..2 {
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 4000.0))),
+                ..egui::RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| settings_ui(ui, state, &show));
+            words = words_placed(&output);
+            drawn_blocks.clear();
+            output.shapes.iter().for_each(|clipped| blocks(&clipped.shape, &mut drawn_blocks));
+            output.drop_without_applying_deltas();
+        }
+        drawn_blocks.sort_unstable();
+        drawn_blocks.dedup();
+        (words, drawn_blocks)
+    }
+
+    /// Every piece of words a frame drew, with the room it was laid out in (which, unlike the
+    /// ink of its letters, is the same whatever the words are).
+    fn words_placed(output: &egui::FullOutput) -> Vec<(String, Rect)> {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect)>) {
+            match shape {
+                egui::Shape::Text(text) => {
+                    into.push((text.galley.text().to_owned(), text.galley.rect.translate(text.pos.to_vec2())));
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let mut into = Vec::new();
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut into));
+        into
+    }
+
+    fn shown(words: &[(String, Rect)], wanted: &str) -> bool {
+        words.iter().any(|(have, _)| have == wanted)
+    }
+
+    fn place(words: &[(String, Rect)], wanted: &str) -> Rect {
+        words.iter().find(|(have, _)| have == wanted).unwrap_or_else(|| panic!("{wanted} isn\u{2019}t drawn")).1
+    }
+
+    /// One frame of Settings in a window 1280 by 1400, tall enough for a chooser's whole list.
+    fn frame(ctx: &egui::Context, state: &mut HomeState, events: Vec<egui::Event>) -> egui::FullOutput {
+        let show = Show::new(Vec::new());
+        let raw = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 1400.0))),
+            events,
+            ..egui::RawInput::default()
+        };
+        ctx.run_ui(raw, |ui| settings_ui(ui, state, &show))
+    }
+
+    /// Clicks at `at` in that window.
+    fn click_at(ctx: &egui::Context, state: &mut HomeState, at: egui::Pos2) {
+        use egui::{Event, Modifiers};
+        let press = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        for events in [vec![Event::PointerMoved(at), press(true)], vec![press(false)]] {
+            frame(ctx, state, events).drop_without_applying_deltas();
+        }
+    }
+
+    /// Clicks the words `name` where that window drew them first (`last`: last, in an open
+    /// list). False when they weren't drawn.
+    fn click_where(ctx: &egui::Context, state: &mut HomeState, name: &str, last: bool) -> bool {
+        let mut at = None;
+        for _ in 0..2 {
+            let output = frame(ctx, state, vec![]);
+            at = if last {
+                crate::studio::tests::last_place_of(&output, name)
+            } else {
+                crate::studio::tests::place_of(&output, name)
+            };
+            output.drop_without_applying_deltas();
+        }
+        let Some(at) = at else { return false };
+        click_at(ctx, state, at);
+        true
+    }
+
+    fn click(ctx: &egui::Context, state: &mut HomeState, _show: &Show, name: &str) -> bool {
+        click_where(ctx, state, name, false)
+    }
+
+    fn click_last(ctx: &egui::Context, state: &mut HomeState, _show: &Show, name: &str) -> bool {
+        click_where(ctx, state, name, true)
+    }
+
+    fn key(named: NamedKey) -> Pressed {
+        Pressed::from(Key::Named(named))
+    }
+
+    fn typed(letter: &str) -> Pressed {
+        Pressed::from(Key::Character(letter.into()))
+    }
+
+    #[test]
+    fn choosing_an_action_in_a_row_changes_the_table_and_shows_its_default() {
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut state = state_on(false);
+        // Esc's chooser, the first on the page, opens its list: the three groups under their
+        // headings, in order, then Nothing.
+        assert!(click(&ctx, &mut state, &show, "Clear All"), "Esc\u{2019}s chooser");
+        frame(&ctx, &mut state, vec![]).drop_without_applying_deltas();
+        let open = frame(&ctx, &mut state, vec![]);
+        let mut above = f32::MIN;
+        // In a window with the room, the whole list shows without scrolling.
+        let listed = [
+            "CLEAR",
+            "Hide the Words",
+            "Clear Slide",
+            "Clear Media",
+            "Clear Props",
+            "Clear Audio",
+            "Clear Messages",
+            "SLIDES",
+            "Show Selected",
+            "Show Again",
+            "PLAYLIST AND VIEWS",
+            "Add to Playlist",
+            "Remove from Playlist",
+            "Go to Bible",
+            "Go to Service",
+            "Nothing",
+        ];
+        for words in listed {
+            let at = crate::studio::tests::last_place_of(&open, words).unwrap_or_else(|| panic!("{words} is listed"));
+            assert!(at.y > above, "{words} comes in its place");
+            above = at.y;
+        }
+        let usual = ctx.global_style().spacing.default_area_size;
+        assert_eq!(usual, egui::Style::default().spacing.default_area_size, "the toolkit\u{2019}s own is put back");
+        open.drop_without_applying_deltas();
+        use KeyAction as A;
+        let actions = |actions: &[KeyAction]| actions.iter().map(|action| Line::Action(*action)).collect::<Vec<_>>();
+        let mut whole = vec![Line::Heading("Clear")];
+        whole.extend(actions(&[
+            A::ClearAll,
+            A::HideWords,
+            A::ClearSlide,
+            A::ClearMedia,
+            A::ClearProps,
+            A::ClearAudio,
+            A::ClearMessages,
+        ]));
+        whole.push(Line::Heading("Slides"));
+        whole.extend(actions(&[A::ShowSelected, A::ShowAgain, A::Next, A::Previous, A::First, A::Last]));
+        whole.push(Line::Heading("Playlist and views"));
+        whole.extend(actions(&[A::AddToPlaylist, A::RemoveFromPlaylist, A::GoToBible, A::GoToService]));
+        whole.extend([Line::Separator, Line::Action(A::Nothing)]);
+        assert_eq!(chooser_list(), whole);
+        assert!(click_last(&ctx, &mut state, &show, "Clear Slide"));
+        assert_eq!(state.keys.action(ShowKey::Escape), KeyAction::ClearSlide);
+        let (words, _) = page(&ctx, &mut state, 1280.0);
+        assert!(shown(&words, "Default: Clear All"), "the row says what it was");
+        // The row's default chosen again puts it back, and its note goes.
+        assert!(click(&ctx, &mut state, &show, "Clear Slide"), "Esc\u{2019}s chooser again");
+        assert!(click_last(&ctx, &mut state, &show, "Clear All"));
+        assert_eq!(state.keys.action(ShowKey::Escape), KeyAction::ClearAll);
+        let (words, _) = page(&ctx, &mut state, 1280.0);
+        assert!(!words.iter().any(|(have, _)| have.starts_with("Default:")));
+    }
+
+    #[test]
+    fn the_style_switch_sets_every_row_and_reset_returns_to_the_style() {
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut state = state_on(true);
+        state.keys.set(ShowKey::Space, KeyAction::Nothing);
+        assert!(click(&ctx, &mut state, &show, "Like SoftProjector"));
+        assert_eq!(state.keys.style, KeyStyle::SoftProjector);
+        assert_eq!(state.keys.action(ShowKey::F5), KeyAction::ShowSelected);
+        assert_eq!(state.keys.action(ShowKey::F1), KeyAction::ClearAll);
+        assert_eq!(state.keys.action(ShowKey::Space), KeyAction::Next, "a changed row is the layout\u{2019}s again");
+        assert_eq!(reset_hint(&state.keys, true), "Every key is as the SoftProjector layout has it");
+        // A row changed and a key added: Reset to Defaults goes back to the layout chosen, and
+        // the key added goes.
+        state.keys.set(ShowKey::F2, KeyAction::ClearSlide);
+        state.keys.add(&typed("b"), true).expect("added");
+        assert_eq!(reset_hint(&state.keys, true), "Every key back to the SoftProjector layout; added keys go");
+        assert!(click(&ctx, &mut state, &show, "Reset to Defaults"));
+        assert_eq!(state.keys.action(ShowKey::F2), KeyAction::AddToPlaylist);
+        assert_eq!(state.keys.listed(true), crate::key_table::rows(true));
+        assert_eq!(state.keys.style, KeyStyle::SoftProjector, "the layout stays");
+        assert!(click(&ctx, &mut state, &show, "Standard"));
+        assert_eq!(state.keys.style, KeyStyle::SoftPresenter);
+        assert_eq!(state.keys.action(ShowKey::F5), KeyAction::ClearAudio);
+        assert_eq!(reset_hint(&state.keys, true), "Every key is as the Standard layout has it");
+        // Choosing a layout leaves the keys added as they are.
+        state.keys.add(&typed("b"), true).expect("added");
+        state.keys.set(ShowKey::Other(KeyCode::KeyB), KeyAction::Next);
+        assert!(click(&ctx, &mut state, &show, "Like SoftProjector"));
+        assert_eq!(state.keys.action(ShowKey::Other(KeyCode::KeyB)), KeyAction::Next);
+        assert_eq!(state.keys.listed(true)[0], ShowKey::Other(KeyCode::KeyB));
+    }
+
+    #[test]
+    fn choosing_the_style_already_chosen_keeps_a_changed_row() {
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut state = state_on(false);
+        state.keys.set(ShowKey::Escape, KeyAction::ClearSlide);
+        assert!(click(&ctx, &mut state, &show, "Standard"), "the lit half");
+        assert_eq!(state.keys.style, KeyStyle::SoftPresenter);
+        assert_eq!(state.keys.action(ShowKey::Escape), KeyAction::ClearSlide, "nothing changed");
+        // The other half still switches.
+        assert!(click(&ctx, &mut state, &show, "Like SoftProjector"));
+        assert_eq!(state.keys.action(ShowKey::Escape), KeyAction::HideWords);
+    }
+
+    #[test]
+    fn the_style_line_says_what_each_style_does_on_and_off_a_mac() {
+        let lines = [
+            (KeyStyle::SoftPresenter, false, "Esc and F1 clear everything; F2 to F6 clear one layer each."),
+            (
+                KeyStyle::SoftPresenter,
+                true,
+                "Esc clears everything; the layer keys under the preview clear one layer each.",
+            ),
+            (
+                KeyStyle::SoftProjector,
+                false,
+                "As in SoftProjector: Esc hides the words, F5 shows, F2 adds to the playlist; F1 clears all.",
+            ),
+            (KeyStyle::SoftProjector, true, "As in SoftProjector, Esc hides the words and leaves the background up."),
+        ];
+        for (style, mac, line) in lines {
+            assert_eq!(style_line(style, mac), line);
+            // On the page, under its caption and beside the switch's two halves.
+            let ctx = crate::studio::tests::styled();
+            let mut state = state_on(!mac);
+            state.keys.set_style(style);
+            let (words, _) = page(&ctx, &mut state, 1280.0);
+            for wanted in [line, "KEY LAYOUT", "Standard", "Like SoftProjector", "KEY", "DOES"] {
+                assert!(shown(&words, wanted), "{style:?}, mac {mac}: {wanted}");
+            }
+            // The Mac's note under the table, and only there.
+            let mac_note = "Whatever Esc does here, it closes an open menu, window or the find box first. The F keys are the Mac\u{2019}s own (brightness, sound), so they aren\u{2019}t here.";
+            assert_eq!(shown(&words, mac_note), mac);
+            let note = "Whatever Esc does here, it closes an open menu, window or the find box first.";
+            assert_eq!(shown(&words, note), !mac);
+            // A Mac has nine rows, a PC twenty-one: F12 only off a Mac.
+            assert_eq!(shown(&words, "F12"), !mac);
+            for cap in ["Esc", "Space", "\u{2192}", "\u{2190}", "Page Down", "Page Up", "Home", "End", "."] {
+                assert!(shown(&words, cap), "mac {mac}: the row of {cap}");
+            }
+        }
+    }
+
+    #[test]
+    fn no_key_doing_next_is_said_under_the_table() {
+        let ctx = crate::studio::tests::styled();
+        let mut state = state_on(false);
+        // As it comes nothing is said, though no key does Show Selected or Add to Playlist.
+        assert_eq!(none_line(&state.keys, false), "");
+        for key in [ShowKey::Space, ShowKey::Right, ShowKey::PageDown] {
+            state.keys.set(key, KeyAction::Nothing);
+        }
+        assert_eq!(none_line(&state.keys, false), "No key does Next Slide now.");
+        let (words, _) = page(&ctx, &mut state, 1280.0);
+        assert!(shown(&words, "No key does Next Slide now."));
+        for key in [ShowKey::Left, ShowKey::PageUp, ShowKey::End] {
+            state.keys.set(key, KeyAction::ShowAgain);
+        }
+        assert_eq!(none_line(&state.keys, false), "No key does Next Slide or Previous Slide or Last Slide now.");
+        // In SoftProjector's layout on a Mac no key does Clear All: its button does, and the
+        // line says nothing of it.
+        let mut state = state_on(false);
+        state.keys.set_style(KeyStyle::SoftProjector);
+        assert_eq!(none_line(&state.keys, false), "");
+        // A key added that does Next counts.
+        for key in [ShowKey::Space, ShowKey::Right, ShowKey::PageDown] {
+            state.keys.set(key, KeyAction::Nothing);
+        }
+        state.keys.add(&typed("n"), false).expect("added");
+        state.keys.set(ShowKey::Other(KeyCode::KeyN), KeyAction::Next);
+        assert_eq!(none_line(&state.keys, false), "");
+    }
+
+    #[test]
+    fn a_key_added_to_the_table_has_its_note_and_a_cross_that_takes_it_out() {
+        let ctx = crate::studio::tests::styled();
+        let mut state = state_on(false);
+        state.keys.set_style(KeyStyle::SoftProjector);
+        for pressed in [typed("b"), typed("1"), typed(","), key(NamedKey::F1)] {
+            state.keys.add(&pressed, false).expect("added");
+        }
+        // Newest first, over the layout's rows; an F key on a Mac does what the layout gives it.
+        assert_eq!(state.keys.listed(false)[0], ShowKey::F1);
+        assert_eq!(state.keys.action(ShowKey::F1), KeyAction::ClearAll);
+        let drawn = frame(&ctx, &mut state, vec![]);
+        drawn.drop_without_applying_deltas();
+        let drawn = frame(&ctx, &mut state, vec![]);
+        let words = words_placed(&drawn);
+        drawn.drop_without_applying_deltas();
+        assert!(shown(&words, "Added \u{b7} no longer jumps to Bridge 1"), "a group\u{2019}s letter");
+        assert!(shown(&words, "Added \u{b7} in Bible it still types"), "a digit");
+        assert_eq!(words.iter().filter(|(have, _)| have == "Added").count(), 2, "the comma and F1");
+        assert!(place(&words, "B").center().y < place(&words, "Esc").center().y, "above the layout\u{2019}s rows");
+        // Its × is at the right end of its row, under Reset to Defaults.
+        let at = pos2(place(&words, "Reset to Defaults").max.x - 1.0, place(&words, "F1").center().y);
+        click_at(&ctx, &mut state, at);
+        assert!(!state.keys.is_added(ShowKey::F1), "F1 is out of the list");
+        assert_eq!(state.keys.listed(false).len(), crate::key_table::rows(false).len() + 3);
+    }
+
+    #[test]
+    fn reset_is_lit_only_while_a_row_listed_here_differs_or_a_key_was_added() {
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        // A PC's file with F2 changed, read on a Mac: no row here differs.
+        let mut state = state_on(false);
+        state.keys.set(ShowKey::F2, KeyAction::HideWords);
+        assert!(differs(&state.keys, true) && !differs(&state.keys, false));
+        assert!(click(&ctx, &mut state, &show, "Reset to Defaults"));
+        assert_eq!(state.keys.action(ShowKey::F2), KeyAction::HideWords, "greyed: it takes no click");
+        state.keys.add(&typed("b"), false).expect("added");
+        assert!(differs(&state.keys, false), "a key added lights it");
+        state.keys.remove(ShowKey::Other(KeyCode::KeyB));
+        state.keys.set(ShowKey::Space, KeyAction::Nothing);
+        assert!(differs(&state.keys, false), "and so does a row changed");
+    }
+
+    #[test]
+    fn nothing_on_the_keys_page_moves_when_a_choice_or_the_style_changes() {
+        for language in Language::ALL {
+            crate::i18n::with_language(language, || {
+                for (width, f_keys) in [(820.0, true), (820.0, false), (1280.0, true), (1280.0, false)] {
+                    let said = format!("{language:?} at {width}, F keys {f_keys}");
+                    let ctx = crate::studio::tests::styled();
+                    let mut state = state_on(f_keys);
+                    // What may change: what the choosers say, the style's line and a changed
+                    // row's note. Everything else stays as it is.
+                    let mut changing: Vec<String> = KeyAction::ALL.iter().map(|action| action.words()).collect();
+                    for style in [KeyStyle::SoftPresenter, KeyStyle::SoftProjector] {
+                        changing.push(style_line(style, !f_keys).to_owned());
+                    }
+                    changing.push(default_words(KeyAction::ClearAll));
+                    changing.push(default_words(KeyAction::HideWords));
+                    let still = |words: &[(String, Rect)]| -> Vec<(String, Rect)> {
+                        words.iter().filter(|(have, _)| !changing.contains(have)).cloned().collect()
+                    };
+                    // Where each chooser's words start: one for every row.
+                    let choosers = |words: &[(String, Rect)]| -> Vec<(i32, i32)> {
+                        let names: Vec<String> = KeyAction::ALL.iter().map(|action| action.words()).collect();
+                        words
+                            .iter()
+                            .filter(|(have, _)| names.contains(have))
+                            .map(|(_, rect)| ((rect.min.x * 10.0).round() as i32, (rect.min.y * 10.0).round() as i32))
+                            .collect()
+                    };
+                    let standard = page(&ctx, &mut state, width);
+                    assert_eq!(choosers(&standard.0).len(), crate::key_table::rows(f_keys).len(), "{said}");
+                    // The other layout: only the switch's lit half moves, to a half as large.
+                    state.keys.set_style(KeyStyle::SoftProjector);
+                    let softprojector = page(&ctx, &mut state, width);
+                    assert_eq!(still(&softprojector.0), still(&standard.0), "{said}: the layout moved words");
+                    assert_eq!(choosers(&softprojector.0), choosers(&standard.0), "{said}: a chooser moved");
+                    let only = |a: &[[i32; 4]], b: &[[i32; 4]]| -> Vec<[i32; 4]> {
+                        a.iter().filter(|block| !b.contains(block)).copied().collect()
+                    };
+                    let (was, now) = (only(&standard.1, &softprojector.1), only(&softprojector.1, &standard.1));
+                    assert_eq!((was.len(), now.len()), (1, 1), "{said}: only the lit half moves: {was:?} {now:?}");
+                    assert_eq!((was[0][0], was[0][2], was[0][3]), (now[0][0], now[0][2], now[0][3]), "{said}");
+                    let line = |words: &[(String, Rect)], style| place(words, style_line(style, !f_keys));
+                    let (one, other) =
+                        (line(&standard.0, KeyStyle::SoftPresenter), line(&softprojector.0, KeyStyle::SoftProjector));
+                    assert!((one.center().y - other.center().y).abs() <= 1.5, "{said}: the style\u{2019}s line");
+                    assert!((one.min.x - other.min.x).abs() <= 0.5, "{said}: the style\u{2019}s line");
+                    // A row changed: its note comes, and nothing else moves.
+                    state.keys.set(ShowKey::Escape, KeyAction::ClearSlide);
+                    let changed = page(&ctx, &mut state, width);
+                    let note = default_words(KeyAction::HideWords);
+                    let is_note = |have: &str| {
+                        let start = have.trim_end_matches('\u{2026}');
+                        start.chars().count() > 3 && note.starts_with(start)
+                    };
+                    assert!(changed.0.iter().any(|(have, _)| is_note(have)), "{said}: the changed row\u{2019}s note");
+                    let no_cut = |words: &[(String, Rect)]| -> Vec<(String, Rect)> {
+                        still(words).into_iter().filter(|(have, _)| !have.ends_with('\u{2026}')).collect()
+                    };
+                    assert_eq!(no_cut(&changed.0), no_cut(&softprojector.0), "{said}: a choice moved words");
+                    assert_eq!(choosers(&changed.0), choosers(&standard.0), "{said}: a choice moved a chooser");
+                    assert_eq!(changed.1, softprojector.1, "{said}: a choice moved a block");
+                    // Reset to Defaults, then the first layout again: as they were.
+                    reset(&mut state);
+                    let after = page(&ctx, &mut state, width);
+                    assert_eq!(after, softprojector, "{said}: Reset to Defaults");
+                    state.keys.set_style(KeyStyle::SoftPresenter);
+                    let back = page(&ctx, &mut state, width);
+                    assert_eq!(back, standard, "{said}: back to the first layout");
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn the_keys_page_stays_inside_the_narrowest_window_in_every_language() {
+        let right = 820.0 - crate::studio::GAP - 28.0;
+        for language in Language::ALL {
+            crate::i18n::with_language(language, || {
+                for f_keys in [true, false] {
+                    let ctx = crate::studio::tests::styled();
+                    let mut state = state_on(f_keys);
+                    state.keys.set_style(KeyStyle::SoftProjector);
+                    state.keys.set(ShowKey::Escape, KeyAction::RemoveFromPlaylist);
+                    for pressed in [typed("b"), typed("1"), key(NamedKey::Insert)] {
+                        state.keys.add(&pressed, f_keys).expect("added");
+                    }
+                    let (words, blocks) = page(&ctx, &mut state, 820.0);
+                    for (have, rect) in words.iter().filter(|(have, _)| !have.is_empty()) {
+                        assert!(
+                            rect.max.x <= right + 0.5,
+                            "{language:?}, F keys {f_keys}: \u{201c}{have}\u{201d} ends at {}",
+                            rect.max.x
+                        );
+                    }
+                    // The page's blocks (those that start in it) end inside its panel.
+                    let page_left = ((crate::studio::GAP + crate::studio::LEFT_WIDTH) * 10.0) as i32;
+                    for block in blocks.iter().filter(|block| block[1] > page_left) {
+                        let ends = (block[1] + block[2]) as f32 / 10.0;
+                        assert!(ends <= 820.0 - crate::studio::GAP + 0.5, "{language:?}: a block ends at {ends}");
+                    }
+                }
+            });
+        }
+    }
+}

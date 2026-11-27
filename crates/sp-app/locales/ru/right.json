@@ -1,7 +1,7 @@
 {
   "_note": "Russian; see topbar.json. The right column: the preview, the layer keys, Clear All, the tool tabs. The layer keys' names (right.layer.*) are set in capitals in a narrow key; where the usual word is too wide, its .short form is used.",
   "right.clear_all": "Очистить всё",
-  "right.clear_all.hint": "Очистить всё: убрать всё с экранов (Esc)",
+  "right.clear_all.hint": "Очистить всё: убрать всё с экранов",
   "right.layer.slide": "Слайд",
   "right.layer.slide.short": "Слайд",
   "right.layer.slide.clear": "Убрать слайд: убрать слова с экранов",

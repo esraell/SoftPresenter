@@ -736,7 +736,11 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 (
                     t("tools.hide", "Hide"),
                     Flat::On,
-                    crate::keys::clear_hint(t("tools.message.hide.hint", "Take this message off the screens"), "F6"),
+                    crate::keys::action_hint(
+                        &state.keys,
+                        t("tools.message.hide.hint", "Take this message off the screens"),
+                        crate::key_table::KeyAction::ClearMessages,
+                    ),
                 )
             } else {
                 (

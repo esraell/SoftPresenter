@@ -9,6 +9,7 @@ use sp_engine::Show;
 use super::{HomeState, Page, open_page};
 
 mod find_card;
+pub(crate) mod keys_card;
 pub(crate) mod parts;
 mod screens_page;
 use crate::i18n::{t, tf, tk, tn};
@@ -745,18 +746,32 @@ fn language_page(ui: &mut egui::Ui) {
     );
 }
 
-/// Settings › Keys: the switch for the keys on the buttons, and every key the list of keys (`?`)
-/// has, from the same list so the two always agree; then the menus' shortcuts.
+/// Settings › Keys, top to bottom: the switch for the keys on the buttons; Running the show,
+/// what each key that runs the show does (`keys_card`); and Always the same, the keys that
+/// can't be changed, from the list the list of keys (`?`) is made from, with the menus'
+/// shortcuts after them.
 fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
-    let about = t("settings.keys.about", "The keys that run the show, and the menu shortcuts.");
-    ui.label(egui::RichText::new(about).color(TEXT_DIM));
-    ui.add_space(8.0);
-    ui.checkbox(&mut state.keys_on_buttons, t("keys.show_on_buttons", "Show keys on buttons"));
-    ui.add_space(8.0);
+    card(
+        ui,
+        t("settings.keys.buttons.title", "On the buttons"),
+        t("settings.keys.buttons.about", "Key tags"),
+        None,
+        |ui| {
+            let size = on_off_size(ui);
+            let label = t("keys.show_on_buttons", "Show keys on buttons");
+            let about = t("settings.keys.buttons.note", "A small tag beside each button with its key");
+            row(ui, label, about, size, |ui, place| {
+                if on_off(ui, place, ui.scope_id().with("keys on buttons"), state.keys_on_buttons).clicked() {
+                    state.keys_on_buttons = !state.keys_on_buttons;
+                }
+            });
+        },
+    );
+    keys_card::keys_card(ui, state);
     // A key's own words never break (Space, then 1 … 9); a line breaks only between keys.
     let keys_words = |keys: &[String]| keys.iter().map(|key| key.replace(' ', "\u{a0}")).collect::<Vec<_>>().join("  ");
     let mut rows: Vec<(&str, String, String)> = Vec::new();
-    for (group, keys) in crate::keys::every_key() {
+    for (group, keys) in crate::keys::fixed_keys() {
         for (keys, what) in keys {
             rows.push((crate::keys::group_title(group), what, keys_words(&keys)));
         }
@@ -764,7 +779,27 @@ fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
     for (menu, command, key) in crate::menubar::shortcuts() {
         rows.push((menu, command.trim_end_matches('…').to_owned(), keys_words(&[key])));
     }
-    keys_table(ui, &rows);
+    card(
+        ui,
+        t("settings.keys.fixed.title", "Always the same"),
+        t("settings.keys.fixed.about", "Fixed keys \u{b7} press ? anywhere for the whole list"),
+        None,
+        |ui| {
+            keys_table(ui, &rows);
+            ui.add_space(8.0);
+        },
+    );
+}
+
+/// A group as Settings writes it: the fuller of its names ("Verse 1" for the group that
+/// "verse" names too), with a capital.
+pub(super) fn group_shown(names: &[&str]) -> String {
+    let name = names.iter().find(|name| name.contains(' ')).or(names.first()).copied().unwrap_or("");
+    let mut shown = name.to_owned();
+    if let Some(first) = shown.get_mut(0..1) {
+        first.make_ascii_uppercase();
+    }
+    shown
 }
 
 /// The Keys page's table, every other row striped: each row's group, what it does, and its keys,
@@ -1066,10 +1101,7 @@ fn groups_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
             }
             for ((key, names), used) in sp_model::GROUP_KEYS.iter().zip(uses.iter()) {
                 let name = names.iter().find(|name| name.contains(' ')).or(names.first()).copied().unwrap_or("");
-                let mut shown = name.to_owned();
-                if let Some(first) = shown.get_mut(0..1) {
-                    first.make_ascii_uppercase();
-                }
+                let shown = group_shown(names);
                 let (place, _) = ui.allocate_exact_size(vec2(width, 38.0), Sense::hover());
                 let painter = ui.painter();
                 let middle = place.center().y;
@@ -1308,9 +1340,10 @@ mod tests {
                 for (words, rect) in &drawn {
                     assert!(rect.max.x <= right + 0.5, "{language:?}: \u{201c}{words}\u{201d} ends at {}", rect.max.x);
                 }
-                // Each row's keys are drawn (as one piece of words; a long one wraps within it).
+                // Each fixed key's row is drawn (its keys as one piece of words; a long one wraps
+                // within it).
                 let keys = |keys: &[String]| keys.iter().map(|key| key.replace(' ', "\u{a0}")).collect::<Vec<_>>();
-                for (_, rows) in crate::keys::every_key() {
+                for (_, rows) in crate::keys::fixed_keys() {
                     for (row, what) in rows {
                         let wanted = keys(&row).join("  ");
                         assert!(drawn.iter().any(|(words, _)| *words == wanted), "{language:?}: the keys for {what}");

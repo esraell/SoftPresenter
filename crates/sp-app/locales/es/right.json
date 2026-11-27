@@ -1,7 +1,7 @@
 {
   "_note": "Español de España; see topbar.json. The layer keys' names (right.layer.*) are set in capitals and have a budget of ten letters; where the usual word is too long for the key, its .short form is used.",
   "right.clear_all": "Borrar todo",
-  "right.clear_all.hint": "Borrar todo: quitar todo de las pantallas (Esc)",
+  "right.clear_all.hint": "Borrar todo: quitar todo de las pantallas",
   "right.layer.slide": "Diapositiva",
   "right.layer.slide.short": "Diapo.",
   "right.layer.slide.clear": "Quitar la diapositiva: sacar la letra de las pantallas",

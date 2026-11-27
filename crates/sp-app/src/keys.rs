@@ -8,7 +8,8 @@
 //!   runs that macro, switches to that stage layout or plays that track. Shift-modifier-M
 //!   numbers the pictures and videos in the media strip, and 1 to 9 shows one. The numbers stay
 //!   four seconds, or until Escape, which then only puts them away.
-//! - `?` (and the round button in the top bar) opens the list of every key.
+//! - `?` (and the round button in the top bar) opens the list of every key. The keys that
+//!   Settings › Keys can change (`key_table`) are written there as the table has them now.
 //!
 //! The keys that run the show (Space, the arrows, Escape, the F keys off a Mac, the letters) are
 //! read in `main.rs` before the window draws; these are read here, in the window's frame.
@@ -17,6 +18,7 @@ use egui::{Align2, Color32, FontId, Key, Rect, Stroke, StrokeKind, pos2, vec2};
 
 use crate::home::HomeState;
 use crate::i18n::t;
+use crate::key_table::{KeyAction, KeyTable};
 use crate::studio::{CARE, LINE, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, fixed, fixed_semibold, semibold};
 
 /// How long the numbers after modifier-1 to 7 (or Shift-modifier-M) stay.
@@ -85,13 +87,16 @@ pub fn f_keys() -> bool {
     !cfg!(target_os = "macos")
 }
 
-/// A layer key's tooltip, with its F key after it off a Mac: "… (F2)".
-pub fn clear_hint(what: &str, f_key: &str) -> String {
-    clear_hint_on(what, f_key, f_keys())
+/// A clear button's tooltip: `what`, with the keys that do `action` now after it, as Settings ›
+/// Keys has them ("… (Esc, F1)"), or by itself when no key does.
+pub fn action_hint(table: &KeyTable, what: &str, action: KeyAction) -> String {
+    action_hint_on(table, what, action, f_keys())
 }
 
-fn clear_hint_on(what: &str, f_key: &str, f_keys: bool) -> String {
-    if f_keys { format!("{what} ({f_key})") } else { what.to_owned() }
+/// As [`action_hint`], with the F rows (`f_keys`, off a Mac) or without them.
+fn action_hint_on(table: &KeyTable, what: &str, action: KeyAction, f_keys: bool) -> String {
+    let keys: Vec<String> = table.keys_for(action, f_keys).into_iter().map(|key| key.cap_for(!f_keys)).collect();
+    if keys.is_empty() { what.to_owned() } else { format!("{what} ({})", keys.join(", ")) }
 }
 
 /// What the list of keys says in place of a key for something only a button does.
@@ -389,17 +394,156 @@ pub fn frame(ctx: &egui::Context, state: &mut HomeState, voxlive: bool) -> Optio
 }
 
 /// One row of the list of keys: the keys, and what they do.
-type Row = (Vec<String>, String);
+pub type Row = (Vec<String>, String);
 
-/// The list of every key, in groups, as the window shows it: the list of keys (`?`) and
-/// Settings › Key Mappings are both made from it.
-pub fn every_key() -> Vec<(&'static str, Vec<Row>)> {
-    every_key_on(f_keys())
+/// The list of every key, in groups, as the list of keys (`?`) shows it: the keys Settings ›
+/// Keys can change say what `table` has them do now, and the rest are [`fixed_keys`].
+pub fn every_key(table: &KeyTable) -> Vec<(&'static str, Vec<Row>)> {
+    every_key_for(table, f_keys())
 }
 
-/// The list of every key, with the F keys (off a Mac) or without them (on a Mac, where clearing
-/// one layer is the layer keys' alone).
-fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
+/// As [`every_key`], with the F rows (`f_keys`, off a Mac) or without them (a Mac, where only an
+/// F key added has a row). The table's part:
+/// - one row for each action that has keys ("Next slide: Space → Page Down");
+/// - the clears no key does are "Button only" rows, their buttons being always on screen;
+/// - the keys set to Nothing have one row saying so;
+/// - the row of the pick names only the arrows still doing Previous and Next, and the keys
+///   still doing Next; with neither arrow on them it goes.
+pub fn every_key_for(table: &KeyTable, f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
+    use crate::key_table::ShowKey;
+    let caps = |keys: Vec<ShowKey>| keys.into_iter().map(|key| key.cap_for(!f_keys)).collect::<Vec<_>>();
+    let doing = |action: KeyAction| caps(table.keys_for(action, f_keys));
+    let either = |a: &str, b: &str| crate::i18n::tf("keys.list.or", "{a} or {b}", &[("a", a), ("b", b)]);
+    // A row for each of `actions` that has keys.
+    let rows_of = |actions: &[(KeyAction, &str)]| -> Vec<Row> {
+        actions
+            .iter()
+            .filter_map(|(action, what)| {
+                let keys = doing(*action);
+                (!keys.is_empty()).then(|| (keys, (*what).to_owned()))
+            })
+            .collect()
+    };
+    let button_only = || vec![t("keys.cap.button_only", "Button only").to_owned()];
+
+    let mut running = rows_of(&[
+        (KeyAction::ShowSelected, t("keys.list.show_selected", "Show the chosen slide or verse, as Enter does")),
+        (
+            KeyAction::ShowAgain,
+            t("keys.list.show_again", "Show again what was hidden or cleared, if nothing went up since"),
+        ),
+        (KeyAction::Next, t("keys.running.1", "Next slide")),
+        (KeyAction::Previous, t("keys.running.2", "Previous slide")),
+        (KeyAction::First, t("keys.list.first", "First slide of the song, or verse in Bible")),
+        (KeyAction::Last, t("keys.list.last", "Last slide of the song, or verse in Bible")),
+    ]);
+    // With nothing on screen, ← and → move the pick only while they still do Previous and Next.
+    let arrows: Vec<ShowKey> = [(ShowKey::Left, KeyAction::Previous), (ShowKey::Right, KeyAction::Next)]
+        .into_iter()
+        .filter(|(key, action)| table.is_listed(*key, f_keys) && table.action(*key) == *action)
+        .map(|(key, _)| key)
+        .collect();
+    let pick = (!arrows.is_empty()).then(|| {
+        let mut puts: Vec<String> =
+            caps(table.keys_for(KeyAction::Next, f_keys).into_iter().filter(|key| *key != ShowKey::Right).collect());
+        puts.push(t("keys.cap.enter", "Enter").to_owned());
+        let puts = puts.into_iter().reduce(|all, key| either(&all, &key)).unwrap_or_default();
+        let what = crate::i18n::tf(
+            "keys.list.pick",
+            "With nothing on screen, move the pick; {keys} puts it on",
+            &[("keys", &puts)],
+        );
+        (caps(arrows), what)
+    });
+
+    let mut clearing = rows_of(&[
+        (KeyAction::ClearAll, t("keys.clearing.1", "Clear everything")),
+        (KeyAction::HideWords, t("keys.list.hide_words", "Hide the words; the background stays up")),
+        (KeyAction::ClearSlide, t("keys.list.clear_slide", "Clear the slide")),
+        (KeyAction::ClearMedia, t("keys.list.clear_media", "Clear the media")),
+        (KeyAction::ClearProps, t("keys.list.clear_props", "Clear the props")),
+        (KeyAction::ClearAudio, t("keys.list.clear_audio", "Stop the audio")),
+        (KeyAction::ClearMessages, t("keys.list.clear_messages", "Clear the message")),
+    ]);
+    if doing(KeyAction::ClearAll).is_empty() {
+        clearing
+            .push((button_only(), t("keys.list.clear_all_button", "Clear everything: the Clear All key").to_owned()));
+    }
+    // The layers no key clears, and with them the announcements, which no key ever clears.
+    let mut layers: Vec<&str> = [
+        (KeyAction::ClearSlide, t("keys.list.layer.slide", "the slide")),
+        (KeyAction::ClearMedia, t("keys.list.layer.media", "media")),
+        (KeyAction::ClearProps, t("keys.list.layer.props", "props")),
+        (KeyAction::ClearAudio, t("keys.list.layer.audio", "audio")),
+        (KeyAction::ClearMessages, t("keys.list.layer.messages", "messages")),
+    ]
+    .into_iter()
+    .filter(|(action, _)| doing(*action).is_empty())
+    .map(|(_, layer)| layer)
+    .collect();
+    if !layers.is_empty() {
+        layers.push(t("keys.list.layer.announcements", "announcements"));
+        let last = layers.pop().unwrap_or_default();
+        let named = either(&layers.join(", "), last);
+        clearing.push((
+            button_only(),
+            crate::i18n::tf(
+                "keys.list.layers_button",
+                "Clear {layers}: the layer keys under the preview",
+                &[("layers", &named)],
+            ),
+        ));
+    }
+    let nothing = doing(KeyAction::Nothing);
+    if !nothing.is_empty() {
+        clearing.push((nothing, t("keys.nothing", "Nothing in the show, as set in Settings \u{203a} Keys").to_owned()));
+    }
+
+    let places = rows_of(&[
+        (KeyAction::GoToService, t("keys.list.go_service", "Service")),
+        (KeyAction::GoToBible, t("keys.list.go_bible", "Bible")),
+        (
+            KeyAction::AddToPlaylist,
+            t("keys.list.add_to_playlist", "Add the open song, or the passage, to the playlist"),
+        ),
+        (
+            KeyAction::RemoveFromPlaylist,
+            t("keys.list.remove_from_playlist", "Take the picked items out of the playlist"),
+        ),
+    ]);
+
+    let mut groups = Vec::new();
+    for (group, fixed) in fixed_keys() {
+        let rows = match group {
+            "Running the slides" => {
+                // The letters' row comes last, after the pick's.
+                let mut fixed = fixed;
+                let letter = fixed.pop();
+                let mut rows = std::mem::take(&mut running);
+                rows.extend(fixed);
+                rows.extend(pick.clone());
+                rows.extend(letter);
+                rows
+            }
+            "Going places" => {
+                let mut rows = places.clone();
+                rows.extend(fixed);
+                rows
+            }
+            _ => fixed,
+        };
+        groups.push((group, rows));
+        // Clearing is all the table's: it comes after the slides' group, as it always has.
+        if group == "Running the slides" {
+            groups.push(("Clearing", std::mem::take(&mut clearing)));
+        }
+    }
+    groups
+}
+
+/// The keys that are always the same, in the list's groups: what Settings › Keys can't change.
+/// The list of keys (`?`) and Settings › Keys' Always the same are both made from it.
+pub fn fixed_keys() -> Vec<(&'static str, Vec<Row>)> {
     let m = with_modifier;
     let one = |key: &str| vec![key.to_owned()];
     let keys = |keys: &[&str]| keys.iter().map(|key| (*key).to_owned()).collect::<Vec<_>>();
@@ -408,8 +552,6 @@ fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
         (
             "Running the slides",
             vec![
-                row(keys(&[t("keys.cap.space", "Space"), "\u{2192}"]), t("keys.running.1", "Next slide")),
-                row(one("\u{2190}"), t("keys.running.2", "Previous slide")),
                 row(
                     keys(&["\u{2191}", "\u{2193}"]),
                     t("keys.running.3", "The item above or below; in Bible, pick the verse before or after"),
@@ -422,10 +564,6 @@ fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
                     ),
                 ),
                 row(
-                    keys(&[t("keys.cap.home", "Home"), t("keys.cap.end", "End")]),
-                    t("keys.running.5", "First or last slide of the song"),
-                ),
-                row(
                     one(t("keys.cap.letter", "A letter")),
                     t(
                         "keys.running.6",
@@ -433,29 +571,6 @@ fn every_key_on(f_keys: bool) -> Vec<(&'static str, Vec<Row>)> {
                     ),
                 ),
             ],
-        ),
-        (
-            "Clearing",
-            if f_keys {
-                vec![
-                    row(keys(&["Esc", "F1"]), t("keys.clearing.1", "Clear everything")),
-                    row(
-                        keys(&["F2", "F3", "F4", "F5", "F6"]),
-                        t("keys.clearing.2", "Clear the slide, media, props, audio, message"),
-                    ),
-                ]
-            } else {
-                vec![
-                    row(one("Esc"), t("keys.clearing.3", "Clear everything")),
-                    row(
-                        one(t("keys.cap.button_only", "Button only")),
-                        t(
-                            "keys.clearing.4",
-                            "Clear the slide, media, props, messages, audio or announcements: the layer keys under the preview",
-                        ),
-                    ),
-                ]
-            },
         ),
         (
             "Going places",
@@ -600,7 +715,7 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
             let origin = ui.max_rect().min;
             let painter = ui.painter().clone();
             let mut tops = [origin.y + 4.0; 2];
-            for (place, (group, rows)) in every_key().into_iter().enumerate() {
+            for (place, (group, rows)) in every_key(&state.keys).into_iter().enumerate() {
                 let side = place % 2;
                 // The groups stand in rows of two, each row starting under the taller of the last.
                 if side == 0 {
@@ -676,7 +791,10 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
         let knob = if on { track.right_center() - vec2(8.5, 0.0) } else { track.left_center() + vec2(8.5, 0.0) };
         painter.circle_filled(knob, 6.0, if on { TEXT } else { TEXT_DIM });
         painter.galley(pos2(track.max.x + 10.0, track.center().y - label.size().y / 2.0), label, TEXT);
-        let where_else = t("keys.also_in", "Also in Settings \u{203a} Keys.");
+        let where_else = t(
+            "keys.foot",
+            "The keys listed in Settings \u{203a} Keys do what it says there. Any other key can be added.",
+        );
         let left = switch.max.x + 14.0;
         let note = painter.layout(
             where_else.to_uppercase(),
@@ -761,25 +879,145 @@ mod tests {
         .drop_without_applying_deltas();
     }
 
+    /// A group of the list of keys: each row's keys, two spaces between them, and what they do.
+    fn group(list: &[(&'static str, Vec<Row>)], name: &str) -> Vec<(String, String)> {
+        let rows = &list.iter().find(|(group, _)| *group == name).expect("listed").1;
+        rows.iter().map(|(keys, what)| (keys.join("  "), what.clone())).collect()
+    }
+
+    fn rows(rows: &[(&str, &str)]) -> Vec<(String, String)> {
+        rows.iter().map(|(keys, what)| ((*keys).to_owned(), (*what).to_owned())).collect()
+    }
+
+    const NOTHING: &str = "Nothing in the show, as set in Settings \u{203a} Keys";
+    const LAYERS: &str =
+        "Clear the slide, media, props, audio, messages or announcements: the layer keys under the preview";
+
     #[test]
-    fn the_f_keys_clear_off_a_mac_and_on_a_mac_one_layer_is_cleared_by_its_button_only() {
-        let clearing =
-            |f_keys: bool| every_key_on(f_keys).into_iter().find(|(group, _)| *group == "Clearing").expect("listed").1;
-        let keys = |rows: &[Row]| rows.iter().flat_map(|(keys, _)| keys.clone()).collect::<Vec<_>>();
-        // Windows and Linux: Escape and F1 clear everything; F2 to F6 a layer each.
-        assert_eq!(keys(&clearing(true)), ["Esc", "F1", "F2", "F3", "F4", "F5", "F6"]);
-        // A Mac: Escape alone, and the layers by their keys in the right column.
-        assert_eq!(keys(&clearing(false)), ["Esc", BUTTON_ONLY]);
+    fn the_question_mark_list_and_the_clear_buttons_name_the_tables_keys() {
+        use crate::key_table::{KeyStyle, ShowKey};
+        let mut table = KeyTable::default();
+        table.set(ShowKey::Escape, KeyAction::ClearSlide);
+        // A clear button's hint names the keys that do it now, off a Mac and on one, or none.
+        let hint = |what: &str, action, f_keys| action_hint_on(&table, what, action, f_keys);
+        assert_eq!(hint("Clear the slide", KeyAction::ClearSlide, true), "Clear the slide (Esc, F2)");
+        assert_eq!(hint("Clear the slide", KeyAction::ClearSlide, false), "Clear the slide (Esc)");
+        assert_eq!(hint("Clear All", KeyAction::ClearAll, true), "Clear All (F1, .)");
+        assert_eq!(hint("Clear All", KeyAction::ClearAll, false), "Clear All (.)");
+        assert_eq!(hint("Clear the media", KeyAction::ClearMedia, false), "Clear the media");
+        assert_eq!(f_keys(), !cfg!(target_os = "macos"));
+        // The list of keys, off a Mac: one row for each action that has keys.
+        let pc = every_key_for(&table, true);
+        assert_eq!(
+            group(&pc, "Clearing"),
+            rows(&[
+                ("F1  .", "Clear everything"),
+                ("Esc  F2", "Clear the slide"),
+                ("F3", "Clear the media"),
+                ("F4", "Clear the props"),
+                ("F5", "Stop the audio"),
+                ("F6", "Clear the message"),
+                ("F7  F8  F9  F10  F11  F12", NOTHING),
+            ])
+        );
+        let running = group(&pc, "Running the slides");
+        assert_eq!(
+            running[..4],
+            rows(&[
+                ("Space  \u{2192}  Page Down", "Next slide"),
+                ("\u{2190}  Page Up", "Previous slide"),
+                ("Home", "First slide of the song, or verse in Bible"),
+                ("End", "Last slide of the song, or verse in Bible"),
+            ])
+        );
+        let cue =
+            ("\u{2190}  \u{2192}", "With nothing on screen, move the pick; Space or Page Down or Enter puts it on");
+        assert_eq!(running[6], (cue.0.to_owned(), cue.1.to_owned()));
+        assert_eq!((running.len(), running[7].0.as_str()), (8, "A letter"));
+        // On a Mac no F key is in it, and the layers no key clears are their buttons'.
+        let mac = every_key_for(&table, false);
+        assert_eq!(
+            group(&mac, "Clearing"),
+            rows(&[
+                (".", "Clear everything"),
+                ("Esc", "Clear the slide"),
+                (BUTTON_ONLY, "Clear media, props, audio, messages or announcements: the layer keys under the preview"),
+            ])
+        );
         let no_f_key = |key: &String| !(key.len() >= 2 && key.starts_with('F') && key[1..].parse::<u8>().is_ok());
-        for (group, rows) in every_key_on(false) {
+        for (group, rows) in &mac {
             for (keys, _) in rows {
                 assert!(keys.iter().all(no_f_key), "{group}: {keys:?}");
             }
         }
-        // The layer keys' tooltips name their F key off a Mac only.
-        assert_eq!(clear_hint_on("Clear the props", "F4", true), "Clear the props (F4)");
-        assert_eq!(clear_hint_on("Clear the props", "F4", false), "Clear the props");
-        assert_eq!(f_keys(), !cfg!(target_os = "macos"));
+        assert_eq!(
+            group(&every_key_for(&KeyTable::default(), false), "Clearing"),
+            rows(&[("Esc  .", "Clear everything"), (BUTTON_ONLY, LAYERS)])
+        );
+        // SoftProjector's layout: the new actions have their rows, and the clears no key does
+        // are "Button only".
+        table.set_style(KeyStyle::SoftProjector);
+        let pc = every_key_for(&table, true);
+        assert_eq!(
+            group(&pc, "Clearing"),
+            rows(&[
+                ("F1", "Clear everything"),
+                ("Esc  .", "Hide the words; the background stays up"),
+                (BUTTON_ONLY, LAYERS),
+                ("F8  F9  F10  F11  F12", NOTHING),
+            ])
+        );
+        assert_eq!(
+            group(&pc, "Running the slides")[..2],
+            rows(&[
+                ("F5", "Show the chosen slide or verse, as Enter does"),
+                ("F4", "Show again what was hidden or cleared, if nothing went up since"),
+            ])
+        );
+        assert_eq!(
+            group(&pc, "Going places")[..4],
+            rows(&[
+                ("F7", "Service"),
+                ("F6", "Bible"),
+                ("F2", "Add the open song, or the passage, to the playlist"),
+                ("F3", "Take the picked items out of the playlist"),
+            ])
+        );
+        assert_eq!(
+            group(&every_key_for(&table, false), "Clearing"),
+            rows(&[
+                ("Esc  .", "Hide the words; the background stays up"),
+                (BUTTON_ONLY, "Clear everything: the Clear All key"),
+                (BUTTON_ONLY, LAYERS),
+            ])
+        );
+        // The row of the pick names only the arrows still doing Previous and Next, and the keys
+        // still doing Next; with neither arrow on them it goes.
+        let mut table = KeyTable::default();
+        table.set(ShowKey::Right, KeyAction::Nothing);
+        table.set(ShowKey::Space, KeyAction::Nothing);
+        table.set(ShowKey::PageDown, KeyAction::Nothing);
+        let running = group(&every_key_for(&table, false), "Running the slides");
+        assert!(!running.iter().any(|(_, what)| what == "Next slide"), "no key does Next: no row");
+        assert!(
+            running.contains(&(
+                "\u{2190}".to_owned(),
+                "With nothing on screen, move the pick; Enter puts it on".to_owned()
+            ))
+        );
+        table.set(ShowKey::Left, KeyAction::ClearAll);
+        let running = group(&every_key_for(&table, false), "Running the slides");
+        assert!(!running.iter().any(|(_, what)| what.starts_with("With nothing on screen")));
+        // A key added is named with the others, first.
+        let mut table = KeyTable::default();
+        table.add(&crate::key_table::Pressed::from(winit::keyboard::Key::Character("b".into())), false).expect("added");
+        table.set(ShowKey::Other(winit::keyboard::KeyCode::KeyB), KeyAction::Next);
+        let running = group(&every_key_for(&table, false), "Running the slides");
+        assert_eq!(running[0], ("B  Space  \u{2192}  Page Down".to_owned(), "Next slide".to_owned()));
+        // The keys that are always the same have no row of the table's among them.
+        let fixed: Vec<String> = fixed_keys().into_iter().flat_map(|(_, rows)| rows).map(|(_, what)| what).collect();
+        assert!(fixed.iter().any(|what| what.starts_with("The item above or below")));
+        assert!(!fixed.iter().any(|what| what == "Next slide" || what == "Clear everything" || what == NOTHING));
     }
 
     #[test]
