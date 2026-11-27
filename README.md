@@ -65,7 +65,8 @@ Website: [softpresenter.com](https://softpresenter.com)
 
 ## What it does
 
-The full list, area by area, is in [docs/features.md](docs/features.md), and what changed lately in [CHANGELOG.md](CHANGELOG.md). In short:
+The full list, area by area, is in [docs/features.md](docs/features.md), and what changed lately in [CHANGELOG.md](CHANGELOG.md), which the app also shows
+under Settings › About › What's new. In short:
 
 - **Songs and slides.** Groups (Verse, Chorus, Bridge), arrangements, one-key jumps, playlists
   with headers, and a slide editor with text, shapes, pictures and video. Words can be styled
@@ -100,7 +101,8 @@ The full list, area by area, is in [docs/features.md](docs/features.md), and wha
    libraries from SoftProjector and other presentation software, keeping each song's groups
    and arrangements.
 3. **Build the running order.** Make a playlist with the + beside PLAYLISTS (say "Sunday
-   Morning"), drag songs into it in order, and add headers to group them. Sermon and notice
+   Morning"), drag songs into it in order (the find box keeps its search, so you can drag one
+   after another), and add headers to group them. Sermon and notice
    slides that arrive as presentation or PDF files come in with File › Import Slides… or by
    dropping them on the window. A `.pptx` asks whether to bring it in as slides you can edit
    or as pictures; a PDF becomes a picture for each page.
@@ -232,7 +234,7 @@ status` instead of `sp status`.
 | B, N, M | jump to Bridge 1, 2, 3 |
 | P, T, I, E, O | Pre-chorus, Tag, Intro, Ending, Outro |
 | Cmd+N | new song |
-| / or Cmd+F | find a song (title or words) or a Bible passage or verse |
+| / or Cmd+F | find a song (title or words) or a Bible passage or verse; after a drag from the results, the keys run the slides again and / (or a click in the box) searches again |
 | Cmd+, | Settings |
 | Option+Cmd+1 | Screens |
 | Shift+Cmd+1 / Shift+Cmd+2 | audience / stage screens on or off |
