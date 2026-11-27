@@ -1820,6 +1820,23 @@ fn a_media_playlist_goes_on_from_a_video_of_it_that_never_starts() {
         "the log says why{}",
         run.context()
     );
+    // Seen, then the next round: the playlist comes back to it, it doesn't start again, and the
+    // notice isn't raised again as new.
+    copy.ok(&["notices", "seen"]);
+    let gone_on = |log: &str| log.matches("the media playlist Loop goes on to its next item").count();
+    while gone_on(&run.log()) < 2 {
+        assert!(began.elapsed() < Duration::from_secs(45), "the playlist never came back to it{}", run.context());
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    let listed = copy.ok(&["notices"]).data;
+    let about: Vec<&Value> = listed
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|notice| notice["text"].as_str().is_some_and(|text| text.contains("hasn\u{2019}t started after")))
+        .collect();
+    assert_eq!(about.len(), 1, "said once: {about:?}");
+    assert_eq!(about[0]["seen"], true, "not raised again as new on the next round: {about:?}");
     copy.ok(&["media-playlist", "stop"]);
     copy.ok(&["clear", "media"]);
     let quitted = copy.quit();

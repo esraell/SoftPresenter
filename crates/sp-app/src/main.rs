@@ -3358,6 +3358,12 @@ impl App {
             && (!now || cycle.since.elapsed() >= Duration::from_secs_f32(PICTURE_SECONDS))
     }
 
+    /// Whether a media playlist playing shows the media on screen (and so comes back to it each
+    /// round).
+    fn playlist_shows_live_media(&self) -> bool {
+        self.media_cycle.as_ref().is_some_and(|cycle| self.show.live_media() == Some(cycle.shown))
+    }
+
     /// A whole round of the media playlist playing went by and none of its videos would play:
     /// it stops going round, on the last of them (its still, or nothing), and the operator is
     /// told once.
@@ -3739,10 +3745,16 @@ impl App {
                 // (see `followed`), with nothing to tell the operator.
                 if !self.gone_from_followed_folder(&item.path) {
                     self.video_refused = Some(item.id);
-                    // FFmpeg missing: fetched again where it can be, and said so.
+                    // FFmpeg missing: fetched again where it can be, and said so (once, for a
+                    // media playlist coming back to it every round).
                     let problem = self.video_problem(&item.path, problem);
+                    let in_playlist = self.playlist_shows_live_media();
                     if let Some(running) = self.running.as_mut() {
-                        running.home_state.notices.trouble(problem);
+                        if in_playlist {
+                            running.home_state.notices.lasting_trouble(problem);
+                        } else {
+                            running.home_state.notices.trouble(problem);
+                        }
                     }
                 }
             }
@@ -4462,8 +4474,10 @@ impl App {
             // Not taken back as the playlist goes on (it stays true), only once the item plays.
             let item = *item;
             self.skipped_videos.insert(item, text.clone());
+            // Said once however many turns it doesn't start: an entry already in the list, seen
+            // or not, isn't raised again (until it has been taken back).
             if let Some(running) = self.running.as_mut() {
-                running.home_state.notices.trouble(text);
+                running.home_state.notices.lasting_trouble(text);
             }
         } else if change == Change::GaveUp {
             applog::event(
@@ -4613,8 +4627,14 @@ impl App {
             if !path.is_some_and(|path| self.gone_from_followed_folder(&path)) {
                 // A playing media playlist goes on from it (`tick_media_cycle`).
                 self.video_refused = Some(id);
+                let in_playlist = self.playlist_shows_live_media();
                 if let Some(running) = self.running.as_mut() {
-                    running.home_state.notices.trouble(problem);
+                    // A media playlist comes back to it every round: said once.
+                    if in_playlist {
+                        running.home_state.notices.lasting_trouble(problem);
+                    } else {
+                        running.home_state.notices.trouble(problem);
+                    }
                 }
             }
             return None;
