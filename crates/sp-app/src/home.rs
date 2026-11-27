@@ -2923,12 +2923,29 @@ fn edit_view(
     // delete a prop, a stage layout, a template or slides): then Delete, the arrows and the
     // other keys never reach the slide, its objects or the list behind the question.
     let keys_taken = ui.ctx().text_edit_focused() || state.alert_open();
+    // A web page box just added hands its address field the keyboard, so the address can be
+    // typed at once. Until something is typed there or the field is clicked, Delete and
+    // Backspace are still the box's, as for any box picked; every other key is the field's.
+    let address = state.inspector.address;
+    let fresh_address = address.filter(|address| {
+        address.given
+            && !state.alert_open()
+            && ui.ctx().memory(|memory| memory.has_focus(address.field))
+            && state.editing.as_ref().is_some_and(|draft| draft.selection() == [address.object])
+    });
+    // An Escape that takes the keyboard out of the address field is the field's alone (the
+    // toolkit lets go of the keyboard on Escape before the window is drawn, so no field has it
+    // here): the box stays picked, so a Delete after it takes the box and not the slide.
+    let escape_left_address = address.is_some_and(|address| {
+        ui.ctx().memory(|memory| memory.had_focus_last_frame(address.field) && !memory.has_focus(address.field))
+    });
 
     // Keys: undo and redo, delete and nudging, each only when the keyboard isn't taken.
     let (undo, redo, delete, nudge) = ui.input(|input| {
         let undo = command_key(input, egui::Key::Z, false);
         let redo = command_key(input, egui::Key::Z, true);
-        let delete = !keys_taken && (input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace));
+        let delete = (!keys_taken || fresh_address.is_some())
+            && (input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace));
         // On a stage layout the arrows move 10 and Shift one pixel, as the new design has it;
         // on a slide, a template or a prop, still one, and Shift 10.
         let step = match (stage_mode, input.modifiers.shift) {
@@ -2950,6 +2967,11 @@ fn edit_view(
         }
         (undo, redo, delete, nudge)
     });
+    // The new box goes (below), and its address field lets go of the keyboard.
+    if delete && let Some(address) = fresh_address {
+        ui.ctx().memory_mut(|memory| memory.surrender_focus(address.field));
+        state.inspector.address = None;
+    }
     // Copy, paste, duplicate and select all act on objects unless a field is being typed in.
     if !keys_taken {
         let (copy, cut, pasted, duplicate, all) = ui.input(|input| {
@@ -3062,6 +3084,7 @@ fn edit_view(
     // Escape lets go of the objects picked (Edit › Deselect All of the old menu bar), unless it is
     // for something over the editor.
     if !keys_taken
+        && !escape_left_address
         && state.edit_request.is_none()
         && state.editing.as_ref().is_some_and(|draft| draft.selected.is_some())
         && !state.escape_taken_above(ui.ctx())
@@ -11801,6 +11824,173 @@ mod tests {
         frame_with(&ctx, &show, &mut state, Some(Key::Delete));
         assert!(state.stage_layouts.iter().all(|layout| layout.id != first), "deleted at once");
         assert!(matches!(state.removed.as_slice(), [crate::removed::Removed::StageLayout { at: 0, .. }]));
+    }
+
+    /// Where the home window, drawn once more at `time`, puts `words` (an object tool over the
+    /// canvas, say).
+    fn home_place(ctx: &egui::Context, show: &Show, state: &mut HomeState, words: &str, time: f64) -> egui::Pos2 {
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+            time: Some(time),
+            ..RawInput::default()
+        };
+        let output = ctx.run_ui(raw, |ui| {
+            home_ui(ui, show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+        });
+        let at = crate::studio::tests::place_of(&output, words).expect(words);
+        output.drop_without_applying_deltas();
+        at
+    }
+
+    /// The Edit view of the middle slide of a song of three (so a Delete with nothing picked on
+    /// the canvas would take the slide), and a box put on it by a click on the object tool named
+    /// `tool`, as a person adds one, and one frame more; the time of the last frame.
+    fn added_by_tool(tool: &str) -> (egui::Context, Show, HomeState, f64) {
+        let (show, mut state) = song_open(&[("Verse 1", 3)], 1);
+        let (ctx, mut time) = (egui::Context::default(), 0.0);
+        let at = home_place(&ctx, &show, &mut state, tool, time);
+        click_at(&ctx, &show, &mut state, at, &mut time);
+        time += 0.1;
+        frame_events(&ctx, &show, &mut state, Vec::new(), time);
+        (ctx, show, state, time)
+    }
+
+    /// The addresses of the web page boxes on the slide being edited.
+    fn web_addresses(state: &HomeState) -> Vec<String> {
+        let objects = state.editing.iter().flat_map(|draft| &draft.slide.objects);
+        objects
+            .filter_map(|object| match &object.kind {
+                sp_model::ObjectKind::Web { url } => Some(url.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn delete_right_after_adding_a_web_page_takes_the_box_away_and_undo_puts_it_back() {
+        for key in [Key::Delete, Key::Backspace] {
+            let (ctx, show, mut state, mut time) = added_by_tool("Web Page");
+            assert_eq!(web_addresses(&state), [""], "a web page box, picked, its address still to type");
+            assert!(ctx.text_edit_focused(), "its address field has the keyboard, so the address can be typed");
+            let mut step = |state: &mut HomeState, events: Vec<Event>| {
+                time += 0.1;
+                frame_events(&ctx, &show, state, events, time);
+            };
+            step(&mut state, pressed(key, Modifiers::NONE));
+            assert!(web_addresses(&state).is_empty(), "{key:?} takes the box away, as for any box picked");
+            assert!(state.slide_request.is_none(), "and only the box: the slide stays");
+            step(&mut state, Vec::new());
+            assert!(!ctx.text_edit_focused(), "the field has let go of the keyboard");
+            step(&mut state, pressed(Key::Z, Modifiers::COMMAND));
+            assert_eq!(web_addresses(&state), [""], "Undo puts the box back");
+        }
+    }
+
+    #[test]
+    fn once_something_is_typed_in_a_new_web_pages_address_delete_and_backspace_edit_it() {
+        let (ctx, show, mut state, mut time) = added_by_tool("Web Page");
+        let mut step = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            frame_events(&ctx, &show, state, events, time);
+        };
+        step(&mut state, vec![Event::Text("ab".to_owned())]);
+        step(&mut state, pressed(Key::Backspace, Modifiers::NONE));
+        step(&mut state, pressed(Key::Delete, Modifiers::NONE));
+        assert_eq!(web_addresses(&state).len(), 1, "the box stays");
+        assert!(ctx.text_edit_focused(), "the field keeps the keyboard");
+        // Return takes the address as typed: Backspace took the b, and Delete, at its end, nothing.
+        step(&mut state, pressed(Key::Enter, Modifiers::NONE));
+        assert_eq!(web_addresses(&state), ["https://a"]);
+
+        // Typed and rubbed out, the field is empty again, and still the person's.
+        let (ctx, show, mut state, mut time) = added_by_tool("Web Page");
+        let mut step = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            frame_events(&ctx, &show, state, events, time);
+        };
+        step(&mut state, vec![Event::Text("a".to_owned())]);
+        step(&mut state, pressed(Key::Backspace, Modifiers::NONE));
+        step(&mut state, pressed(Key::Backspace, Modifiers::NONE));
+        step(&mut state, pressed(Key::Delete, Modifiers::NONE));
+        assert_eq!(web_addresses(&state).len(), 1, "the box stays");
+        assert!(ctx.text_edit_focused(), "the field keeps the keyboard");
+
+        // A click in the field makes it the person's too, typed in or not.
+        let (ctx, show, mut state, mut time) = added_by_tool("Web Page");
+        let field = home_place(&ctx, &show, &mut state, "https://…", time);
+        click_at(&ctx, &show, &mut state, field, &mut time);
+        assert!(ctx.text_edit_focused(), "the field has the keyboard");
+        time += 0.1;
+        frame_events(&ctx, &show, &mut state, pressed(Key::Backspace, Modifiers::NONE), time);
+        assert_eq!(web_addresses(&state).len(), 1, "the box stays");
+        assert!(ctx.text_edit_focused(), "and the field keeps the keyboard");
+    }
+
+    #[test]
+    fn escape_out_of_a_new_web_pages_address_leaves_the_box_picked_for_delete() {
+        let picked = |state: &HomeState| state.editing.as_ref().is_some_and(|draft| draft.selected.is_some());
+        let (ctx, show, mut state, mut time) = added_by_tool("Web Page");
+        let mut step = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            frame_events(&ctx, &show, state, events, time);
+        };
+        step(&mut state, pressed(Key::Escape, Modifiers::NONE));
+        step(&mut state, Vec::new());
+        assert!(!ctx.text_edit_focused(), "Escape takes the keyboard out of the field");
+        assert!(picked(&state), "and only that: the box stays picked");
+        step(&mut state, pressed(Key::Delete, Modifiers::NONE));
+        assert!(web_addresses(&state).is_empty(), "Delete then takes the box away");
+        assert!(state.slide_request.is_none(), "and not the slide");
+
+        // The same once an address is typed: Escape takes it, and leaves the box picked.
+        let (ctx, show, mut state, mut time) = added_by_tool("Web Page");
+        let mut step = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            frame_events(&ctx, &show, state, events, time);
+        };
+        step(&mut state, vec![Event::Text("example.org".to_owned())]);
+        step(&mut state, pressed(Key::Escape, Modifiers::NONE));
+        step(&mut state, Vec::new());
+        assert_eq!(web_addresses(&state), ["https://example.org"]);
+        assert!(picked(&state), "the box stays picked");
+        step(&mut state, pressed(Key::Delete, Modifiers::NONE));
+        assert!(web_addresses(&state).is_empty(), "Delete then takes the box away");
+        assert!(state.slide_request.is_none(), "and not the slide");
+    }
+
+    #[test]
+    fn delete_right_after_adding_an_ndi_source_takes_the_box_away_and_undo_puts_it_back() {
+        let ndi_boxes = |state: &HomeState| {
+            let objects = state.editing.iter().flat_map(|draft| &draft.slide.objects);
+            objects.filter(|object| matches!(object.kind, sp_model::ObjectKind::Ndi { .. })).count()
+        };
+        let (ctx, show, mut state, mut time) = added_by_tool("NDI Source");
+        assert_eq!(ndi_boxes(&state), 1, "an NDI source box, picked");
+        assert!(ctx.memory(|memory| memory.focused()).is_some(), "its Source menu has the keyboard");
+        let mut step = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            frame_events(&ctx, &show, state, events, time);
+        };
+        step(&mut state, pressed(Key::Delete, Modifiers::NONE));
+        assert_eq!(ndi_boxes(&state), 0, "Delete takes the box away");
+        assert!(state.slide_request.is_none(), "and only the box");
+        step(&mut state, pressed(Key::Z, Modifiers::COMMAND));
+        assert_eq!(ndi_boxes(&state), 1, "Undo puts it back");
+    }
+
+    #[test]
+    fn delete_right_after_adding_a_text_box_or_an_airplay_box_takes_it_away() {
+        // Neither hands a field the keyboard: the box is picked, as one clicked on is.
+        let boxes = |state: &HomeState| state.editing.as_ref().map_or(0, |draft| draft.slide.objects.len());
+        let (_, before) = song_open(&[("Verse 1", 3)], 1);
+        for tool in ["Add Text", "AirPlay"] {
+            let (ctx, show, mut state, time) = added_by_tool(tool);
+            assert_eq!(boxes(&state), boxes(&before) + 1, "{tool} adds a box");
+            assert!(!ctx.text_edit_focused(), "{tool} gives no field the keyboard");
+            frame_events(&ctx, &show, &mut state, pressed(Key::Delete, Modifiers::NONE), time + 0.1);
+            assert_eq!(boxes(&state), boxes(&before), "Delete takes the box {tool} added away");
+            assert!(state.slide_request.is_none());
+        }
     }
 
     #[test]

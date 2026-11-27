@@ -1448,8 +1448,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   thumbnails keep a faint blue panel; picked, like any box, it keeps its place in the layers
   and only a thin white outline and its handles are drawn over everything),
   laid out at the box's size and see-through where the page has no
-  background, so it can sit over the slide's background or under its words. Only addresses
-  starting with https:// open. The page of a song open in the window is loaded ahead, so it has
+  background, so it can sit over the slide's background or under its words. Adding one picks it
+  and gives the address field in the inspector's Shape tab the keyboard, so the address can be
+  typed at once; until something is typed there or the field is clicked, Delete and Backspace
+  still take the box away, as for any box picked, and Escape leaves the field with the box still
+  picked. Only addresses starting with https:// open. The page of a song open in the window is loaded ahead, so it has
   loaded and drawn by the time its slide goes on screen; nothing shows on the screens until it
   has, and a page shown again isn't loaded again. Once loaded and drawn for the thumbnails, a
   page off the screens rests (no animation, next to no work) until its slide goes on screen,

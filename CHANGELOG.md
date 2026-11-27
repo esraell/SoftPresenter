@@ -5,11 +5,15 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-Remote Control uses less of the computer.
+Remote Control uses less of the computer, and a new web page box can be deleted straight away.
 
 ### Better
 
 - **Calmer Remote Control.** With a phone's page open and nothing happening, the app now wakes about a fifth as often and uses much less of the computer.
+
+### Fixed
+
+- **Delete a new web page box.** In the Edit view, Delete or Backspace now takes away a Web Page box straight after you add it, as it does any box you pick; its address can still be typed at once. Before, nothing happened until you clicked another box and back, and pressing Escape first let go of the box, so Delete took the slide instead.
 
 ## 0.9.0-dev.27 — 27 November 2026 (development build)
 

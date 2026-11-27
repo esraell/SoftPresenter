@@ -61,6 +61,22 @@ pub struct InspectorState {
     pub new_step: bool,
     /// A− or A+ was pressed beside Size: how much to step every size by (slide units).
     pub size_step: f32,
+    /// The web page address field that last had the keyboard (see [`web_address`]), for the Edit
+    /// view's keys, which are read before the panel is drawn.
+    pub address: Option<AddressField>,
+}
+
+/// A web page box's address field, as the Edit view's Delete and Escape need it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AddressField {
+    /// The box.
+    pub object: sp_model::Uuid,
+    /// The field, as the toolkit knows it when it has the keyboard.
+    pub field: egui::Id,
+    /// The field has the keyboard only because the box was just added, ready for the address:
+    /// nothing has been typed in it since, and it hasn't been clicked. Delete and Backspace are
+    /// then still for the box.
+    pub given: bool,
 }
 
 /// How far A− and A+ move a size, in slide units.
@@ -776,16 +792,30 @@ fn nothing_selected(ui: &mut egui::Ui) {
 
 /// A web page box's address: what is typed is kept while the field has the keyboard, and taken
 /// when it is left (with https:// put in front of a bare name). An address that isn't https is
-/// refused, and says so.
-fn web_address(ui: &mut egui::Ui, object: sp_model::Uuid, url: &mut String) {
+/// refused, and says so. A box just added hands the field the keyboard, so the address can be
+/// typed at once; `address` says which field has it, and whether only for that (see
+/// [`AddressField`]).
+fn web_address(ui: &mut egui::Ui, object: sp_model::Uuid, url: &mut String, address: &mut Option<AddressField>) {
     ui.label(egui::RichText::new(t("inspector.web", "Web Page")).size(12.5).strong().color(INK));
     ui.add_space(2.0);
     let id = ui.make_persistent_id(("web address", object));
     let bad_id = id.with("refused");
     let mut typed = ui.data_mut(|data| data.get_temp::<String>(id)).unwrap_or_else(|| url.clone());
-    let field = ui.add(egui::TextEdit::singleline(&mut typed).hint_text("https://…").desired_width(INNER));
+    let field =
+        ui.add(egui::TextEdit::singleline(&mut typed).id(id.with("field")).hint_text("https://…").desired_width(INNER));
+    let has_keys = |ui: &egui::Ui| ui.memory(|memory| memory.has_focus(field.id));
     if ui.data_mut(|data| data.remove_temp::<bool>(egui::Id::unique("web address focus"))).is_some() {
         field.request_focus();
+        *address = Some(AddressField { object, field: field.id, given: true });
+    } else if has_keys(ui) && address.is_none_or(|known| known.field != field.id) {
+        *address = Some(AddressField { object, field: field.id, given: false });
+    }
+    // Typing in it, a click in it, or leaving it makes the field the person's: Delete and
+    // Backspace edit its words from then on.
+    if let Some(known) = address.as_mut().filter(|known| known.field == field.id)
+        && (field.changed() || field.is_pointer_button_down_on() || !has_keys(ui))
+    {
+        known.given = false;
     }
     if field.has_focus() {
         ui.data_mut(|data| data.insert_temp(id, typed));
@@ -924,6 +954,7 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let history = (state.can_undo(false), state.can_undo(true));
     let menu_asked = &mut state.menu_asked;
     let lock_shape = &mut state.inspector.lock_shape;
+    let address = &mut state.inspector.address;
     let (ndi_view, ndi_installed, ndi_download) = (&mut state.ndi, state.ndi_available, &mut state.ndi_download);
     let mirror_view = &state.mirror;
     let Some(draft) = state.editing.as_mut() else { return };
@@ -1057,7 +1088,7 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     // A web page: its address. The page is laid out at the box's size.
     let object_id = object.id;
     if let sp_model::ObjectKind::Web { url } = &mut object.kind {
-        web_address(ui, object_id, url);
+        web_address(ui, object_id, url, address);
         rule(ui);
     }
 
