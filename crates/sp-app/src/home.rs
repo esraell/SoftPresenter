@@ -385,6 +385,8 @@ pub struct HomeState {
     pub key_tags_for_capture: bool,
     /// The list of every key is open.
     pub key_sheet: bool,
+    /// The What's new window, over the Settings window (`whats_new.rs`).
+    pub whats_new: crate::whats_new::View,
     /// File › Import… was chosen: the import menu over the left column opens (once it is drawn).
     pub import_menu_request: bool,
     /// Open the menu of the slide on screen, as its "more" button does (modifier-O): the frame
@@ -1990,6 +1992,7 @@ impl Default for HomeState {
             import_as: std::collections::BTreeMap::new(),
             key_tags_for_capture: false,
             key_sheet: false,
+            whats_new: crate::whats_new::View::default(),
             import_menu_request: false,
             live_menu: None,
 
@@ -5910,7 +5913,6 @@ pub const SHAPE_KEYS: [char; 10] = ['O', 'R', 'E', 'G', 'L', 'H', 'P', 'S', 'D',
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     Guide,
-    WhatsNew,
     ReportIssue,
     Licences,
     /// What the anonymous reports send, and what they never do.
@@ -5922,7 +5924,6 @@ pub fn page_url(page: Page) -> String {
     const REPO: &str = "https://github.com/esraell/SoftPresenter";
     match page {
         Page::Guide => format!("{REPO}#readme"),
-        Page::WhatsNew => format!("{REPO}/commits/master"),
         Page::ReportIssue => {
             format!("{REPO}/issues/new?body=SoftPresenter%20{}%0A%0A", crate::updates::VERSION)
         }
@@ -15651,6 +15652,41 @@ mod tests {
             crate::studio::tests::drawn(ctx, events, |ui| body(ui, state)).drop_without_applying_deltas();
         }
         true
+    }
+
+    #[test]
+    fn about_s_what_s_new_key_opens_the_window_over_settings_and_done_closes_it() {
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut about = HomeState { preferences_open: true, preferences_pane: Pane::About, ..HomeState::default() };
+        let frame = |state: &mut HomeState, events: Vec<Event>| {
+            crate::studio::tests::drawn(&ctx, events, |ui| settings_ui(ui, state, &show))
+        };
+        // Where the last drawing put `words` (on top of the rest, as the window is).
+        let place = |state: &mut HomeState, words: &str| {
+            frame(state, vec![]).drop_without_applying_deltas();
+            let drawn = frame(state, vec![]);
+            let at = crate::studio::tests::last_place_of(&drawn, words);
+            drawn.drop_without_applying_deltas();
+            at
+        };
+        let click = |state: &mut HomeState, at: egui::Pos2| {
+            for events in crate::studio::tests::click_frames(at, egui::PointerButton::Primary) {
+                frame(state, events).drop_without_applying_deltas();
+            }
+        };
+        // The row's label says it too; its key is drawn after it.
+        let key = place(&mut about, "What\u{2019}s new").expect("About has the What's new key");
+        click(&mut about, key);
+        assert!(about.whats_new.is_open(), "the key opens the window");
+        for _ in 0..2 {
+            frame(&mut about, vec![]).drop_without_applying_deltas();
+        }
+        assert!(about.whats_new.is_open(), "and the click that opened it doesn't close it");
+        let done = place(&mut about, "Done").expect("the window is drawn over Settings, with Done");
+        click(&mut about, done);
+        assert!(!about.whats_new.is_open(), "Done closes it");
+        assert!(about.preferences_open, "and Settings stays");
     }
 
     #[test]

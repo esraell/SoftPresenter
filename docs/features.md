@@ -2479,6 +2479,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   wrong? (Report an issue…, a new issue with the version filled in) and Licences…; a click on the
   readout under the preview goes to the slide on screen (opens its item and brings the slide
   into view), and a group and song too long for it end in …, and show whole on hover. The media strip has its fold button (a chevron at the right of its heading).
+- **What's new.** Settings › About › What's new (and Help › What's New in SoftPresenter on a Mac,
+  and `sp menu WhatsNew`) opens a window over Settings, 700 points wide, with the changes of the
+  version running, then the earlier ones, from the changelog built into the program (nothing is
+  fetched). At the top: its date and how many changes, its sentence, then New, Better and Fixed,
+  each a rounded panel with its pill and count, each change a short name and its first sentence.
+  Then Earlier versions to scroll through, each an outlined panel with its date, 20 versions at
+  most, and "The first version listed here" at the end; a version from before the changelog had the
+  three parts shows one part, Changes. "↓ Scroll for earlier versions" at the foot goes once the end
+  is in view, and Done stays where it is. Esc, Enter, Done, the × or a click outside close it. The
+  changelog's words are in English; the window's own are in the app's language.
 - On Windows the little triangle on menu buttons (Advanced, Shapes, Add, + Add's arrow) is drawn
   from Segoe UI Symbol; before, it showed as an empty box. The list of fonts no longer shows a
   Mac's private faces (names beginning with a dot).
@@ -2507,7 +2517,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Check for Updates…, Settings…, Services, Hide, Quit), File (New Song, Import…, which opens the import menu over the
   left column, Close Window), Edit (Undo, Redo, Cut, Copy, Paste, Paste and Match Style, Delete,
   Select All, Find…), View (Service, Bible, Edit, with ⌘1, ⌘2, ⌘3, and Enter Full Screen), Window
-  (the system's) and Help (SoftPresenter Help, Keys…, Report an Issue…). Format, Arrange, Insert,
+  (the system's) and Help (SoftPresenter Help, What's New in SoftPresenter, Keys…, Report an
+  Issue…). Format, Arrange, Insert,
   Presentation and Screens went, and so did the View menu's Control-letter keys (⌃T ⌃C ⌃M ⌃P ⌃⇧M
   ⇧⌘S ⌃A ⌃V): their jobs are in the window (the inspector, Edit's Add, the right column's tabs
   with ⌥1 to ⌥7, the bar under the slides, the media strip's fold button, Settings). Keys that

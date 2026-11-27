@@ -5,6 +5,12 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+What's new opens a window with each version's changes.
+
+### New
+
+- **What's new window.** Settings › About › What's new (and Help › What's New in SoftPresenter on a Mac) now opens a window with this version's changes, in New, Better and Fixed, and the versions before it under them to scroll through. Each change is a short name and one plain sentence. Before, the key opened the list of changes on GitHub in the browser; the window needs no internet, as the changes come with SoftPresenter.
+
 ## 0.9.0-dev.26 — 26 November 2026 (development build)
 
 A second copy of SoftPresenter no longer opens on the same library, where either could save over the other's changes.

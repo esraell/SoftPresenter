@@ -3818,13 +3818,7 @@ impl crate::App {
         }
         // By its id ("ClearAll") or the words on it ("Clear All").
         let typed = rest(args, 1);
-        let action = items
-            .iter()
-            .find(|(action, label)| {
-                crate::menubar::id_of(*action).eq_ignore_ascii_case(&typed)
-                    || label.trim_end_matches('…').eq_ignore_ascii_case(typed.trim_end_matches('…'))
-            })
-            .map(|(action, _)| *action)
+        let action = crate::menubar::chosen(&typed)
             .ok_or_else(|| format!("No menu item called \u{201c}{typed}\u{201d}. sp menu lists them."))?;
         self.menu_action(el, action);
         Ok(Reply::done(format!("Chose {} from the menu.", crate::menubar::id_of(action))))

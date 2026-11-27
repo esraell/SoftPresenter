@@ -1408,6 +1408,7 @@ an AI assistant can't use these: whether a computer sends reports is decided at 
 
 Any command that starts a job takes `--wait`, and then prints the job's result and exits with
 its code. Menu items that open a window or a file chooser open it on the Mac, as a click does.
+`sp menu WhatsNew` opens the What's new window over Settings › About, on every system.
 
 ## Updates
 

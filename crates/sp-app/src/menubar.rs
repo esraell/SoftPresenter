@@ -382,7 +382,7 @@ pub const COMMANDS: &[(&str, &[Entry])] = &[
         "Help",
         &[
             Do(Action::Website, "SoftPresenter Help", None),
-            Do(Action::WhatsNew, "What's New in SoftPresenter", None),
+            Do(Action::WhatsNew, "What\u{2019}s New in SoftPresenter", None),
             Line,
             Check(Action::KeysOnButtons, "Show Keys on Buttons", None),
             Do(Action::KeysSheet, "Keys…", None),
@@ -456,6 +456,7 @@ pub const MENUS: &[(&str, &[Entry])] = &[
         "Help",
         &[
             Do(Action::Website, "SoftPresenter Help", None),
+            Do(Action::WhatsNew, "What\u{2019}s New in SoftPresenter", None),
             Do(Action::KeysSheet, "Keys…", None),
             Line,
             Do(Action::ReportIssue, "Report an Issue…", None),
@@ -578,6 +579,7 @@ fn item_words(action: Action) -> Option<Words> {
         A::BibleView => tk("menubar.view.bible", "Bible"),
         A::EditView => tk("menubar.view.edit", "Edit"),
         A::Website => tk("menubar.help.website", "SoftPresenter Help"),
+        A::WhatsNew => tk("menubar.help.whats_new", "What\u{2019}s New in SoftPresenter"),
         A::KeysSheet => tk("menubar.help.keys", "Keys…"),
         A::ReportIssue => tk("menubar.help.report_issue", "Report an Issue…"),
         _ => return None,
@@ -629,6 +631,19 @@ pub fn shortcuts() -> Vec<(&'static str, &'static str, String)> {
 /// The id a menu item is known by.
 pub fn id_of(action: Action) -> String {
     format!("{action:?}")
+}
+
+/// The item `sp menu` chooses by what was typed: its id ("ClearAll") or the words on it ("Clear
+/// All"), in any case, with or without its "…".
+pub fn chosen(typed: &str) -> Option<Action> {
+    // A typed ' is taken for the ’ the words are written with.
+    let plain = |words: &str| words.trim_end_matches('…').replace('\u{2019}', "'");
+    labelled_items()
+        .into_iter()
+        .find(|(action, label)| {
+            id_of(*action).eq_ignore_ascii_case(typed) || plain(label).eq_ignore_ascii_case(&plain(typed))
+        })
+        .map(|(action, _)| action)
 }
 
 /// The action a menu item's id stands for.
@@ -1163,17 +1178,33 @@ mod tests {
         assert_eq!(&app[..2], &[Entry::System(System::About), Do(Action::CheckForUpdates, "Check for Updates…", None)]);
         assert_eq!(labels("File"), ["New Song", "Import\u{2026}", "Close Window"]);
         assert_eq!(labels("View"), ["Service", "Bible", "Edit"]);
-        assert_eq!(labels("Help"), ["SoftPresenter Help", "Keys\u{2026}", "Report an Issue\u{2026}"]);
+        assert_eq!(
+            labels("Help"),
+            ["SoftPresenter Help", "What\u{2019}s New in SoftPresenter", "Keys\u{2026}", "Report an Issue\u{2026}"]
+        );
         // None of the View menu's Control keys (or anything else's) is left.
         assert!(menu_items().iter().filter_map(|(_, shortcut)| *shortcut).all(|shortcut| !shortcut.control));
         // Every menu item is one of the commands `sp menu` knows, with the same words and key.
-        for (action, shortcut) in menu_items() {
+        fn walk(entries: &'static [Entry], into: &mut Vec<(Action, &'static str, Option<Shortcut>)>) {
+            for entry in entries {
+                match entry {
+                    Do(action, label, key) | Check(action, label, key) => into.push((*action, *label, *key)),
+                    Entry::Sub(_, inside) => walk(inside, into),
+                    _ => {}
+                }
+            }
+        }
+        let mut in_the_bar = Vec::new();
+        for (_, entries) in MENUS {
+            walk(entries, &mut in_the_bar);
+        }
+        for (action, label, shortcut) in in_the_bar {
             let command = every_entry().into_iter().find_map(|(_, entry)| match entry {
                 Do(have, label, key) | Check(have, label, key) if *have == action => Some((*label, *key)),
                 _ => None,
             });
             assert!(command.is_some(), "{action:?} is in the menu bar but not among the commands");
-            assert_eq!(command.map(|(_, key)| key), Some(shortcut), "{action:?}");
+            assert_eq!(command, Some((label, shortcut)), "{action:?}");
         }
     }
 
@@ -1206,6 +1237,37 @@ mod tests {
                 assert_ne!(english.0, spanish.0, "{english:?}");
             }
         }
+    }
+
+    #[test]
+    fn sp_menu_finds_an_item_by_its_id_or_its_words_with_either_apostrophe() {
+        for typed in [
+            "WhatsNew",
+            "whatsnew",
+            "What\u{2019}s New in SoftPresenter",
+            "What's New in SoftPresenter",
+            "what's new in softpresenter",
+        ] {
+            assert_eq!(chosen(typed), Some(Action::WhatsNew), "{typed}");
+        }
+        assert_eq!(chosen("Clear All"), Some(Action::ClearAll));
+        assert_eq!(chosen("Keys"), Some(Action::KeysSheet), "the \u{2026} may be left off");
+        assert_eq!(chosen("Nothing at all"), None);
+    }
+
+    #[test]
+    fn the_help_menu_has_whats_new_which_opens_the_window_over_settings_about() {
+        let help = MENUS.iter().find(|(title, _)| *title == "Help").expect("a Help menu").1;
+        assert!(help.iter().any(|entry| matches!(entry, Do(Action::WhatsNew, _, None))), "Help lists What's New");
+        assert!(menu_items().iter().any(|(action, _)| *action == Action::WhatsNew));
+        // A click on it comes back by its id as WhatsNew, the action `sp menu WhatsNew` chooses.
+        assert_eq!(action_of(&id_of(Action::WhatsNew)), Some(Action::WhatsNew));
+        // Which opens Settings at About, with the window over it.
+        let mut state = crate::home::HomeState::default();
+        crate::whats_new::open_over_about(&mut state);
+        assert!(state.preferences_open, "Settings opens");
+        assert!(state.preferences_pane == crate::home::Pane::About, "at About");
+        assert!(state.whats_new.is_open(), "with the window over it");
     }
 
     #[test]

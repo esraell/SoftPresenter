@@ -260,6 +260,8 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
         inside.set_clip_rect(page);
         page_ui(&mut inside, state, show);
     });
+    // The What's new window, over the whole of Settings, from About.
+    crate::whats_new::window(ui.ctx(), &mut state.whats_new);
 }
 
 /// The list: "Settings", the groups and their rows, and Set up SoftPresenter under them.
@@ -932,8 +934,8 @@ fn song_files_page(ui: &mut egui::Ui, state: &mut HomeState) {
 }
 
 /// Settings › About: the version, updates (and under them, in a pre-release, a row saying so),
-/// what's new, the guide, reporting a problem and the licences, each a row with its key; then
-/// the anonymous reports' card.
+/// what's new (the What's new window, over this one: `whats_new.rs`), the guide, reporting a
+/// problem and the licences, each a row with its key; then the anonymous reports' card.
 fn about_page(ui: &mut egui::Ui, state: &mut HomeState) {
     let version = tf(
         "settings.about.version",
@@ -954,25 +956,25 @@ fn about_page(ui: &mut egui::Ui, state: &mut HomeState) {
                 t("settings.about.whats_new.label", "What\u{2019}s new"),
                 t("settings.about.whats_new", "What\u{2019}s new"),
                 t("settings.about.whats_new.about", "The changes in this version"),
-                Page::WhatsNew,
+                None,
             ),
             (
                 t("settings.about.help", "Help"),
                 t("settings.about.guide", "Open the guide"),
                 t("settings.about.guide.about", "How to set up the screens, run a service and more, on the web"),
-                Page::Guide,
+                Some(Page::Guide),
             ),
             (
                 t("settings.about.wrong", "Something wrong?"),
                 t("settings.about.report", "Report an issue\u{2026}"),
                 t("settings.about.report.about", "Opens a new issue on GitHub, with the version filled in"),
-                Page::ReportIssue,
+                Some(Page::ReportIssue),
             ),
             (
                 t("settings.about.licences.label", "Licences"),
                 t("settings.about.licences", "Licences\u{2026}"),
                 t("settings.about.licences.about", "SoftPresenter\u{2019}s and those of the parts it carries"),
-                Page::Licences,
+                Some(Page::Licences),
             ),
         ] {
             let size = parts::key_size(ui, key);
@@ -983,8 +985,11 @@ fn about_page(ui: &mut egui::Ui, state: &mut HomeState) {
             });
         }
     });
-    if let Some(page) = opened {
-        open_page(state, page);
+    // A web page, or (with none) the What's new window on the version running.
+    match opened {
+        Some(Some(page)) => open_page(state, page),
+        Some(None) => crate::whats_new::open_over_about(state),
+        None => {}
     }
     crate::reports::ui::settings_card(ui, state);
 }

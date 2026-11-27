@@ -101,6 +101,7 @@ mod timers;
 mod updates;
 mod versions;
 mod voxlive;
+mod whats_new;
 mod window_plan;
 mod writer;
 
@@ -9959,6 +9960,14 @@ impl App {
                         state.preferences_pane = home::Pane::Integrations;
                         state.timelychurch.open = true;
                     }
+                    // Testing aid: the What's new window over About (whats-new), or scrolled to
+                    // its end (whats-new-end).
+                    "whats-new" | "whats-new-end" => {
+                        crate::whats_new::open_over_about(state);
+                        if pane == "whats-new-end" {
+                            state.whats_new.scroll_to_end();
+                        }
+                    }
                     // Any page by its name ("phone-remote", "key mappings", "mcp").
                     other => {
                         if let Some(found) = home::Pane::named(other) {
@@ -10433,6 +10442,10 @@ impl App {
         let Some(running) = self.running.as_mut() else {
             return;
         };
+        // The What's new window goes with the Settings window it is drawn over.
+        if !running.home_state.preferences_open {
+            running.home_state.whats_new.close();
+        }
         let state = &running.home_state;
         running.panels.retain(|panel| panel.kind.wanted(state));
         for kind in Panel::ALL {
@@ -11256,14 +11269,13 @@ impl App {
             }
             A::IdentifyScreens => state.identify = !state.identify,
             A::KeysOnButtons => state.keys_on_buttons = !state.keys_on_buttons,
-            A::Website | A::WhatsNew | A::ReportIssue => {
-                let page = match action {
-                    A::WhatsNew => home::Page::WhatsNew,
-                    A::ReportIssue => home::Page::ReportIssue,
-                    _ => home::Page::Guide,
-                };
+            A::Website | A::ReportIssue => {
+                let page = if action == A::ReportIssue { home::Page::ReportIssue } else { home::Page::Guide };
                 home::open_page(state, page);
             }
+            // The What's new window over Settings › About, where its key is (as Check for
+            // Updates opens there).
+            A::WhatsNew => crate::whats_new::open_over_about(state),
         }
         running.home_window.request_redraw();
         if !commands.is_empty() {

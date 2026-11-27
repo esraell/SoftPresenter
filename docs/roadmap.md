@@ -223,11 +223,11 @@ rather than a feature, but no church on Windows can use the app without them.
 - **Tested Windows and Linux builds.** · L · High
 - **Editable key mappings.** Rebind keys, with filters for changed keys and clashes, a reset, and keys for your own clear buttons, macros and props. (started: a read-only table) · M · Medium
 - **The app in other languages.** Russian or Ukrainian menus for operators, which matters for the two-language churches SoftPresenter is made for. · M–L · Medium
-- **Updates pane.** Checking now, notices of new versions, an opt-in beta and release notes; it matters more once there are releases. (started: Help › What's New opens the list of changes) · M · Low
+- **Updates pane.** Checking now, notices of new versions, an opt-in beta and release notes; it matters more once there are releases. (started: Settings › About › What's new shows each version's changes in a window) · M · Low
 - **Media and Import panes.** Default scaling, layer, picture duration, video loop and what audio does at its end, for imported items. · S · Low
 - **Network, Inputs and Devices panes.** Built with the features they set up. · S each · Low
 - **First-run guide and sample content.** Pick the audience and stage screens, and get sample songs and media. (started: one sample song) · S–M · Low
-- **Help menu extras.** A knowledge base, tutorials, status, reporting an issue with setup details, and release notes. (started: Help, What's New and Report an Issue) · S · Low
+- **Help menu extras.** A knowledge base, tutorials, status, reporting an issue with setup details, and release notes. (started: Help, Report an Issue, and What's new in Settings › About) · S · Low
 - **Finding the mouse pointer** (⌥M). · S · Low
 - **Showing or choosing the data folder in Settings.** · S · Low
 - **A search field in Settings.** · S · Low
