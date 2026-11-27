@@ -865,6 +865,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn off_a_mac_the_keys_are_named_as_the_languages_keyboards_print_them() {
+        use crate::i18n::{Language, with_language};
+        let chord = || chord_on(false, false, false, true, true, "1");
+        assert_eq!(with_language(Language::English, chord), "Ctrl+Shift+1");
+        assert_eq!(with_language(Language::German, chord), "Strg+Umschalt+1");
+        assert_eq!(with_language(Language::Spanish, chord), "Ctrl+May\u{fa}s+1");
+        assert_eq!(with_language(Language::Russian, chord), "Ctrl+Shift+1");
+        // A Mac's keys are its symbols in every language.
+        assert_eq!(
+            with_language(Language::German, || chord_on(true, false, false, true, true, "1")),
+            "\u{21e7}\u{2318}1"
+        );
+    }
+
     fn press(
         ctx: &egui::Context,
         state: &mut HomeState,

@@ -1,7 +1,7 @@
 # Translating SoftPresenter's own words
 
-SoftPresenter's buttons, menus, tooltips and notices exist in English, Spanish, Russian and
-Ukrainian (English, Spanish and Russian in full). Songs, Bible text and Bible book names are
+SoftPresenter's buttons, menus, tooltips and notices exist in English, Spanish, Russian,
+Ukrainian and German (English, Spanish, Russian and Ukrainian in full; German area by area). Songs, Bible text and Bible book names are
 content and keep their own languages; the `sp` command line, log lines and dev reports stay in
 English; the phone's remote page has its own tables. The rules for how words may grow are in the design's
 `06-languages.md`; this page is how to do the work in the code.
@@ -54,7 +54,7 @@ tn("left.songs", n, "{n} song", "{n} songs", &[])   // "1 song", "5 songs"
 ```
 
 `{n}` is the number as the language writes it (13,613; 13.613; 13 613). In the table a plural is an
-array: **two** forms for English and Spanish (one, other), **three** for Russian and Ukrainian
+array: **two** forms for English, Spanish and German (one, other), **three** for Russian and Ukrainian
 (one: 1, 21; few: 2 to 4, 22 to 24; many: 5 to 20, 11 to 14):
 
 ```json
@@ -141,8 +141,7 @@ start with `_` (`"_note"`) are comments.
 | `common` | words several areas share |
 | `format` | numbers and quotation marks (not words) |
 
-Spanish and Russian have every area above. What stays in English is what other crates say in their own words
-Spanish and Ukrainian have every area above. What stays in English is what other crates say in their own words
+Spanish, Russian and Ukrainian have every area above. What stays in English is what other crates say in their own words
 when something fails (NDI's, the DeckLink driver's and a video file's reasons, shown as they
 come), and the few errors said at startup before the language is known (the home window can't
 open, no graphics device).
@@ -153,13 +152,11 @@ and `load::reason_words` for why a song reader refused a file, an `sp_model::Rea
 crate and `sp` keep their English. What the system or a library says inside such a reason (a file
 the system couldn't read, the JSON or zip reader's own words) is shown as it comes.
 
-When you finish an area, add its file name to `SPANISH_DONE` in `i18n.rs`, so a string wrapped
-later without its Spanish fails the tests. Russian is held to the same list (`RUSSIAN_DONE` is
-`SPANISH_DONE`), so a string wrapped later needs its Russian as well as its Spanish.
 When you finish an area, add its file name to `SPANISH_DONE` in `i18n.rs` (and to the list of
-each other language that has it in full, such as `UKRAINIAN_DONE`), so a string wrapped later
-without its words in that language fails the tests. Every area is in both lists now: a new string
-needs its Spanish and its Ukrainian in the same commit.
+each other language that has it in full: `RUSSIAN_DONE` and `UKRAINIAN_DONE` are `SPANISH_DONE`,
+and `GERMAN_DONE` lists the areas German has finished), so a string wrapped later without its
+words in that language fails the tests. A new string needs its Spanish, Russian and Ukrainian in
+the same commit, and its German when its area is in `GERMAN_DONE`.
 
 ## Spanish: which Spanish
 
@@ -377,6 +374,160 @@ Names the church gives (a playlist, a library, a song) can't be declined, so a s
 carries one puts it in «…» or after a noun: «{item}» додано до «{list}»; у бібліотеці {library}.
 A count given without plural forms (`tf`) goes after a colon or in brackets, so nothing has to
 agree with it: «Імпортовано пісень: {n}», «Вилучити зі списку ({n})».
+
+## German
+
+Written for German-speaking churches, in Germany, Austria and Switzerland, the way a volunteer at the screens
+talks: plain modern German, short sentences, everyday words. Translated from the English in the
+code; Spanish and Russian only helped with what a string means. **Not yet read by a German
+speaker**: `"_note"` at the top of each German file says so.
+
+- **Register: du.** The tables speak to the person with du, in lower case (du, dein, dich), as
+  the German help of a widely used church management program does, and as a team of volunteers
+  speaks to each other; never Sie. A German speaker deciding otherwise changes the sentences that
+  tell the person what to do („Klicke…“, „Wähle…“), and little else: buttons and menu items are
+  an infinitive or a noun either way („Lied hinzufügen“, „Alles ausblenden“, „Fertig“).
+- **Capitals.** German's own: nouns capitalised, everything else lower case. The English Title
+  Case has no German form („Clear All“ is „Alles ausblenden“). Where the app sets a caption in
+  capitals itself (the layer keys, INSTALLED), the table writes it normally.
+- **Marks.** „…“ (`format.json`), but never round a placeholder the code already quotes
+  (`i18n::quoted`); the ellipsis is one character, …; a dash is „ – “; numbers 1.234, 13.613 and
+  0,4 s; a percentage „75 %“ with a no-break space.
+- **Plurals** have two forms, one and other, each with `{n}`: `["{n} Lied", "{n} Lieder"]`.
+- **Names in sentences.** A name the church gave (a playlist, a library, a screen) can't take a
+  genitive -s, so a sentence gives it a head noun („zum Ablauf {list}“, „in der Bibliothek
+  {library}“) or puts it before a colon („{name}: konnte nicht gelesen werden“).
+- **Keys.** Off a Mac the keys are named as German keyboards and Windows name them: Strg
+  (`keys.cap.ctrl`), Umschalt, Entf, Pos1, Ende, Leertaste, Pfeiltasten; Esc, Tab, Alt and the F
+  keys as printed. A song part's jump key stays its letter (C for the chorus).
+- **The Mac's menu bar** uses Apple's own German: Ablage, Bearbeiten, Darstellung, Fenster, Hilfe;
+  Widerrufen, Wiederholen, Ausschneiden, Kopieren, Einsetzen, Alles auswählen; Über
+  SoftPresenter, Einstellungen …, Dienste, SoftPresenter ausblenden, Andere ausblenden, Alle
+  einblenden, SoftPresenter beenden; Im Dock ablegen, Zoomen, Alle nach vorne bringen. Inside the
+  app's own window Paste is Einfügen.
+- **Room.** German runs about a third longer than English. The three views say Ablauf, Bibel and
+  Editor (nine letters at most); the layer keys have short forms where the word is longer than ten
+  letters (Nachr., Ankünd.); a button's words are chosen short, since nothing in a control wraps.
+- **Never translated:** product names (SoftPresenter, NDI, DeckLink, VoxLive, Canva, TimelyChurch,
+  Worship Leader App, CCLI, Claude, ChatGPT, AirPlay, FFmpeg…), `sp` and its commands, file
+  names, and the group names in examples (`[Verse 1]`, `[Chorus]`).
+
+Glossary (the main window's tables, and every table after them, use these words):
+
+| English | German |
+|---|---|
+| Service (the church service) | Gottesdienst |
+| Service (the view's tab in the top bar) | Ablauf |
+| Service (the first playlist's name, given and saved) | Gottesdienst |
+| playlist (the running order of a service) | Ablauf (pl. Abläufe) |
+| the service's playlist | der Ablauf des Gottesdienstes |
+| playlist item | Eintrag |
+| header · divider · placeholder (in a playlist) | Überschrift · Trennlinie · Platzhalter |
+| library · All Songs · song libraries | Bibliothek · Alle Lieder · Liedbibliotheken |
+| song · songs | Lied · Lieder |
+| words (of a song) · line (of words) | Text (Liedtext) · Zeile |
+| slide | Folie |
+| group (a song's part: verse, chorus…) | Teil (Liedteil) |
+| verse · chorus · pre-chorus · bridge · ending · intro · tag | Strophe · Refrain · Pre-Chorus · Bridge · Schluss · Intro · Tag |
+| arrangement | Arrangement (pl. Arrangements) |
+| As written (the arrangement) | Wie geschrieben |
+| songbook · free songbooks | Liederbuch · kostenlose Liederbücher |
+| song pack · song bundle | Liedpaket · Liedbündel |
+| Bible (the view) · Edit (the view) | Bibel · Editor |
+| Edit (the verb) · Edit Words | Bearbeiten · Text bearbeiten |
+| Bible verse · passage · chapter · book | Vers · Bibelstelle · Kapitel · Buch |
+| reference (what is typed or looked up: „Bible, ready for a reference“) | Bibelstelle |
+| the reference shown on a slide (the line naming the verses) | Stellenangabe |
+| Bible translation · reading | Übersetzung · Lesung |
+| an example reference (English „John 3:16“) | Johannes 3,16 (German writes chapter,verse with a comma) |
+| screen · display, monitor (the device) | Bildschirm · Monitor |
+| projector | Beamer |
+| audience screens · Audience (key and tab) | Bildschirme im Saal · Saal |
+| stage screens · Stage (key and tab) | Bildschirme auf der Bühne · Bühne |
+| stage layout | Bühnenlayout |
+| the room (the congregation's side) | der Saal |
+| the operator's window | das Bedienfenster |
+| on screen (what the audience sees now) | auf den Bildschirmen / live |
+| preview | Vorschau |
+| output | Ausgabe |
+| Clear (take off the screens) · Clear All | Ausblenden · Alles ausblenden |
+| take off the screens | von den Bildschirmen nehmen |
+| Show / Hide (a part of the window, such as the media strip) | Anzeigen / Verbergen (never „ausblenden“, which is Clear) |
+| Show (put on the screens) | Zeigen |
+| On · Off (a state) | Ein · Aus (the top bar's keys: Ein · Aus) |
+| layer keys | Ebenentasten |
+| layer | Ebene |
+| media · media strip · media bin | Medien · Medienleiste · Mediathek |
+| media playlist · audio playlist | Medienliste · Audioliste |
+| picture · video · audio · track (audio) · sound | Bild · Video · Audio · Track · Ton |
+| title (of a song, a passage) | Titel |
+| background | Hintergrund |
+| props · prop | Grafiken · Grafik |
+| messages (shown on the screens) · quick message | Nachrichten · Schnellnachricht |
+| announcements | Ankündigungen |
+| notices (the app's own list of what happened) | Meldungen |
+| timer · countdown · count up · clock | Timer · Countdown · Hochzählen · Uhr |
+| macro | Makro |
+| theme · theme version · the usual look | Design · Designvariante · das übliche Aussehen |
+| template | Vorlage |
+| transition | Übergang |
+| Cut · Dissolve · Continuous | Schnitt · Blende · Durchgehend (the bar under the slides has little room; Überblenden only in sentences) |
+| box (on a slide) · text box · shape · object | Feld · Textfeld · Form · Objekt |
+| captions (live captions) | Untertitel (Live-Untertitel) |
+| test pattern · Identify | Testbild · Identifizieren |
+| key · fill (a video switcher's keyer) | Key · Fill |
+| Settings · Integrations · AI assistants | Einstellungen · Integrationen · KI-Assistenten |
+| Settings groups: The room · On screen · Connect · Advanced | Saal · Auf dem Bildschirm · Verbinden · Erweitert |
+| Phone remote · Remote Control | Handy-Fernbedienung · Fernsteuerung |
+| AirPlay | AirPlay (a name, never translated) |
+| setup (the first start's) | Einrichtung (Ersteinrichtung where it means the first start) |
+| Set up SoftPresenter… | SoftPresenter einrichten… |
+| name (of a song, list, file) · name (of a person) | Name · Name |
+| sign in · sign-in · password · sync | anmelden · Anmeldung · Passwort · Synchronisierung |
+| Import · Export · download · install | Importieren · Exportieren · herunterladen · installieren |
+| Undo · Redo | Widerrufen · Wiederholen |
+| Cancel · Done · Close · OK | Abbrechen · Fertig · Schließen · OK |
+| Delete · Remove (from a list) | Löschen · Entfernen |
+| Duplicate · Rename · Copy · Cut · Paste | Duplizieren · Umbenennen · Kopieren · Ausschneiden · Einfügen |
+| pick · picked | auswählen · ausgewählt |
+| choose | wählen |
+| Trash | Papierkorb |
+| folder · file | Ordner · Datei |
+| computer | Computer |
+| app | App |
+| Command line · terminal · Command Prompt | Befehlszeile · Terminal · Eingabeaufforderung |
+| Next (the action) · Go to Next (a slide's timing) | Weiter · Automatisch weiter |
+| Previous | Zurück |
+| Loop · loops (a song, a video, a media playlist going round) | Schleife · läuft in Schleife („Wiederholen“ is only Redo) |
+| Again (a slide tag) | Nochmal |
+| Scale to Fill · Scale to Fit · Stretch to Fill | Füllend skalieren · Einpassen · Strecken |
+| Reload · Keep mine (a song changed outside) | Neu laden · Meine behalten |
+| a copy's name ("{name} copy") | {name} (Kopie) |
+| What's new | Neuigkeiten |
+| About | Über |
+| Licences | Lizenzen |
+| copyright line | Copyright-Zeile |
+| CCLI Song # | CCLI-Liednummer |
+| Version (a theme version, a program version) | Variante (theme) · Version (program) |
+| Screen Mirroring · Control Centre (Apple's own) | Bildschirmsynchronisierung · Kontrollzentrum |
+| Keychain · Credential Manager | Schlüsselbund · Anmeldeinformationsverwaltung |
+| Task Manager | Task-Manager |
+| On screen (the state under the preview) · nothing on screen | Live · Leer |
+| goes on screen · is on screen | wird gezeigt / kommt auf die Bildschirme · ist live |
+| Usual (a transition, a template: whatever the theme or setting picks) | Wie üblich |
+| theme version (short) | Variante |
+| Edit › Themes (the Edit view's kind) | Editor › Designs |
+| right-click menu | Rechtsklick-Menü |
+| notes · Slide Notes | Notizen · Foliennotizen |
+| How many times (a group in an arrangement) | Wie oft |
+| the Bible page | die Bibelseite |
+| Stop (a button) · Play · Stop Playing | Stopp · Abspielen · Wiedergabe stoppen |
+| Show keys on buttons | Tasten an Schaltflächen anzeigen |
+| (press ?) · ({key}) in a hint | (drücke ?) · ({key}) |
+| Settings pages: Screens · AirPlay · Slides · Groups · Language · Integrations · AI assistants · Phone remote · Keys · Command line · Song files · About | Bildschirme · AirPlay · Folien · Liedteile · Sprache · Integrationen · KI-Assistenten · Handy-Fernbedienung · Tasten · Befehlszeile · Lieddateien · Info |
+| Settings › Slides (and the old name Settings › General) | Einstellungen › Folien |
+| Set up SoftPresenter › Languages | SoftPresenter einrichten › Sprachen |
+| a notice's Clear All (empties the notices list, nothing to do with the screens) | Alle entfernen |
 
 ## Checking
 

@@ -888,6 +888,14 @@ mod tests {
                 ("1 песня".into(), "2 песни".into(), "5 песен".into(), "21 песня".into(), "13\u{a0}613 песен".into())
             );
         });
+        with_language(Language::German, || {
+            assert_eq!(
+                (songs(1), songs(0), songs(21), songs(1234)),
+                ("1 Lied".into(), "0 Lieder".into(), "21 Lieder".into(), "1.234 Lieder".into())
+            );
+            assert_eq!(t("right.layer.messages", "Messages"), "Nachrichten");
+            assert_eq!(ts("right.layer.messages", "Messages"), "Nachr.", "the short form");
+        });
         let template = |n| {
             let forms = ["{n} песня", "{n} песни", "{n} песен"];
             fill(forms[Language::Russian.plural_form(n)], &[("n", &n.to_string())])
@@ -1066,7 +1074,7 @@ mod tests {
     const UKRAINIAN_DONE: &[&str] = SPANISH_DONE;
     // German joins an area at a time, as its tables are written; from then on a string wrapped
     // without its German fails here as well.
-    const GERMAN_DONE: &[&str] = &[];
+    const GERMAN_DONE: &[&str] = &["topbar", "left", "right", "slides", "dock", "keys", "media"];
 
     /// What `language` lacks in the areas `done` lists, as "key (English)".
     fn lacking_in(language: Language, done: &[&str]) -> Vec<String> {

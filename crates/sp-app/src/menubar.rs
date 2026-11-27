@@ -535,12 +535,12 @@ impl Shortcut {
 
 impl Shortcut {
     /// The shortcut as Windows and Linux write it: "Ctrl+Shift+F" (there the Command key is Ctrl,
-    /// and a Control shortcut is Ctrl too), with Shift as the list of keys writes it, as the
-    /// language's keyboards print it (Mayús in Spanish).
+    /// and a Control shortcut is Ctrl too), with Ctrl and Shift as the list of keys writes them, as
+    /// the language's keyboards print them (Mayús in Spanish, Strg+Umschalt in German).
     pub fn words(self) -> String {
         let mut out = String::new();
-        let shift = t("keys.cap.shift", "Shift");
-        for (on, word) in [(self.command || self.control, "Ctrl"), (self.option, "Alt"), (self.shift, shift)] {
+        let (ctrl, shift) = (t("keys.cap.ctrl", "Ctrl"), t("keys.cap.shift", "Shift"));
+        for (on, word) in [(self.command || self.control, ctrl), (self.option, "Alt"), (self.shift, shift)] {
             if on {
                 out.push_str(word);
                 out.push('+');
@@ -1132,6 +1132,15 @@ mod mac {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn off_a_mac_a_shortcut_is_written_as_the_languages_keyboards_print_it() {
+        use crate::i18n::{Language, with_language};
+        let find = Shortcut { command: true, control: false, option: false, shift: true, key: 'F' };
+        assert_eq!(with_language(Language::English, || find.words()), "Ctrl+Shift+F");
+        assert_eq!(with_language(Language::German, || find.words()), "Strg+Umschalt+F");
+        assert_eq!(with_language(Language::Spanish, || find.words()), "Ctrl+May\u{fa}s+F");
+    }
 
     #[test]
     fn every_shortcut_is_used_once_has_a_key_and_needs_command_or_control() {
