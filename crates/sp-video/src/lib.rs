@@ -950,13 +950,15 @@ mod tests {
         player.set_volume(0.0);
         let frames = player.frames();
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // The pictures' times and the hand-over's, on one clock.
+        let base = std::time::Instant::now();
         let reader = {
             let (frames, stop) = (frames.clone(), stop.clone());
             std::thread::spawn(move || {
-                let (started, mut seen) = (std::time::Instant::now(), Vec::new());
+                let mut seen = Vec::new();
                 while !stop.load(std::sync::atomic::Ordering::Relaxed) {
                     if let Some(pixel) = frames.next_with(|lending| lending.rows().map(middle)).flatten() {
-                        seen.push((started.elapsed(), pixel));
+                        seen.push((base.elapsed(), pixel));
                     }
                     std::thread::sleep(Duration::from_millis(2));
                 }
@@ -966,7 +968,11 @@ mod tests {
         player.play();
         let started = std::time::Instant::now();
         let (mut lined_up, mut took_over) = (false, None);
-        while started.elapsed() < Duration::from_millis(2300) {
+        // FFmpeg is started on the player's own thread, so the red video's first pass begins with
+        // its first picture, a while after it was asked for on a busy computer: the loop goes on
+        // until the blue video has played a moment after taking over.
+        let mut until = Duration::from_secs(8);
+        while started.elapsed() < until {
             if !lined_up && started.elapsed() > Duration::from_millis(300) {
                 player.play_next(&blue).expect("the blue video opens");
                 assert_eq!(player.next_file(), Some(blue.as_path()));
@@ -974,7 +980,8 @@ mod tests {
             }
             let wait = player.tick();
             if let Some(handed) = player.take_handed_over() {
-                took_over = Some((started.elapsed(), handed));
+                took_over = Some((base.elapsed(), handed));
+                until = started.elapsed() + Duration::from_millis(1300);
             }
             std::thread::sleep(wait.min(Duration::from_millis(5)));
         }
@@ -982,12 +989,14 @@ mod tests {
         let seen = reader.join().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
 
-        let (when, handed) = took_over.expect("the blue video took over");
+        let (handed_at, handed) = took_over.expect("the blue video took over");
         assert_eq!(handed, Ok(blue.clone()));
         assert_eq!(player.path(), blue.as_path());
+        // Timed from the red video's first picture, where its first pass began.
+        let when = handed_at.saturating_sub(seen.first().map_or(Duration::ZERO, |(at, _)| *at));
         assert!(
             when > Duration::from_millis(850) && when < Duration::from_millis(1300),
-            "at the end of the red video's first pass, not when it was lined up: {when:?}"
+            "at the end of the red video's first pass, not when it was lined up: {when:?} after its first picture"
         );
         assert!(frames.same(&player.frames()), "the screens' frames are the same handle after the hand-over");
         assert!(seen.len() > 40, "pictures came all the way through: {}", seen.len());
