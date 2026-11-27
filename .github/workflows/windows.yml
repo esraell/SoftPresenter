@@ -12,15 +12,23 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  SOFTPRESENTER_QUIET: "1"
+  CARGO_TERM_COLOR: always
+
+# The check runs as jobs side by side, on machines of their own: the build and lints, the tests
+# other than the end-to-end ones, and the end-to-end tests in three parts. The last job, "Build
+# and tests on Windows", passes only when every one of them did.
+#
+# The end-to-end tests are dealt out with cargo-nextest, which runs each test as a process of
+# its own; the other tests run with cargo test, as before. Each job compiles what it runs: Cargo
+# builds the program again for the tests anyway (sp-app's dev-dependencies switch on sp-model's
+# test-documents), so a build shared between jobs would only make the tests wait for it.
 jobs:
-  windows:
-    # The name the earlier runs had, so anything that waits on this check by name still finds it.
-    name: Build and tests on Windows
+  build-and-lints:
+    name: Windows build, lints and sp-render tests
     runs-on: windows-latest
     timeout-minutes: 60
-    env:
-      SOFTPRESENTER_QUIET: "1"
-      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Git on GitHub's Windows machines turns LF into CRLF as it checks files out;
@@ -37,25 +45,13 @@ jobs:
           fi
       - name: Install the Rust version in rust-toolchain.toml
         run: rustup toolchain install
+      # A cache of its own: the program as it ships (without the tests' features) and clippy's
+      # checking are built here only.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows-build-and-lints
       - name: Build
         run: cargo build --workspace
-      # The end-to-end tests (crates/sp-app/tests/e2e.rs) are among them: they start the app
-      # itself, as a quiet copy, drawing with WARP (DirectX 12 on the processor), as these
-      # machines have no graphics card. On WARP the app works out its pictures on the processor
-      # (sp_render::early_stages_on_processor): WARP faults on one of the renderer's stages.
-      - name: Tests
-        run: cargo test --workspace --exclude sp-render --no-fail-fast
-      # A program Windows stopped (an access violation, say) leaves its name, the module it
-      # stopped in and the place there in the Application log: printed when a step failed, as
-      # the tests can only say the exit code.
-      - name: Say what Windows logged about stopped programs
-        if: failure()
-        shell: pwsh
-        run: |
-          $stopped = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000 } -MaxEvents 20 -ErrorAction SilentlyContinue
-          if (-not $stopped) { "Windows logged no stopped program."; exit 0 }
-          $stopped | ForEach-Object { "--- " + $_.TimeCreated.ToString('u'); $_.Message }
       - name: Tests (sp-render, without the picture tests)
         if: success() || failure()
         run: cargo test -p sp-render --lib --no-fail-fast
@@ -64,9 +60,104 @@ jobs:
       - name: Lints
         if: success() || failure()
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # A program Windows stopped (an access violation, say) leaves its name, the module it
+      # stopped in and the place there in the Application log: printed when a step failed, as
+      # the tests can only say the exit code. Each job that runs tests has this step.
+      - name: Say what Windows logged about stopped programs
+        if: failure()
+        shell: pwsh
+        run: &stopped |
+          $stopped = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000 } -MaxEvents 20 -ErrorAction SilentlyContinue
+          if (-not $stopped) { "Windows logged no stopped program."; exit 0 }
+          $stopped | ForEach-Object { "--- " + $_.TimeCreated.ToString('u'); $_.Message }
       - name: Say which tests were left out
         if: success() || failure()
         run: >-
           echo "::notice title=Picture tests skipped::crates/sp-render/tests/golden.rs compares
           against pictures made on the maintainer's Mac with its GPU and fonts, so it runs there,
           not here."
+
+  tests:
+    name: Windows tests, all but the end-to-end ones
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the Rust version in rust-toolchain.toml
+        run: rustup toolchain install
+      # One cache for this job and the end-to-end ones, which build a part of what this job
+      # builds, with the same packages and so the same features. This job alone saves it.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows
+      # Every test as before, the documentation tests among them, but for the end-to-end ones:
+      # the jobs below run those, and here they skip themselves, saying why, as the switch
+      # makes them. So a test binary added later runs here.
+      - name: Tests
+        env:
+          SOFTPRESENTER_E2E: "off (the end-to-end jobs run them)"
+        run: cargo test --workspace --exclude sp-render --no-fail-fast
+      - name: Say what Windows logged about stopped programs
+        if: failure()
+        shell: pwsh
+        run: *stopped
+
+  end-to-end:
+    name: Windows end-to-end tests, part ${{ matrix.part }} of 3
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      # Each part runs to its end whatever the others do, as cargo test --no-fail-fast did.
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the Rust version in rust-toolchain.toml
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: windows
+          save-if: false
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
+        with:
+          tool: cargo-nextest@0.9.152
+      # The end-to-end tests (crates/sp-app/tests/e2e.rs) start the app itself, as a quiet copy,
+      # drawing with WARP (DirectX 12 on the processor), as these machines have no graphics
+      # card. On WARP the app works out its pictures on the processor
+      # (sp_render::early_stages_on_processor): WARP faults on one of the renderer's stages.
+      #
+      # One copy at a time on a machine, as the harness's own lock keeps them under cargo test:
+      # --no-capture runs the tests one after another (nextest's processes are out of that
+      # lock's reach), and passes their output straight through, notices and timings. The
+      # same packages as the job above, so the app is built with the same features; only the
+      # end-to-end test binary and the program it starts are built. The parts are dealt out
+      # in turn from the tests in name order.
+      - name: End-to-end tests
+        run: >-
+          cargo nextest run --workspace --exclude sp-render --test e2e --no-fail-fast
+          --no-capture --partition slice:${{ matrix.part }}/3
+      - name: Say what Windows logged about stopped programs
+        if: failure()
+        shell: pwsh
+        run: *stopped
+
+  # The name the earlier runs had, so anything that waits on this check by name still finds it.
+  windows:
+    name: Build and tests on Windows
+    needs: [build-and-lints, tests, end-to-end]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every Windows job passed
+        env:
+          RESULTS: ${{ needs.build-and-lints.result }} ${{ needs.tests.result }} ${{ needs.end-to-end.result }}
+        run: |
+          echo "Build and lints, tests, end-to-end tests: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != success ]; then
+              echo "::error title=Windows checks::A Windows job did not pass ($RESULTS)."
+              exit 1
+            fi
+          done
