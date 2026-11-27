@@ -78,7 +78,7 @@
   "editor.screen.label.none": "Немає",
   "editor.hint.keyboard": "Тут клавіатура редагує макет. Пробіл і стрілки не перемикають слайди.",
   "editor.hint.mouse": "Клацніть, щоб вибрати · Shift-клацання додає до вибраного · перетягніть, щоб перемістити · маркери змінюють розмір · стрілки зсувають, із Shift — на піксель",
-  "editor.mirror.name": "Екран телефону або iPad",
-  "editor.mirror.numbered": "Екран телефону або iPad {n}",
-  "editor.add.mirror": "Екран телефону або iPad"
+  "editor.mirror.name": "AirPlay",
+  "editor.mirror.numbered": "AirPlay {n}",
+  "editor.add.mirror": "AirPlay"
 }

@@ -1085,16 +1085,8 @@ impl crate::App {
                     _ => None,
                 }) {
                     Some(url) => *url = address.clone(),
-                    None => {
-                        let mut web = sp_model::Object::web(address.clone());
-                        web.frame = Some(sp_model::SlideRect {
-                            x: 0.0,
-                            y: 0.0,
-                            w: sp_model::SLIDE_WIDTH,
-                            h: sp_model::SLIDE_HEIGHT,
-                        });
-                        changed.objects.insert(0, web);
-                    }
+                    // Over the whole slide, as `Object::web` makes it, behind everything.
+                    None => changed.objects.insert(0, sp_model::Object::web(address.clone())),
                 }
                 format!("slide {} shows the web page {address}", index + 1)
             };

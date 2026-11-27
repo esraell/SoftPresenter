@@ -616,7 +616,7 @@ fn draw_ndi(
     draw_ndi_tag(scene, fonts, placed, &tag, stopped, template, rect, outline);
 }
 
-/// A Phone or iPad Screen box: on the screens, the mirrored screen's newest picture (held and
+/// An AirPlay box: on the screens, the mirrored screen's newest picture (held and
 /// faded as an NDI source's is when its sender goes) or nothing; in the operator's window, the
 /// picture while somebody is showing one, else a dashed box, with a tag saying what the box is.
 fn draw_mirror(
@@ -649,7 +649,7 @@ fn draw_mirror(
             scene.stroke(&dashed, placed, Color::from_rgba8(150, 150, 156, 255), None, outline);
         }
     }
-    draw_ndi_tag(scene, fonts, placed, "Phone or iPad Screen", false, template, rect, outline);
+    draw_ndi_tag(scene, fonts, placed, "AirPlay", false, template, rect, outline);
 }
 
 /// A small tag at the foot of an NDI box, on a dark strip, amber when the source is not sending.

@@ -112,6 +112,6 @@
   "edit.list.duplicate": "Дублювати",
   "edit.list.delete": "Видалити",
   "edit.why.one_layout": "Макет сцени завжди лишається хоча б один",
-  "edit.tools.mirror": "Екран телефону або iPad",
+  "edit.tools.mirror": "AirPlay",
   "edit.tools.mirror.hint": "Покласти на слайд рамку для екрана iPhone, iPad чи Mac, що показує його цьому компʼютеру (його видно, поки слайд на екрані)"
 }

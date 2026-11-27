@@ -112,6 +112,6 @@
   "edit.list.duplicate": "Duplicar",
   "edit.list.delete": "Eliminar",
   "edit.why.one_layout": "Siempre hay un diseño del escenario",
-  "edit.tools.mirror": "Pantalla de teléfono o iPad",
+  "edit.tools.mirror": "AirPlay",
   "edit.tools.mirror.hint": "Poner en la diapositiva un cuadro para la pantalla de un iPhone, iPad o Mac que la muestra a este ordenador (se ve mientras la diapositiva está en pantalla)"
 }

@@ -80,7 +80,7 @@ impl Pane {
     fn words(self) -> (&'static str, &'static str) {
         match self {
             Pane::Screens => tk("settings.pane.screens", "Screens"),
-            Pane::PhoneScreens => tk("settings.pane.mirror", "Phone Screens"),
+            Pane::PhoneScreens => tk("settings.pane.mirror", "AirPlay"),
             Pane::Slides => tk("settings.pane.slides", "Slides"),
             Pane::Groups => tk("settings.pane.groups", "Groups"),
             Pane::Language => tk("settings.pane.language", "Language"),
@@ -104,7 +104,8 @@ impl Pane {
             "remote control" | "remote" => Some(Pane::PhoneRemote),
             // Phone remote with Port and certificate folded out (`remote::pane`).
             "remote more" => Some(Pane::PhoneRemote),
-            "mirror" | "phone" => Some(Pane::PhoneScreens),
+            // AirPlay was called Phone Screens until 26 November.
+            "mirror" | "phone" | "phone screens" => Some(Pane::PhoneScreens),
             "mcp" | "ai" => Some(Pane::AiAssistants),
             "cli" => Some(Pane::CommandLine),
             // About, with the anonymous reports' See what's sent opened.

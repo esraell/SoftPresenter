@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::i18n::{t, tf, tn};
 use serde::{Deserialize, Serialize};
-use sp_model::{Group, Object, Presentation, SlideRect, Uuid};
+use sp_model::{Group, Object, Presentation, Uuid};
 
 /// A PDF, whose pages become slides.
 pub const PDF_ENDING: &str = "pdf";
@@ -98,7 +98,7 @@ pub fn natural_order(a: &str, b: &str) -> std::cmp::Ordering {
 /// A slide showing one picture across the whole slide.
 fn picture_slide(file: String, name: String, width: u32, height: u32) -> sp_model::Slide {
     let mut picture = Object::image(file, name, width, height);
-    picture.frame = Some(SlideRect { x: 0.0, y: 0.0, w: sp_model::SLIDE_WIDTH, h: sp_model::SLIDE_HEIGHT });
+    picture.frame = Some(sp_model::WHOLE_SLIDE);
     sp_model::Slide::new(vec![picture])
 }
 

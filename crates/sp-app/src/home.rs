@@ -490,8 +490,8 @@ pub struct HomeState {
     pub timelychurch: crate::timelychurch::View,
     /// Settings › Remote Control, as the window shows it.
     pub remote: crate::remote::View,
-    /// Settings › Phone Screens, as the window shows it, and what the inspector says of a Phone
-    /// or iPad Screen box.
+    /// Settings › AirPlay, as the window shows it, and what the inspector says of an AirPlay
+    /// box.
     pub mirror: crate::mirror::View,
     /// Where the VoxLive item is among the presentations.
     pub voxlive_slot: Option<usize>,
@@ -4049,7 +4049,7 @@ fn edit_view(
             state.inspector.tab = crate::inspector::InspectorTab::Shape;
             ui.data_mut(|data| data.insert_temp(egui::Id::unique("ndi source focus"), true));
         }
-        // The screen of an iPhone, iPad or Mac that is showing it to this computer, in a box.
+        // AirPlay: the screen of an iPhone, iPad or Mac that is showing it to this computer, in a box.
         let mirror_bar = tools[5];
         let mirror = ui.interact(mirror_bar, ui.scope_id().with("add phone screen"), Sense::click());
         crate::studio::paint_button(ui.painter(), mirror_bar, mirror.hovered());
@@ -8976,14 +8976,14 @@ const TOOL_PAD: f32 = 12.0;
 const TOOLS_ONE_ROW: f32 = 44.0;
 
 /// The words on the Edit view's object tools, left to right: Add Text, Shapes, Media…, Web Page,
-/// NDI Source and Phone or iPad Screen.
+/// NDI Source and AirPlay.
 const TOOL_WORDS: [(&str, &str); 6] = [
     tk("edit.add_text", "Add Text"),
     tk("edit.tools.shapes", "Shapes ▾"),
     tk("edit.tools.media", "Media…"),
     tk("edit.tools.web", "Web Page"),
     tk("edit.tools.ndi", "NDI Source"),
-    tk("edit.tools.mirror", "Phone or iPad Screen"),
+    tk("edit.tools.mirror", "AirPlay"),
 ];
 
 /// The words on the object tool at `place` (see [`TOOL_WORDS`]), in the language set.

@@ -1357,7 +1357,7 @@ Remote Control (a web page on the church's network that runs the show)
   remote forget ID|all         forget a device: it signs in again, and its pages close now
   remote disconnect N          close page N's connection (its device stays remembered)
 
-Phone screens (an iPhone, iPad or Mac shows its screen in a box on a slide; unofficial)
+AirPlay (an iPhone, iPad or Mac shows its screen in a box on a slide; unofficial)
   mirror [status]              on or off, the name devices see, who is showing a screen, who
                                is waiting for an answer
   mirror on | mirror off       start receiving, or stop (off until switched on)

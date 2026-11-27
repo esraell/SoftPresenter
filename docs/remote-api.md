@@ -284,7 +284,7 @@ Refused before they reach the app, with words saying so (read as the app would r
 - `song reload` without a song (reads every song again), and `status --wait`;
 - **Remote Control itself**: `remote …`; **TimelyChurch**: `timelychurch …`; **Check for
   Updates**: `update …` (it asks the internet from the computer);
-- **phone and iPad screens**: `mirror …`, and the answer to "may this device show its screen?"
+- **AirPlay**: `mirror …`, and the answer to "may this device show its screen?"
   (`notices answer N mirror:allow|mirror:deny`): a device is let onto the screens at the computer;
 - **the app's language**: `settings set language=…`;
 - anything the server doesn't know: a command, **or a sub-command** of `voxlive`, `canva`,

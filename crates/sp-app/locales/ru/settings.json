@@ -1,5 +1,5 @@
 {
-  "_note": "Russian; see topbar.json. The Settings window as home/settings.rs draws it: the list's four groups, each page's name and what its row says at its end (On/Off as Вкл./Выкл.), the Set Up button, the pages (Screens, Slides, Groups, Language, Keys, Command line, Song files, About). Page names are the glossary's (Экраны, Слайды, Части, Язык, Клавиши, Интеграции, Пульт на телефоне, Экраны телефонов, ИИ-помощники, Командная строка); rows ending in .short are used where a row's readout doesn't fit. Windows' own Command Prompt is «командная строка».",
+  "_note": "Russian; see topbar.json. The Settings window as home/settings.rs draws it: the list's four groups, each page's name and what its row says at its end (On/Off as Вкл./Выкл.), the Set Up button, the pages (Screens, Slides, Groups, Language, Keys, Command line, Song files, About). Page names are the glossary's (Экраны, Слайды, Части, Язык, Клавиши, Интеграции, Пульт на телефоне, AirPlay, ИИ-помощники, Командная строка); rows ending in .short are used where a row's readout doesn't fit. Windows' own Command Prompt is «командная строка».",
   "settings.language": "Язык",
   "settings.language.about": "Слова самого SoftPresenter: кнопки, меню и сообщения. Меняется сразу",
   "settings.language.computer": "Язык компьютера ({language})",
@@ -71,7 +71,7 @@
   "settings.cli.not_written": "Не удалось изменить {path}: {error}",
   "settings.cli.path_not_set": "Команда sp создана в {folder}, но {error}.",
   "settings.cli.path_not_removed": "Команда sp удалена, но {error}.",
-  "settings.pane.mirror": "Экраны телефонов",
+  "settings.pane.mirror": "AirPlay",
   "settings.title": "Настройки",
   "settings.group.room": "Зал",
   "settings.group.on_screen": "На экране",

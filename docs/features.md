@@ -1435,7 +1435,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   box. The Insert
   menu also adds a text box or any shape.
 - **Web pages** on slides (Web Page above the slide, or `sp slide web SONG N URL`): a box that
-  shows a live web page, laid out at the box's size and see-through where the page has no
+  shows a live web page (added from Web Page, it covers the whole slide, and can then be moved
+  and sized as any box), laid out at the box's size and see-through where the page has no
   background, so it can sit over the slide's background or under its words. Only addresses
   starting with https:// open. The page of a song open in the window is loaded ahead, so it has
   loaded and drawn by the time its slide goes on screen; nothing shows on the screens until it
@@ -1453,8 +1454,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   content such as a scrolling ticker can look uneven; a smoother engine is planned), and not
   yet on other systems.
 - **NDI sources** on slides (NDI Source, right after Web Page above the slide, in slides,
-  props and stage layouts): a box, 16:9 and in the middle, that shows a live NDI source from
-  the network. It is set up as a web page box is: adding one picks it and gives the inspector's
+  props and stage layouts): a box, over the whole slide when added (it can then be moved and
+  sized as any box), that shows a live NDI source from the network. It is set up as a web page box is: adding one picks it and gives the inspector's
   Source menu the keyboard. The menu lists the sources found (as "Camera 1 · STREAM-PC"), with
   Look again beside it; SoftPresenter's own NDI outputs are never offered (a source shown in
   a slide would show itself). One line under it says what is so: how many are found, that it is
@@ -1483,13 +1484,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   remote page shows the box as drawn and can't add one (there is no remote command for it).
   Songs with an NDI box are saved as version 4 of the song file; older SoftPresenters say to
   update. Not yet: sound, and `sp` has no command to add one (`sp slide SONG N` lists it).
-- **A phone's, iPad's or Mac's screen** on slides (Phone or iPad Screen, right after NDI Source
-  above the slide, in slides, props and stage layouts): a box, 16:9 and in the middle, that
-  shows the screen of an iPhone, iPad or Mac whose owner chose this computer in Screen Mirroring
+- **AirPlay** on slides (AirPlay, right after NDI Source above the slide, in slides, props and
+  stage layouts): a box, over the whole slide when added (it can then be moved and sized as any
+  box), that shows the screen of an iPhone, iPad or Mac whose owner chose this computer in Screen Mirroring
   (Control Centre on the device). **Unofficial:** it works with Screen Mirroring (AirPlay) from
   an iPhone, iPad or Mac, but isn't made or supported by Apple, and an Apple update may stop it
   working; Settings says so beside the switch. It is off until switched on in **Settings ›
-  Phone Screens**, where the name devices see ("SoftPresenter — " and the computer's name
+  AirPlay**, where the name devices see ("SoftPresenter — " and the computer's name
   unless changed), **Ask me each time** (on unless changed), who is connected (with Stop) and
   the ports are. A device can never put itself on a screen: its picture shows only in a box the
   operator put on a slide, while that slide is on screen (and in the Edit view and thumbnails).
@@ -1507,9 +1508,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   started only while this is switched on, under its own licence:
   [licences/screen-mirroring.md](licences/screen-mirroring.md)), which decodes with FFmpeg. A
   quiet test run never announces itself and listens on this computer only. From the command
-  line: `sp mirror` ([cli.md](cli.md#phone-screens)). A song with such a box is written as
+  line: `sp mirror` ([cli.md](cli.md#airplay)). A song with such a box is written as
   version 5 of the song format, which earlier builds decline to open rather than lose the box.
-  Interface words are in English, Spanish and Ukrainian. On a Mac for now.
+  Interface words are in English, Spanish, Russian and Ukrainian. On a Mac for now.
 - **Builds** (the inspector's Build tab): an object can come on with a Dissolve, Fly In from
   any side, or Zoom, with the slide (after its transition and a delay) or on a click of Next,
   and leave with a Dissolve, Fly Out or Zoom on a click. Next sets a slide's click builds going
@@ -2124,7 +2125,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   smaller, as the Format menu says).
 - **A Settings window** (Cmd+,), its pages in four groups down the left, each row ending in how
   its page stands in the fixed-width face, with a green light when something is on: **The room**
-  (Screens, "3 of 4 on"; Phone Screens, On or Off), **On screen** (Slides, with the transition
+  (Screens, "3 of 4 on"; AirPlay, On or Off), **On screen** (Slides, with the transition
   for all slides; Groups, each group's colour, name, key and how many slides use it; Language,
   Auto or the language chosen), **Connect** (Integrations, "1
   connected"; AI assistants, Off, Can prepare or Runs screens; Phone remote, Off or how many

@@ -308,6 +308,13 @@ Mirror server". We go plainer:
   Inc. SoftPresenter is not made, licensed or endorsed by Apple."
 - No Apple symbol, no Apple artwork, no "AirPlay" in the feature's name.
 
+**Changed on 2026-11-26: the feature is called AirPlay.** The owner chose it ("we should just
+call it airplay"), knowing it reverses the last point above. Settings › AirPlay, the AirPlay box
+and `sp mirror`'s replies say AirPlay, in every language, and it is never translated. The
+switch still says what it does ("Show an iPhone, iPad or Mac screen"). Kept as they were: the
+trademark notice in the README and `NOTICE.md`, the line beside the switch that says it is
+unofficial and not made or supported by Apple, and no Apple symbol or artwork anywhere.
+
 ## 4. What SoftPresenter needs, piece by piece
 
 "Have" means it is in `Cargo.lock` and built into the app today.

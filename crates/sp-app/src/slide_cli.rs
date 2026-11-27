@@ -549,7 +549,7 @@ fn object_name(object: &Object) -> String {
         (None, ObjectKind::Text { .. }) => "Text".to_owned(),
         (None, ObjectKind::Web { .. }) => "Web page".to_owned(),
         (None, ObjectKind::Ndi { .. }) => "NDI source".to_owned(),
-        (None, ObjectKind::Mirror { .. }) => "Phone or iPad Screen".to_owned(),
+        (None, ObjectKind::Mirror { .. }) => "AirPlay".to_owned(),
         (None, _) => "Object".to_owned(),
     }
 }
@@ -951,6 +951,16 @@ mod tests {
         let mut named = Object::text(Role::translation(), "Перевод");
         named.name = "Russian".to_owned();
         Slide::new(vec![Object::text(Role::primary(), "Main words"), named])
+    }
+
+    /// An AirPlay box with no name of its own is called AirPlay by `sp slide` and `sp stage`.
+    #[test]
+    fn an_unnamed_airplay_box_is_called_airplay() {
+        let mut airplay = Object::mirror();
+        assert_eq!(object_name(&airplay), "AirPlay");
+        airplay.name.clear();
+        assert_eq!(object_name(&airplay), "AirPlay");
+        assert_eq!(crate::stage::describe(&airplay, &[]), "an AirPlay screen");
     }
 
     #[test]

@@ -1067,11 +1067,9 @@ fn shape_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         rule(ui);
     }
 
-    // A phone's or iPad's screen: who is showing one, and how its picture sits in the box.
+    // AirPlay: who is showing a screen, and how its picture sits in the box.
     if let sp_model::ObjectKind::Mirror { scaling } = &mut object.kind {
-        ui.label(
-            egui::RichText::new(t("inspector.mirror.title", "Phone or iPad Screen")).size(12.5).strong().color(INK),
-        );
+        ui.label(egui::RichText::new(t("inspector.mirror.title", "AirPlay")).size(12.5).strong().color(INK));
         ui.add_space(2.0);
         let ink = if mirror_view.on { crate::studio::TEXT_DIM } else { crate::studio::CARE };
         ui.label(egui::RichText::new(crate::mirror::line(mirror_view)).size(11.5).color(ink));

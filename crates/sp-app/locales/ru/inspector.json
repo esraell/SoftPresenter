@@ -219,6 +219,6 @@
   "inspector.build.order": "Порядок щелчков",
   "inspector.build.order.none": "Ни одна анимация не ждёт щелчка. «Далее» сразу переходит к следующему слайду.",
   "inspector.link.timer.short": "{name}",
-  "inspector.mirror.title": "Экран телефона или iPad",
+  "inspector.mirror.title": "AirPlay",
   "inspector.mirror.fits": "Размещение"
 }

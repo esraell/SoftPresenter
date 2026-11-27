@@ -78,7 +78,7 @@ pub enum Icon {
     Notices,
     /// A display on a short stand: Settings › Screens.
     Display,
-    /// A phone seen from the front: Settings › Phone Screens.
+    /// A phone seen from the front: Settings › AirPlay.
     Phone,
     /// Three dots in a row: Settings › Groups.
     Dots,

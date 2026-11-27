@@ -80,3 +80,5 @@ pub use uuid::Uuid;
 pub const SLIDE_WIDTH: f32 = 1920.0;
 /// See [`SLIDE_WIDTH`].
 pub const SLIDE_HEIGHT: f32 = 1080.0;
+/// The whole slide, edge to edge.
+pub const WHOLE_SLIDE: SlideRect = SlideRect { x: 0.0, y: 0.0, w: SLIDE_WIDTH, h: SLIDE_HEIGHT };

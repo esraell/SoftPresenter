@@ -78,7 +78,7 @@
   "editor.screen.label.none": "Нет",
   "editor.hint.keyboard": "Здесь клавиатура меняет макет. Пробел и стрелки не переключают слайды.",
   "editor.hint.mouse": "Щелчок — выбрать · Shift-щелчок — выбрать ещё · перетащите, чтобы сдвинуть · маркеры меняют размер · стрелки двигают, с Shift — на пиксель",
-  "editor.mirror.name": "Экран телефона или iPad",
-  "editor.mirror.numbered": "Экран телефона или iPad {n}",
-  "editor.add.mirror": "Экран телефона или iPad"
+  "editor.mirror.name": "AirPlay",
+  "editor.mirror.numbered": "AirPlay {n}",
+  "editor.add.mirror": "AirPlay"
 }

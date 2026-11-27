@@ -204,7 +204,7 @@ fn media_theme() -> Arc<Theme> {
 /// A slide of one box filling the screen, showing a file as it is set to fill it.
 pub fn media_slide(file: &str, name: &str, fit: sp_model::ImageFit) -> Slide {
     let mut object = sp_model::Object::image(file.to_owned(), name.to_owned(), 16, 9);
-    object.frame = Some(sp_model::SlideRect { x: 0.0, y: 0.0, w: sp_model::SLIDE_WIDTH, h: sp_model::SLIDE_HEIGHT });
+    object.frame = Some(sp_model::WHOLE_SLIDE);
     object.kind = sp_model::ObjectKind::Image { file: file.to_owned(), fit };
     Slide::new(vec![object])
 }
@@ -783,10 +783,7 @@ mod tests {
         let slide = media_slide("/media/notices.mp4", "notices.mp4", sp_model::ImageFit::Fit);
         assert_eq!(slide.objects.len(), 1);
         let object = &slide.objects[0];
-        assert_eq!(
-            object.frame,
-            Some(sp_model::SlideRect { x: 0.0, y: 0.0, w: sp_model::SLIDE_WIDTH, h: sp_model::SLIDE_HEIGHT })
-        );
+        assert_eq!(object.frame, Some(sp_model::WHOLE_SLIDE));
         assert!(matches!(
             &object.kind,
             sp_model::ObjectKind::Image { file, fit: sp_model::ImageFit::Fit } if file == "/media/notices.mp4"

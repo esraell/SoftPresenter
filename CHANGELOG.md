@@ -5,7 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-A What's new window, a find box that keeps its search after a drag, a tidier Find songs, and file drops on Linux's Wayland.
+A What's new window, a find box that keeps its search after a drag, a tidier Find songs, Wayland file drops, and the AirPlay name.
 
 ### New
 
@@ -19,6 +19,8 @@ A What's new window, a find box that keeps its search after a drag, a tidier Fin
 - **Ticking rows in Find songs.** In Settings › Song files › Find songs on this computer, ticking or unticking a row no longer moves anything on the page. The key always reads Import New Songs, greyed with nothing new ticked, and how many new songs come in is said beside it; before, the key's words and width changed with every tick ("Import 3,518 New Songs"). A database copied while SoftProjector had it open now says so once, under the first of its libraries, instead of under each of them.
 - **Reasons under the name.** In Find songs, why a songbook couldn't be read now sits under its name, in two lines at most. The whole reason shows when the pointer is over the row. Before, it was squeezed into a narrow column beside the name, where it could take three lines.
 - **Find songs, one line.** Find songs on this computer now starts as one line, with Choose a Folder… and Find beside a sentence saying where it looks. A folder you choose joins that sentence by its name, and with three or more it names the first two and counts the others; nothing on the page moves when you choose one, and only a very long name is cut, in its middle. In a narrow Settings window the keys go under the sentence. Before, it started with a row of where it looks in pills, its keys on a line of their own and a note under them.
+- **Called AirPlay.** What was Phone Screens is now called AirPlay in SoftPresenter's window and in `sp`, in every language, though boxes already on slides keep their name.
+- **Boxes that fill the slide.** A Web Page, NDI Source or AirPlay box added in the Edit view covers the whole slide, and can be moved and sized as usual.
 
 ### Fixed
 

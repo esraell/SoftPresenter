@@ -723,7 +723,7 @@ enum AppEvent {
     /// Something Remote Control's server asks of the main thread: a command from a page (carried
     /// out as `sp`'s are), a slide to draw, the state to publish.
     Remote(remote::ToApp),
-    /// The program that receives phone screens said something, or a device's first picture came.
+    /// The program that receives AirPlay said something, or a device's first picture came.
     Mirror,
     /// A deck of slides finished on its own thread.
     DeckDone,
@@ -2223,7 +2223,7 @@ struct App {
     _control: std::sync::Arc<std::sync::Mutex<Option<control::Listening>>>,
     /// `status --wait`s held until something changes or their time is up.
     waiting: Vec<control::Waiter>,
-    /// Phone screens: the program that receives an iPhone's, iPad's or Mac's screen, while
+    /// AirPlay: the program that receives an iPhone's, iPad's or Mac's screen, while
     /// switched on.
     mirror: mirror::Mirror,
     /// Remote Control: the web page other devices run the show from, while switched on.
@@ -3366,12 +3366,7 @@ impl App {
                 // stand-in is, for the operator's window.
                 let stand_in = (!live).then(|| web_stand_in(url)).flatten();
                 let url = stand_in.as_ref().unwrap_or(url);
-                let place = object.frame.unwrap_or(sp_model::SlideRect {
-                    x: 0.0,
-                    y: 0.0,
-                    w: sp_model::SLIDE_WIDTH,
-                    h: sp_model::SLIDE_HEIGHT,
-                });
+                let place = object.frame.unwrap_or(sp_model::WHOLE_SLIDE);
                 let key = sp_render::web_key(url, place.w, place.h);
                 match into.iter_mut().find(|(have, ..)| *have == key) {
                     Some(found) => found.4 |= live,
@@ -11525,7 +11520,7 @@ impl App {
         self.canva.shut_down();
         // Canva videos replaced while they played go now that nothing plays them.
         self.remove_replaced_canva_videos();
-        // The program that receives phone screens leaves with the app.
+        // The program that receives AirPlay leaves with the app.
         self.mirror.quit();
         // The last anonymous report is given two seconds from when the quit began, here in the
         // event loop too (most often they have passed, or it has gone, while the saves were made).
@@ -12507,7 +12502,7 @@ impl ApplicationHandler<AppEvent> for App {
         // Remote Control: what Settings asked, the state for pages (at most twenty times a
         // second, only while one is connected) and the slides they asked to see.
         let remote_at = self.tick_remote();
-        // Phone screens: what Settings asked, what the receiving program said, and a still
+        // AirPlay: what Settings asked, what the receiving program said, and a still
         // screen's picture kept from fading.
         let mirror_at = self.tick_mirror();
         let Some(running) = self.running.as_mut() else {

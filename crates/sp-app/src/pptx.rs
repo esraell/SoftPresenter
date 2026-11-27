@@ -820,7 +820,7 @@ impl<'a, 'p> SlideCx<'a, 'p> {
 
     /// Fills the whole slide with a background fill.
     fn background(&mut self, fill: Fill, rels: &Rels) {
-        let whole = SlideRect { x: 0.0, y: 0.0, w: sp_model::SLIDE_WIDTH, h: sp_model::SLIDE_HEIGHT };
+        let whole = sp_model::WHOLE_SLIDE;
         match fill {
             Fill::None => {}
             Fill::Solid(colour) => {

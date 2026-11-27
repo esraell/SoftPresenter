@@ -152,7 +152,7 @@ fn main() -> std::process::ExitCode {
     let (listeners, control_port, video_port) = match server::bind(arguments.announce, arguments.port) {
         Ok(bound) => bound,
         Err(error) => {
-            events::problem(format!("The ports for phone screens could not be opened ({:?}).", error.kind()));
+            events::problem(format!("The ports for AirPlay could not be opened ({:?}).", error.kind()));
             return std::process::ExitCode::FAILURE;
         }
     };

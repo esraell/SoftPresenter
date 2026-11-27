@@ -1,10 +1,10 @@
-//! Showing an iPhone's, iPad's or Mac's screen: someone picks SoftPresenter in Screen Mirroring
-//! (AirPlay) on their device, and its screen shows in the Phone or iPad Screen boxes of the slide
-//! on screen.
+//! AirPlay: showing an iPhone's, iPad's or Mac's screen. Someone picks SoftPresenter in Screen
+//! Mirroring (AirPlay) on their device, and its screen shows in the AirPlay boxes of the slide on
+//! screen.
 //!
 //! Everything that speaks to the device is in a separate program, `softpresenter-mirror`, which
 //! sits beside SoftPresenter's own as FFmpeg does: this module only starts it while the feature
-//! is switched on (Settings › Phone Screens; off until someone switches it on), tells it who may
+//! is switched on (Settings › AirPlay; off until someone switches it on), tells it who may
 //! connect, and reads what it says. No network connection is opened here. Between the two:
 //!
 //! - its standard input takes one JSON object a line: `{"hello":{…}}` first (the name devices
@@ -401,7 +401,7 @@ pub struct Mirror {
     found: bool,
 }
 
-/// What Settings › Phone Screens and the inspector show.
+/// What Settings › AirPlay and the inspector show.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct View {
     pub on: bool,
@@ -421,7 +421,7 @@ pub struct View {
     pub request: Option<Request>,
 }
 
-/// What Settings › Phone Screens asks of the app.
+/// What Settings › AirPlay asks of the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Request {
     Switch(bool),
@@ -471,7 +471,7 @@ impl Mirror {
         let Ok(text) = serde_json::to_vec_pretty(&self.saved) else { return };
         let beside = file.with_extension("json.new");
         if std::fs::write(&beside, text).and_then(|()| std::fs::rename(&beside, &file)).is_err() {
-            crate::applog::problem("mirror", "Could not save the Phone Screens settings.");
+            crate::applog::problem("mirror", "Could not save the AirPlay settings.");
         }
     }
 
@@ -505,16 +505,12 @@ impl Mirror {
         let program = program.ok_or_else(|| {
             t(
                 "mirror.problem.no_program",
-                "The part of SoftPresenter that receives phone screens (softpresenter-mirror) isn\u{2019}t beside the app.",
+                "The part of SoftPresenter that receives AirPlay (softpresenter-mirror) isn\u{2019}t beside the app.",
             )
             .to_owned()
         })?;
         let ffmpeg = sp_video::ffmpeg_program().ok_or_else(|| {
-            t(
-                "mirror.problem.no_ffmpeg",
-                "Showing a phone\u{2019}s screen needs FFmpeg, and FFmpeg isn\u{2019}t on this computer.",
-            )
-            .to_owned()
+            t("mirror.problem.no_ffmpeg", "AirPlay needs FFmpeg, and FFmpeg isn\u{2019}t on this computer.").to_owned()
         })?;
         if self.saved.device_id.is_empty() {
             self.saved.device_id = new_device_id();
@@ -537,7 +533,7 @@ impl Mirror {
             command.creation_flags(CREATE_NO_WINDOW);
         }
         let could_not = |why: &dyn std::fmt::Display| {
-            tf("mirror.problem.start", "Receiving phone screens could not start: {why}.", &[("why", &why.to_string())])
+            tf("mirror.problem.start", "AirPlay could not start: {why}.", &[("why", &why.to_string())])
         };
         let mut child = command.spawn().map_err(|e| could_not(&e))?;
         let (Some(mut input), Some(output), Some(errors)) =
@@ -644,7 +640,7 @@ impl Mirror {
     fn status(&self) -> Reply {
         let name = self.name();
         let text = match (self.saved.on, self.connected(), &self.problem) {
-            (false, _, _) => "Showing a phone's screen is switched off.".to_owned(),
+            (false, _, _) => "AirPlay is switched off.".to_owned(),
             (true, _, Some(problem)) => format!("Switched on, but not running: {problem}"),
             (true, Some(device), _) => format!("{device} is showing its screen. Devices see \"{name}\"."),
             (true, None, _) => match self.listening {
@@ -677,19 +673,17 @@ impl Mirror {
     }
 }
 
-/// Whether any of these objects is a Phone or iPad Screen box that is shown.
+/// Whether any of these objects is an AirPlay box that is shown.
 pub fn wanted_in(objects: &[sp_model::Object]) -> bool {
     objects.iter().any(|object| !object.hidden && matches!(object.kind, sp_model::ObjectKind::Mirror { .. }))
 }
 
-/// The line the inspector shows under a Phone or iPad Screen box's name.
+/// The line the inspector shows under an AirPlay box's name.
 pub fn line(view: &View) -> String {
     match (view.on, &view.connected) {
-        (false, _) => t(
-            "mirror.box.off",
-            "Showing a phone\u{2019}s screen is switched off. Switch it on in Settings \u{203a} Phone Screens.",
-        )
-        .to_owned(),
+        (false, _) => {
+            t("mirror.box.off", "AirPlay is switched off. Switch it on in Settings \u{203a} AirPlay.").to_owned()
+        }
         (true, Some(name)) => tf(
             "mirror.box.connected",
             "{name} is showing its screen. It shows here, live, while the slide is on screen.",
@@ -703,13 +697,13 @@ pub fn line(view: &View) -> String {
     }
 }
 
-/// Settings › Phone Screens.
+/// Settings › AirPlay.
 pub fn pane(ui: &mut egui::Ui, view: &mut View) {
     use crate::studio::{CARE, TEXT, TEXT_DIM};
     use egui::RichText;
     let width = ui.available_width().min(600.0);
     ui.set_max_width(width);
-    crate::studio::caption(ui, t("mirror.caption", "PHONE SCREENS"));
+    crate::studio::caption(ui, t("mirror.caption", "AIRPLAY"));
     let mut on = view.on;
     ui.add_enabled_ui(view.found || view.on, |ui| {
         if ui.checkbox(&mut on, t("mirror.turn_on", "Show an iPhone, iPad or Mac screen")).changed() {
@@ -729,7 +723,7 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
         ui.label(
             RichText::new(t(
                 "mirror.problem.no_program",
-                "The part of SoftPresenter that receives phone screens (softpresenter-mirror) isn\u{2019}t beside the app.",
+                "The part of SoftPresenter that receives AirPlay (softpresenter-mirror) isn\u{2019}t beside the app.",
             ))
             .color(CARE),
         );
@@ -741,7 +735,7 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
     ui.label(
         RichText::new(tf(
             "mirror.how",
-            "On the iPhone or iPad, open Control Centre, tap Screen Mirroring and choose {name}. The screen then shows in a Phone or iPad Screen box on the slide that is on screen, and nowhere else.",
+            "On the iPhone or iPad, open Control Centre, tap Screen Mirroring and choose {name}. The screen then shows in an AirPlay box on the slide that is on screen, and nowhere else.",
             &[("name", &view.name_now)],
         ))
         .color(TEXT_DIM),
@@ -845,7 +839,7 @@ impl crate::App {
         })
     }
 
-    /// Whether the audience or stage screens show a Phone or iPad Screen box now (the slide on
+    /// Whether the audience or stage screens show an AirPlay box now (the slide on
     /// screen, its layout behind it, the stage layouts).
     pub(crate) fn live_mirror_wanted(&self) -> bool {
         let mut wanted = false;
@@ -1027,7 +1021,7 @@ impl crate::App {
         running.home_window.request_redraw();
     }
 
-    /// Does what Settings › Phone Screens asked, takes in what the helper said, starts it again
+    /// Does what Settings › AirPlay asked, takes in what the helper said, starts it again
     /// if it stopped, tells the renderer whether a box wants its pictures, and keeps a still
     /// screen's picture from fading. Says when to look again.
     pub(crate) fn tick_mirror(&mut self) -> Option<Instant> {
@@ -1118,7 +1112,7 @@ impl crate::App {
             if self.mirror.failures == 1 || was_showing.is_some() {
                 running.home_state.notices.trouble(t(
                     "mirror.problem.stopped",
-                    "Receiving phone screens stopped by itself and is starting again. A device that was showing its screen has to connect again.",
+                    "AirPlay stopped by itself and is starting again. A device that was showing its screen has to connect again.",
                 ));
             }
             running.home_window.request_redraw();
@@ -1456,5 +1450,84 @@ mod tests {
         assert!(line(&view).contains("choose SoftPresenter \u{2014} Hall"));
         view.connected = Some("Anna's iPhone".to_owned());
         assert!(line(&view).starts_with("Anna's iPhone is showing its screen."));
+    }
+
+    /// The owner, 26 November: "we should just call it airplay". Its name in every language is
+    /// AirPlay, never translated; the line saying it is unofficial keeps the owner's words.
+    #[test]
+    fn the_feature_is_called_airplay_in_every_language() {
+        use crate::i18n::Language;
+        let wrapped = crate::i18n::wrapped_keys();
+        let english = |key: &str| wrapped.get(key).cloned().unwrap_or_else(|| panic!("no code asks for `{key}`"));
+        let named: &[(&'static str, &str)] = &[
+            ("settings.pane.mirror", "AirPlay"),
+            ("mirror.caption", "AIRPLAY"),
+            ("edit.tools.mirror", "AirPlay"),
+            ("editor.add.mirror", "AirPlay"),
+            ("editor.mirror.name", "AirPlay"),
+            ("editor.mirror.numbered", "AirPlay {n}"),
+            ("inspector.mirror.title", "AirPlay"),
+            ("mirror.box.off", "AirPlay is switched off. Switch it on in Settings \u{203a} AirPlay."),
+            ("mirror.problem.start", "AirPlay could not start: {why}."),
+            ("mirror.problem.no_ffmpeg", "AirPlay needs FFmpeg, and FFmpeg isn\u{2019}t on this computer."),
+            (
+                "mirror.problem.no_program",
+                "The part of SoftPresenter that receives AirPlay (softpresenter-mirror) isn\u{2019}t beside the app.",
+            ),
+            (
+                "mirror.problem.stopped",
+                "AirPlay stopped by itself and is starting again. A device that was showing its screen has to connect again.",
+            ),
+        ];
+        for (key, words) in named {
+            assert_eq!(english(key), *words, "`{key}`");
+        }
+        assert!(english("mirror.how").contains("shows in an AirPlay box on the slide"));
+        assert_eq!(
+            english("mirror.unofficial"),
+            "Unofficial: works with Screen Mirroring (AirPlay) from an iPhone, iPad or Mac, but isn\u{2019}t made or supported by Apple, and an Apple update may stop it working."
+        );
+        // Every language still has its words for each, and they say AirPlay too.
+        let keys = named.iter().map(|(key, _)| *key).chain(["mirror.how", "mirror.unofficial"]);
+        for key in keys {
+            for language in [Language::Spanish, Language::Russian, Language::Ukrainian] {
+                // `tg`, not `t`: it remembers nothing, so the stand-in English never reaches
+                // the table that puts replies back into English for the other tests.
+                let said = crate::i18n::with_language(language, || crate::i18n::tg(key, "\u{0}"));
+                assert_ne!(said, "\u{0}", "{language:?} has no words for `{key}`");
+                assert!(said.to_lowercase().contains("airplay"), "{language:?} `{key}`: {said}");
+            }
+        }
+        // Nothing the program wraps calls it by its old names any more.
+        for (key, words) in &wrapped {
+            for old in
+                ["Phone Screens", "PHONE SCREENS", "Phone or iPad Screen", "phone screens", "a phone\u{2019}s screen"]
+            {
+                assert!(!words.contains(old), "`{key}` still says {old:?}: {words}");
+            }
+        }
+    }
+
+    /// `sp mirror` calls it AirPlay too.
+    #[test]
+    fn sp_mirror_says_airplay() {
+        let mirror = Mirror {
+            saved: Saved::default(),
+            quiet: true,
+            shared: Arc::default(),
+            helper: None,
+            failures: 0,
+            retry_at: None,
+            asking: Vec::new(),
+            connected: None,
+            listening: None,
+            size: None,
+            problem: None,
+            told: None,
+            drawn: (0, None),
+            started: false,
+            found: false,
+        };
+        assert_eq!(mirror.status().text, "AirPlay is switched off.");
     }
 }

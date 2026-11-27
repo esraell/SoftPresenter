@@ -218,7 +218,7 @@ mod tests {
     fn a_song_with_a_phone_screen_box_is_written_as_version_5_and_comes_back() {
         let mut mirrored = song();
         let mut object = crate::Object::mirror();
-        assert_eq!(object.name, "Phone or iPad Screen");
+        assert_eq!(object.name, "AirPlay");
         assert!(matches!(object.kind, crate::ObjectKind::Mirror { scaling: crate::ImageFit::Fit }));
         if let crate::ObjectKind::Mirror { scaling } = &mut object.kind {
             *scaling = crate::ImageFit::Fill;

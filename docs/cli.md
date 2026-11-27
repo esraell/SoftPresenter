@@ -1457,11 +1457,11 @@ in [remote-api.md](remote-api.md).
     Key fingerprint (SHA-256): 3F:A2:…:9C
     Pages connected: 0   Devices remembered: 0
 
-## Phone screens
+## AirPlay
 
-An iPhone, iPad or Mac can show its screen in a Phone or iPad Screen box on a slide (its own
-Screen Mirroring; unofficial: it isn't made or supported by Apple, and an Apple update may stop
-it working). These commands do what Settings › Phone Screens does. None of them can be sent from
+An iPhone, iPad or Mac can show its screen in an AirPlay box on a slide (its own Screen
+Mirroring; unofficial: it isn't made or supported by Apple, and an Apple update may stop it
+working). These commands do what Settings › AirPlay does. None of them can be sent from
 a remote page (a remote page can answer the question in the notices).
 
 | Command | Does |

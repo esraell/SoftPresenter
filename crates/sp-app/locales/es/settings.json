@@ -71,7 +71,7 @@
   "settings.cli.not_written": "No se pudo cambiar {path}: {error}",
   "settings.cli.path_not_set": "Se creó el comando sp en {folder}, pero {error}.",
   "settings.cli.path_not_removed": "Se quitó el comando sp, pero {error}.",
-  "settings.pane.mirror": "Pantallas de teléfonos",
+  "settings.pane.mirror": "AirPlay",
   "settings.title": "Ajustes",
   "settings.group.room": "La sala",
   "settings.group.on_screen": "En pantalla",

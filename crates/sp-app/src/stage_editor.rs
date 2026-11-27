@@ -414,7 +414,7 @@ pub fn add_menu(ui: &mut egui::Ui, draft: &mut EditDraft, screens: &[(sp_model::
         draft.add_ndi();
         ui.close();
     }
-    if ui.button(t("editor.add.mirror", "Phone or iPad Screen")).clicked() {
+    if ui.button(t("editor.add.mirror", "AirPlay")).clicked() {
         draft.add_mirror();
         ui.close();
     }

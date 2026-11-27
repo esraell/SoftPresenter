@@ -66,7 +66,7 @@ person:
 | Switch | What it does |
 |---|---|
 | `SOFTPRESENTER_RELEASE_VERSION=<version>` (when building) | A pre-release made from the public source for GitHub's releases calls itself this (`0.9.0-dev.16`) in About, the log and Check for Updates, so it is told of newer pre-releases; nothing else changes (unlike a development build, it offers no song catalog) |
-| `SOFTPRESENTER_QUIET=1` | Windows open behind everything, no full screen, no NDI, no DeckLink card; no anonymous reports are sent, and the one-time notice about them is not shown (the same in any copy with `SOFTPRESENTER_DATA`, or one that only saves a picture); Remote Control, if switched on, listens on 127.0.0.1 only; so does receiving phone screens, which then announces nothing; sound plays, timed and mixed as usual (NDI included), but the speakers get silence |
+| `SOFTPRESENTER_QUIET=1` | Windows open behind everything, no full screen, no NDI, no DeckLink card; no anonymous reports are sent, and the one-time notice about them is not shown (the same in any copy with `SOFTPRESENTER_DATA`, or one that only saves a picture); Remote Control, if switched on, listens on 127.0.0.1 only; so does AirPlay, which then announces nothing; sound plays, timed and mixed as usual (NDI included), but the speakers get silence |
 | `SOFTPRESENTER_DATA=<folder>` | Keep the library, Bibles, settings and log in that folder instead of the owner's |
 | `SOFTPRESENTER_CONTROL_SOCKET=<path>` | Where `sp` and the app meet; a short path for a test copy (a socket file on Windows too) |
 | `SOFTPRESENTER_TEST_ROOT=<folder>` | For test programs built on one computer and run on another (Windows tests built on the Mac): the golden pictures and shipped Bibles are read from that copy of the repository instead of the build's own source folder |
@@ -248,8 +248,8 @@ a minute on a Mac. One test alone:
   notices ([docs/licences/screen-mirroring.md](docs/licences/screen-mirroring.md)). It stays a
   separate program: `sp-app` never depends on that crate, the crate depends on no `sp-*` crate,
   and SoftPresenter's additional permission for NDI and DeckLink does not extend to it. The
-  interface calls the feature by what it does ("Show an iPhone, iPad or Mac screen") and says,
-  wherever it is switched on, that it is unofficial.
+  interface calls the feature AirPlay (in every language; its switch says what it does, "Show an
+  iPhone, iPad or Mac screen") and says, wherever it is switched on, that it is unofficial.
 - **Content.** No song lyrics or Bible text that isn't public domain, in tests or anywhere else.
   Tests use text written for them.
 - **Privacy.** No secrets, tokens, local paths (`/Users/…`), links to private sessions or

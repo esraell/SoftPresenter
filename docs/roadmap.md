@@ -85,11 +85,11 @@ rather than a feature, but no church on Windows can use the app without them.
 - **In and out points, duration and start delay.** · M · Medium
 - **Media kept with the library.** Every imported file copied into the app's folder, found again when moved, and unused copies cleaned up. (started: pictures put on slides are copied to the Images folder, and copies nothing uses go to the Trash once a day; media bin items and videos stay where they are) · M · Medium
 - **Live video inputs.** Cameras, capture cards, NDI sources and AirPlay as a layer, from the media bin, a slide action or a box on a slide. (started: an NDI source in a box on a slide, picture only) · L · Medium
-- **Phone screens: what is left.** An iPhone, iPad or Mac shows its screen in a box on a slide
+- **AirPlay: what is left.** An iPhone, iPad or Mac shows its screen in a box on a slide
   today (picture only, one device at a time, on a Mac; unofficial). Still to come: the device's
   sound through the app's mixer; Windows and Linux; a code on the screen instead of a question,
-  with remembered devices; several devices at once; a mirrored screen full screen as media;
-  Russian and Ukrainian words. (M)
+  with remembered devices; several devices at once; a mirrored screen full screen as media.
+  (M)
 - **Media bin filter, list view and size slider.** Find media by name, which matters most, and a list with path, duration, transition and format. · S · Medium
 - **Foreground and background media.** Each media cue is marked background (it stays under the slides as they change) or foreground (a one-off item such as a video, which shows even over slide background colours and has its own rule for the music; see Audio). Both play on the media layer under the words. (started: one kind of media cue; SoftPresenter has no slide background colours yet, so the difference matters less) · S–M · Low
 - **Fit with blur.** Fit the picture and fill the bars with a blurred copy of it, for portrait phone photos. · S · Low

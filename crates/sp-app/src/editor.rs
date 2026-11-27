@@ -739,7 +739,8 @@ impl EditDraft {
         self.slide.objects.push(object);
     }
 
-    /// Puts a web page box on the slide, selected, its address to be typed.
+    /// Puts a web page box on the slide, over the whole of it (as [`Object::web`] makes it),
+    /// selected, its address to be typed.
     pub fn add_web(&mut self) {
         self.record();
         let same = self.slide.objects.iter().filter(|o| matches!(o.kind, ObjectKind::Web { .. })).count();
@@ -754,7 +755,8 @@ impl EditDraft {
         self.slide.objects.push(object);
     }
 
-    /// Puts an NDI source box on the slide, selected, its source to be chosen.
+    /// Puts an NDI source box on the slide, over the whole of it (as [`Object::ndi`] makes it),
+    /// selected, its source to be chosen.
     pub fn add_ndi(&mut self) {
         self.record();
         let same = self.slide.objects.iter().filter(|o| matches!(o.kind, ObjectKind::Ndi { .. })).count();
@@ -769,16 +771,16 @@ impl EditDraft {
         self.slide.objects.push(object);
     }
 
-    /// Puts a Phone or iPad Screen box on the slide, selected: whoever is showing their screen
-    /// to this computer shows in it.
+    /// Puts an AirPlay box on the slide, over the whole of it (as [`Object::mirror`] makes it),
+    /// selected: whoever is showing their screen to this computer shows in it.
     pub fn add_mirror(&mut self) {
         self.record();
         let same = self.slide.objects.iter().filter(|o| matches!(o.kind, ObjectKind::Mirror { .. })).count();
         let mut object = Object::mirror();
         object.name = if same > 0 {
-            tgf("editor.mirror.numbered", "Phone or iPad Screen {n}", &[("n", &(same + 1).to_string())])
+            tgf("editor.mirror.numbered", "AirPlay {n}", &[("n", &(same + 1).to_string())])
         } else {
-            tg("editor.mirror.name", "Phone or iPad Screen").to_owned()
+            tg("editor.mirror.name", "AirPlay").to_owned()
         };
         self.selected = Some(object.id);
         self.also.clear();
@@ -1498,12 +1500,7 @@ mod tests {
         assert_eq!(first.name, "NDI source");
         assert!(matches!(&first.kind, ObjectKind::Ndi { source, scaling, quality, sound }
             if source.is_empty() && *scaling == sp_model::ImageFit::Fit && *quality == sp_model::NdiQuality::Full && !sound));
-        let frame = first.frame.unwrap();
-        assert_eq!((frame.w, frame.h), (1400.0, 788.0), "16:9");
-        assert_eq!(
-            (frame.x + frame.w / 2.0, frame.y + frame.h / 2.0),
-            (sp_model::SLIDE_WIDTH / 2.0, sp_model::SLIDE_HEIGHT / 2.0)
-        );
+        assert_eq!(first.frame, Some(sp_model::WHOLE_SLIDE), "over the whole slide");
         assert_eq!(d.slide.objects.len(), before + 1);
         assert_eq!(d.slide.objects.last().map(|o| o.id), d.selected, "in front, and the one picked");
         d.add_ndi();
@@ -1514,6 +1511,59 @@ mod tests {
         // One step back takes the last one away.
         d.undo();
         assert_eq!(d.slide.objects.len(), before + 2);
+    }
+
+    /// The owner, 26 November: a web page, an AirPlay box or an NDI source is added covering
+    /// the whole slide, edge to edge; any other box keeps its own size. It is an ordinary box
+    /// after that. (The tools over the slide and a stage layout's Add menu both add through
+    /// these.)
+    #[test]
+    fn a_web_page_an_airplay_and_an_ndi_box_are_added_over_the_whole_slide() {
+        let whole = sp_model::WHOLE_SLIDE;
+        let mut d = draft();
+        let before = d.slide.objects.len();
+        d.add_web();
+        assert!(matches!(d.selected_object().unwrap().kind, ObjectKind::Web { .. }));
+        assert_eq!(d.selected_object().unwrap().frame, Some(whole), "a web page fills the slide");
+        d.add_ndi();
+        assert!(matches!(d.selected_object().unwrap().kind, ObjectKind::Ndi { .. }));
+        assert_eq!(d.selected_object().unwrap().frame, Some(whole), "an NDI source fills the slide");
+        d.undo();
+        d.add_mirror();
+        let airplay = d.selected_object().unwrap();
+        assert!(matches!(airplay.kind, ObjectKind::Mirror { .. }));
+        assert_eq!(airplay.name, "AirPlay");
+        assert_eq!(airplay.frame, Some(whole), "an AirPlay box fills the slide");
+        assert!(!airplay.locked && !airplay.hidden);
+        d.add_mirror();
+        assert_eq!(d.selected_object().unwrap().name, "AirPlay 2");
+        assert_eq!(d.slide.objects.len(), before + 3);
+        // Made smaller by its corner and moved, as any box is, and Undo puts it back.
+        let theme = Theme::builtin();
+        d.press(&theme, (SLIDE_WIDTH, SLIDE_HEIGHT), 10.0, false);
+        d.drag_to((1440.0, 810.0), false, false);
+        d.release();
+        assert_eq!(d.selected_object().unwrap().frame, Some(SlideRect { x: 0.0, y: 0.0, w: 1440.0, h: 810.0 }));
+        d.nudge(&theme, (10.0, 20.0));
+        assert_eq!(d.selected_object().unwrap().frame, Some(SlideRect { x: 10.0, y: 20.0, w: 1440.0, h: 810.0 }));
+        d.undo();
+        assert_eq!(d.selected_object().unwrap().frame, Some(whole));
+        // Undo takes each one away again.
+        d.undo();
+        d.undo();
+        assert_eq!(d.slide.objects.len(), before + 1);
+        d.undo();
+        assert_eq!(d.slide.objects.len(), before);
+        // A text box and a shape keep the sizes they had.
+        d.add_text();
+        let (w, h) = (SLIDE_WIDTH * 0.75, SLIDE_HEIGHT * 0.75);
+        assert_eq!(
+            d.selected_object().unwrap().frame,
+            Some(SlideRect { x: (SLIDE_WIDTH - w) / 2.0, y: (SLIDE_HEIGHT - h) / 2.0, w, h })
+        );
+        d.add_shape(sp_model::Shape::Star);
+        assert_eq!(d.selected_object().unwrap().frame, Object::shape(sp_model::Shape::Star).frame);
+        assert_ne!(d.selected_object().unwrap().frame, Some(whole));
     }
 
     #[test]

@@ -220,6 +220,6 @@
   "inspector.build.order": "Порядок клацань",
   "inspector.build.order.none": "Жодна поява не чекає клацання. «Далі» одразу переходить до наступного слайда.",
   "inspector.link.timer.short": "{name}",
-  "inspector.mirror.title": "Екран телефону або iPad",
+  "inspector.mirror.title": "AirPlay",
   "inspector.mirror.fits": "Масштаб"
 }

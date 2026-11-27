@@ -537,39 +537,37 @@ impl Object {
         }
     }
 
-    /// A web page box, two thirds of the slide, in the middle. With an empty address it shows
-    /// nothing until one is typed.
+    /// A web page box over the whole slide (the owner, 26 November). With an empty address it
+    /// shows nothing until one is typed.
     pub fn web(url: String) -> Object {
-        let (w, h) = (crate::SLIDE_WIDTH * 2.0 / 3.0, crate::SLIDE_HEIGHT * 2.0 / 3.0);
         Object {
             name: "Web page".to_owned(),
-            frame: Some(SlideRect { x: (crate::SLIDE_WIDTH - w) / 2.0, y: (crate::SLIDE_HEIGHT - h) / 2.0, w, h }),
+            frame: Some(crate::WHOLE_SLIDE),
             fill: None,
             kind: ObjectKind::Web { url },
             ..Object::shape(Shape::Rectangle)
         }
     }
 
-    /// An NDI source box, 16:9, in the middle of the slide. With no source chosen it shows an
-    /// empty box until one is.
+    /// An NDI source box over the whole slide (the owner, 26 November). With no source chosen
+    /// it shows an empty box until one is.
     pub fn ndi(source: String) -> Object {
-        let (w, h) = (1400.0, 788.0);
         Object {
             name: "NDI source".to_owned(),
-            frame: Some(SlideRect { x: (crate::SLIDE_WIDTH - w) / 2.0, y: (crate::SLIDE_HEIGHT - h) / 2.0, w, h }),
+            frame: Some(crate::WHOLE_SLIDE),
             fill: None,
             kind: ObjectKind::Ndi { source, scaling: ImageFit::Fit, quality: NdiQuality::Full, sound: false },
             ..Object::shape(Shape::Rectangle)
         }
     }
 
-    /// A box for the screen of an iPhone, iPad or Mac that is showing it to this computer, 16:9,
-    /// in the middle of the slide. It is empty until one connects.
+    /// An AirPlay box: for the screen of an iPhone, iPad or Mac that is showing it to this
+    /// computer, over the whole slide (the owner, 26 November). It is empty until one connects.
+    /// (Boxes saved before the name AirPlay keep the name they were saved with.)
     pub fn mirror() -> Object {
-        let (w, h) = (1400.0, 788.0);
         Object {
-            name: "Phone or iPad Screen".to_owned(),
-            frame: Some(SlideRect { x: (crate::SLIDE_WIDTH - w) / 2.0, y: (crate::SLIDE_HEIGHT - h) / 2.0, w, h }),
+            name: "AirPlay".to_owned(),
+            frame: Some(crate::WHOLE_SLIDE),
             fill: None,
             kind: ObjectKind::Mirror { scaling: ImageFit::Fit },
             ..Object::shape(Shape::Rectangle)
@@ -1401,6 +1399,18 @@ impl MediaItem {
 
 #[cfg(test)]
 mod tests {
+
+    /// The owner, 26 November: a web page, an AirPlay box and an NDI source fill the slide,
+    /// edge to edge, when made; a shape keeps its own size.
+    #[test]
+    fn a_web_page_an_airplay_box_and_an_ndi_source_cover_the_whole_slide() {
+        let whole = SlideRect { x: 0.0, y: 0.0, w: crate::SLIDE_WIDTH, h: crate::SLIDE_HEIGHT };
+        assert_eq!(crate::WHOLE_SLIDE, whole);
+        assert_eq!(Object::web(String::new()).frame, Some(whole), "a web page");
+        assert_eq!(Object::mirror().frame, Some(whole), "an AirPlay box");
+        assert_eq!(Object::ndi("PC (Camera 1)".to_owned()).frame, Some(whole), "an NDI source");
+        assert_ne!(Object::shape(Shape::Star).frame, Some(whole), "a shape");
+    }
 
     #[test]
     fn several_slides_paste_in_order_after_one_as_slides_of_their_own() {

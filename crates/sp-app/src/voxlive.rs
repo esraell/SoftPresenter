@@ -221,7 +221,6 @@ pub const COLOUR: sp_model::Rgba = sp_model::Rgba { r: 44, g: 93, b: 124, a: 255
 /// screen. Each slide is a web page box filling the slide with the screen's live display, which
 /// the screens open when the slide is shown (thumbnails show its free test pattern instead).
 pub fn item(screens: &[Screen]) -> sp_model::Presentation {
-    let full = sp_model::SlideRect { x: 0.0, y: 0.0, w: sp_model::SLIDE_WIDTH, h: sp_model::SLIDE_HEIGHT };
     let groups = screens
         .iter()
         .filter(|screen| !screen.url.is_empty())
@@ -229,7 +228,6 @@ pub fn item(screens: &[Screen]) -> sp_model::Presentation {
             let mut web = sp_model::Object::web(screen.url.clone());
             web.id = stable_id("object", &screen.id);
             web.name = screen.label();
-            web.frame = Some(full);
             let mut slide = sp_model::Slide::new(vec![web]);
             slide.id = stable_id("slide", &screen.id);
             sp_model::Group {

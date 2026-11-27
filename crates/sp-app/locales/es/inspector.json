@@ -219,6 +219,6 @@
   "inspector.build.order": "Orden de los clics",
   "inspector.build.order.none": "Ninguna animación espera un clic. Siguiente pasa directamente a la diapositiva siguiente.",
   "inspector.link.timer.short": "{name}",
-  "inspector.mirror.title": "Pantalla de teléfono o iPad",
+  "inspector.mirror.title": "AirPlay",
   "inspector.mirror.fits": "Ajuste"
 }

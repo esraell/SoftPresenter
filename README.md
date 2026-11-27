@@ -390,7 +390,7 @@ LGPL build inside the app) runs as a separate program and NDI's runtime is opene
 ([docs/licences/ffmpeg.md](docs/licences/ffmpeg.md), [docs/licences/ndi.md](docs/licences/ndi.md)).
 NDI® is a registered trademark of Vizrt NDI AB.
 
-Showing an iPhone, iPad or Mac screen is unofficial: a separate program does it
+AirPlay (showing an iPhone, iPad or Mac screen) is unofficial: a separate program does it
 ([docs/licences/screen-mirroring.md](docs/licences/screen-mirroring.md)). AirPlay, iPhone, iPad,
 Mac and Apple TV are trademarks of Apple Inc. SoftPresenter is not made, licensed or endorsed by
 Apple.

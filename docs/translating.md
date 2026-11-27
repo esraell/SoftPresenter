@@ -233,7 +233,7 @@ means. The Ukrainian tables follow the same glossary, so the two read alike.
 | preview / live (on the screens) | предпросмотр / на экране |
 | Settings / Integrations / AI assistants | Настройки / Интеграции / ИИ-помощники |
 | Settings groups: The room / On screen / Connect / Advanced | Зал / На экране / Подключения / Дополнительно |
-| Phone remote / Remote Control / Phone Screens | Пульт на телефоне / Удалённое управление / Экраны телефонов |
+| Phone remote / Remote Control / AirPlay | Пульт на телефоне / Удалённое управление / AirPlay (a name, never translated; masculine: «AirPlay выключен») |
 | songbook / free songbooks / song pack / song bundle | сборник / бесплатные сборники / набор песен / пакет песен |
 | notices / setup (first start) | уведомления / первая настройка |
 | name (of a song, list, file) / name (NDI, a person) | название / имя |
@@ -326,7 +326,7 @@ Glossary, shared with the Russian tables so the two read alike:
 | AI assistants | ШІ-помічники |
 | Phone remote | Пульт на телефоні |
 | Remote Control | Дистанційне керування |
-| Phone Screens | Екрани телефонів |
+| AirPlay (Settings and the box) | AirPlay (a name, never translated) |
 | Edit view · Service view · Bible view | Редактор · Служіння · Біблія |
 | Edit (the verb) | Редагувати |
 | key (on the keyboard) | клавіша |
@@ -354,7 +354,6 @@ Glossary, shared with the Russian tables so the two read alike:
 | Identify · test pattern | Розпізнати · тестове зображення |
 | key · fill (a DeckLink keyer) | ключ · заповнення |
 | Screen Mirroring · Control Centre (Apple's own) | Відеодублювання · Центр керування |
-| Phone or iPad Screen (the box) | Екран телефону або iPad |
 | a text box · any other box (inspector) | поле · рамка |
 | Build (the inspector's tab) | Поява |
 | Slide Notes · stage message | Нотатки слайда · повідомлення для сцени |
