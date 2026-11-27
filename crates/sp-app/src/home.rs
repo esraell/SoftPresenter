@@ -6180,7 +6180,7 @@ fn library_search(
 
 /// Why Add to Playlist's key added nothing (`keys.add.none`).
 pub(crate) fn nothing_to_add() -> &'static str {
-    t("keys.add.none", "Open a song in a library, or a passage in Bible, to add it to the playlist")
+    t("keys.add.none", "Open a song in a library, or a passage in Bible, to add it to the playlist.")
 }
 
 /// Ends the find box's search: the list under it goes, and the box gives the keyboard back, so
