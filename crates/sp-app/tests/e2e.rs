@@ -2318,6 +2318,49 @@ fn a_windows_log_off_saves_and_stops_the_app_as_its_own_quit_does() {
     assert_eq!(prefs["columns"], 7, "the last setting is on disk: {prefs}");
 }
 
+/// On Windows, the Restart Manager asks a program to close when an installer needs a file it
+/// holds (a driver or NDI update run in the room): the same messages as a log-off, marked
+/// `ENDSESSION_CLOSEAPP`. The session goes on, and the screens may be in use, so the app saves
+/// everything (words, and a setting whose save waits its turn) and stays open, the slide still
+/// on screen.
+#[cfg(windows)]
+#[test]
+fn an_installer_asking_the_app_to_close_gets_everything_saved_and_the_app_stays_open() {
+    let name = "an_installer_asking_the_app_to_close_gets_everything_saved_and_the_app_stays_open";
+    let Some(run) = Run::new(name) else { return };
+    let file = run.file("Hill Road.txt");
+    let words = song_text(&[("Verse 1", "Morning light on the hill"), ("Chorus", "Sing out, the day is new")]);
+    std::fs::write(&file, words).expect("the song's file");
+    let ask = run.file("close for an installer");
+    let copy = run.start(&[("SOFTPRESENTER_END_SESSION_WHEN", &ask.to_string_lossy())]);
+    copy.ok(&["song", "import", &file.to_string_lossy()]);
+    copy.ok(&["go", "Hill Road"]);
+    copy.ok(&["settings", "set", "columns=5"]);
+    copy.ok(&["settings", "set", "columns=7"]);
+    copy.ok(&["slide", "text", "Hill Road", "2", "Sing out, the day is here"]);
+    std::fs::write(&ask, "closeapp").expect("the file that sends the Restart Manager's ask");
+    let began = Instant::now();
+    while !run.log().contains("SoftPresenter stays open") {
+        assert!(began.elapsed() < Duration::from_secs(30), "the ask wasn't answered{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let log = run.log();
+    assert!(
+        log.contains("what the Restart Manager sends for an installer"),
+        "the switch was not taken{}",
+        run.context()
+    );
+    assert!(!log.contains("Windows is ending the session"), "taken for the session's end{}", run.context());
+    // Everything is on disk, while the app runs on with the slide on screen.
+    let saved = song_file_with(&run.data, "Morning light on the hill").expect("the song's file in Songs");
+    assert!(saved.contains("Sing out, the day is here"), "the changed words were not saved: {saved}");
+    let prefs: Value = serde_json::from_str(&std::fs::read_to_string(run.data.join("preferences.json")).unwrap())
+        .expect("the settings file reads");
+    assert_eq!(prefs["columns"], 7, "the last setting is on disk: {prefs}");
+    copy.assert_live("Hill Road", 1);
+    copy.quit().assert_clean(&run);
+}
+
 #[test]
 fn a_picture_from_the_media_bin_shows_behind_the_words_and_clears() {
     let Some(run) = Run::new("a_picture_from_the_media_bin_shows_behind_the_words_and_clears") else { return };

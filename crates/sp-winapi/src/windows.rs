@@ -33,10 +33,10 @@ use windows_sys::Win32::System::Registry::{
 use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId, GetCurrentThreadId};
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    ASFW_ANY, AllowSetForegroundWindow, ENDSESSION_LOGOFF, EnumThreadWindows, GW_OWNER, GetForegroundWindow, GetWindow,
-    GetWindowThreadProcessId, HWND_BROADCAST, IsIconic, IsWindowVisible, SMTO_ABORTIFHUNG, SW_RESTORE,
-    SendMessageTimeoutW, SendMessageW, SetForegroundWindow, ShowWindow, WM_CLOSE, WM_ENDSESSION, WM_NCDESTROY,
-    WM_QUERYENDSESSION, WM_SETTINGCHANGE,
+    ASFW_ANY, AllowSetForegroundWindow, ENDSESSION_CLOSEAPP, ENDSESSION_LOGOFF, EnumThreadWindows, GW_OWNER,
+    GetForegroundWindow, GetWindow, GetWindowThreadProcessId, HWND_BROADCAST, IsIconic, IsWindowVisible,
+    SMTO_ABORTIFHUNG, SW_RESTORE, SendMessageTimeoutW, SendMessageW, SetForegroundWindow, ShowWindow, WM_CLOSE,
+    WM_ENDSESSION, WM_NCDESTROY, WM_QUERYENDSESSION, WM_SETTINGCHANGE,
 };
 
 fn usable(handle: HANDLE) -> bool {
@@ -471,6 +471,28 @@ pub fn ui_languages() -> Vec<String> {
 // program any time after that answer. The window library handles neither, so the app's window
 // is subclassed: on the second, the window is asked to close (a WM_CLOSE handed to the window
 // library's procedure, which tells the app at once), and only then is the answer given.
+//
+// The Restart Manager sends the same messages with ENDSESSION_CLOSEAPP when an installer needs
+// a file the app holds (a driver or NDI update run in the room): the session goes on, so the app
+// is asked only to save, and stays open; the screens never go dark for it in a service.
+//
+// Each close handed over this way is counted, and [`take_windows_ask`] says what it was for, so
+// the app never takes one for the operator's own close, even one the window library kept for
+// later because the app was busy.
+
+/// What Windows asked of the app's window, with a close handed to the window library.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowsAsk {
+    /// The Restart Manager asks the app to close (`ENDSESSION_CLOSEAPP`): save, and stay open.
+    CloseApp,
+    /// The session is ending: save and stop.
+    Ending,
+}
+
+/// Closes handed to the window library for Windows' asks, not yet taken by the app.
+static FORWARDED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// Set when the Restart Manager has asked the app to close, until the app takes it.
+static CLOSE_APP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Set once Windows has said the session is ending, before the window is asked to close.
 static SESSION_ENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -491,12 +513,21 @@ unsafe extern "system" fn session_end_proc(
     _data: usize,
 ) -> LRESULT {
     use std::sync::atomic::Ordering::SeqCst;
-    if message == WM_ENDSESSION && wparam != 0 {
-        SESSION_ENDING.store(true, SeqCst);
+    let close = || {
+        FORWARDED.fetch_add(1, SeqCst);
         // SAFETY: `window` is the window Windows calls this subclass for, on its own thread; the
         // close request carries no pointers, and goes to the next procedure in line (the window
         // library's), which tells the app before it returns unless the app is busy.
         unsafe { DefSubclassProc(window, WM_CLOSE, 0, 0) };
+    };
+    if message == WM_ENDSESSION && wparam != 0 && (lparam as u32) & ENDSESSION_CLOSEAPP != 0 {
+        CLOSE_APP.store(true, SeqCst);
+        close();
+        return 0;
+    }
+    if message == WM_ENDSESSION && wparam != 0 {
+        SESSION_ENDING.store(true, SeqCst);
+        close();
         if !SESSION_END_DONE.load(SeqCst) {
             SESSION_END_LATE.store(true, SeqCst);
         }
@@ -524,6 +555,18 @@ pub fn session_ending() -> bool {
     SESSION_ENDING.load(std::sync::atomic::Ordering::SeqCst)
 }
 
+pub fn take_windows_ask() -> Option<WindowsAsk> {
+    use std::sync::atomic::Ordering::SeqCst;
+    if SESSION_ENDING.load(SeqCst) {
+        return Some(WindowsAsk::Ending);
+    }
+    FORWARDED.try_update(SeqCst, SeqCst, |n| n.checked_sub(1)).ok()?;
+    // A close handed over for an ask an earlier take has already done (two came before the app
+    // took either) does it again, which is harmless: never the operator's own close.
+    CLOSE_APP.store(false, SeqCst);
+    Some(WindowsAsk::CloseApp)
+}
+
 pub fn session_end_done() {
     SESSION_END_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
 }
@@ -532,14 +575,14 @@ pub fn session_end_late() -> bool {
     SESSION_END_LATE.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-pub fn pretend_session_end(window: isize) {
+pub fn pretend_session_end(window: isize, close_app: bool) {
     let window = window as HWND;
-    let logoff = ENDSESSION_LOGOFF as LPARAM;
+    let why = if close_app { ENDSESSION_CLOSEAPP } else { ENDSESSION_LOGOFF } as LPARAM;
     // SAFETY: SendMessageW sends plain numbers (no pointers) to a window handle and waits for
     // its answer; for a window gone since, the call fails harmlessly.
     unsafe {
-        SendMessageW(window, WM_QUERYENDSESSION, 0, logoff);
-        SendMessageW(window, WM_ENDSESSION, 1, logoff);
+        SendMessageW(window, WM_QUERYENDSESSION, 0, why);
+        SendMessageW(window, WM_ENDSESSION, 1, why);
     }
 }
 
@@ -618,14 +661,19 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
     use windows_sys::Win32::UI::WindowsAndMessaging::DefWindowProcW;
 
-    /// How many times the test's window was asked to close; the test's window marks the app's
-    /// saving done when it is.
+    /// How many times the test's window was asked to close, and what each close was for, as the
+    /// app takes it; the test's window marks the app's saving done for the session's end.
     static CLOSES: AtomicUsize = AtomicUsize::new(0);
+    static ASKED: std::sync::Mutex<Vec<Option<WindowsAsk>>> = std::sync::Mutex::new(Vec::new());
 
     unsafe extern "system" fn plain_window(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         if message == WM_CLOSE {
             CLOSES.fetch_add(1, SeqCst);
-            session_end_done();
+            let ask = take_windows_ask();
+            if ask == Some(WindowsAsk::Ending) {
+                session_end_done();
+            }
+            ASKED.lock().unwrap().push(ask);
             return 0;
         }
         // SAFETY: the values Windows gave this call, passed on to its usual handling.
@@ -634,7 +682,9 @@ mod tests {
 
     /// A window of the test's own, never shown, with the subclass the app's window gets: asked
     /// whether the session may end, it says yes; told the session isn't ending after all, it does
-    /// nothing; told it is, it is asked to close before the answer goes back.
+    /// nothing; asked by the Restart Manager to close, it is asked to close to save only (the
+    /// session isn't ending); told the session is ending, it is asked to close for that, before
+    /// the answer goes back. A close the operator asks for is never taken for one of those.
     #[test]
     fn a_window_is_asked_to_close_before_windows_is_told_the_session_may_end() {
         use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -685,9 +735,19 @@ mod tests {
         // SAFETY: as above.
         unsafe { SendMessageW(window, WM_ENDSESSION, 0, ENDSESSION_LOGOFF as LPARAM) };
         assert!(!session_ending() && CLOSES.load(SeqCst) == 0, "not ending after all: nothing");
-        pretend_session_end(window as isize);
+        // An installer needs a file the app holds: asked to close to save, not to end.
+        pretend_session_end(window as isize, true);
+        assert!(!session_ending(), "the session goes on");
+        assert_eq!(ASKED.lock().unwrap().as_slice(), [Some(WindowsAsk::CloseApp)]);
+        // The operator's own close afterwards is no ask of Windows'.
+        // SAFETY: as above.
+        unsafe { SendMessageW(window, WM_CLOSE, 0, 0) };
+        assert_eq!(ASKED.lock().unwrap().last(), Some(&None), "the operator's close");
+        // The session ends.
+        pretend_session_end(window as isize, false);
         assert!(session_ending(), "ending");
-        assert_eq!(CLOSES.load(SeqCst), 1, "asked to close, once");
+        assert_eq!(ASKED.lock().unwrap().last(), Some(&Some(WindowsAsk::Ending)));
+        assert_eq!(CLOSES.load(SeqCst), 3, "asked to close once for each");
         assert!(!session_end_late(), "saved before Windows was answered");
         // SAFETY: the test's own window, on its thread; the subclass comes off as it goes.
         assert_ne!(unsafe { DestroyWindow(window) }, 0);

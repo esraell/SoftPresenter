@@ -12497,18 +12497,45 @@ impl App {
         }
     }
 
-    /// What a quit does at once, however it came: what was changed is handed to be saved, and
-    /// the screens close (their NDI sources stopped, see `NdiOutput::stop`).
-    fn begin_quit(&mut self) {
+    /// Hands the library's writer everything changed, whatever its time: songs and themes (one
+    /// whose save failed tried once more, now), the small choices, the lists and every settings
+    /// file waiting its turn. What a quit does first, and what Windows asking the app to close
+    /// does.
+    fn hand_over_all(&mut self) {
         self.save_unsaved();
-        // A song or theme whose save failed is tried once more, now; if it fails again it is
-        // kept in "Not saved" (`finish_saves`).
         for (path, keep_old_in) in self.retries.due(Instant::now(), true) {
             self.save_again(&path, keep_old_in);
         }
         self.hand_over_choices(true);
         self.hand_over_lists(true);
         self.paced.flush(&self.writer);
+    }
+
+    /// The Restart Manager asked the app to close (Windows' way for an installer that needs a
+    /// file the app holds, such as a driver or NDI update run in the room). Everything changed
+    /// is saved now, waited for here as the program may be ended soon after, but the app stays
+    /// open: the screens never go dark in the middle of a service for it, and the installer
+    /// asks for a restart instead. A save that fails is tried again as usual.
+    fn save_for_close_app(&mut self) {
+        applog::event("quit", "Windows asked SoftPresenter to close, as an installer needs a file it uses: saving");
+        let began = Instant::now();
+        self.hand_over_all();
+        self.finish_saves();
+        self.writer.drain();
+        self.finish_saves();
+        applog::event(
+            "quit",
+            &format!(
+                "everything is saved, in {:.0} ms; SoftPresenter stays open, as the screens may be in use",
+                began.elapsed().as_secs_f64() * 1000.0
+            ),
+        );
+    }
+
+    /// What a quit does at once, however it came: what was changed is handed to be saved, and
+    /// the screens close (their NDI sources stopped, see `NdiOutput::stop`).
+    fn begin_quit(&mut self) {
+        self.hand_over_all();
         self.keep_held_aside();
         // A sync under way is stopped, and the screens close first: nothing waits in front of
         // the audience.
@@ -13395,10 +13422,15 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::HoveredFile(path) => self.file_drag_told(file_drop::Told::Over(path)),
             WindowEvent::HoveredFileCancelled => self.file_drag_told(file_drop::Told::Gone),
             WindowEvent::DroppedFile(path) => self.file_drag_told(file_drop::Told::Dropped(path)),
-            // Windows ending the session asks the window to close, and may end the program once
-            // this returns: everything is saved and stopped now, waiting where it must.
-            WindowEvent::CloseRequested if sp_winapi::session_ending() => self.leave_for_session_end(el),
-            WindowEvent::CloseRequested => self.quit(el),
+            // Windows asks the window to close when the session is ending, and may end the
+            // program once this returns: everything is saved and stopped now, waiting where it
+            // must. The Restart Manager asks the same when an installer needs a file the app
+            // holds: everything is saved, and the app stays open.
+            WindowEvent::CloseRequested => match sp_winapi::take_windows_ask() {
+                Some(sp_winapi::WindowsAsk::Ending) => self.leave_for_session_end(el),
+                Some(sp_winapi::WindowsAsk::CloseApp) => self.save_for_close_app(),
+                None => self.quit(el),
+            },
             WindowEvent::Resized(size) => {
                 if size.width > 0 && size.height > 0 {
                     running.home_resize = Some((size, Instant::now()));
@@ -13633,10 +13665,12 @@ impl ApplicationHandler<AppEvent> for App {
         }
         // Testing aid: SOFTPRESENTER_END_SESSION_WHEN=<file> has the operator's window sent, once
         // that file exists, what Windows sends it at a log-off (may the session end, then that it
-        // is ending), from a thread of its own as Windows sends it, so what the app does then can
-        // be tried without logging off, at a moment the test chooses however slowly the copy
-        // started. On Windows only, for a copy with its own data folder; looked at each time the
-        // loop waits, and the loop wakes for it four times a second until then.
+        // is ending), or, when the file says `closeapp`, what the Restart Manager sends when an
+        // installer needs a file the app holds, from a thread of its own as Windows sends it, so
+        // what the app does then can be tried without logging off or installing anything, at a
+        // moment the test chooses however slowly the copy started. On Windows only, for a copy
+        // with its own data folder; looked at each time the loop waits, and the loop wakes for it
+        // four times a second until then.
         #[cfg(windows)]
         let end_session_at = {
             static WHEN: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
@@ -13651,8 +13685,16 @@ impl ApplicationHandler<AppEvent> for App {
                             self.running.as_ref().and_then(|running| win32_handle(&running.home_window))
                     {
                         self.end_session_asked = true;
-                        applog::event("quit", "Testing aid: sending the window what Windows sends at a log-off");
-                        std::thread::spawn(move || sp_winapi::pretend_session_end(window));
+                        let close_app = std::fs::read_to_string(file).is_ok_and(|said| said.trim() == "closeapp");
+                        applog::event(
+                            "quit",
+                            if close_app {
+                                "Testing aid: sending the window what the Restart Manager sends for an installer"
+                            } else {
+                                "Testing aid: sending the window what Windows sends at a log-off"
+                            },
+                        );
+                        std::thread::spawn(move || sp_winapi::pretend_session_end(window, close_app));
                     }
                     Some(Instant::now() + Duration::from_millis(250))
                 }

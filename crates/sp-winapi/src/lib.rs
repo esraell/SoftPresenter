@@ -48,6 +48,34 @@ pub fn on_session_end(window: isize) -> bool {
     }
 }
 
+/// What Windows asked of the app's window ([`on_session_end`]), handed over with a close of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowsAsk {
+    /// The Restart Manager asks the app to close because an installer needs a file it holds (a
+    /// driver or NDI update run in the room): save everything, and stay open, as the session
+    /// goes on and the screens may be in use.
+    CloseApp,
+    /// The session is ending (a log-off, a restart, a shut-down): save and stop.
+    Ending,
+}
+
+/// What the close of the app's window the window library has just told the app of was for:
+/// one Windows asked for ([`on_session_end`]), each taken once (the session's end every time),
+/// or `None` for the operator's own close. Always `None` on other systems.
+pub fn take_windows_ask() -> Option<WindowsAsk> {
+    #[cfg(windows)]
+    {
+        windows::take_windows_ask().map(|ask| match ask {
+            windows::WindowsAsk::CloseApp => WindowsAsk::CloseApp,
+            windows::WindowsAsk::Ending => WindowsAsk::Ending,
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
 /// Whether Windows has said the session is ending ([`on_session_end`]). Always false on other
 /// systems.
 pub fn session_ending() -> bool {
@@ -82,12 +110,13 @@ pub fn session_end_late() -> bool {
 
 /// Testing aid: sends the app's window `window` what Windows sends at a log-off, from the thread
 /// this is called on (not the window's), waiting for each answer: may the session end, then that
-/// it is ending. Nothing on other systems.
-pub fn pretend_session_end(window: isize) {
+/// it is ending; or, `close_app`, what the Restart Manager sends when an installer needs a file
+/// the app holds. Nothing on other systems.
+pub fn pretend_session_end(window: isize, close_app: bool) {
     #[cfg(windows)]
-    windows::pretend_session_end(window);
+    windows::pretend_session_end(window, close_app);
     #[cfg(not(windows))]
-    let _ = window;
+    let _ = (window, close_app);
 }
 
 /// The part of the monitor under this point that the taskbar leaves free, as `(x, y, width,
