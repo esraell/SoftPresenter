@@ -195,9 +195,10 @@ impl Form {
         if self == Form::Wide { 6.0 } else { 5.0 }
     }
 
-    /// The face of a key's name.
+    /// The face of a key's name: the same size in every form. Only the room round it
+    /// tightens; the lettering is never made smaller to fit.
     fn font(self) -> FontId {
-        FontId::proportional(if self == Form::Wide { 12.5 } else { 12.0 })
+        FontId::proportional(12.5)
     }
 }
 

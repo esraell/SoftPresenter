@@ -58,7 +58,11 @@
   "edit.slides.up.many": "Перемістити вибрані слайди на одне місце вище",
   "edit.slides.down.one": "Перемістити цей слайд на одне місце нижче",
   "edit.slides.down.many": "Перемістити вибрані слайди на одне місце нижче",
-  "edit.slides.dragged": ["{n} слайд", "{n} слайди", "{n} слайдів"],
+  "edit.slides.dragged": [
+    "{n} слайд",
+    "{n} слайди",
+    "{n} слайдів"
+  ],
   "edit.slide.rename_group": "Перейменувати частину",
   "edit.slide.duplicate": "Дублювати",
   "edit.slide.delete": "Видалити",
@@ -100,5 +104,6 @@
   "edit.list.add": "Додати",
   "edit.list.duplicate": "Дублювати",
   "edit.list.delete": "Видалити",
-  "edit.why.one_layout": "Макет сцени завжди лишається хоча б один"
+  "edit.why.one_layout": "Макет сцени завжди лишається хоча б один",
+  "edit.list.greyed": "{name}: {why}"
 }

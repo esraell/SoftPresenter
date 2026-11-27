@@ -169,7 +169,7 @@
   "inspector.build.delay": "Retraso",
   "inspector.build.starts": "Cuándo",
   "inspector.build.with_slide": "Con la diapositiva",
-  "inspector.build.on_click": "Con un clic",
+  "inspector.build.on_click": "Con un clic en Siguiente",
   "inspector.build.delivery": "Texto",
   "inspector.build.by_paragraph": "Por párrafos",
   "inspector.build.by_click": "Cada clic muestra el párrafo siguiente.",
@@ -187,7 +187,7 @@
   "inspector.tab.screen": "Pantalla",
   "inspector.tab.box": "Cuadro",
   "inspector.tab.animation": "Animación",
-  "inspector.heading.prop": "ELEMENTO",
+  "inspector.heading.prop": "GRÁFICO",
   "inspector.heading.slide": "DIAPOSITIVA",
   "inspector.row.address": "Dirección",
   "inspector.row.source": "Fuente",
@@ -272,5 +272,12 @@
   "inspector.rename.hint": "Escribir su nombre de nuevo en la lista de objetos",
   "inspector.duplicate": "Duplicar",
   "inspector.duplicate.hint": "Hacer una copia a su lado",
-  "inspector.row.holds": "Contiene"
+  "inspector.row.holds": "Contiene",
+  "inspector.row.go_next": "Avanzar",
+  "inspector.arrange.spread.why": "Elige tres objetos o más para repartirlos",
+  "inspector.rename.several": "Elige un solo objeto para renombrarlo",
+  "inspector.tab.video": "Vídeo",
+  "inspector.kind.video": "vídeo",
+  "inspector.row.file": "Archivo",
+  "inspector.video.plays": "Se reproduce desde el principio mientras la diapositiva está en pantalla."
 }

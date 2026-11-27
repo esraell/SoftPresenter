@@ -377,6 +377,21 @@ fn caption_column(ui: &egui::Ui, captions: &[&str]) -> f32 {
         .min(CAPTION_MOST)
 }
 
+/// A caption set in its small capitals on one line at most `room` wide: one that is wider is
+/// cut short with "…" (and the galley says so, `elided`).
+fn caption_within(ui: &egui::Ui, caption: &str, room: f32) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::default();
+    let format = egui::TextFormat {
+        font_id: caption_font(),
+        color: crate::studio::TEXT_DIM,
+        extra_letter_spacing: CAPTION_SPACING,
+        ..Default::default()
+    };
+    job.append(&caption.to_uppercase(), 0.0, format);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(room.max(0.0));
+    ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
+}
+
 /// The room a row's controls have after a caption column `column` wide.
 fn control_room(column: f32) -> f32 {
     PANEL_WIDTH - column - CAPTION_GAP
@@ -393,16 +408,16 @@ fn row_tall(ui: &mut egui::Ui, column: f32, caption: &str, tall: f32, add: impl 
     let width = ui.available_width();
     ui.allocate_ui_with_layout(vec2(width, tall), Layout::left_to_right(Align::Max), |ui| {
         ui.spacing_mut().item_spacing.x = BETWEEN;
-        let (cell, _) = ui.allocate_exact_size(vec2(column, tall), Sense::hover());
-        crate::studio::paint_spaced(
-            ui,
-            cell.left_center(),
-            Align2::LEFT_CENTER,
-            &caption.to_uppercase(),
-            caption_font(),
-            crate::studio::TEXT_DIM,
-            CAPTION_SPACING,
-        );
+        let (cell, over) = ui.allocate_exact_size(vec2(column, tall), Sense::hover());
+        // A caption longer than the widest column is cut short with "…", never drawn under the
+        // controls beside it, and said whole under the pointer.
+        let words = caption_within(ui, caption, column);
+        let at = pos2(cell.min.x, cell.center().y - words.size().y / 2.0);
+        let cut = words.elided;
+        ui.painter().galley(at, words, crate::studio::TEXT_DIM);
+        if cut {
+            over.on_hover_text(caption);
+        }
         ui.add_space(CAPTION_GAP - BETWEEN);
         add(ui);
     });
@@ -1107,7 +1122,7 @@ fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     let captions = [
         t("slides.menu.label", "Label"),
         t("slides.menu.template", "Template"),
-        t("slides.menu.go_next", "Go to Next"),
+        t("inspector.row.go_next", "Go to Next"),
     ];
     let column = caption_column(ui, &captions);
     let room = control_room(column);
@@ -1115,7 +1130,7 @@ fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     let (mut label, mut template, mut advance) = before.clone();
     row(ui, column, captions[0], |ui| {
         let none = t("slides.menu.label.none", "None");
-        let shown = label.clone().unwrap_or_else(|| none.to_owned());
+        let shown = label.as_deref().map_or(none, crate::home::slide_label_words).to_owned();
         egui::ComboBox::from_id_salt("slide label")
             .selected_text(shown)
             .width(room)
@@ -1185,11 +1200,17 @@ fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     nothing_selected(ui);
 }
 
+/// True for a picture object whose file is a video, which plays in its box.
+fn is_video_file(file: &str) -> bool {
+    crate::media::is_video(std::path::Path::new(file))
+}
+
 /// The name of an object's own tab: what the object is.
 fn own_tab_name(kind: &ObjectKind) -> &'static str {
     match kind {
         ObjectKind::Text { .. } => t("inspector.tab.text", "Text"),
         ObjectKind::Shape { .. } => t("inspector.tab.shape", "Shape"),
+        ObjectKind::Image { file, .. } if is_video_file(file) => t("inspector.tab.video", "Video"),
         ObjectKind::Image { .. } => t("inspector.tab.picture", "Picture"),
         ObjectKind::Web { .. } => t("inspector.web", "Web Page"),
         ObjectKind::Ndi { .. } => t("inspector.ndi", "NDI Source"),
@@ -1203,6 +1224,7 @@ fn kind_words(kind: &ObjectKind) -> &'static str {
     match kind {
         ObjectKind::Text { .. } => t("inspector.kind.text", "text box"),
         ObjectKind::Shape { .. } => t("inspector.kind.shape", "shape"),
+        ObjectKind::Image { file, .. } if is_video_file(file) => t("inspector.kind.video", "video"),
         ObjectKind::Image { .. } => t("inspector.kind.picture", "picture"),
         ObjectKind::Web { .. } => t("inspector.kind.web", "web page"),
         ObjectKind::Ndi { .. } => t("inspector.kind.ndi", "NDI source"),
@@ -1220,7 +1242,8 @@ fn tabs_for(state: &HomeState) -> Vec<(InspectorTab, &'static str)> {
     let picked = draft.selection();
     let mut kinds = draft.slide.objects.iter().filter(|object| picked.contains(&object.id)).map(|object| &object.kind);
     let Some(first) = kinds.next() else { return Vec::new() };
-    let one_kind = kinds.all(|kind| std::mem::discriminant(kind) == std::mem::discriminant(first));
+    // A picture and a video are different kinds here, though one kind of object holds both.
+    let one_kind = kinds.all(|kind| own_tab_name(kind) == own_tab_name(first));
     let mut tabs = Vec::with_capacity(3);
     if one_kind {
         tabs.push((InspectorTab::Own, own_tab_name(first)));
@@ -1383,12 +1406,31 @@ fn ndi_source(
     ));
 }
 
+/// True for the kinds whose box shows a picture from somewhere: a picture or video, a web page,
+/// an NDI source, AirPlay, a screen picture.
+fn shows_a_picture(kind: &ObjectKind) -> bool {
+    !matches!(kind, ObjectKind::Text { .. } | ObjectKind::Shape { .. })
+}
+
+/// Which of the fill's rows a tab has, for what is picked.
+#[derive(Clone, Copy)]
+struct FillRows {
+    /// The colour is captioned Behind, not Fill: everything picked shows a picture.
+    behind: bool,
+    /// Gradient and To are there: nothing picked shows a picture, or one of them has a gradient
+    /// already (from an older file), so nothing saved is out of reach.
+    gradient: bool,
+}
+
 /// The rows for the colour inside a box or a shape: Fill (none, the swatches, any colour), then
-/// its gradient's.
-fn fill_rows(ui: &mut egui::Ui, column: f32, object: &mut sp_model::Object) {
+/// its gradient's where it has them (see [`FillRows`]).
+fn fill_rows(ui: &mut egui::Ui, column: f32, object: &mut sp_model::Object, rows: FillRows) {
     let room = control_room(column);
     let look = Swatches { salt: "fill", room, count: 8, none_too: true, mixed: None };
-    swatches_row(ui, column, t("inspector.shape.fill", "Fill"), &look, |ui, look| {
+    // Behind a picture, the colour shows in the bars beside it and while it hasn't come:
+    // "Fill" there would read as how the picture fits.
+    let caption = if rows.behind { t("inspector.row.behind", "Behind") } else { t("inspector.shape.fill", "Fill") };
+    swatches_row(ui, column, caption, &look, |ui, look| {
         // A colour chosen for a box that had none starts part see-through over what is behind
         // it, as a new fill always has.
         let had = object.fill.is_some();
@@ -1399,6 +1441,9 @@ fn fill_rows(ui: &mut egui::Ui, column: f32, object: &mut sp_model::Object) {
             fill.a = 160;
         }
     });
+    if !rows.gradient {
+        return;
+    }
     // Drawing changes nothing: the gradient is written back only when a control changed it.
     let mut gradient = object.gradient.unwrap_or_default();
     let before = gradient;
@@ -1504,16 +1549,31 @@ fn kind_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         if now != was && object.name == crate::editor::shape_name(was) {
             crate::editor::shape_name(now).clone_into(&mut object.name);
         }
-        fill_rows(ui, column, object);
+        fill_rows(ui, column, object, FillRows { behind: false, gradient: true });
         outline_row(ui, column, object);
         return;
     }
     match &mut object.kind {
         ObjectKind::Text { .. } | ObjectKind::Shape { .. } | ObjectKind::Screen { .. } => {}
         // A picture: how it sits in its place.
-        ObjectKind::Image { fit, .. } => {
-            let column = caption_column(ui, &[t("inspector.row.fits", "Fits")]);
+        ObjectKind::Image { file, fit } => {
+            let captions = [t("inspector.row.file", "File"), t("inspector.row.fits", "Fits")];
+            let column = caption_column(ui, &captions);
+            // The file by its name alone, cut short where it is long and whole under the pointer.
+            let name = std::path::Path::new(file.as_str()).file_name().map(|name| name.to_string_lossy().into_owned());
+            let name = name.unwrap_or_else(|| file.clone());
+            row(ui, column, captions[0], |ui| {
+                let words = egui::RichText::new(name.as_str()).size(12.5).color(INK);
+                let room = vec2(control_room(column), KEY);
+                ui.allocate_ui_with_layout(room, Layout::left_to_right(Align::Center), |ui| {
+                    ui.add(egui::Label::new(words).truncate()).on_hover_text(name.as_str());
+                });
+            });
             fits_row(ui, column, "picture fit", fit);
+            if is_video_file(file) {
+                let plays = t("inspector.video.plays", "It plays from the start while the slide is on screen.");
+                line_of_words(ui, plays, crate::studio::TEXT_DIM);
+            }
         }
         // A web page: its address. The page is laid out at the box's size.
         ObjectKind::Web { url } => web_address(ui, object_id, url, address),
@@ -1546,6 +1606,16 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let picked = draft.selection();
     // With several picked: how many, and what they are.
     let mut kinds: Vec<String> = Vec::new();
+    // A row shows only where it applies to everything picked: a shape's colour and outline are
+    // on its own tab, so with a shape among them the Box tab has neither.
+    let of_picked = |ask: &dyn Fn(&sp_model::Object) -> bool| {
+        draft.slide.objects.iter().filter(|object| picked.contains(&object.id)).any(ask)
+    };
+    let any_shape = of_picked(&|object| matches!(object.kind, ObjectKind::Shape { .. }));
+    let fill = FillRows {
+        behind: !of_picked(&|object| !shows_a_picture(&object.kind)),
+        gradient: !of_picked(&|object| shows_a_picture(&object.kind)) || of_picked(&|object| object.gradient.is_some()),
+    };
     for object in draft.slide.objects.iter().filter(|object| picked.contains(&object.id)) {
         let kind = kind_words(&object.kind).to_owned();
         if !kinds.contains(&kind) {
@@ -1556,13 +1626,13 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let (Some(frame), Some(object)) = (themed, draft.selected_object_mut()) else {
         return nothing_selected(ui);
     };
-    let is_shape = matches!(object.kind, ObjectKind::Shape { .. });
     let captions = [
         t("inspector.row.place", "Place"),
         t("inspector.row.arrange", "Arrange"),
         t("inspector.row.rotate", "Rotate"),
         t("inspector.shape.opacity", "Opacity"),
         t("inspector.shape.fill", "Fill"),
+        t("inspector.row.behind", "Behind"),
         t("inspector.row.gradient", "Gradient"),
         t("inspector.row.to", "To"),
         t("inspector.row.outline", "Outline"),
@@ -1573,7 +1643,7 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     ];
     let column = caption_column(ui, &captions);
     let room = control_room(column);
-    let [place, arrange, rotate, opacity, _, _, _, _, effects, _, order, named] = captions;
+    let [place, arrange, rotate, opacity, _, _, _, _, _, effects, _, order, named] = captions;
     if picked.len() > 1 {
         let count = crate::i18n::tn("inspector.several", picked.len() as u64, "{n} object", "{n} objects", &[]);
         scope_line(ui, true, &count, &kinds.join(", "));
@@ -1613,8 +1683,10 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     // them out evenly too, which is done once this object is let go of.
     let mut spread: Option<bool> = None;
     row(ui, column, arrange, |ui| {
+        // Always the eight keys, so none changes size when a third object is picked: the two
+        // that spread are greyed until there are three.
         let spreads = picked.len() > 2;
-        let wide = key_width(room, if spreads { 8 } else { 6 });
+        let wide = key_width(room, 8);
         let hints = [
             t("inspector.arrange.left", "Line up with the left of the slide"),
             t("inspector.arrange.centre", "Centre across the slide"),
@@ -1636,17 +1708,19 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
                 }
             }
         }
-        if spreads {
+        ui.add_enabled_ui(spreads, |ui| {
             for (across, hint) in [
                 (true, t("inspector.arrange.spread_across", "Spread them out evenly, left to right")),
                 (false, t("inspector.arrange.spread_down", "Spread them out evenly, top to bottom")),
             ] {
                 let mark = if across { 1 } else { 4 };
-                if square_key(ui, wide, (false, false), hint, |p, cell, ink| align_mark(p, cell, mark, ink)).clicked() {
+                let key = square_key(ui, wide, (false, false), hint, |p, cell, ink| align_mark(p, cell, mark, ink));
+                let why = t("inspector.arrange.spread.why", "Pick three or more objects to spread them out");
+                if key.on_disabled_hover_text(why).clicked() {
                     spread = Some(across);
                 }
             }
-        }
+        });
     });
     if edited != frame {
         object.frame = Some(edited);
@@ -1687,8 +1761,8 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     });
 
     // A shape's colour and outline are what it is: they are on its own tab.
-    if !is_shape {
-        fill_rows(ui, column, object);
+    if !any_shape {
+        fill_rows(ui, column, object, fill);
         outline_row(ui, column, object);
     }
 
@@ -1737,18 +1811,26 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
             (t("inspector.duplicate", "Duplicate"), duplicate_hint.as_str(), crate::icons::Icon::Stack),
             (t("inspector.delete", "Delete"), delete_hint, crate::icons::Icon::Trash),
         ];
+        // A name is one object's: Rename is greyed while several are picked.
+        let one = picked.len() == 1;
+        let several = t("inspector.rename.several", "Pick one object to rename it");
         let mut pressed = [false; 3];
         if object_keys_named(ui, room) {
             for (at, (words, hint, _)) in keys.into_iter().enumerate() {
-                pressed[at] = word_key(ui, words, false, true).on_hover_text(hint).clicked();
+                let can = at != 0 || one;
+                pressed[at] = word_key(ui, words, false, can).on_hover_text(if can { hint } else { several }).clicked();
             }
         } else {
             for (at, (words, _, icon)) in keys.into_iter().enumerate() {
-                let key = square_key(ui, KEY_WIDE, (false, false), words, |painter, cell, ink| {
-                    crate::icons::paint(painter, icon, Rect::from_center_size(cell.center(), vec2(14.0, 14.0)), ink);
+                let can = at != 0 || one;
+                ui.add_enabled_ui(can, |ui| {
+                    let key = square_key(ui, KEY_WIDE, (false, false), words, |painter, cell, ink| {
+                        let glyph = Rect::from_center_size(cell.center(), vec2(14.0, 14.0));
+                        crate::icons::paint(painter, icon, glyph, ink);
+                    });
+                    key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, can, words));
+                    pressed[at] = key.on_disabled_hover_text(several).clicked();
                 });
-                key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, words));
-                pressed[at] = key.clicked();
             }
         }
         [rename, duplicate, delete] = pressed;
@@ -1890,7 +1972,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     if shows {
         captions.push(t("inspector.row.shows", "Shows"));
     }
-    if for_theme {
+    if for_theme && boxes == 1 {
         captions.push(t("inspector.row.holds", "Holds"));
     }
     let column = caption_column(ui, &captions);
@@ -2038,7 +2120,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     // In a template: which of a slide's words the box holds. No two boxes hold the same, and
     // every text box holds some (one with no role yet takes one from its name when the
     // template is kept), so there is no choice of none.
-    if for_theme {
+    if for_theme && boxes == 1 {
         let mut holds = object.role.clone();
         row(ui, column, t("inspector.row.holds", "Holds"), |ui| {
             let shown = holds.as_ref().map_or_else(|| object.name.clone(), crate::editor::role_label);
@@ -2960,6 +3042,15 @@ mod tests {
                     ("text box", editing_text(InspectorTab::Box, false, false)),
                     ("animation", editing_text(InspectorTab::Animation, false, false)),
                     ("shape", editing_shape(InspectorTab::Own, false)),
+                    ("slide", {
+                        let mut state = editing_text(InspectorTab::Own, false, false);
+                        state.song_templates = vec![(sp_model::Uuid::new_v4(), "Two languages".to_owned())];
+                        if let Some(draft) = state.editing.as_mut() {
+                            draft.select_only(None);
+                        }
+                        state
+                    }),
+                    ("video", editing_picture("clip.mp4", None)),
                     ("three picked", {
                         let mut state = editing_shape(InspectorTab::Box, true);
                         if let Some(draft) = state.editing.as_mut() {
@@ -3224,6 +3315,92 @@ mod tests {
                 assert_eq!(named == 3, fits, "{language:?}: names where they fit {room}");
             });
         }
+    }
+
+    /// A slide being edited with a picture object for `file` added and picked, on its own tab or
+    /// (with a gradient to give it, or `Some(None)` for none) on the Box tab.
+    fn editing_picture(file: &str, gradient: Option<Option<sp_model::Gradient>>) -> HomeState {
+        let tab = if gradient.is_some() { InspectorTab::Box } else { InspectorTab::Own };
+        let mut state = editing_text(tab, false, false);
+        if let Some(draft) = state.editing.as_mut() {
+            let mut object = sp_model::Object::shape(sp_model::Shape::Rectangle);
+            object.kind = ObjectKind::Image { file: file.to_owned(), fit: sp_model::ImageFit::Fit };
+            object.gradient = gradient.flatten();
+            let id = object.id;
+            draft.add(object);
+            draft.select_only(Some(id));
+        }
+        state
+    }
+
+    #[test]
+    fn a_video_has_its_own_tab_with_its_file_and_a_picture_has_no_line_about_playing() {
+        let theme = Theme::builtin();
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let plays = "It plays from the start while the slide is on screen.";
+            let mut video = editing_picture("/media/welcome loop.mp4", None);
+            let tabs: Vec<&str> = tabs_for(&video).into_iter().map(|(_, name)| name).collect();
+            assert_eq!(tabs, ["Video", "Box", "Animation"]);
+            let words = words_drawn(&mut video, &theme);
+            for wanted in ["FILE", "welcome loop.mp4", "FITS", plays] {
+                assert!(words.iter().any(|said| said == wanted), "{wanted} in {words:?}");
+            }
+            let mut picture = editing_picture("/media/cross.png", None);
+            let tabs: Vec<&str> = tabs_for(&picture).into_iter().map(|(_, name)| name).collect();
+            assert_eq!(tabs, ["Picture", "Box", "Animation"]);
+            let words = words_drawn(&mut picture, &theme);
+            assert!(
+                words.iter().any(|said| said == "cross.png") && !words.iter().any(|said| said == plays),
+                "{words:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn a_picture_boxs_colour_is_behind_it_with_gradient_rows_only_for_a_saved_gradient() {
+        let theme = Theme::builtin();
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let has = |words: &[String], wanted: &str| words.iter().any(|said| said == wanted);
+            let words = words_drawn(&mut editing_picture("cross.png", Some(None)), &theme);
+            assert!(has(&words, "BEHIND") && !has(&words, "FILL"), "{words:?}");
+            assert!(!has(&words, "GRADIENT") && !has(&words, "TO"), "{words:?}");
+            // One saved with a gradient, by an older build: its rows are there, so it can be
+            // changed or taken off.
+            let saved = sp_model::Gradient { kind: sp_model::GradientKind::Linear, ..Default::default() };
+            let words = words_drawn(&mut editing_picture("cross.png", Some(Some(saved))), &theme);
+            assert!(has(&words, "BEHIND") && has(&words, "GRADIENT") && has(&words, "TO"), "{words:?}");
+            // A text box is as before.
+            let words = words_drawn(&mut editing_text(InspectorTab::Box, false, false), &theme);
+            assert!(has(&words, "FILL") && has(&words, "GRADIENT") && !has(&words, "BEHIND"), "{words:?}");
+        });
+    }
+
+    #[test]
+    fn a_change_made_with_several_picked_goes_to_every_one() {
+        let theme = Theme::builtin();
+        let mut state = editing_shape(InspectorTab::Own, false);
+        let draft = state.editing.as_mut().expect("editing");
+        let first = draft.selected.expect("the star");
+        draft.add_shape(sp_model::Shape::Ellipse);
+        let second = draft.selected.expect("the ellipse");
+        draft.select_only(Some(first));
+        draft.toggle_selected(second);
+        let before = draft.selected_object().cloned().expect("picked");
+        // The Shape menu's change, and a build chosen on Animation.
+        if let Some(object) = draft.selected_object_mut() {
+            object.kind = ObjectKind::Shape { shape: sp_model::Shape::Triangle };
+            object.build_in = Some(sp_model::Build::of(sp_model::BuildEffect::Zoom));
+        }
+        draft.share_change(&theme, &before);
+        for object in draft.slide.objects.iter().filter(|object| [first, second].contains(&object.id)) {
+            assert!(matches!(object.kind, ObjectKind::Shape { shape: sp_model::Shape::Triangle }), "{:?}", object.kind);
+            assert_eq!(object.build_in.map(|build| build.effect), Some(sp_model::BuildEffect::Zoom));
+        }
+        // With a shape among them, the Box tab has no Fill or Outline: they are the shape's own.
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let words = words_drawn(&mut editing_shape(InspectorTab::Box, true), &theme);
+            assert!(!words.iter().any(|said| said == "FILL" || said == "OUTLINE"), "{words:?}");
+        });
     }
 
     #[test]

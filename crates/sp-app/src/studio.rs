@@ -1710,8 +1710,14 @@ pub fn list_keys(ui: &mut egui::Ui, salt: &str, can: [bool; 5], hints: [&str; 5]
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, can[at], name));
         // A greyed key still senses the pointer, so it takes a hover: the reason. A key that
         // is only its picture says its name.
+        // One that is greyed as a picture says both: its name, and why it can't be pressed.
+        let greyed;
         let hover = match (can[at], named) {
-            (false, _) => why[at],
+            (false, true) => why[at],
+            (false, false) => {
+                greyed = tf("edit.list.greyed", "{name}: {why}", &[("name", name), ("why", why[at])]);
+                greyed.as_str()
+            }
             (true, true) => hints[at],
             (true, false) => name,
         };

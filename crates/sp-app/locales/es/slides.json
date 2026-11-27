@@ -7,7 +7,10 @@
   "slides.playlist.gone": "Ya no existe",
   "slides.playlist.empty": "Aún no tiene nada",
   "slides.playlist.playing": "Reproduciéndose en bucle",
-  "slides.playlist.click": ["{n} elemento · haz clic para reproducirlos en bucle", "{n} elementos · haz clic para reproducirlos en bucle"],
+  "slides.playlist.click": [
+    "{n} elemento · haz clic para reproducirlos en bucle",
+    "{n} elementos · haz clic para reproducirlos en bucle"
+  ],
   "slides.playlist.hint": "Reproducir sus imágenes (8 segundos cada una) y vídeos por turno, en bucle",
   "slides.drop_slide": "Suelta para añadirlo como diapositiva",
   "slides.none": "Aún no hay diapositivas.",
@@ -35,7 +38,10 @@
   "slides.kind.media_playlist": "Lista multimedia",
   "slides.kind.placeholder": "Hueco",
   "slides.kind.missing": "Falta",
-  "slides.name.hint": ["{n} diapositiva · doble clic para renombrar", "{n} diapositivas · doble clic para renombrar"],
+  "slides.name.hint": [
+    "{n} diapositiva · doble clic para renombrar",
+    "{n} diapositivas · doble clic para renombrar"
+  ],
   "slides.add_slide": "Añadir diapositiva",
   "slides.add_slide.hint": "Añadir una diapositiva con el mismo diseño que la última",
   "slides.details": "Detalles: el autor, el editor y el número CCLI de la canción",
@@ -148,5 +154,9 @@
   "slides.menu.paste_style.none": "Primero copia un estilo",
   "slides.media.show.short": "Clic para mostrar",
   "slides.media.gone.short": "Ya no está",
-  "slides.playlist.playing.short": "En bucle"
+  "slides.playlist.playing.short": "En bucle",
+  "slides.label.blank": "Diapositiva en blanco",
+  "slides.label.instrumental": "Instrumental",
+  "slides.label.repeat": "Repetir",
+  "slides.label.spoken": "Hablado"
 }

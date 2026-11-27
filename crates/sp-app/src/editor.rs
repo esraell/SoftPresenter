@@ -929,6 +929,54 @@ impl EditDraft {
             if before.shadow != after.shadow {
                 object.shadow = after.shadow;
             }
+            if before.gradient != after.gradient {
+                object.gradient = after.gradient;
+            }
+            if before.build_in != after.build_in {
+                object.build_in = after.build_in;
+            }
+            if before.build_out != after.build_out {
+                object.build_out = after.build_out;
+            }
+            // What makes each the kind it is, where they are of one kind: which shape, how a
+            // picture fits, an NDI source's settings.
+            match (&before.kind, &after.kind, &mut object.kind) {
+                (ObjectKind::Shape { shape: was }, ObjectKind::Shape { shape: now }, ObjectKind::Shape { shape })
+                    if was != now =>
+                {
+                    *shape = *now;
+                }
+                (
+                    ObjectKind::Image { fit: was, .. },
+                    ObjectKind::Image { fit: now, .. },
+                    ObjectKind::Image { fit, .. },
+                ) if was != now => {
+                    *fit = *now;
+                }
+                (
+                    ObjectKind::Mirror { scaling: was },
+                    ObjectKind::Mirror { scaling: now },
+                    ObjectKind::Mirror { scaling },
+                ) if was != now => {
+                    *scaling = *now;
+                }
+                (
+                    ObjectKind::Ndi { scaling: was_fit, quality: was_quality, sound: was_sound, .. },
+                    ObjectKind::Ndi { scaling: now_fit, quality: now_quality, sound: now_sound, .. },
+                    ObjectKind::Ndi { scaling, quality, sound, .. },
+                ) => {
+                    if was_fit != now_fit {
+                        *scaling = *now_fit;
+                    }
+                    if was_quality != now_quality {
+                        *quality = *now_quality;
+                    }
+                    if was_sound != now_sound {
+                        *sound = *now_sound;
+                    }
+                }
+                _ => {}
+            }
             if before.flip_h != after.flip_h {
                 object.flip_h = after.flip_h;
             }

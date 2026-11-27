@@ -58,7 +58,10 @@
   "edit.slides.up.many": "Subir un puesto las diapositivas elegidas",
   "edit.slides.down.one": "Bajar un puesto esta diapositiva",
   "edit.slides.down.many": "Bajar un puesto las diapositivas elegidas",
-  "edit.slides.dragged": ["{n} diapositiva", "{n} diapositivas"],
+  "edit.slides.dragged": [
+    "{n} diapositiva",
+    "{n} diapositivas"
+  ],
   "edit.slide.rename_group": "Renombrar grupo",
   "edit.slide.duplicate": "Duplicar",
   "edit.slide.delete": "Eliminar",
@@ -100,5 +103,6 @@
   "edit.list.add": "Añadir",
   "edit.list.duplicate": "Duplicar",
   "edit.list.delete": "Eliminar",
-  "edit.why.one_layout": "Siempre hay un diseño del escenario"
+  "edit.why.one_layout": "Siempre hay un diseño del escenario",
+  "edit.list.greyed": "{name}: {why}"
 }

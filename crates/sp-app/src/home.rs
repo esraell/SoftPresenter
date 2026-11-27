@@ -5375,6 +5375,19 @@ pub const SLIDE_LABELS: [(&str, &str); 4] = [
     tk("slides.label.spoken", "Spoken Word"),
 ];
 
+/// A slide's label in the language set, where it is one of the app's four ([`SLIDE_LABELS`]) in
+/// English, as songs labelled in English keep them; any other label, one given in another
+/// language included, is said as it is.
+pub fn slide_label_words(label: &str) -> &str {
+    match label {
+        "Blank Slide" => t("slides.label.blank", "Blank Slide"),
+        "Instrumental" => t("slides.label.instrumental", "Instrumental"),
+        "Repeat" => t("slides.label.repeat", "Repeat"),
+        "Spoken Word" => t("slides.label.spoken", "Spoken Word"),
+        other => other,
+    }
+}
+
 /// What an object is called in the Objects list: the name it was given, or, until it is given
 /// one (a box still has the name the app gave it, "Text 2" or "Texto 2" in whichever language it
 /// was made in), the first line of its words. A new box still saying the app's sample words has
@@ -13280,8 +13293,13 @@ mod tests {
         let ctx = crate::studio::tests::styled();
         let (show, mut state) = song_open(&[("Verse 1", 1)], 0);
         let said = hover_words(&ctx, &show, &mut state, Rect::from_min_size(pos2(10.0, 0.0), vec2(300.0, 400.0)));
+        // Each reason is said: alone under a key with its name on it, or after the key's name
+        // where this computer's letters make the keys pictures.
         for why in [one_slide(), crate::studio::at_top(), crate::studio::at_bottom()] {
-            assert!(said.contains(why), "{why:?} not said: {said:?}");
+            assert!(
+                said.iter().any(|words| words == why || words.ends_with(&format!(": {why}"))),
+                "{why:?} in {said:?}"
+            );
         }
         // The Delete key (the slide list's) says why with a cue, as it can't be greyed.
         let mut notices = crate::notices::Notices::default();

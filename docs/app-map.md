@@ -202,8 +202,8 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   THE WHOLE BOX, or SELECTED WORDS and the words quoted while words are selected in a box being
   typed in, and font, size, B I U S and colour then change only those words, a half-lit key or
   "Mixed" showing where they differ; Copy style, Paste style, Back to theme, Reset spacing and
-  Clear word styles are keys at its foot; in a template, Holds says which of a slide's words the box takes), Shape (which shape, fill, gradient, outline), Picture (how it
-  fits), Web Page, NDI Source, AirPlay, Screen. Then Box, the same for every kind (place
+  Clear word styles are keys at its foot; in a template, Holds says which of a slide's words the box takes), Shape (which shape, fill, gradient, outline), Picture and Video (the file's name and how it
+  fits; a video's line says it plays from the start while the slide is on screen), Web Page, NDI Source, AirPlay, Screen. Then Box, the same for every kind (place
   and size, lining up, rotation with the two flips after the angle, opacity, fill and outline for all but shapes, shadow,
   order, Rename (which retypes the name in the Objects list), Duplicate and Delete (their names where the three fit one line, else all three as picture keys: `object_keys_named`), Undo, Redo, Reset to theme), and Animation (how an object comes on and
   goes off; not on a theme's template or a stage layout). Several objects of different kinds

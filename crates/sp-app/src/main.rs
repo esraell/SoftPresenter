@@ -11591,6 +11591,11 @@ impl App {
                 if let Some(draft) = running.home_state.editing.as_mut() {
                     draft.selected = if picked { draft.slide.objects.last() } else { draft.slide.objects.first() }
                         .map(|object| object.id);
+                    // Testing aid: `nothing` leaves nothing picked, for a picture of the slide's own
+                    // panel in the inspector.
+                    if editor_capture == "nothing" {
+                        draft.select_only(None);
+                    }
                     // Testing aid: as if the box had been double-clicked.
                     if editor_capture == "typing" || editor_capture == "selected-typing" {
                         draft.typing = draft.selected;
@@ -11612,6 +11617,18 @@ impl App {
                         Ok(picture) => running.home_state.picture_to_add.push(picture),
                         Err(problem) => eprintln!("{problem}"),
                     }
+                }
+                // Testing aid: SOFTPRESENTER_CAPTURE_VIDEO=<file> puts a video box for that file
+                // (which needn't be there) on the slide, picked, for a picture of its own tab.
+                if let Ok(file) = std::env::var("SOFTPRESENTER_CAPTURE_VIDEO")
+                    && let Some(draft) = running.home_state.editing.as_mut()
+                {
+                    let mut object = sp_model::Object::shape(sp_model::Shape::Rectangle);
+                    object.name = "Video".to_owned();
+                    object.kind = sp_model::ObjectKind::Image { file, fit: sp_model::ImageFit::Fit };
+                    let id = object.id;
+                    draft.add(object);
+                    draft.select_only(Some(id));
                 }
                 // Testing aid: give the selected object builds, to see the Animation tab filled in.
                 if std::env::var_os("SOFTPRESENTER_CAPTURE_BUILD").is_some()

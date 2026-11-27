@@ -58,7 +58,11 @@
   "edit.slides.up.many": "Переместить выбранные слайды на одно место вверх",
   "edit.slides.down.one": "Переместить этот слайд на одно место вниз",
   "edit.slides.down.many": "Переместить выбранные слайды на одно место вниз",
-  "edit.slides.dragged": ["{n} слайд", "{n} слайда", "{n} слайдов"],
+  "edit.slides.dragged": [
+    "{n} слайд",
+    "{n} слайда",
+    "{n} слайдов"
+  ],
   "edit.slide.rename_group": "Переименовать часть",
   "edit.slide.duplicate": "Дублировать",
   "edit.slide.delete": "Удалить",
@@ -100,5 +104,6 @@
   "edit.list.add": "Добавить",
   "edit.list.duplicate": "Дублировать",
   "edit.list.delete": "Удалить",
-  "edit.why.one_layout": "Один макет сцены есть всегда"
+  "edit.why.one_layout": "Один макет сцены есть всегда",
+  "edit.list.greyed": "{name}: {why}"
 }
