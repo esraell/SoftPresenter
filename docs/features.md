@@ -2985,7 +2985,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   aside so the setup opens over the home window); Settings › Command line has the sp command's
   row, saying where it stands, with Install, Use This Copy and Remove (quiet while sp is where it
   should be), and what a click did under it; Settings › About has a card with the version and a
-  row each for Updates (Check for updates, below; in a pre-release a row under it says so, as
+  row each for Updates (Check for Updates, below; in a pre-release a row under it says so, as
   the setup does), What's new, Help (Open the guide), Something
   wrong? (Report an issue…, a new issue with the version filled in) and Licences…; a click on the
   readout under the preview goes to the slide on screen (opens its item and brings the slide
@@ -3010,15 +3010,31 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   apps have it), and on every system the Updates row of Settings › About, asks once whether there
   is a newer version: never in the background, only when asked, one check at a time (a second
   click, or `sp update check`, joins the one running; the menu item says Checking for Updates…
-  and is greyed, and so is the row's key, Checking…). The menu item opens Settings › About, where
-  the row says what was found and when ("You have the newest version (0.9.0) · checked at 2:07",
-  "SoftPresenter 0.9.1 is available", or "Couldn't check: GitHub took too long to answer"); the
-  answer goes in the notices too. A build of the public source asks GitHub for this repository's
-  releases, pre-releases included (the app is 0.x), takes the highest version among them (the
-  Bibles' releases, tagged `bibles-N`, are passed over) and compares it with its own, sending only
-  "SoftPresenter/<version>" as who asks; it gives up after 10 seconds. A newer version gets a row
-  of its own with Open the download page, which opens its release page in the browser (only a
-  page of this repository's releases): nothing is downloaded or installed.
+  and is greyed, and so is the row's key while the row says Checking…). The menu item opens
+  Settings › About, where the Updates row says where things stand: a sentence, a line under it,
+  and one key at the right, the row one height and the key one width whatever it says, so
+  nothing on the page moves. Before any check: "Updates are checked only when you ask." over "Not
+  checked yet", with Check Now; then "SoftPresenter 0.9.0 is the newest." over "Checked at 2:07";
+  a newer version, "SoftPresenter 0.9.1 is out." over "This copy can't update itself yet.", with
+  Open the Download Page, which opens its release page in the browser (only a page of this
+  repository's releases): nothing is downloaded or installed; a check that couldn't be made,
+  "Couldn't check: GitHub took too long to answer." over "Or get it from the download page:
+  softpresenter.com.", with Try Again. A network that checks secure connections (a school's, an
+  office's or a hotel's filter answering with a certificate of its own, which is never trusted)
+  is told apart from no connection: "Couldn't check: this network checks secure connections and
+  blocked it." over "Try another network, or get it from the download page: softpresenter.com."
+  The answer goes in the notices too. A build of the public source asks GitHub for this
+  repository's releases, pre-releases included (the app is 0.x), takes the highest version among
+  them (the Bibles' releases, tagged `bibles-N`, are passed over) and compares it with its own,
+  sending only "SoftPresenter/<version>" as who asks; it gives up after 10 seconds. A build whose
+  own updater fetches newer versions (a development build's) shows that in the same row, with a
+  thin bar where the key was: "Downloading 0.9.1… 42% · 23 of 54 MB" over "Carry on as usual:
+  nothing changes until it is ready."; then "0.9.1 is ready. It goes in when you quit, or now."
+  with Update and Restart, the one bright key (greyed, with "Something is on screen" under it,
+  while anything is); or why it couldn't ("0.9.1 couldn't be downloaded: there is no internet
+  connection.", the blocked network as above, "0.9.1 was refused: it isn't signed by
+  SoftPresenter." over "Nothing was changed."), with Try Again. A download goes on with Settings
+  closed, and a notice says "Version 0.9.1 is ready." once; the gear carries no mark.
 - The version a build shows (the Mac's About panel, Settings › About, the log's first line, a new
   issue's text, `sp update`, the MCP server's name) is a development build's full one,
   0.9.0-dev.15, where it has one; a release shows 0.9.0. The Mac bundle keeps the plain 0.9.0 as

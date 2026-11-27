@@ -38,6 +38,8 @@ Settings and playlists that couldn't be saved are tried again.
 - **Box tab in seven rows.** The Edit view's Box tab is now the same seven rows for every kind of object: Place, Align, Rotate with the two flips beside it, Opacity, Effects, Order and Object. Outline and Shadow are switches on Effects, each with dots beside it that open its look in a small panel over the rows; Outline switches on at 4 points wide. A shape's outline stays on its Shape tab.
 - **One place for a box's colour.** The colour behind a text box is now set on the Text tab's Behind row only, and no longer on the Box tab as well. A picture, video, web page, NDI source, AirPlay or screen box has Behind on its own tab, and a shape keeps Fill on its Shape tab. Slides keep the colours they have.
 - **Line-up keys.** The six keys on the Box tab that line an object up with the slide (its row is now called Align) are full size in every language. With three or more objects picked, the two keys that spread them out evenly show on a line under them.
+- **Updates row.** In Settings › About, Updates now says where things stand in a sentence with one key beside it: Check Now, Open the Download Page for a newer version, or Try Again. The row keeps its size whatever it says, so nothing on the page moves.
+- **Blocked networks say so.** On a network that checks secure connections, such as some schools, offices and hotels, Check for Updates now says the network blocked it and to try another network. Before, it said there was no connection.
 
 ### Fixed
 

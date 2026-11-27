@@ -466,6 +466,9 @@ pub struct HomeState {
     /// Where each result the find box lists was drawn last, in the list's order (for a testing
     /// aid to drag one, and for tests).
     pub find_rows: Vec<Rect>,
+    /// Where the Updates row's key (or the bar in its place) was drawn last, in Settings › About
+    /// (for tests).
+    pub updates_key: Option<Rect>,
     /// Where each tile of the media strip was drawn last, in the strip's order (for tests, and to
     /// aim a testing aid's drag).
     pub media_tiles: Vec<Rect>,
@@ -2095,6 +2098,7 @@ impl Default for HomeState {
             live_menu: None,
 
             media_tiles: Vec::new(),
+            updates_key: None,
             media_playlists: Vec::new(),
             media_playlist_shown: None,
             media_playlists_changed: false,
@@ -17799,9 +17803,9 @@ mod tests {
         assert!(crate::studio::tests::place_of(&drawn, &line).is_some(), "About says the version");
         assert!(crate::studio::tests::place_of(&drawn, "Not checked yet").is_some(), "and that updates weren't");
         drawn.drop_without_applying_deltas();
-        // Its Check for updates does what the Mac's Check for Updates… does: on Windows and Linux,
+        // Its Check Now does what the Mac's Check for Updates… does: on Windows and Linux,
         // which have no menu bar, it is the way to check.
-        assert!(click_word(&ctx, &mut about, "Check for updates", &settings));
+        assert!(click_word(&ctx, &mut about, "Check Now", &settings));
         assert_eq!(about.menu_asked.take(), Some(Action::CheckForUpdates));
         // Settings > Screens: Identify, and the test patterns one at a time, and Off.
         let mut state = HomeState { preferences_open: true, preferences_pane: Pane::Screens, ..HomeState::default() };

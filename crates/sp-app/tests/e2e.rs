@@ -3550,19 +3550,19 @@ fn check_for_updates_asks_for_the_releases_and_says_what_it_found() {
         return;
     }
     assert!(newest.ok, "{}", newest.text);
-    assert_eq!(newest.text, format!("You have the newest version ({version})"));
+    assert_eq!(newest.text, format!("SoftPresenter {version} is the newest."));
     let newer = copy.ok(&["update", "check"]);
-    assert_eq!(newer.text, format!("SoftPresenter 99.0.0 is available: {PAGES}v99.0.0"));
+    assert_eq!(newer.text, format!("SoftPresenter 99.0.0 is out. {PAGES}v99.0.0"));
     let status = copy.ok(&["update"]).data;
     assert_eq!(
         (status["newer"].as_str(), status["page"].as_str()),
         (Some("99.0.0"), Some(&*format!("{PAGES}v99.0.0")))
     );
     let notices = copy.ok(&["notices"]).text;
-    assert!(notices.contains("SoftPresenter 99.0.0 is available"), "the answer is in the notices too: {notices}");
+    assert!(notices.contains("SoftPresenter 99.0.0 is out."), "the answer is in the notices too: {notices}");
     copy.refused(&["update", "check"], "list of releases");
     let elsewhere = copy.ok(&["update", "check"]);
-    assert_eq!(elsewhere.text, format!("SoftPresenter 99.1.0 is available: {PAGES}v99.1.0"));
+    assert_eq!(elsewhere.text, format!("SoftPresenter 99.1.0 is out. {PAGES}v99.1.0"));
     copy.refused(&["update", "check"], "fewer checks");
     let asked = stand_in.asked();
     assert_eq!(asked.len(), 5, "one request for each check: {asked:?}");

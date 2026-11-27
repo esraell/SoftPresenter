@@ -1434,13 +1434,15 @@ Neither command can be sent from a remote page or by an AI assistant.
 | `update check` | Checks now and waits for the answer: the newest, or the newer version and its download page; exits with 1 when the check couldn't be made. The answer goes in the notices too |
 
     $ sp update check
-    You have the newest version (0.9.0)
+    SoftPresenter 0.9.0 is the newest.
     $ sp update check
-    SoftPresenter 0.9.1 is available: https://github.com/esraell/SoftPresenter/releases/tag/v0.9.1
+    SoftPresenter 0.9.1 is out. https://github.com/esraell/SoftPresenter/releases/tag/v0.9.1
     $ sp update check
-    Couldn’t check: GitHub took too long to answer
+    Couldn’t check: GitHub took too long to answer.
+    $ sp update check                    # on a network that checks secure connections
+    Couldn’t check: this network checks secure connections and blocked it.
     $ sp update
-    You have the newest version (0.9.0) · checked at 2:07
+    SoftPresenter 0.9.0 is the newest. Checked at 2:07
 
 ## Remote Control
 

@@ -126,8 +126,12 @@ Every command, with its words, is listed by `sp menu`; any of them can be chosen
 (SoftPresenter, File, Edit, View, Window, Help); `COMMANDS` is the longer list `sp menu` uses, and
 each of those has its place in the window. Windows and Linux have no menu bar. SoftPresenter ›
 Check for Updates… (under About) opens Settings › About and checks there; the check, its one-at-a-
-time rule, GitHub's releases and the version compared are `updates.rs` (`update check`;
-`updates::set_hook` lets a build answer some other way).
+time rule, GitHub's releases, the version compared, the Updates row (`updates::row`), every state's
+words (`updates::view`) and the kinds of network trouble (`updates::trouble_of`: a certificate
+nobody vouches for is a network that blocked it) are `updates.rs` (`update check`).
+`updates::set_hook` lets a build answer some other way; an updater that fetches a newer version
+says how far it is with `updates::report` (bytes of bytes, ready, failed and why) and what
+Update and Restart does with `updates::set_install`.
 
 ### Keys in the Edit view
 

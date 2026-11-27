@@ -827,6 +827,8 @@ enum AppEvent {
     Saved,
     /// Check for Updates has its answer (see `updates`).
     UpdateChecked,
+    /// An updater got further with a newer version: the Updates row shows something else.
+    UpdateStepped,
     /// A fetch of the videos' FFmpeg began or ended (see `ffmpeg_fetch`).
     FfmpegFetch,
     /// The system says the displays changed (macOS: a display plugged in or out, the main one
@@ -866,6 +868,7 @@ impl AppEvent {
             AppEvent::FindSongs => "FindSongs",
             AppEvent::Saved => "Saved",
             AppEvent::UpdateChecked => "UpdateChecked",
+            AppEvent::UpdateStepped => "UpdateStepped",
             AppEvent::FfmpegFetch => "FfmpegFetch",
             AppEvent::DisplaysChanged => "DisplaysChanged",
             AppEvent::Dialog(_) => "Dialog",
@@ -13438,6 +13441,10 @@ impl ApplicationHandler<AppEvent> for App {
                 self.finish_update_check();
                 return;
             }
+            AppEvent::UpdateStepped => {
+                self.update_stepped();
+                return;
+            }
             AppEvent::FfmpegFetch => {
                 self.tick_ffmpeg_fetch();
                 return;
@@ -14955,6 +14962,7 @@ fn main() -> ExitCode {
     start_steps::mark("app made");
     // The log says when the window's thread is held up, and with what.
     stall::watch();
+    app.wake_for_updates();
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("The window system stopped: {e}");
         return ExitCode::FAILURE;

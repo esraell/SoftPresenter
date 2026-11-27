@@ -1139,11 +1139,10 @@ fn about_page(ui: &mut egui::Ui, state: &mut HomeState) {
     );
     let mut opened = None;
     card(ui, "SoftPresenter", &version, None, |ui| {
-        updates_row(ui, state);
+        crate::updates::row(ui, state);
         // A pre-release says so under Updates, as the setup's first step does.
         if let Some((heading, about)) = crate::updates::pre_release_words(crate::updates::VERSION) {
-            let updates =
-                t("settings.about.prerelease.updates", "Check for updates, above, tells you when one is out.");
+            let updates = t("settings.about.prerelease.updates", "Check Now, above, tells you when one is out.");
             row(ui, &heading, &format!("{about} {updates}"), vec2(0.0, 30.0), |_, _| {});
         }
         for (label, key, note, page) in [
@@ -1187,42 +1186,6 @@ fn about_page(ui: &mut egui::Ui, state: &mut HomeState) {
         None => {}
     }
     crate::reports::ui::settings_card(ui, state);
-}
-
-/// Settings › About's Updates row: what the last Check for Updates found and when, and the key
-/// that checks (greyed, saying so, while a check runs); once a newer version was found on GitHub,
-/// a row under it with the key that opens its download page. The same as the Mac's app menu
-/// item, which opens this page; on Windows and Linux, which have no menu bar, this is its place.
-fn updates_row(ui: &mut egui::Ui, state: &mut HomeState) {
-    let now = crate::updates::status();
-    let font = FontId::proportional(12.5);
-    let check = t("settings.updates.check", "Check for updates");
-    let checking = t("settings.updates.checking", "Checking\u{2026}");
-    let line = crate::updates::line(&now, state.clock.known());
-    // The key keeps one width whichever it says.
-    let size = vec2(crate::studio::widest(ui, &[check, checking], &font) + 26.0, 30.0);
-    row(ui, t("settings.updates.label", "Updates"), &line, size, |ui, place| {
-        let words = if now.checking { checking } else { check };
-        let id = ui.scope_id().with("updates check");
-        if flat_button(ui, place, id, words, font, Flat::Plain, !now.checking).clicked() {
-            state.menu_asked = Some(crate::menubar::Action::CheckForUpdates);
-        }
-    });
-    let Some((crate::updates::Found::Newer { version, page }, _)) = &now.last else { return };
-    let open = t("settings.updates.open", "Open the download page");
-    let label = tf("settings.updates.download", "SoftPresenter {version}", &[("version", version)]);
-    let note = t("settings.updates.download.about", "Its page on GitHub, where it is downloaded from");
-    row(ui, &label, note, parts::key_size(ui, open), |ui, place| {
-        if parts::key(ui, place, ui.scope_id().with("updates open"), open, false).clicked()
-            && let Err(e) = crate::canva::open_page(page)
-        {
-            state.notices.trouble(tf(
-                "settings.about.not_opened",
-                "Could not open the web page: {error}",
-                &[("error", &e.to_string())],
-            ));
-        }
-    });
 }
 
 /// Settings › Groups: each group's colour, name, the key that jumps to it and how many slides of
