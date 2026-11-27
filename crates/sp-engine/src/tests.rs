@@ -201,16 +201,56 @@ fn next_or_previous_with_nowhere_to_go_leaves_the_words_hidden() {
     hide(&mut s);
     assert!(s.apply(Command::Next).slides);
     assert_eq!((s.live(), s.words_hidden()), (at(0, 0), false));
-    // The same slide again at its next place in an arrangement puts no other slide up: the
-    // place moves on, and the words stay hidden.
+    // The same slide at another place in an arrangement is somewhere to go (Verse 1, Chorus,
+    // Verse 2 switched off, Chorus): Next onto the second chorus, and Previous back onto the
+    // first, bring the words back.
     let mut s = arranged();
     let mut song = (*s.presentations()[0]).clone();
     song.groups[2].slides[0].enabled = false;
     s.replace_presentation(0, Arc::new(song));
     s.apply(Command::GoToStep { presentation: 0, step: 1 });
     hide(&mut s);
+    assert!(s.apply(Command::Next).slides);
+    assert_eq!((s.live(), s.position(), s.words_hidden()), (at(0, 1), Some((3, 4)), false));
+    hide(&mut s);
+    assert!(s.apply(Command::Previous).slides);
+    assert_eq!((s.live(), s.position(), s.words_hidden()), (at(0, 1), Some((1, 4)), false));
+    // So does a song that loops going round from its last chorus onto its first (Verse 1
+    // switched off).
+    let mut s = arranged();
+    let mut song = (*s.presentations()[0]).clone();
+    song.loops = true;
+    song.groups[0].slides[0].enabled = false;
+    s.replace_presentation(0, Arc::new(song));
+    s.apply(Command::GoToStep { presentation: 0, step: 3 });
+    hide(&mut s);
+    assert!(s.apply(Command::Next).slides);
+    assert_eq!((s.live(), s.position(), s.words_hidden()), (at(0, 1), Some((1, 4)), false));
+}
+
+#[test]
+fn next_on_screen_names_the_same_slide_at_another_place_only_while_its_words_are_hidden() {
+    // Verse 1, Chorus, Verse 2 switched off, Chorus: from the first chorus, Next goes on to the
+    // second, the same slide.
+    let mut s = arranged();
+    let mut song = (*s.presentations()[0]).clone();
+    song.groups[2].slides[0].enabled = false;
+    s.replace_presentation(0, Arc::new(song));
+    s.apply(Command::GoToStep { presentation: 0, step: 1 });
+    // Its words showing: Next changes nothing the room sees, and the line names nothing.
+    assert_eq!(s.next_on_screen(), None);
     assert_eq!(s.apply(Command::Next), Changes::default());
-    assert_eq!((s.live(), s.position(), s.words_hidden()), (at(0, 1), Some((3, 4)), true));
+    // Its words hidden: Next brings them back, and the line names the chorus.
+    s.apply(Command::GoToStep { presentation: 0, step: 1 });
+    s.apply(Command::HideWords);
+    assert_eq!(s.next_on_screen(), at(0, 1));
+    assert!(s.apply(Command::Next).slides);
+    assert_eq!((s.live(), s.position(), s.words_hidden()), (at(0, 1), Some((3, 4)), false));
+    // At the arrangement's end, hidden: nowhere to go, and nothing named.
+    s.apply(Command::HideWords);
+    assert_eq!(s.next_on_screen(), None);
+    assert_eq!(s.apply(Command::Next), Changes::default());
+    assert!(s.words_hidden());
 }
 
 #[test]

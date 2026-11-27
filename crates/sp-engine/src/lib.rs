@@ -54,7 +54,8 @@ pub enum Command {
     /// Takes the live slide's words off the screens. The slide stays live, and its background
     /// with it. Show Again, a click on the slide, or another slide (or build) put on screen brings
     /// the words back; Next or Previous with nowhere to go leaves them hidden; a clear takes the
-    /// slide off.
+    /// slide off. First, Last and a GoTo or GoToStep of the live slide bring the words back, like
+    /// a click.
     HideWords,
     /// Shows hidden words again. With nothing live, puts back the slide the last clear took off,
     /// if no slide has gone up since and it is still there.
@@ -187,14 +188,16 @@ impl Show {
     /// play order (a song that loops goes round), the selected presentation's first with nothing
     /// shown yet, or, after a clear at the end of a song, the slide last on screen again. `None`
     /// when Next would put no slide on: it sets the live slide's next build going instead, or
-    /// the slide on screen is the last.
+    /// the slide on screen is the last. With the slide's words hidden, the same slide at another
+    /// place in the play order counts, since Next brings the words back.
     pub fn next_on_screen(&self) -> Option<SlideRef> {
         if self.builds_left() {
             return None;
         }
-        let (at, _) = self.next_target()?;
+        let (at, step) = self.next_target()?;
         let shown = at.slide < self.slide_count(at.presentation) && self.enabled(at);
-        (shown && self.live != Some(at)).then_some(at)
+        let words_back = self.words_hidden && step != self.step;
+        (shown && (self.live != Some(at) || words_back)).then_some(at)
     }
 
     /// The slide `Previous` would put on screen before the cursor, in the play order; `None`
@@ -554,12 +557,14 @@ impl Show {
         true
     }
 
-    /// Next or Previous to `target`, as `go_to`, except that with no other slide to go to (the
-    /// end of the item, or the same slide again at its next place in the play order) hidden
-    /// words stay hidden and nothing changes on screen: a stray Next, or a timer's, never brings
-    /// back the last verse.
+    /// Next or Previous to `target`, as `go_to`, except that with nowhere to go (the item's end:
+    /// the slide on screen at the same place in the play order, as `upcoming` and `preceding`
+    /// say) hidden words stay hidden and nothing changes on screen: a stray Next, or a timer's,
+    /// never brings back the last verse. The same slide at another place (a chorus sung again)
+    /// is somewhere to go, and shows its words.
     fn step_to(&mut self, target: Option<(SlideRef, Option<usize>)>) -> Changes {
-        let stays_hidden = self.words_hidden && target.is_some_and(|(at, _)| self.live == Some(at));
+        let stays_hidden =
+            self.words_hidden && target.is_some_and(|(at, step)| self.live == Some(at) && step == self.step);
         let changes = self.go_to(target);
         if stays_hidden {
             self.words_hidden = true;
