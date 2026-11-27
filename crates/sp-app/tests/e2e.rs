@@ -922,10 +922,22 @@ fn a_capture_on_a_folder_in_use_saves_no_picture_and_leaves_the_copy_alone() {
 /// A copy that is quitting (here, waiting for its songs to be written to a slow disk) refuses to
 /// come to the front, so a start made meanwhile, as a person restarting it makes, waits for it to
 /// go and then opens the app, rather than ending with nothing open.
+///
+/// The copy must still be quitting when it is asked. Its songs are written behind the import, so a
+/// Quit it takes late quits at once: on GitHub's Windows machines, which draw in software, its
+/// window's thread was held drawing for 3.3 s after the import, the Quit was taken only once the
+/// 2.4 s of writing then asked for were done, and the copy had gone before it could be asked (`sp`
+/// found nothing listening; a test PC drawing the same way held it 7.3 s). So the copy is first
+/// waited for until it answers promptly, the writing is long (16 s), the copy is asked only once
+/// its log says the Quit waits for it, and the second start is made once four seconds or less of it
+/// are left, so the first has gone within the ten seconds that start goes on asking.
 #[test]
 fn a_start_while_the_copy_running_quits_opens_the_app_once_that_copy_has_gone() {
-    /// With each file written 40 ms late, about two and a half seconds of writing after Quit.
-    const SONGS: usize = 60;
+    /// Each written 100 ms late (SOFTPRESENTER_SLOW_WRITES): 16 s of writing after the import.
+    const SONGS: usize = 160;
+    const SLOW_MS: u64 = 100;
+    /// The second start is made once this many songs or fewer are left to write.
+    const LEFT_AT_SECOND_START: usize = 40;
     let Some(run) = Run::new("a_start_while_the_copy_running_quits_opens_the_app_once_that_copy_has_gone") else {
         return;
     };
@@ -935,12 +947,48 @@ fn a_start_while_the_copy_running_quits_opens_the_app_once_that_copy_has_gone() 
         let words = song_text(&[("Verse 1", &format!("The verse of closing test song {n}"))]);
         std::fs::write(folder.join(format!("Closing Song {n:03}.txt")), words).expect("a song");
     }
-    let mut first = run.start(&[("SOFTPRESENTER_SLOW_WRITES", "40")]);
+    let mut first = run.start(&[("SOFTPRESENTER_SLOW_WRITES", &SLOW_MS.to_string())]);
+    // Past its first drawings, which on a computer that draws in software hold its window's
+    // thread, and so its answers, for seconds (as in the big import's test).
+    let settled = Instant::now();
+    let mut prompt = 0;
+    while prompt < 3 {
+        let took = first.ok(&["status"]).took;
+        prompt = if took < Duration::from_millis(500) { prompt + 1 } else { 0 };
+        assert!(settled.elapsed() < START_WITHIN, "the copy never answered promptly{}", run.context());
+    }
+    let imported = Instant::now();
     first.ok(&["song", "import", &folder.to_string_lossy()]);
     assert!(run.sp(&["menu", "Quit"]).ok, "menu Quit{}", run.context());
+    say(&format!("{}: Quit answered {:.1} s after the import", run.name, imported.elapsed().as_secs_f64()));
+    // The quit waits for the songs to be written: its log says so after a second.
+    let waiting = Instant::now();
+    while !run.log().contains("[saving] waiting for") {
+        assert!(
+            first.child.try_wait().ok().flatten().is_none() && waiting.elapsed() < Duration::from_secs(30),
+            "the copy quit without waiting for its songs ({} of {SONGS} written): the Quit came after they were{}",
+            song_files(&run.data).0,
+            run.context()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
     // While it writes them it still answers, and refuses to come to the front.
     let refused = run.sp(&["front", "--start"]);
-    assert!(!refused.ok && refused.text.contains("closing"), "{refused:?}{}", run.context());
+    assert!(
+        !refused.ok && refused.text.contains("closing"),
+        "{refused:?} ({} of {SONGS} songs written){}",
+        song_files(&run.data).0,
+        run.context()
+    );
+    while song_files(&run.data).0 + LEFT_AT_SECOND_START < SONGS && first.child.try_wait().ok().flatten().is_none() {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    say(&format!(
+        "{}: the second start made {:.1} s after the import, {} of {SONGS} songs written",
+        run.name,
+        imported.elapsed().as_secs_f64(),
+        song_files(&run.data).0
+    ));
     let mut second = run.launch(&[]);
     let status = first.wait_exit(Duration::from_secs(60)).unwrap_or_else(|| panic!("it didn't quit{}", run.context()));
     assert!(status.success(), "the first ended with {status}{}", run.context());
