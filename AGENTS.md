@@ -124,6 +124,7 @@ person:
 | `SOFTPRESENTER_SLOW_WRITES=<ms>` | Each file the library's writer writes (a song, the playlists, the libraries, the media bin) takes that many milliseconds longer, as on a computer whose disk or virus scanner is slow (Windows Defender looks at every new file): to see that a big import never holds up the window or `sp`, and that quitting waits until every file is written. Only with `SOFTPRESENTER_DATA` set |
 | `SOFTPRESENTER_HIDE_PICTURE_APPS=1` | Behave as on a Mac where no app can open a presentation to draw it (the import sheet greys As Pictures) |
 | `SOFTPRESENTER_VIDEO_COPY=1` | Videos the system plays reach the GPU as copies of their pixels, as on a computer where they can't go as the decoder's own memory (to compare the two ways) |
+| `SOFTPRESENTER_VIDEO_OPEN_SLOW=<ms>` | Every video FFmpeg plays takes that many milliseconds longer to open, before FFmpeg is asked what the video is, as on a computer where starting FFmpeg's programs is slow (a virus scanner reading them, a processor kept busy): to see that the window, `sp` and the screens never wait for a video to open. The log's `[video] opened …` line says how long was held back |
 | `SOFTPRESENTER_VIDEO_RGBA=1` | The video FFmpeg plays behind the words comes as RGBA pixels FFmpeg converts on the processor, as before, instead of as planes the GPU turns into colours (to compare the two ways, or go back with no new build) |
 | `SOFTPRESENTER_NDI_LOSE=<n>` or `<n>@<place>` | The next n NDI pictures somebody is watching for count as lost on their way back from the GPU (with a place, only that picture of each drawing: 1 is the first) |
 | `SOFTPRESENTER_NDI=<name>` | Also send over NDI under this name, this run only |
@@ -176,7 +177,8 @@ process, and nextest gives each test a process of its own). One test alone:
   the Linux job, which installs it.
 - **Switches it uses:** `SOFTPRESENTER_SLOW_WRITES` (the import), `SOFTPRESENTER_SLOW_REPLIES` (each
   reply to `sp` written late, to see `menu Quit` still answered), `SOFTPRESENTER_RELEASES_URL`
-  (the updates stand-in), `SOFTPRESENTER_LANGUAGE=en`.
+  (the updates stand-in), `SOFTPRESENTER_VIDEO_OPEN_SLOW` (a video slow to open, which must hold
+  up neither `sp` nor the window), `SOFTPRESENTER_LANGUAGE=en`.
 - **On another computer** (the Mac's Intel build on an Intel Mac, which this Mac can't run):
   build the tests without running them (`cargo test --release --target x86_64-apple-darwin -p
   sp-app --test e2e --no-run` prints the test program's path), copy that program and the app

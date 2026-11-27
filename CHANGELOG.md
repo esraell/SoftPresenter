@@ -5,7 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-Your changes are safer, Remote Control uses less of the computer, and Delete, Undo and Escape in the Edit view act on the box you mean.
+Your changes are safer, opening a video no longer holds up the window, Remote Control uses less of the computer, and Delete, Undo and Escape in the Edit view act on the box you mean.
 
 ### Better
 
@@ -20,6 +20,7 @@ Your changes are safer, Remote Control uses less of the computer, and Delete, Un
 - **Changes just before quitting.** A setting or playlist changed from the phone, `sp` or an assistant a moment before quitting, while SoftPresenter's window wasn't being drawn (covered or minimised), could be lost; it is saved now.
 - **A failed save is tried again.** When a song or theme couldn't be saved because another program held its file for a moment (a virus scanner, a sync tool), the change was lost at quit; now SoftPresenter keeps trying, says when it is saved, and at quit keeps any change it still couldn't save in the library's Not saved folder.
 - **Saved when Windows shuts down.** When Windows signed out, restarted or shut down with SoftPresenter open, the last second's changes and any files still being saved were lost; now SoftPresenter saves and closes first, as it does when you quit it.
+- **Window froze opening videos.** Showing a video could freeze SoftPresenter's window for seconds on a busy or slow PC; the window now carries on at once. The screens keep what they showed, the earlier video still playing, until the new video's first picture is ready, and `sp media show` answers at once.
 
 ## 0.9.0-dev.27 — 27 November 2026 (development build)
 

@@ -27,6 +27,9 @@ const VIDEO_POLL: Duration = Duration::from_millis(8);
 /// screen) is looked at: a picture after it starts again is at most this late.
 const VIDEO_IDLE_POLL: Duration = Duration::from_millis(50);
 
+/// A video picture that takes this long to hand to the GPU says in the log where the time went.
+const SLOW_VIDEO_COPY: Duration = Duration::from_millis(100);
+
 /// Everything the output needs to draw one picture. Immutable once sent.
 #[derive(Clone)]
 pub struct Frame {
@@ -1121,10 +1124,13 @@ fn into_texture(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     video_texture: &mut Option<MovingPicture>,
+    making: &mut Duration,
 ) -> Option<Picture> {
     let lent = match lending {
         sp_video::Lending::Rows(lent) => lent,
-        sp_video::Lending::Planes(planes) => return planes_into_texture(planes, painter, device, queue, video_texture),
+        sp_video::Lending::Planes(planes) => {
+            return planes_into_texture(planes, painter, device, queue, video_texture, making);
+        }
     };
     // The GPU draws each pixel's fourth byte as its alpha. A picture shown opaque whatever those
     // bytes say goes there as it is only when every one is full (as the system's player decodes
@@ -1136,7 +1142,9 @@ fn into_texture(
     let order = pixel_order(lent.order);
     // The video's first picture, or one of another size than its last: a new texture.
     if !video_texture.as_ref().is_some_and(|kept| kept.fits(lent.width, lent.height, order)) {
+        let began = Instant::now();
         *video_texture = painter.moving_picture(device, lent.width, lent.height, order);
+        *making = began.elapsed();
     }
     video_texture
         .as_ref()
@@ -1148,18 +1156,22 @@ fn into_texture(
 
 /// A video's two planes, sent to the GPU, which turns them into colours in the moving picture's
 /// texture (made, or made again for another size). `None` when it could not be done (planes
-/// too large for a texture, which FFmpeg is never asked for).
+/// too large for a texture, which FFmpeg is never asked for). How long a new texture took to
+/// make is put in `making`.
 fn planes_into_texture(
     planes: &sp_video::Planes<'_>,
     painter: &mut Painter,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     video_texture: &mut Option<MovingPicture>,
+    making: &mut Duration,
 ) -> Option<Picture> {
     let (width, height) = (planes.width, planes.height);
     let order = sp_render::PixelOrder::Rgba;
     if !video_texture.as_ref().is_some_and(|kept| kept.fits(width, height, order)) {
+        let began = Instant::now();
         *video_texture = painter.moving_picture(device, width, height, order);
+        *making = began.elapsed();
     }
     let sent = sp_render::YuvPlanes {
         width,
@@ -3651,6 +3663,8 @@ impl Output {
         if let Some(frames) = frame.video.as_ref() {
             let fetching = Instant::now();
             let mut copying = Duration::ZERO;
+            // How long a new texture for the picture took to make, and whether it came as planes.
+            let (mut making, mut as_planes) = (Duration::ZERO, false);
             // A video the system plays goes to the GPU as the decoder's own memory; one whose
             // pictures can't (clear parts, FFmpeg's, another system) is copied.
             #[cfg(target_os = "macos")]
@@ -3680,7 +3694,8 @@ impl Output {
             let mut by_copy = || {
                 frames.next_with(|lending| {
                     let began = Instant::now();
-                    let shown = into_texture(lending, painter, device, queue, video_texture);
+                    as_planes = matches!(lending, sp_video::Lending::Planes(_));
+                    let shown = into_texture(lending, painter, device, queue, video_texture, &mut making);
                     copying = began.elapsed();
                     shown
                 })
@@ -3690,6 +3705,24 @@ impl Output {
             #[cfg(not(target_os = "macos"))]
             let shown = by_copy();
             held.add(Part::VideoFetch, For::Nothing, fetching.elapsed().saturating_sub(copying));
+            // A picture that was slow to reach the GPU says where the time went: the screens
+            // wait for nothing else meanwhile.
+            if copying >= SLOW_VIDEO_COPY {
+                let ms = |time: Duration| format!("{:.1} ms", time.as_secs_f64() * 1000.0);
+                let work = if as_planes { painter.planes_work() } else { sp_render::PlanesWork::default() };
+                crate::applog::event(
+                    "video",
+                    &format!(
+                        "A picture of the video took {} to hand to the GPU: {} making its texture, {} making the \
+                         textures its planes go into, {} handing over their bytes, {} asking for the colours",
+                        ms(copying),
+                        ms(making),
+                        ms(work.textures),
+                        ms(work.bytes),
+                        ms(work.pass)
+                    ),
+                );
+            }
             if let Some(shown) = shown {
                 held.add(Part::VideoCopy, For::Nothing, copying);
                 self.video_picture = shown;

@@ -17,7 +17,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -665,8 +666,10 @@ impl Drop for Run {
     }
 }
 
-/// A video playing through FFmpeg, with its sound.
-pub struct Player {
+/// A video playing through FFmpeg, with its sound, as the player's own thread holds it (see
+/// [`Player`]): everything here that waits (FFmpeg's programs being started and ended, the
+/// sound output being opened) is done on that thread only.
+struct Direct {
     path: PathBuf,
     info: Info,
     size: (u32, u32),
@@ -681,6 +684,8 @@ pub struct Player {
     /// Something to say in the log once, such as that the graphics chip couldn't decode it.
     note: Option<String>,
     slot: Arc<Mutex<Slot>>,
+    /// When the first picture of all came (see [`Player::ready`]).
+    first: Arc<OnceLock<Instant>>,
     /// How its pictures reach the screens (see [`crate::pace`]).
     pace: Arc<crate::pace::Pace>,
     /// The sound output, tapped for the screens that send sound (see [`crate::sound`]).
@@ -688,12 +693,17 @@ pub struct Player {
     run: Option<Run>,
 }
 
-impl Player {
-    /// Opens a video, playing from its start, its pictures as planes where `planes` asks for
-    /// them and the video allows (see [`colours_of`]). The error is a sentence for the operator.
-    pub fn open(path: &Path, planes: bool, pace: Arc<crate::pace::Pace>) -> Result<Player, String> {
-        tool("ffmpeg").ok_or_else(|| missing(path))?;
-        let info = probe(path)?;
+impl Direct {
+    /// A video FFmpeg has said `info` of, not started yet (see [`Direct::start_at`]), paused at
+    /// its start: its pictures as planes where `planes` asks for them and the video allows
+    /// (see [`colours_of`]). Opens the sound output, for a video with sound.
+    fn new(
+        path: &Path,
+        info: Info,
+        planes: bool,
+        hardware: Option<&'static str>,
+        (slot, first, pace): (Arc<Mutex<Slot>>, Arc<OnceLock<Instant>>, Arc<crate::pace::Pace>),
+    ) -> Direct {
         let stream = if info.sound { crate::sound::Output::open().ok() } else { None };
         let planes = info.colours.filter(|_| planes && !rgba_forced());
         // Planes take any size, odd sides too; one that fits is asked for as it is, so FFmpeg
@@ -702,7 +712,7 @@ impl Player {
             Some(_) if info.width <= MAX_W && info.height <= MAX_H => (info.width, info.height),
             _ => fitted(&info, MAX_W, MAX_H),
         };
-        let mut player = Player {
+        Direct {
             path: path.to_owned(),
             info,
             size,
@@ -710,20 +720,14 @@ impl Player {
             looping: false,
             paused: true,
             volume: 1.0,
-            hardware: HARDWARE,
+            hardware,
             note: None,
-            slot: Arc::default(),
+            slot,
+            first,
             pace,
             stream,
             run: None,
-        };
-        player.start_at(0.0)?;
-        Ok(player)
-    }
-
-    /// Its pictures a second, as the file says (0 when it doesn't).
-    pub fn fps(&self) -> f64 {
-        self.info.fps
+        }
     }
 
     /// Starts FFmpeg from a point, in place of any run before.
@@ -817,6 +821,7 @@ impl Player {
         let (looping, planes) = (self.looping, self.planes);
         let (clock_v, stop_v, ended_v) = (clock.clone(), stop.clone(), ended.clone());
         let on_hardware = self.hardware.is_some();
+        let first = self.first.clone();
         run.threads.push(std::thread::spawn(move || {
             let mut shown: u64 = 0;
             loop {
@@ -877,6 +882,7 @@ impl Player {
                 if let Ok(mut slot) = slot.lock() {
                     slot.put(Decoded { width: w, height: h, bytes, planes, at: from + due, due: due_at });
                 }
+                let _ = first.set(Instant::now());
             }
         }));
 
@@ -936,85 +942,65 @@ impl Player {
         Ok(())
     }
 
-    pub fn frames(&self) -> Frames {
-        Frames { slot: self.slot.clone(), pace: self.pace.clone() }
-    }
-
-    pub fn play(&mut self) {
-        if self.ended() {
-            self.paused = false;
-            let _ = self.start_at(0.0);
-            return;
-        }
-        self.paused = false;
-        if let Some(run) = &self.run {
-            run.clock.set_paused(false);
-            if let Some(sink) = &run.sink {
-                sink.play();
+    /// Carries out one thing asked of the video. A new start of FFmpeg it calls for is only
+    /// noted in `start` (where from), for the thread to make once it has taken everything asked
+    /// so far: opening a video, setting it to loop and playing it start FFmpeg once, not three
+    /// times.
+    fn take(&mut self, ask: Ask, start: &mut Option<f64>, seeks: &mut u64) {
+        match ask {
+            Ask::Play => {
+                // One that has played to its end starts again from its beginning.
+                if self.ended() && start.is_none() {
+                    *start = Some(0.0);
+                }
+                self.set_paused(false);
+            }
+            Ask::Pause => self.set_paused(true),
+            Ask::Seek(to) => {
+                *start = Some(to.max(0.0));
+                *seeks += 1;
+            }
+            // Looping is part of how FFmpeg is started, so a change starts it again where it is.
+            Ask::Looping(looping) => {
+                if self.looping != looping {
+                    self.looping = looping;
+                    start.get_or_insert_with(|| self.position());
+                }
+            }
+            Ask::Volume(volume) => {
+                self.volume = volume.clamp(0.0, 1.0);
+                if let Some(sink) = self.run.as_ref().and_then(|run| run.sink.as_ref()) {
+                    sink.set_volume(self.volume);
+                }
             }
         }
     }
 
-    pub fn pause(&mut self) {
-        self.paused = true;
+    fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
         if let Some(run) = &self.run {
-            run.clock.set_paused(true);
-            if let Some(sink) = &run.sink {
-                sink.pause();
+            run.clock.set_paused(paused);
+            match &run.sink {
+                Some(sink) if paused => sink.pause(),
+                Some(sink) => sink.play(),
+                None => {}
             }
         }
-    }
-
-    pub fn playing(&self) -> bool {
-        !self.paused && !self.ended()
-    }
-
-    pub fn seek(&mut self, to: f64) {
-        let _ = self.start_at(to.max(0.0));
     }
 
     /// How far in it is, in seconds.
-    pub fn position(&self) -> f64 {
+    fn position(&self) -> f64 {
         let Some(run) = &self.run else { return 0.0 };
-        let at = run.from + run.clock.elapsed().unwrap_or(0.0);
-        match self.info.duration {
-            Some(length) if self.looping && length > 0.0 => at % length,
-            Some(length) => at.min(length),
-            None => at,
-        }
+        within(run.from + run.clock.elapsed().unwrap_or(0.0), self.info.duration, self.looping)
     }
 
-    pub fn duration(&self) -> Option<f64> {
-        self.info.duration
-    }
-
-    /// Looping is part of how FFmpeg is started, so a change starts it again where it is.
-    pub fn set_looping(&mut self, looping: bool) {
-        if self.looping != looping {
-            self.looping = looping;
-            let at = self.position();
-            let _ = self.start_at(at);
-        }
-    }
-
-    pub fn set_volume(&mut self, volume: f32) {
-        self.volume = volume.clamp(0.0, 1.0);
-        if let Some(sink) = self.run.as_ref().and_then(|run| run.sink.as_ref()) {
-            sink.set_volume(self.volume);
-        }
-    }
-
-    pub fn ended(&self) -> bool {
+    fn ended(&self) -> bool {
         self.run.as_ref().is_some_and(|run| run.ended.load(Ordering::Relaxed))
-    }
-
-    pub fn problem(&self) -> Option<String> {
-        self.run.as_ref().and_then(|run| run.problem.lock().ok().and_then(|problem| problem.clone()))
     }
 
     /// What FFmpeg is asked for, for the log: to decode on the graphics chip (where the codec
     /// allows) or with its own decoder on the processor, and the pictures it gives.
-    pub fn asked(&self) -> String {
+    fn asked(&self) -> String {
         let decoding = match self.hardware {
             Some(decoder) => format!("decoding asked of the graphics chip ({decoder}) where the codec allows"),
             None => "decoding on the processor".to_owned(),
@@ -1030,13 +1016,9 @@ impl Player {
         format!("{decoding}; {pictures}")
     }
 
-    /// Something to say in the log once, if there is something new.
-    pub fn take_note(&mut self) -> Option<String> {
-        self.note.take()
-    }
-
-    /// FFmpeg loops by itself; nothing to do but say when to look again.
-    pub fn tick(&mut self) -> Duration {
+    /// FFmpeg loops by itself; this says where it must be started again all the same, if it
+    /// must.
+    fn start_again_from(&mut self) -> Option<f64> {
         // FFmpeg stopped before its first picture, asked to decode on the graphics chip: asked
         // again, from the same place, with its own decoder.
         if let Some(run) = self.run.as_ref().filter(|run| run.hardware_failed.load(Ordering::Relaxed)) {
@@ -1046,16 +1028,388 @@ impl Player {
                 "FFmpeg couldn't decode {} on the graphics chip ({decoder}); it decodes on the processor instead",
                 shown_name(&self.path)
             ));
-            let _ = self.start_at(from);
-            return Duration::from_millis(50);
+            return Some(from);
         }
         // A looping video FFmpeg couldn't start again by itself is started again from its
         // beginning here (one that gave no pictures at all is left with its problem said).
-        if self.looping && self.run.as_ref().is_some_and(|run| run.ran_out.load(Ordering::Relaxed)) {
-            let _ = self.start_at(0.0);
-            return Duration::from_millis(50);
+        (self.looping && self.run.as_ref().is_some_and(|run| run.ran_out.load(Ordering::Relaxed))).then_some(0.0)
+    }
+
+    /// The run under way, as the holder of the player sees it.
+    fn seen(&self) -> Option<Seen> {
+        self.run.as_ref().map(|run| Seen {
+            from: run.from,
+            clock: run.clock.clone(),
+            ended: run.ended.clone(),
+            problem: run.problem.clone(),
+        })
+    }
+}
+
+/// A time in a video of this length: within it, going round in one that loops.
+fn within(at: f64, duration: Option<f64>, looping: bool) -> f64 {
+    match duration {
+        Some(length) if looping && length > 0.0 => at % length,
+        Some(length) => at.min(length),
+        None => at,
+    }
+}
+
+/// What a player's holder asks of its thread.
+enum Ask {
+    Play,
+    Pause,
+    Seek(f64),
+    Looping(bool),
+    Volume(f32),
+}
+
+/// What a player's thread has found out and done, for its holder to read.
+#[derive(Default)]
+struct Told {
+    /// What the video is, once FFmpeg has said.
+    info: Option<Info>,
+    /// Whether a sound output was opened for it.
+    sound_output: bool,
+    /// What FFmpeg was asked for, for the log (see [`Direct::asked`]); empty until it is started.
+    asked: String,
+    /// The run of FFmpeg under way.
+    run: Option<Seen>,
+    /// Why the video can't be played at all.
+    problem: Option<String>,
+    /// Lines for the log, each said once.
+    notes: VecDeque<String>,
+    /// How many of the seeks asked for have been made.
+    seeks: u64,
+    /// How many times FFmpeg has been started for it.
+    starts: u32,
+}
+
+/// A run of FFmpeg as the player's holder sees it: where in the video it began, its clock, and
+/// what its threads say of it.
+struct Seen {
+    from: f64,
+    clock: Arc<Clock>,
+    ended: Arc<AtomicBool>,
+    problem: Arc<Mutex<Option<String>>>,
+}
+
+/// What a player's thread is given to open the video with.
+struct Opening {
+    path: PathBuf,
+    planes: bool,
+    hardware: Option<&'static str>,
+    /// How long to wait first (see [`slow_open`]).
+    wait: Duration,
+    slot: Arc<Mutex<Slot>>,
+    first: Arc<OnceLock<Instant>>,
+    pace: Arc<crate::pace::Pace>,
+}
+
+/// Testing aid: SOFTPRESENTER_VIDEO_OPEN_SLOW=<ms> makes every video FFmpeg plays that many
+/// milliseconds slower to open, before FFmpeg is asked what the video is, as on a computer where
+/// starting FFmpeg's programs is slow (a virus scanner reading them, a busy processor): to see
+/// that the window, `sp` and the screens never wait for a video to open.
+fn slow_open() -> Duration {
+    let wait = std::env::var("SOFTPRESENTER_VIDEO_OPEN_SLOW").ok().and_then(|ms| ms.trim().parse::<u64>().ok());
+    Duration::from_millis(wait.unwrap_or(0))
+}
+
+fn tell<R>(told: &Mutex<Told>, change: impl FnOnce(&mut Told) -> R) -> R {
+    change(&mut told.lock().unwrap_or_else(PoisonError::into_inner))
+}
+
+/// A player's own thread: asks FFmpeg what the video is, opens the sound output, starts FFmpeg,
+/// and then carries out what the holder asks until the player is let go, which ends FFmpeg.
+/// Everything that can wait on the computer (two programs started, a sound device opened,
+/// programs ended and their threads joined) waits here, never on the thread that asked.
+fn play_on_this_thread(opening: Opening, asks: &Receiver<Ask>, told: &Mutex<Told>) {
+    let asked_at = Instant::now();
+    let Opening { path, planes, hardware, wait, slot, first, pace } = opening;
+    std::thread::sleep(wait);
+    let waited = asked_at.elapsed();
+    let info = match probe(&path) {
+        Ok(info) => info,
+        Err(problem) => {
+            tell(told, |told| told.problem = Some(problem));
+            // Kept until the player is let go, with nothing more to do.
+            while asks.recv().is_ok() {}
+            return;
         }
-        Duration::from_millis(200)
+    };
+    let probed = asked_at.elapsed();
+    let mut direct = Direct::new(&path, info, planes, hardware, (slot, first, pace));
+    let sound_opened = asked_at.elapsed();
+    tell(told, |told| {
+        told.info = Some(info);
+        told.sound_output = direct.stream.is_some();
+    });
+    let (mut start, mut seeks) = (Some(0.0), 0u64);
+    let (mut said_opened, mut said_first) = (false, false);
+    loop {
+        // Everything asked so far is taken together, so FFmpeg is started once for all of it.
+        loop {
+            match asks.try_recv() {
+                Ok(ask) => direct.take(ask, &mut start, &mut seeks),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+            }
+        }
+        if start.is_none() {
+            start = direct.start_again_from();
+        }
+        if let Some(from) = start.take() {
+            let starting = Instant::now();
+            let started = direct.start_at(from);
+            let note = (!said_opened).then(|| {
+                let ms = |time: Duration| format!("{:.0} ms", time.as_secs_f64() * 1000.0);
+                let held = if wait.is_zero() { String::new() } else { format!("{} held back to test, ", ms(waited)) };
+                format!(
+                    "opened {} with FFmpeg ({}) in {}: {held}{} for FFmpeg to say what it is, {} to open the sound \
+                     output, {} to start FFmpeg; {} fps",
+                    path.display(),
+                    direct.asked(),
+                    ms(asked_at.elapsed()),
+                    ms(probed.saturating_sub(waited)),
+                    ms(sound_opened.saturating_sub(probed)),
+                    ms(starting.elapsed()),
+                    crate::fps_words(info.fps),
+                )
+            });
+            said_opened = true;
+            tell(told, |told| {
+                told.run = direct.seen();
+                told.asked = direct.asked();
+                told.seeks = seeks;
+                told.starts += 1;
+                told.notes.extend(note);
+                if let Err(problem) = started {
+                    told.problem.get_or_insert(problem);
+                }
+            });
+        }
+        if let Some(note) = direct.note.take() {
+            tell(told, |told| told.notes.push_back(note));
+        }
+        if !said_first && let Some(came) = direct.first.get() {
+            said_first = true;
+            let note = format!(
+                "the first picture of {} came {:.0} ms after the video was asked for",
+                shown_name(&path),
+                came.saturating_duration_since(asked_at).as_secs_f64() * 1000.0
+            );
+            tell(told, |told| told.notes.push_back(note));
+        }
+        match asks.recv_timeout(Duration::from_millis(50)) {
+            Ok(ask) => direct.take(ask, &mut start, &mut seeks),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => return,
+        }
+    }
+}
+
+/// How long letting go of a player waits for its thread to end FFmpeg: all it takes on a
+/// computer that isn't held up. Past that the thread ends it by itself, a moment later.
+const END_WITHIN: Duration = Duration::from_millis(300);
+
+/// A video playing through FFmpeg, with its sound.
+///
+/// Nothing here waits for FFmpeg. Opening a video only starts a thread of the player's own,
+/// which asks FFmpeg what the video is, opens the sound output and starts FFmpeg, and then
+/// carries out what is asked of the player (playing, pausing, going to a time, looping): on a
+/// computer where starting a program takes seconds (a virus scanner reading it, a processor
+/// kept busy by something else), the thread that opened the video, the operator's window's,
+/// goes on at once. What the video is (its pictures a second, its length) is known a moment
+/// after it is opened, not when [`Player::open`] returns; a video that turns out not to be
+/// one says so through [`Player::problem`]. [`Player::ready`] says when its first picture has
+/// come.
+pub struct Player {
+    looping: bool,
+    paused: bool,
+    /// How many times it was asked to go to a time, and where the last time: until the thread
+    /// has started FFmpeg there, that is where the video is.
+    seeks: u64,
+    sought: f64,
+    told: Arc<Mutex<Told>>,
+    slot: Arc<Mutex<Slot>>,
+    first: Arc<OnceLock<Instant>>,
+    pace: Arc<crate::pace::Pace>,
+    /// `None` only while the player is let go.
+    asks: Option<Sender<Ask>>,
+    /// Closed when the thread has ended.
+    gone: Receiver<()>,
+}
+
+impl Drop for Player {
+    fn drop(&mut self) {
+        // The thread ends FFmpeg's programs when nobody can ask it anything more.
+        self.asks = None;
+        let _ = self.gone.recv_timeout(END_WITHIN);
+    }
+}
+
+impl Player {
+    /// Opens a video, paused at its start, without waiting for FFmpeg: its pictures as planes
+    /// where `planes` asks for them and the video allows (see [`colours_of`]). The error (FFmpeg
+    /// isn't on this computer) is a sentence for the operator; a file FFmpeg can't play says so
+    /// later, through [`Player::problem`].
+    pub fn open(path: &Path, planes: bool, pace: Arc<crate::pace::Pace>) -> Result<Player, String> {
+        Player::open_with(path, planes, pace, HARDWARE, slow_open())
+    }
+
+    /// [`Player::open`], asking FFmpeg to decode with `hardware`, after waiting `wait` first on
+    /// the player's thread.
+    fn open_with(
+        path: &Path,
+        planes: bool,
+        pace: Arc<crate::pace::Pace>,
+        hardware: Option<&'static str>,
+        wait: Duration,
+    ) -> Result<Player, String> {
+        if tool("ffmpeg").is_none() || tool("ffprobe").is_none() {
+            return Err(missing(path));
+        }
+        let slot: Arc<Mutex<Slot>> = Arc::default();
+        let first: Arc<OnceLock<Instant>> = Arc::default();
+        let told: Arc<Mutex<Told>> = Arc::default();
+        let opening = Opening {
+            path: path.to_owned(),
+            planes,
+            hardware,
+            wait,
+            slot: slot.clone(),
+            first: first.clone(),
+            pace: pace.clone(),
+        };
+        let (asks, asked) = std::sync::mpsc::channel();
+        let (going, gone) = std::sync::mpsc::channel::<()>();
+        let for_thread = told.clone();
+        std::thread::Builder::new()
+            .name("video player".to_owned())
+            .spawn(move || {
+                // Let go last, once FFmpeg has been ended: it tells the holder the thread is done.
+                let _going = going;
+                play_on_this_thread(opening, &asked, &for_thread);
+            })
+            .map_err(|e| format!("{}: a thread to play the video could not be started ({e}).", shown_name(path)))?;
+        Ok(Player {
+            looping: false,
+            paused: true,
+            seeks: 0,
+            sought: 0.0,
+            told,
+            slot,
+            first,
+            pace,
+            asks: Some(asks),
+            gone,
+        })
+    }
+
+    fn ask(&self, ask: Ask) {
+        if let Some(asks) = &self.asks {
+            let _ = asks.send(ask);
+        }
+    }
+
+    fn told<R>(&self, read: impl FnOnce(&Told) -> R) -> R {
+        read(&self.told.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// Its pictures a second, as the file says (0 when it doesn't, or isn't known yet).
+    pub fn fps(&self) -> f64 {
+        self.told(|told| told.info.map_or(0.0, |info| info.fps))
+    }
+
+    /// True once its first picture has come, or it is known that none will (it has a problem).
+    pub fn ready(&self) -> bool {
+        self.first.get().is_some() || self.problem().is_some()
+    }
+
+    pub fn frames(&self) -> Frames {
+        Frames { slot: self.slot.clone(), pace: self.pace.clone() }
+    }
+
+    pub fn play(&mut self) {
+        self.paused = false;
+        self.ask(Ask::Play);
+    }
+
+    pub fn pause(&mut self) {
+        self.paused = true;
+        self.ask(Ask::Pause);
+    }
+
+    pub fn playing(&self) -> bool {
+        !self.paused && !self.ended()
+    }
+
+    pub fn seek(&mut self, to: f64) {
+        self.seeks += 1;
+        self.sought = to.max(0.0);
+        self.ask(Ask::Seek(self.sought));
+    }
+
+    /// How far in it is, in seconds.
+    pub fn position(&self) -> f64 {
+        self.told(|told| {
+            let duration = told.info.and_then(|info| info.duration);
+            match &told.run {
+                // On its way to a time it was asked to go to.
+                _ if told.seeks < self.seeks => within(self.sought, duration, false),
+                Some(run) => within(run.from + run.clock.elapsed().unwrap_or(0.0), duration, self.looping),
+                None => 0.0,
+            }
+        })
+    }
+
+    /// How long it is, once that is known.
+    pub fn duration(&self) -> Option<f64> {
+        self.told(|told| told.info.and_then(|info| info.duration))
+    }
+
+    pub fn set_looping(&mut self, looping: bool) {
+        if self.looping != looping {
+            self.looping = looping;
+            self.ask(Ask::Looping(looping));
+        }
+    }
+
+    pub fn set_volume(&mut self, volume: f32) {
+        self.ask(Ask::Volume(volume));
+    }
+
+    pub fn ended(&self) -> bool {
+        self.told(|told| told.run.as_ref().is_some_and(|run| run.ended.load(Ordering::Relaxed)))
+    }
+
+    /// Why the video can't play, once that is known.
+    pub fn problem(&self) -> Option<String> {
+        self.told(|told| {
+            told.problem.clone().or_else(|| {
+                told.run.as_ref().and_then(|run| run.problem.lock().ok().and_then(|problem| problem.clone()))
+            })
+        })
+    }
+
+    /// What FFmpeg is asked for, for the log: to decode on the graphics chip (where the codec
+    /// allows) or with its own decoder on the processor, and the pictures it gives. Empty until
+    /// FFmpeg has been started.
+    pub fn asked(&self) -> String {
+        self.told(|told| told.asked.clone())
+    }
+
+    /// Something to say in the log once, if there is something new: that the video was opened
+    /// and how long each step took, when its first picture came, that the graphics chip
+    /// couldn't decode it.
+    pub fn take_note(&mut self) -> Option<String> {
+        self.told.lock().unwrap_or_else(PoisonError::into_inner).notes.pop_front()
+    }
+
+    /// The player's thread keeps the video going; this only says when to look again: soon
+    /// while its first picture is still to come.
+    pub fn tick(&mut self) -> Duration {
+        Duration::from_millis(if self.ready() { 200 } else { 20 })
     }
 }
 
@@ -1106,20 +1460,116 @@ mod tests {
             .status()
             .expect("FFmpeg runs");
         assert!(made.success(), "the video is made");
-        let mut player = Player::open(&path, false, Arc::default()).expect("FFmpeg opens the video");
-        player.hardware = Some("no-such-decoder");
-        player.start_at(0.0).unwrap();
-        let (started, mut note, mut picture) = (Instant::now(), None, None);
-        while started.elapsed() < Duration::from_secs(5) && picture.is_none() {
+        let mut player = Player::open_with(&path, false, Arc::default(), Some("no-such-decoder"), Duration::ZERO)
+            .expect("FFmpeg opens the video");
+        let (started, mut notes, mut picture) = (Instant::now(), Vec::new(), None);
+        while started.elapsed() < Duration::from_secs(10) && picture.is_none() {
             std::thread::sleep(player.tick().min(Duration::from_millis(20)));
-            note = note.or_else(|| player.take_note());
+            notes.extend(player.take_note());
             picture = player.frames().next();
         }
+        notes.extend(std::iter::from_fn(|| player.take_note()));
         let _ = std::fs::remove_dir_all(&dir);
         assert!(picture.is_some(), "a picture came with FFmpeg's own decoder");
         assert_eq!(player.problem(), None);
-        assert!(note.is_some_and(|note| note.contains("no-such-decoder")), "the log was told");
+        assert!(notes.iter().any(|note| note.contains("no-such-decoder")), "the log was told: {notes:?}");
         assert!(player.asked().starts_with("decoding on the processor;"), "{}", player.asked());
+    }
+
+    /// A short grey video FFmpeg plays, in a folder of the test's own; `None` (said) on a
+    /// computer without FFmpeg.
+    fn grey_video(test: &str, seconds: u32) -> Option<(PathBuf, PathBuf)> {
+        let Some(ffmpeg) = tool("ffmpeg") else {
+            crate::skipped(&format!("FFmpeg isn't on this computer: {test} wasn't checked"));
+            return None;
+        };
+        let dir = std::env::temp_dir().join(format!("softpresenter-{test}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("grey.mkv");
+        let made = Command::new(ffmpeg)
+            .args(["-v", "error", "-y", "-f", "lavfi", "-i", &format!("color=c=gray:s=64x36:r=30:d={seconds}")])
+            .args(["-c:v", "ffv1"])
+            .arg(&path)
+            .status()
+            .expect("FFmpeg runs");
+        assert!(made.success(), "the video is made");
+        Some((dir, path))
+    }
+
+    /// Opening a video, and everything asked of it after, never waits for FFmpeg: with FFmpeg
+    /// a second and a half slow to answer, the calls return at once, the video says nothing of
+    /// itself yet, and it plays once FFmpeg has answered, started once for all that was asked.
+    #[test]
+    fn opening_a_video_never_waits_for_ffmpeg() {
+        let Some((dir, path)) = grey_video("slow-open", 2) else { return };
+        const SLOW: Duration = Duration::from_millis(1500);
+        let asked = Instant::now();
+        let mut player = Player::open_with(&path, false, Arc::default(), HARDWARE, SLOW).expect("the video opens");
+        player.set_looping(true);
+        player.set_volume(0.0);
+        player.play();
+        let (fps, length, position, playing) = (player.fps(), player.duration(), player.position(), player.playing());
+        let _ = (player.ended(), player.problem(), player.asked(), player.take_note(), player.tick());
+        let took = asked.elapsed();
+        assert!(took < Duration::from_millis(250), "opening and asking took {took:?}, with FFmpeg {SLOW:?} slow");
+        assert!(!player.ready(), "no picture has come yet");
+        assert_eq!((fps, length, position, playing), (0.0, None, 0.0, true), "nothing is known of it yet");
+        assert!(player.frames().next().is_none());
+        while !player.ready() && asked.elapsed() < Duration::from_secs(20) {
+            std::thread::sleep(player.tick());
+        }
+        let came = asked.elapsed();
+        assert!(player.ready() && came >= SLOW, "its first picture came after FFmpeg answered: {came:?}");
+        assert_eq!(player.problem(), None);
+        assert_eq!(player.fps(), 30.0);
+        assert!(player.duration().is_some_and(|length| (length - 2.0).abs() < 0.1), "{:?}", player.duration());
+        assert!(player.frames().next().is_some(), "a picture is there to take");
+        assert_eq!(player.told(|told| told.starts), 1, "FFmpeg was started once for opening, looping and playing");
+        let notes: Vec<String> = std::iter::from_fn(|| player.take_note()).collect();
+        assert!(notes.iter().any(|note| note.starts_with("opened ") && note.contains("to start FFmpeg")), "{notes:?}");
+        // Going to a time is where it is at once, and FFmpeg follows.
+        player.seek(1.0);
+        assert!((player.position() - 1.0).abs() < 0.001, "{}", player.position());
+        // Letting it go ends FFmpeg without holding the caller.
+        let letting_go = Instant::now();
+        drop(player);
+        assert!(letting_go.elapsed() < END_WITHIN + Duration::from_millis(200), "{:?}", letting_go.elapsed());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A player let go while FFmpeg is still slow to answer doesn't wait for it.
+    #[test]
+    fn a_video_let_go_while_it_opens_holds_nobody() {
+        let Some((dir, path)) = grey_video("let-go", 1) else { return };
+        let player = Player::open_with(&path, false, Arc::default(), HARDWARE, Duration::from_secs(3)).expect("opens");
+        let letting_go = Instant::now();
+        drop(player);
+        let took = letting_go.elapsed();
+        assert!(took < END_WITHIN + Duration::from_millis(200), "letting go took {took:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A file that isn't a video opens all the same (nothing waits to find out), and says what
+    /// is wrong with it a moment later.
+    #[test]
+    fn a_file_that_is_no_video_says_so_once_ffmpeg_has_looked() {
+        if tool("ffmpeg").is_none() || tool("ffprobe").is_none() {
+            crate::skipped("FFmpeg isn't on this computer: a file that is no video wasn't checked");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("softpresenter-no-video-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("words.mkv");
+        std::fs::write(&path, "not a video at all").unwrap();
+        let mut player = Player::open(&path, false, Arc::default()).expect("nothing is known against it yet");
+        let asked = Instant::now();
+        while player.problem().is_none() && asked.elapsed() < Duration::from_secs(20) {
+            std::thread::sleep(player.tick());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(player.problem().as_deref(), Some("words.mkv: not a video SoftPresenter can open."));
+        assert!(player.ready(), "nothing more is waited for");
+        assert!(!player.ended() && player.fps() == 0.0);
     }
 
     /// Which videos come as planes, and in what colours: as FFmpeg's converter takes them.
@@ -1256,9 +1706,14 @@ mod tests {
             .expect("FFmpeg runs");
         assert!(made.success(), "the video is made");
         let mut player = Player::open(&path, false, Arc::default()).expect("FFmpeg opens the video");
-        assert!(player.info.sound && player.stream.is_some(), "it has sound, and an output to play it");
         player.set_volume(0.0);
         player.play();
+        let asked = Instant::now();
+        while !player.ready() && asked.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(player.tick());
+        }
+        let sound = player.told(|told| told.info.is_some_and(|info| info.sound) && told.sound_output);
+        assert!(sound, "it has sound, and an output to play it");
         std::thread::sleep(Duration::from_millis(1500));
         let position = player.position();
         let _ = std::fs::remove_dir_all(&dir);

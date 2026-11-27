@@ -2308,6 +2308,14 @@ struct App {
     started: Instant,
     /// The video on screen, by its media item, playing.
     video: Option<(Uuid, sp_video::Player)>,
+    /// The video that was on screen before it, still playing there: the screens keep it until
+    /// the first picture of the one that took its place has come (see `refresh_output`).
+    video_leaving: Option<sp_video::Player>,
+    /// The picture behind the words the screens were last told to show, and how it fills them:
+    /// what they keep while a video's first picture is still to come.
+    media_on_screens: (Option<sp_render::Picture>, sp_model::ImageFit),
+    /// The screens are keeping what they showed until the video's first picture comes.
+    screens_wait_for_video: bool,
     /// A video in a box on the slide on screen, by the file the box names, playing.
     slide_videos: Vec<(String, sp_video::Player)>,
     /// Box videos neither the system nor FFmpeg could play, so they aren't tried again.
@@ -3243,6 +3251,14 @@ impl App {
         if let Some((_, mut player)) = self.video.take() {
             say_video_pace(&mut player, true);
             applog::event("video", "stopped");
+            // Another video takes its place: it plays on, on the screens, until that one's first
+            // picture has come (one that never reached the screens itself is let go).
+            if live.is_some() && player.ready() {
+                self.video_leaving = Some(player);
+            }
+        }
+        if live.is_none() {
+            self.video_leaving = None;
         }
         let Some(running) = self.running.as_mut() else { return };
         running.home_state.video_live = None;
@@ -3252,22 +3268,22 @@ impl App {
         let quiet = self.quiet();
         let Some(running) = self.running.as_mut() else { return };
         // The video behind the slide goes to the GPU from this thread only (the screens'), so
-        // FFmpeg may give its pictures as planes the GPU turns into colours.
+        // FFmpeg may give its pictures as planes the GPU turns into colours. A video FFmpeg
+        // plays is never waited for here: FFmpeg is asked what it is and started on the
+        // player's own thread, which says in the log how long each step took (`tick_video`).
         match sp_video::Player::open(&item.path, sp_video::Lend::Planes) {
             Ok(mut player) => {
-                let engine = match player.ffmpeg_asked() {
-                    Some(asked) => format!("FFmpeg ({asked})"),
-                    None => "the system's player".to_owned(),
-                };
-                applog::event(
-                    "video",
-                    &format!(
-                        "opened {} with {engine} in {:?}, {}",
+                let said = if player.uses_ffmpeg() {
+                    format!("opening {} with FFmpeg", item.path.display())
+                } else {
+                    format!(
+                        "opened {} with the system's player in {:?}, {}",
                         item.path.display(),
                         started.elapsed(),
                         fps_said(player.fps())
-                    ),
-                );
+                    )
+                };
+                applog::event("video", &said);
                 player.set_looping(loops);
                 // A quiet run (a test) makes no sound: someone may be working at this computer.
                 if quiet {
@@ -3879,13 +3895,21 @@ impl App {
         let quiet = self.quiet();
         let mut wait = Duration::from_secs(1);
         let mut switched = false;
+        let mut troubles: Vec<(String, String)> = Vec::new();
         for (file, player) in &mut self.slide_videos {
             wait = wait.min(player.tick());
-            if let Some(note) = player.take_note() {
+            while let Some(note) = player.take_note() {
                 applog::event("video", &note);
             }
-            // A video FFmpeg couldn't take over either isn't tried again on every tick (each try
-            // starts FFmpeg's prober on this thread).
+            // A video FFmpeg can't play says so a moment after it was opened: the operator is
+            // told once.
+            if player.uses_ffmpeg()
+                && let Some(problem) = player.problem()
+                && self.slide_video_refused.insert(file.clone())
+            {
+                troubles.push((file.clone(), problem));
+            }
+            // A video FFmpeg couldn't take over either isn't tried again on every tick.
             if player.problem().is_none() || player.uses_ffmpeg() || self.slide_video_refused.contains(file) {
                 continue;
             }
@@ -3906,6 +3930,13 @@ impl App {
                 switched = true;
             }
         }
+        for (file, problem) in troubles {
+            applog::event("video", &format!("could not play {file} in a box on the slide: {problem}"));
+            let problem = self.video_problem(std::path::Path::new(&file), problem);
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.notices.trouble(problem);
+            }
+        }
         if switched {
             self.refresh_output();
         }
@@ -3915,10 +3946,16 @@ impl App {
     /// Keeps the video on screen going (a looping one starts again at its end) and the
     /// operator's view of it up to date. Says when to look again.
     fn tick_video(&mut self) -> Option<Instant> {
+        // The screens kept what they showed while the video opened: its first picture has
+        // come (or it is known that none will), so they are told of it now, and the video that
+        // played on meanwhile is let go.
+        if self.screens_wait_for_video && self.video.as_ref().is_none_or(|(_, player)| player.ready()) {
+            self.refresh_output();
+        }
         let (id, player) = self.video.as_mut()?;
         let wait = player.tick();
         say_video_pace(player, false);
-        if let Some(note) = player.take_note() {
+        while let Some(note) = player.take_note() {
             applog::event("video", &note);
         }
         let handed = player.take_handed_over();
@@ -3960,15 +3997,7 @@ impl App {
                 let running = self.running.as_mut()?;
                 match sp_video::Player::open_with_ffmpeg(&item.path, sp_video::Lend::Planes) {
                     Ok(mut fallback) => {
-                        let asked = fallback.ffmpeg_asked().unwrap_or_default();
-                        applog::event(
-                            "video",
-                            &format!(
-                                "playing {} with FFmpeg instead ({asked}), {}",
-                                item.path.display(),
-                                fps_said(fallback.fps())
-                            ),
-                        );
+                        applog::event("video", &format!("playing {} with FFmpeg instead", item.path.display()));
                         fallback.set_looping(loops);
                         if quiet {
                             fallback.set_volume(0.0);
@@ -3985,11 +4014,20 @@ impl App {
                 }
                 return Some(Instant::now() + Duration::from_millis(100));
             }
-            running.home_state.notices.trouble(problem);
             running.home_state.video_live = None;
             running.home_window.request_redraw();
             if let Some((_, mut player)) = self.video.take() {
                 say_video_pace(&mut player, true);
+            }
+            // A file just taken out of a followed folder: the layer goes on to what is left
+            // (see `followed`), with nothing to tell the operator. Anything else is said (a
+            // video FFmpeg plays says what is wrong with it here, a moment after it was shown,
+            // not as it is opened).
+            let path = self.show.media().iter().find(|item| item.id == id).map(|item| item.path.clone());
+            if !path.is_some_and(|path| self.gone_from_followed_folder(&path))
+                && let Some(running) = self.running.as_mut()
+            {
+                running.home_state.notices.trouble(problem);
             }
             return None;
         }
@@ -4737,6 +4775,21 @@ impl App {
         // The screens get the item's full-size picture; until it is read, its small copy.
         let live_item = self.show.live_media().and_then(|index| self.show.media().get(index));
         let media = self.bin_pictures.for_screens(live_item.map(|item| (item.id, item.path.as_path())));
+        // A video whose first picture is still to come (FFmpeg is being started, which on a
+        // busy computer can take seconds) isn't shown yet: the screens keep the picture, or the
+        // video still playing, that they had, and are told of the new one when its first
+        // picture is there (`tick_video`), so they go from the one to the other with nothing
+        // between.
+        let waits = self.video.as_ref().is_some_and(|(_, player)| !player.ready());
+        self.screens_wait_for_video = waits;
+        let (video, media, media_fit) = if waits {
+            let leaving = self.video_leaving.as_ref().map(sp_video::Player::frames);
+            (leaving, self.media_on_screens.0.clone(), self.media_on_screens.1)
+        } else {
+            self.video_leaving = None;
+            self.media_on_screens = (media.clone(), media_fit);
+            (video, media, media_fit)
+        };
         let next_media = next.as_deref().and_then(home::media_of);
         // The audience comes first: tell the output before drawing anything for the operator.
         if let Some(output) = &running.output {
@@ -11728,6 +11781,7 @@ impl App {
         if let Some((_, mut player)) = self.video.take() {
             say_video_pace(&mut player, true);
         }
+        self.video_leaving = None;
         self.announcing = None;
         self.quitting = Some(Instant::now());
         // The last anonymous report, if reports are on, goes from its own thread while the
@@ -13508,6 +13562,9 @@ fn main() -> ExitCode {
         advanced: false,
         started: Instant::now(),
         video: None,
+        video_leaving: None,
+        media_on_screens: (None, sp_model::ImageFit::Fill),
+        screens_wait_for_video: false,
         slide_videos: Vec::new(),
         slide_video_refused: std::collections::HashSet::new(),
         web_pages: Vec::new(),

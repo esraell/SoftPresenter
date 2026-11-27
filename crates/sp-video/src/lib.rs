@@ -407,8 +407,8 @@ macro_rules! either {
 
 impl Engine {
     /// Opens a video, paused at its start: with the system's player for an MP4 or MOV (on the
-    /// main thread), otherwise with FFmpeg. How its pictures reach the screens is counted in
-    /// `pace`.
+    /// main thread), otherwise with FFmpeg, which is never waited for (see [`ffmpeg::Player`]).
+    /// How its pictures reach the screens is counted in `pace`.
     fn open(path: &Path, lend: Lend, pace: &Arc<pace::Pace>) -> Result<Engine, String> {
         #[cfg(target_os = "macos")]
         if system_first(path) {
@@ -421,9 +421,20 @@ impl Engine {
         ffmpeg::Player::open(path, lend == Lend::Planes, pace.clone()).map(|player| Engine::Ffmpeg(Box::new(player)))
     }
 
-    /// Its pictures a second, as the file says (0 when it doesn't).
+    /// Its pictures a second, as the file says (0 when it doesn't, or FFmpeg hasn't said yet).
     fn fps(&self) -> f64 {
         either!(self, engine => engine.fps())
+    }
+
+    /// True once the video can take over the screens: the system's player at once (it gives its
+    /// first picture when asked for it), FFmpeg once its first picture has come, or once it is
+    /// known that none will.
+    fn ready(&self) -> bool {
+        match self {
+            #[cfg(target_os = "macos")]
+            Engine::System(_) => true,
+            Engine::Ffmpeg(player) => player.ready(),
+        }
     }
 
     fn source(&self) -> Source {
@@ -516,12 +527,21 @@ pub struct Player {
     handed_over: Option<Result<PathBuf, String>>,
     /// How its pictures reach the screens (the next file's too, once it takes over).
     pace: Arc<pace::Pace>,
+    /// The pictures a second the pace was last told: FFmpeg says them a moment after a video
+    /// is opened.
+    fps_told: f64,
 }
 
 impl Player {
     /// Opens a video, paused at its start: with the system's player for an MP4 or MOV (on the
     /// main thread), otherwise with FFmpeg. Its pictures are lent as `lend` says, and so are
     /// those of files lined up to follow it. The error is a sentence for the operator.
+    ///
+    /// A video FFmpeg plays is never waited for: this returns at once, FFmpeg is asked what
+    /// the video is and started on a thread of the player's own, and everything asked of the
+    /// player meanwhile is carried out there once it has. Until then its pictures a second are
+    /// 0 and its length isn't known; [`Player::ready`] says when its first picture has come,
+    /// and a file FFmpeg can't play says so through [`Player::problem`], not here.
     pub fn open(path: &Path, lend: Lend) -> Result<Player, String> {
         let pace = Arc::default();
         Engine::open(path, lend, &pace).map(|engine| Player::with(engine, path, lend, pace))
@@ -535,7 +555,8 @@ impl Player {
     }
 
     fn with(engine: Engine, path: &Path, lend: Lend, pace: Arc<pace::Pace>) -> Player {
-        pace.set_fps(engine.fps());
+        let fps_told = engine.fps();
+        pace.set_fps(fps_told);
         Player {
             source: Arc::new(Mutex::new(engine.source())),
             engine,
@@ -547,19 +568,42 @@ impl Player {
             last_position: 0.0,
             handed_over: None,
             pace,
+            fps_told,
         }
     }
 
-    /// Its pictures a second, as the file says (0 when it doesn't).
+    /// Its pictures a second, as the file says (0 when it doesn't, or isn't known yet).
     pub fn fps(&self) -> f64 {
         self.engine.fps()
+    }
+
+    /// True once the video can be put on the screens: its first picture has come, or it is
+    /// known that none will ([`Player::problem`]). Until then whoever shows it keeps on screen
+    /// what was there. The system's player is ready at once.
+    pub fn ready(&self) -> bool {
+        self.engine.ready()
+    }
+
+    /// Whether its pictures are coming now, for the pace: playing, and past the wait for FFmpeg
+    /// to give its first picture (time spent opening isn't time played).
+    fn moving(&self) -> bool {
+        self.engine.playing() && self.engine.ready()
+    }
+
+    /// Tells the pace the video's pictures a second once FFmpeg has said them.
+    fn tell_fps(&mut self) {
+        let fps = self.engine.fps();
+        if fps != self.fps_told {
+            self.fps_told = fps;
+            self.pace.set_fps(fps);
+        }
     }
 
     /// How its pictures have reached the screens: once a minute of counting has passed, or at
     /// once with `now_anyway` (as it stops), what was counted since the last time (see
     /// [`PaceMinute`]); `None` before then, or when it hasn't played.
     pub fn take_pace(&mut self, now_anyway: bool) -> Option<PaceMinute> {
-        self.pace.tick(self.engine.playing());
+        self.pace.tick(self.moving());
         self.pace.take(now_anyway)
     }
 
@@ -601,7 +645,7 @@ impl Player {
     pub fn play(&mut self) {
         self.engine.play();
         self.pace.break_run();
-        self.pace.tick(self.engine.playing());
+        self.pace.tick(self.moving());
     }
 
     pub fn pause(&mut self) {
@@ -665,8 +709,9 @@ impl Player {
 
     /// Lines up another file to follow this one: it is opened now, waiting at its start, and
     /// takes over at the end of the pass under way (where this one would start again or end),
-    /// looping as this one does, at its volume. One lined up before is let go. The error is a
-    /// sentence for the operator; this one plays on as it was.
+    /// looping as this one does, at its volume; one FFmpeg is still opening then takes over at
+    /// the end of the first pass after its first picture has come. One lined up before is let
+    /// go. The error is a sentence for the operator; this one plays on as it was.
     pub fn play_next(&mut self, path: &Path) -> Result<(), String> {
         let mut next = Engine::open(path, self.lend, &self.pace)?;
         next.set_looping(self.looping);
@@ -693,7 +738,8 @@ impl Player {
     /// Keeps it going (a looping video starts again at its end), and hands over to a file lined
     /// up at the end of the pass. Says how soon to call again.
     pub fn tick(&mut self) -> Duration {
-        self.pace.tick(self.engine.playing());
+        self.tell_fps();
+        self.pace.tick(self.moving());
         if self.next.is_some()
             && let Some(wait) = self.hand_over_when_due()
         {
@@ -712,6 +758,11 @@ impl Player {
         self.last_position = position;
         let left = self.engine.duration().map(|length| length - position);
         let playing = self.engine.playing();
+        // A file FFmpeg hasn't given a picture of yet isn't handed over to: this one goes round
+        // again (or stays on its last picture) rather than the screens waiting on it.
+        if !self.next.as_ref().is_some_and(|(next, _)| next.ready()) {
+            return playing.then_some(Duration::from_millis(20));
+        }
         if self.engine.ended() || (playing && (went_round || left.is_some_and(|left| left <= END_OF_PASS))) {
             self.hand_over();
             return Some(Duration::from_millis(10));
@@ -741,7 +792,8 @@ impl Player {
             }
         }
         next.play();
-        self.pace.set_fps(next.fps());
+        self.fps_told = next.fps();
+        self.pace.set_fps(self.fps_told);
         self.pace.break_run();
         let old = std::mem::replace(&mut self.engine, next);
         *self.source.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = self.engine.source();

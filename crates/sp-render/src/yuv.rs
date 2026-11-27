@@ -166,6 +166,18 @@ pub(crate) struct ToColours {
     /// The colours whose rows the uniform holds.
     written: Option<YuvColours>,
     planes: Option<PlaneTextures>,
+    /// Where the time of the last picture turned went (see [`PlanesWork`]).
+    pub(crate) work: PlanesWork,
+}
+
+/// Where the time went sending a video's planes to the GPU and turning them into colours, for
+/// one picture: making the textures the planes go into (only for the first picture of a size),
+/// handing the GPU's queue their bytes, and handing it the pass that turns them into colours.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlanesWork {
+    pub textures: std::time::Duration,
+    pub bytes: std::time::Duration,
+    pub pass: std::time::Duration,
 }
 
 struct PlaneTextures {
@@ -217,7 +229,7 @@ impl ToColours {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        ToColours { pipeline, uniform, written: None, planes: None }
+        ToColours { pipeline, uniform, written: None, planes: None, work: PlanesWork::default() }
     }
 
     /// Sends the planes to the GPU and the pass that writes their colours into `dest` (an
@@ -234,9 +246,11 @@ impl ToColours {
         if !planes.hold() || (dest.width(), dest.height()) != (width, height) {
             return false;
         }
+        let began = std::time::Instant::now();
         if self.planes.as_ref().is_none_or(|kept| kept.size != (width, height)) {
             self.planes = Some(PlaneTextures::new(device, width, height));
         }
+        let made = began.elapsed();
         let Some(textures) = self.planes.as_ref() else { return false };
         let send = |texture: &wgpu::Texture, bytes: &[u8], row: usize| {
             queue.write_texture(
@@ -248,6 +262,7 @@ impl ToColours {
         };
         send(&textures.luma, planes.luma, planes.luma_row);
         send(&textures.chroma, planes.chroma, planes.chroma_row);
+        let sent = began.elapsed();
         if self.written != Some(planes.colours) {
             let bytes: Vec<u8> =
                 planes.colours.rows().as_flattened().iter().flat_map(|word| word.to_le_bytes()).collect();
@@ -274,6 +289,8 @@ impl ToColours {
             pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
         }
         queue.submit([encoder.finish()]);
+        self.work =
+            PlanesWork { textures: made, bytes: sent.saturating_sub(made), pass: began.elapsed().saturating_sub(sent) };
         true
     }
 }

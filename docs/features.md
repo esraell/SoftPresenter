@@ -789,7 +789,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   FFmpeg takes it): the processor no longer converts every pixel, and a third of the bytes cross
   from FFmpeg to the app. A video with clear parts, of RGB pixels, or with colour at more than a
   quarter of the pixels comes as RGBA, converted by FFmpeg, as before; so does a video in a box
-  on a slide or on the Announcements layer. A video the Mac's player plays
+  on a slide or on the Announcements layer. Nothing waits for FFmpeg: a video it plays is opened
+  on a thread of the video's own, which asks FFmpeg what the video is, opens the sound output
+  and starts FFmpeg (once, for opening, looping and playing), and carries out what is asked of
+  the video after; so on a computer where starting a program takes seconds (a virus scanner
+  reading it, a processor kept busy by something else) the operator's window and `sp` go on at
+  once, and `sp media show` answers at once. Until the first picture of a video behind the words
+  has come, the screens keep what they showed, the video that played before still playing; then
+  they go to the new one by the media's transition. A file FFmpeg can't play says so in the
+  notices a moment after it was shown. A video the Mac's player plays
   behind the words goes to the screens as the decoder's own picture memory, with no copy through
   the processor (a video whose format can carry clear parts, and a video in a box on a slide or
   on the Announcements layer, are still copied).
@@ -1973,7 +1981,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   video's new pictures draw it for the Program preview, but not in the Edit view, which has no
   preview.
 - **How smoothly a video plays is in the log.** As a video behind the words opens, the log says
-  its pictures a second (`30 fps`, `29.97 fps`). Once a minute while it plays, and for the part
+  its pictures a second (`30 fps`, `29.97 fps`); for one FFmpeg plays, how long opening took
+  and where the time went (FFmpeg saying what the video is, the sound output, starting FFmpeg),
+  and how long after it was asked for its first picture came. A video picture that takes a
+  tenth of a second or more to hand to the GPU says where that time went (making its texture,
+  making the textures its planes go into, handing over their bytes, asking for the colours).
+  Once a minute while it plays, and for the part
   of a minute it played as it stops, a `[video]` line says how its pictures reached the screens:
   how many its time playing called for, how many FFmpeg decoded, how many the screens showed,
   dropped (never taken, a newer one there first), repeated (one left up for more than its time

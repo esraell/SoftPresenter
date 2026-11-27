@@ -36,4 +36,4 @@ pub use scene::{
 pub use see_through::{Solid, SolidPass, see_through_transition};
 pub use vello;
 pub use vello::wgpu;
-pub use yuv::{YuvColours, YuvMatrix, YuvPlanes};
+pub use yuv::{PlanesWork, YuvColours, YuvMatrix, YuvPlanes};

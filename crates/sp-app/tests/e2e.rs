@@ -1382,6 +1382,136 @@ fn play_or_skip(copy: &Copy, track: &str, what: &str) -> bool {
     panic!("audio play {track} was refused: {}{}", reply.text, copy.run.context());
 }
 
+/// A short video FFmpeg plays on every system (a Mac's own player takes MP4 and MOV, never
+/// this), made with the FFmpeg the app finds. `None`, said, when this computer has no FFmpeg or
+/// its FFmpeg makes no videos (the app's own only plays them).
+fn video_for_ffmpeg(run: &Run, what: &str) -> Option<PathBuf> {
+    let Some(ffmpeg) = sp_video::ffmpeg_program() else {
+        say_skipped(what, "FFmpeg isn't on this computer");
+        return None;
+    };
+    let path = run.file("Grey.mkv");
+    let made = Command::new(ffmpeg)
+        .args(["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=gray:s=64x36:r=30:d=2", "-c:v", "ffv1"])
+        .arg(&path)
+        .stdin(Stdio::null())
+        .status();
+    if !made.is_ok_and(|status| status.success()) {
+        say_skipped(what, "this computer's FFmpeg can't make a test video");
+        return None;
+    }
+    Some(path)
+}
+
+/// How long the window's thread was busy, for each `[stall]` line of the log that says it was.
+fn stalls(log: &str) -> Vec<(f64, &str)> {
+    log.lines()
+        .filter_map(|line| {
+            let said = line.split_once("[stall] the window's thread was busy ")?.1;
+            Some((said.split_once(" s").and_then(|(seconds, _)| seconds.parse().ok())?, line))
+        })
+        .collect()
+}
+
+/// A video that is slow to open (FFmpeg's programs slow to start, as a virus scanner or a busy
+/// processor makes them) holds up neither `sp` nor the window: `media show` answers at once,
+/// `status` goes on being answered while the video opens, the window's thread is never busy for
+/// long, the screens keep the picture they showed until the video's first picture has come, and
+/// the video plays once it has opened.
+#[test]
+fn a_video_slow_to_open_holds_up_neither_sp_nor_the_window() {
+    let name = "a_video_slow_to_open_holds_up_neither_sp_nor_the_window";
+    let Some(run) = Run::new(name) else { return };
+    let Some(video) = video_for_ffmpeg(&run, name) else { return };
+    let picture = run.file("Blue.png");
+    write_png(&picture, [30, 90, 200]);
+    // Testing aid: SOFTPRESENTER_VIDEO_OPEN_SLOW makes every video FFmpeg plays this slow to open.
+    const SLOW: Duration = Duration::from_millis(4000);
+    // Testing aid: SOFTPRESENTER_CAPTURE_OUTPUT saves the first screen's picture once, this long
+    // after the screens first drew: here while the video is still opening.
+    let on_screen = run.file("on-screen.png");
+    let copy = run.start(&[
+        ("SOFTPRESENTER_VIDEO_OPEN_SLOW", "4000"),
+        ("SOFTPRESENTER_CAPTURE_OUTPUT", &on_screen.to_string_lossy()),
+        ("SOFTPRESENTER_CAPTURE_OUTPUT_AFTER", "2.5"),
+    ]);
+    copy.ok(&["media", "add", &picture.to_string_lossy(), &video.to_string_lossy()]);
+    // How long `sp` takes on this computer with nothing to wait for: a picture shown.
+    let usual = copy.ok(&["media", "show", "blue"]).took;
+    // What counts as held up: far longer than that, and well short of the video's opening.
+    let held_up = (usual * 10).clamp(Duration::from_millis(300), SLOW / 2);
+
+    // On a computer too slow to get this far in time, the picture was taken before the video
+    // was asked for, and says nothing of it.
+    let taken_too_soon = on_screen.exists();
+    let began = Instant::now();
+    let shown = copy.ok(&["media", "show", "grey"]);
+    assert!(
+        shown.took < held_up,
+        "sp media show waited {:?} for a video that takes {SLOW:?} to open (a picture: {usual:?}){}",
+        shown.took,
+        run.context()
+    );
+    // While it opens, the window's loop goes on answering.
+    let (mut asked, mut longest, mut taken_meanwhile) = (0, Duration::ZERO, false);
+    while began.elapsed() + Duration::from_millis(500) < SLOW {
+        let status = copy.ok(&["status"]);
+        assert_eq!(status.data["media"], "Grey.mkv", "{}", status.data);
+        asked += 1;
+        longest = longest.max(status.took);
+        taken_meanwhile |= on_screen.exists();
+    }
+    // The screens still show the picture: not the video's still, and not black.
+    if taken_meanwhile && !taken_too_soon {
+        let shown = image::open(&on_screen).expect("the picture of the screen").to_rgb8();
+        let [r, g, b] = shown.get_pixel(shown.width() / 2, shown.height() / 2).0;
+        assert!(
+            b > 150 && r < 80 && g < 140,
+            "while the video opened the screen's middle was {r},{g},{b}, not the blue picture's{}",
+            run.context()
+        );
+    } else {
+        say_skipped(
+            &format!("{name}: what the screens show while the video opens"),
+            "this computer was too slow for the screen's picture to be taken at the right moment",
+        );
+    }
+    say(&format!(
+        "{name}: media show answered in {:?}; status answered {asked} times while the video opened, the slowest \
+         in {longest:?}",
+        shown.took
+    ));
+    assert!(asked >= 1, "status was never answered while the video opened{}", run.context());
+    assert!(
+        longest < held_up,
+        "a status waited {longest:?} while the video opened (a picture shown: {usual:?}){}",
+        run.context()
+    );
+    // It opens, and plays.
+    let opened = Instant::now();
+    while !run.log().contains("the first picture of Grey.mkv") {
+        assert!(opened.elapsed() < Duration::from_secs(30), "the video never gave a picture{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(began.elapsed() >= SLOW, "the video opened sooner than the testing aid makes it");
+    assert_eq!(copy.status()["media"], "Grey.mkv");
+    copy.ok(&["video", "pause"]);
+    copy.ok(&["clear", "media"]);
+    let quitted = copy.quit();
+    quitted.assert_clean(&run);
+    // From the moment the video was asked for, the window's thread was never busy for long
+    // (starting up, before it, may be slow on a slow computer).
+    let log = run.log();
+    let after = log.find("[video] opening ").map_or("", |at| &log[at..]);
+    assert!(!after.is_empty(), "the log says the video was opened");
+    let long: Vec<&str> = stalls(after)
+        .into_iter()
+        .filter(|(seconds, _)| *seconds >= held_up.as_secs_f64().max(1.0))
+        .map(|(_, line)| line)
+        .collect();
+    assert!(long.is_empty(), "the window's thread was held up while the video opened: {long:?}");
+}
+
 #[test]
 fn a_song_from_text_runs_slide_by_slide_and_each_layer_clears() {
     let Some(run) = Run::new("a_song_from_text_runs_slide_by_slide_and_each_layer_clears") else { return };

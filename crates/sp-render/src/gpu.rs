@@ -384,6 +384,12 @@ impl Painter {
         true
     }
 
+    /// Where the time went the last time [`Painter::show_planes`] sent a picture (nothing
+    /// before the first).
+    pub fn planes_work(&self) -> crate::PlanesWork {
+        self.to_colours.as_ref().map(|to_colours| to_colours.work).unwrap_or_default()
+    }
+
     /// Gets the painter ready for the first video of this size, on a screen of this size, so
     /// that its first picture, in the middle of the fade into it, costs no more than the next.
     /// On a PC's integrated graphics the first 1080p video's first pictures held the screens
