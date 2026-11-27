@@ -2239,6 +2239,18 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   song's last slide, as SoftProjector draws them. The card shows a small slide with the first
   song's last words (and the last line of their translation, when it has one) and the mark
   under them, beside Mark the end of a song, On or Off.
+  - **Its look is the theme's.** Which mark (SoftProjector's seven: `* * *`, `- - -`, `° ° °`,
+    `• • •`, `● ● ●`, `▪ ▪ ▪`, `■ ■ ■`), its size (40% to 160% of the words' size in steps of 10,
+    80% as it comes), its colour (the words' own, or one of eight) and its place (under the
+    last line, or the bottom of the screen: as low as the no-room limit allows, 3% above the
+    bottom or just over the copyright line). A theme that never chose a look draws three stars
+    as before, and its file says nothing of it. A song with a theme of its own ends with that
+    theme's mark. The mark always takes the words' font, outline and shadow.
+  - **One small window** sets it, with a small last slide at its left that shows the mark as
+    it will be, and Mark, Size, Colour and Place at its right; a change applies at once and
+    Done closes it. It opens from Settings › Slides' **Change how it looks…** (the main
+    theme's) and from **Song end** › Change… among a theme's own rows in Edit › Themes (a song
+    template open, nothing picked). Nothing in it moves as choices change.
   - **Which slide.** The last place in the order the song is sung in whose slide has the song's
     words and isn't disabled (`end_mark::last_sung`). The song's words are those in its main
     language's and translation's boxes: a caption, a clock or a title in another box is not.

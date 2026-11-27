@@ -220,5 +220,8 @@
   "inspector.build.order.none": "Ninguna animación espera un clic. Siguiente pasa directamente a la diapositiva siguiente.",
   "inspector.link.timer.short": "{name}",
   "inspector.mirror.title": "AirPlay",
-  "inspector.mirror.fits": "Ajuste"
+  "inspector.mirror.fits": "Ajuste",
+  "inspector.theme.song_end": "Final de canción",
+  "inspector.theme.song_end.hint": "La marca bajo la última diapositiva de una canción dibujada con este tema, cuando Ajustes › Diapositivas la tiene activada",
+  "inspector.theme.song_end.change": "Cambiar…"
 }

@@ -697,6 +697,8 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
 
 /// The panel for a theme as a whole, shown in the Theme Editor when no box is selected.
 fn theme_slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
+    let mut end_look_asked = None;
+    let end_looks = state.theme_end_looks.clone();
     let picture_request = &mut state.theme_picture_request;
     let Some(edit) = state.theme_edit.as_mut() else { return };
     let before = (edit.theme.name.clone(), edit.theme.background, edit.theme.background_picture.clone());
@@ -757,6 +759,29 @@ fn theme_slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
         });
     });
     rule(ui);
+    // Song end: the theme's mark for the end of a song, in its colour, and the window that
+    // changes it (`end_look`). Not on a Bible template: a passage has no such mark.
+    let bible = edit.templates().get(edit.template).is_some_and(|template| template.bible);
+    if !bible {
+        let look = end_looks.get(edit.index).copied().unwrap_or_default();
+        let mut change = false;
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(t("inspector.theme.song_end", "Song end")).size(13.0).strong().color(INK))
+                .on_hover_text(t(
+                    "inspector.theme.song_end.hint",
+                    "The mark under the last slide of a song drawn with this theme, when Settings \u{203a} Slides has it on",
+                ));
+            let ink = look.colour.map_or(INK, crate::home::color32);
+            ui.label(egui::RichText::new(crate::end_look::chip_words(look.mark)).size(13.0).color(ink));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                change = ui.button(t("inspector.theme.song_end.change", "Change\u{2026}")).clicked();
+            });
+        });
+        if change {
+            end_look_asked = Some(edit.index);
+        }
+        rule(ui);
+    }
     let about = t(
         "inspector.theme.about",
         "A song's slide uses, of the templates marked Songs, the one that suits what is on it: with the main language and a translation, the first with a box for both; with one language, the first with no translation box. Bible slides use the template marked Bible. Right-click a template to change what it is for. Songs and Bible slides are drawn with the main theme; right-click a theme to make it the main one.",
@@ -768,6 +793,9 @@ fn theme_slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
             edit.theme.name = before.0;
         }
         edit.changed = true;
+    }
+    if let Some(theme) = end_look_asked {
+        crate::end_look::open(state, theme, crate::end_look::Door::Editor);
     }
 }
 

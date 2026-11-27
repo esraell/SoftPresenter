@@ -220,5 +220,8 @@
   "inspector.build.order.none": "Ни одна анимация не ждёт щелчка. «Далее» сразу переходит к следующему слайду.",
   "inspector.link.timer.short": "{name}",
   "inspector.mirror.title": "AirPlay",
-  "inspector.mirror.fits": "Размещение"
+  "inspector.mirror.fits": "Размещение",
+  "inspector.theme.song_end": "Конец песни",
+  "inspector.theme.song_end.hint": "Знак под последним слайдом песни с этой темой, когда он включён в разделе Настройки › Слайды",
+  "inspector.theme.song_end.change": "Изменить…"
 }

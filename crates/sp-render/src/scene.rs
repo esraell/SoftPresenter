@@ -272,35 +272,39 @@ pub(crate) struct EndMark {
     pub opacity: f32,
 }
 
-/// The mark itself: three stars, kept together and apart by no-break spaces.
-const END_MARK: &str = "*\u{a0}\u{a0}\u{a0}\u{a0}*\u{a0}\u{a0}\u{a0}\u{a0}*";
-
-/// The mark's size beside the largest words', and how far under the lowest words its top is, in
-/// lines of the largest words.
-const END_MARK_SIZE: f32 = 0.8;
+/// How far under the lowest words the mark's top is when it goes under them, in lines of the
+/// largest words.
 const END_MARK_GAP: f32 = 0.5;
 
 /// Where the end of a song's mark goes under a slide's words as they were laid out (`words`,
-/// each with the place of its object on the slide and how solid that box is): at 80% of the
-/// size the largest words were fitted to, its top half a line of theirs under the lowest words'
-/// last line, centred on that box's middle, and no more solid than either box. With it, which
-/// words are the largest: the mark takes their look. `None` when the slide has no words, or the
-/// mark would pass `floor`: the words are never moved or made smaller for it.
-fn end_mark_place(words: &[(usize, Laid, f32)], floor: f32) -> Option<(usize, EndMark)> {
+/// each with the place of its object on the slide and how solid that box is), with the look the
+/// theme gives it (`look`): at its share of the size the largest words were fitted to (80% as
+/// it comes), centred on the lowest words' box, and no more solid than either box. Its top is
+/// half a line of the largest words under the lowest words' last line, or, for a look that
+/// puts it at the bottom of the screen, as low as `floor` lets it go. With it, which words are
+/// the largest: the mark takes their look. `None` when the slide has no words, or the mark
+/// under the words would pass `floor`, wherever it is to go: the words are never moved or made
+/// smaller for it, and it never lies over them.
+fn end_mark_place(words: &[(usize, Laid, f32)], floor: f32, look: &sp_model::EndLook) -> Option<(usize, EndMark)> {
     // The first of the largest, and the last of the lowest: as the slide lists its boxes.
     let (largest, sized, sized_opacity) =
         words.iter().copied().reduce(|best, next| if next.1.size > best.1.size { next } else { best })?;
     let (_, lowest, lowest_opacity) =
         words.iter().copied().reduce(|best, next| if next.1.bottom >= best.1.bottom { next } else { best })?;
-    let size = sized.size * END_MARK_SIZE;
+    let size = sized.size * f32::from(look.size) / 100.0;
+    let under = lowest.bottom + sized.size * END_MARK_GAP;
+    // The mark is one line as tall as its letters' size: this is the lowest its top may be.
+    let lowest_top = floor - size;
     let mark = EndMark {
         size,
-        top: lowest.bottom + sized.size * END_MARK_GAP,
+        top: match look.place {
+            sp_model::EndPlace::Under => under,
+            sp_model::EndPlace::Bottom => lowest_top,
+        },
         centre: lowest.centre,
         opacity: sized_opacity.min(lowest_opacity).clamp(0.0, 1.0),
     };
-    // The mark is one line as tall as its letters' size.
-    (mark.top + size <= floor).then_some((largest, mark))
+    (under <= lowest_top).then_some((largest, mark))
 }
 
 /// What drawing a slide's objects came to: whether any text overflowed its box; where the
@@ -456,30 +460,46 @@ fn draw_objects(
     let mut end_mark = None;
     if let (Some(floor), Some(template)) = (slide.end_mark, template)
         && !slide.words_hidden
-        && let Some((largest, mark)) = end_mark_place(&words, floor)
+        && let Some((largest, mark)) = end_mark_place(&words, floor, &theme.end_look)
         && let Some(object) = slide.objects.get(largest)
         && let ObjectKind::Text { style, .. } = &object.kind
         && let Some(look) = template.text_style(object.role.as_ref(), style)
     {
-        draw_end_mark(scene, fonts, to_target, &look, mark);
+        draw_end_mark(scene, fonts, to_target, &look, mark, &theme.end_look);
         end_mark = Some(mark);
     }
     Painted { overflow, words, end_mark }
 }
 
-/// Draws the end of a song's mark in the face, weight, colour, outline and shadow of the words
-/// it follows (`look`), on one line of its own that nothing else of their look changes.
-fn draw_end_mark(scene: &mut Scene, fonts: &mut Fonts, to_target: Affine, look: &BoxStyle, mark: EndMark) {
-    let style = BoxStyle {
-        size: mark.size,
-        min_size: mark.size,
+/// The look the end of a song's mark is drawn in: the face, weight, outline and shadow of the
+/// words it follows (`words`), in their colour unless the theme chose one for it (`colour`), at
+/// `size`, on one line of its own that nothing else of their look changes.
+fn end_mark_style(words: &BoxStyle, size: f32, colour: Option<Rgba>) -> BoxStyle {
+    let plain = plain_look(words.clone());
+    BoxStyle {
+        size,
+        min_size: size,
         align: Align::Center,
         valign: VAlign::Top,
         scaling: Scaling::None,
         line_height: 1.0,
-        ..plain_look(look.clone())
-    };
-    // Room for the three stars whatever the face: they are centred in it and never wrap.
+        fill: colour.unwrap_or(plain.fill),
+        ..plain
+    }
+}
+
+/// Draws the end of a song's mark as the theme has it (`end`: which mark, and its colour if it
+/// has one of its own), in the look of the words it follows (`look`).
+fn draw_end_mark(
+    scene: &mut Scene,
+    fonts: &mut Fonts,
+    to_target: Affine,
+    look: &BoxStyle,
+    mark: EndMark,
+    end: &sp_model::EndLook,
+) {
+    let style = end_mark_style(look, mark.size, end.colour);
+    // Room for the three marks whatever the face: they are centred in it and never wrap.
     let room = mark.size * 20.0;
     let rect = SlideRect { x: mark.centre - room / 2.0, y: mark.top, w: room, h: mark.size };
     // As solid as the words it follows, no more.
@@ -488,7 +508,7 @@ fn draw_end_mark(scene: &mut Scene, fonts: &mut Fonts, to_target: Affine, look: 
         let whole_slide = Rect::new(0.0, 0.0, f64::from(SLIDE_WIDTH), f64::from(SLIDE_HEIGHT));
         scene.push_layer(Fill::NonZero, Mix::Normal, mark.opacity, to_target, &whole_slide);
     }
-    draw_text_box(scene, fonts, to_target, (END_MARK, &[]), &style, rect, 0.0, None);
+    draw_text_box(scene, fonts, to_target, (&end.mark.text(), &[]), &style, rect, 0.0, None);
     if faded {
         scene.pop_layer();
     }
@@ -2182,6 +2202,97 @@ mod tests {
         let (off, on) = (drawn_with_mark(&full, &theme, None), drawn_with_mark(&full, &theme, Some(FLOOR)));
         assert!(on.end_mark.is_none(), "{:?} under {:?}", on.end_mark, on.words);
         assert_eq!(on.words, off.words);
+    }
+
+    /// The built-in theme with a look of its own for the end of a song's mark.
+    fn themed(look: sp_model::EndLook) -> Theme {
+        Theme { end_look: look, ..Theme::builtin() }
+    }
+
+    #[test]
+    fn the_end_look_as_it_comes_draws_the_mark_as_it_always_was() {
+        // A theme that never chose a look: three stars at 80%, half a line under the words, in
+        // the words' own colour.
+        let (theme, song) = (Theme::builtin(), slide("One\nTwo", None));
+        assert!(theme.end_look.is_usual());
+        let drawn = drawn_with_mark(&song, &theme, Some(FLOOR));
+        let [(_, laid, _)] = drawn.words[..] else { panic!("one box of words") };
+        let mark = drawn.end_mark.expect("room");
+        assert!(
+            (mark.size - 0.8 * laid.size).abs() < 0.01 && (mark.top - (laid.bottom + 0.5 * laid.size)).abs() < 0.01
+        );
+        assert_eq!(theme.end_look.mark.text(), "*\u{a0}\u{a0}\u{a0}\u{a0}*\u{a0}\u{a0}\u{a0}\u{a0}*");
+        let words = theme.templates[0].boxes[0].clone();
+        assert_eq!(end_mark_style(&words, mark.size, theme.end_look.colour).fill, words.fill);
+    }
+
+    #[test]
+    fn end_look_each_mark_draws_at_the_themes_size_in_its_colour() {
+        let song = slide("One\nTwo", None);
+        let usual = sp_model::EndLook::default();
+        let plain = build_scene(&mut Fonts::new(), Some(&song), &Theme::builtin(), 1920, 1080);
+        let runs = |built: &Built| built.scene.encoding().resources.patches.len();
+        for mark in sp_model::EndMark::ALL {
+            let theme = themed(sp_model::EndLook { mark, ..usual });
+            assert!(drawn_with_mark(&song, &theme, Some(FLOOR)).end_mark.is_some(), "{mark:?}");
+            // Its three marks are in the scene: more is drawn than without it.
+            let marked = Slide { end_mark: Some(FLOOR), ..song.clone() };
+            let built = build_scene(&mut Fonts::new(), Some(&marked), &theme, 1920, 1080);
+            assert!(runs(&built) > runs(&plain), "{mark:?}: {} and {}", runs(&built), runs(&plain));
+        }
+        // The size is the theme's share of the largest words' fitted size, from 40% to 160%.
+        for size in [40, 80, 120, 160] {
+            let drawn = drawn_with_mark(&song, &themed(sp_model::EndLook { size, ..usual }), Some(FLOOR));
+            let [(_, laid, _)] = drawn.words[..] else { panic!("one box of words") };
+            let mark = drawn.end_mark.unwrap_or_else(|| panic!("room at {size}%"));
+            assert!((mark.size - laid.size * f32::from(size) / 100.0).abs() < 0.01, "{size}%: {mark:?}");
+            // Under the words it starts where it always did, whatever its size.
+            assert!((mark.top - (laid.bottom + 0.5 * laid.size)).abs() < 0.01, "{size}%: {mark:?}");
+        }
+        // Its colour is the words' unless the theme chose one; their face, outline and shadow
+        // are the mark's either way.
+        let words = BoxStyle { outline_width: 4.0, shadow: true, ..Theme::builtin().templates[0].boxes[0].clone() };
+        let yellow = Rgba::rgb(0xff, 0xc4, 0x00);
+        let (own, chosen) = (end_mark_style(&words, 50.0, None), end_mark_style(&words, 50.0, Some(yellow)));
+        assert_eq!((own.fill, chosen.fill), (words.fill, yellow));
+        for style in [&own, &chosen] {
+            assert_eq!(
+                (&style.font_family, style.outline_width, style.shadow, &style.shadow_look, style.size),
+                (&words.font_family, 4.0, true, &words.shadow_look, 50.0)
+            );
+        }
+    }
+
+    #[test]
+    fn end_look_at_the_bottom_the_mark_is_as_low_as_it_may_go_and_never_over_the_words() {
+        let song = slide("One\nTwo", None);
+        let usual = sp_model::EndLook::default();
+        let low = themed(sp_model::EndLook { place: sp_model::EndPlace::Bottom, ..usual });
+        // 3% above the slide's bottom: its one line ends there.
+        let mark = drawn_with_mark(&song, &low, Some(FLOOR)).end_mark.expect("room");
+        assert!((mark.top + mark.size - FLOOR).abs() < 0.01, "{mark:?}");
+        // The copyright line showing: just over that, the floor the app gives then.
+        let over_line = FLOOR - 120.0;
+        let mark = drawn_with_mark(&song, &low, Some(over_line)).end_mark.expect("room");
+        assert!((mark.top + mark.size - over_line).abs() < 0.01, "{mark:?}");
+        // Centred on the words' box, as under them; the words are laid out the same.
+        let under = drawn_with_mark(&song, &Theme::builtin(), Some(FLOOR));
+        let bottom = drawn_with_mark(&song, &low, Some(FLOOR));
+        assert_eq!(under.words, bottom.words, "the words keep their place");
+        assert_eq!(under.end_mark.map(|mark| mark.centre), bottom.end_mark.map(|mark| mark.centre));
+        // The no-room rule is one rule: where the mark wouldn't fit under the words it isn't
+        // drawn at the bottom either, so it never lies over them.
+        let [(_, laid, _)] = under.words[..] else { panic!("one box of words") };
+        let needed = laid.bottom + 0.5 * laid.size + 0.8 * laid.size;
+        for theme in [&Theme::builtin(), &low] {
+            assert!(drawn_with_mark(&song, theme, Some(needed + 0.01)).end_mark.is_some());
+            assert!(drawn_with_mark(&song, theme, Some(needed - 0.01)).end_mark.is_none());
+        }
+        // A bigger mark needs more room, a smaller one less.
+        let big = themed(sp_model::EndLook { size: 160, ..usual });
+        let small = themed(sp_model::EndLook { size: 40, ..usual });
+        assert!(drawn_with_mark(&song, &big, Some(needed + 0.01)).end_mark.is_none());
+        assert!(drawn_with_mark(&song, &small, Some(needed - 0.01)).end_mark.is_some());
     }
 
     #[test]

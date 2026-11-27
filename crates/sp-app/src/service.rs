@@ -874,8 +874,8 @@ pub struct Prefs {
     pub start_audience_off: bool,
     /// Next at the end of a song goes on to the next song in the service.
     pub continuous: bool,
-    /// The end of a song is marked on the audience screens: three stars under the words of its
-    /// last slide as sung (`end_mark`).
+    /// The end of a song is marked on the audience screens: a mark (three stars, unless its
+    /// theme chose another) under the words of its last slide as sung (`end_mark`).
     pub end_mark: bool,
     /// From before start-up was a macro: what played by itself when the app opened. Read once,
     /// to make a macro that does it (`macros::from_opening_choice`); no longer written.

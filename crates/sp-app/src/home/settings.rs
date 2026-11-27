@@ -105,6 +105,8 @@ impl Pane {
             "remote control" | "remote" => Some(Pane::PhoneRemote),
             // Phone remote with Port and certificate folded out (`remote::pane`).
             "remote more" => Some(Pane::PhoneRemote),
+            // Slides with the window of the main theme's end mark open (`settings_ui`).
+            "end look" => Some(Pane::Slides),
             // Keys scrolled on to Always the same (`keys_page`).
             "keys fixed" => Some(Pane::Keys),
             // AirPlay was called Phone Screens until 26 November.
@@ -264,6 +266,20 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
         inside.set_clip_rect(page);
         page_ui(&mut inside, state, show);
     });
+    // A theme's end mark, opened from Slides: over this window while that page is in view.
+    if state.preferences_pane == Pane::Slides {
+        // Testing aid: SOFTPRESENTER_CAPTURE_PREFERENCES=end-look opens Slides with the window
+        // of the main theme's end mark open, to see it in a capture.
+        static OPENED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if std::env::var("SOFTPRESENTER_CAPTURE_PREFERENCES").as_deref() == Ok("end-look")
+            && !OPENED.swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            crate::end_look::open(state, state.theme_for_songs, crate::end_look::Door::Settings);
+        }
+        crate::end_look::window(ui.ctx(), state, show, crate::end_look::Door::Settings);
+    } else {
+        crate::end_look::settings_closed(state);
+    }
     // The What's new window, over the whole of Settings, from About.
     crate::whats_new::window(ui.ctx(), &mut state.whats_new);
 }
@@ -664,17 +680,19 @@ fn sample_slide(ui: &mut egui::Ui, state: &HomeState, show: &Show, size: egui::V
     ));
 }
 
-/// The mark of the end of a song, as the small slide draws it: three stars kept together and
-/// apart by no-break spaces, as the screens draw them.
-const END_MARK: &str = "*\u{a0}\u{a0}\u{a0}\u{a0}*\u{a0}\u{a0}\u{a0}\u{a0}*";
-
-/// The End of a song card's insides: a small slide with a song's last words and the mark under
-/// them, beside the switch and what it does (under the slide when the page is narrow).
+/// The End of a song card's insides: a small slide with a song's last words and the main
+/// theme's mark, beside the switch and what it does (under the slide when the page is narrow);
+/// and under the switch the key that opens the mark's look, which is the theme's (`end_look`).
 fn end_of_a_song(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     let width = ui.available_width();
     // A smaller slide than the copyright line's: two lines and the mark need no more, and the
     // page stays short.
     let slide = vec2(192.0, 108.0);
+    let sample = |ui: &mut egui::Ui, state: &HomeState| {
+        let (place, _) = ui.allocate_exact_size(slide, Sense::hover());
+        let look = crate::end_look::look_of(state, state.theme_for_songs);
+        crate::end_look::sample(ui, place, show, &look, state.end_mark);
+    };
     let switch = |ui: &mut egui::Ui, state: &mut HomeState| {
         let size = on_off_size(ui);
         row_unlined(
@@ -682,7 +700,7 @@ fn end_of_a_song(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
             t("settings.slides.end.line", "Mark the end of a song"),
             t(
                 "settings.slides.end.note",
-                "Three stars under the words of a song\u{2019}s last slide as sung, on the audience screens, as SoftProjector draws them",
+                "A mark under the words of a song\u{2019}s last slide as sung, on the audience screens, as SoftProjector draws it",
             ),
             size,
             |ui, place| {
@@ -691,71 +709,54 @@ fn end_of_a_song(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
                 }
             },
         );
+        // Change how it looks…, and whose the look is: beside the key where there is room for
+        // the sentence on one line there, else under it.
+        let words = t("settings.slides.end.look", "Change how it looks\u{2026}");
+        let main = state.theme_for_songs;
+        let name = match (state.theme_ids.get(main), state.theme_names.get(main)) {
+            (Some(id), Some(name)) => crate::theme_store::theme_name(*id, name).into_owned(),
+            _ => String::new(),
+        };
+        let whose = tf(
+            "settings.slides.end.look.note",
+            "Its mark, size, colour and place belong to the theme ({theme}).",
+            &[("theme", &name)],
+        );
+        let key = parts::key_size(ui, words);
+        let room = ui.available_width();
+        let font = FontId::proportional(12.5);
+        let beside = crate::studio::widest(ui, &[whose.as_str()], &font) <= room - key.x - 10.0;
+        let note_room = if beside { room - key.x - 10.0 } else { room };
+        let note = parts::lines(ui, &whose, font, TEXT_FAINT, note_room, 18.0);
+        let tall = if beside { key.y.max(note.size().y) } else { key.y + 6.0 + note.size().y };
+        let (place, _) = ui.allocate_exact_size(vec2(room, tall), Sense::hover());
+        let at = Rect::from_min_size(place.min, key);
+        if parts::key(ui, at, ui.scope_id().with("end look"), words, false).clicked() {
+            crate::end_look::open(state, main, crate::end_look::Door::Settings);
+        }
+        let note_at = if beside {
+            pos2(at.max.x + 10.0, at.center().y - note.size().y / 2.0)
+        } else {
+            pos2(place.min.x, at.max.y + 6.0)
+        };
+        ui.painter().galley(note_at, note, TEXT_FAINT);
     };
     ui.add_space(4.0);
     if width - 212.0 >= 320.0 {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 20.0;
-            end_sample(ui, state, show, slide);
+            sample(ui, state);
             ui.vertical(|ui| {
                 ui.set_width(ui.available_width());
                 switch(ui, state);
             });
         });
     } else {
-        end_sample(ui, state, show, slide);
+        sample(ui, state);
         ui.add_space(8.0);
         switch(ui, state);
     }
     ui.add_space(10.0);
-}
-
-/// The small slide the end of a song is shown on: the first song's last slide as sung (the one
-/// the screens mark, `end_mark::last_sung`), the last two lines of its words and the last line
-/// of its translation when it has one, and under them the mark as the screens draw it (80% of
-/// the words' size, half a line under the lowest words) while it is on. The words keep their
-/// place either way.
-fn end_sample(ui: &mut egui::Ui, state: &HomeState, show: &Show, size: egui::Vec2) {
-    const WORDS: f32 = 15.0;
-    const TRANSLATION: f32 = 11.0;
-    let (place, _) = ui.allocate_exact_size(size, Sense::hover());
-    let painter = ui.painter().with_clip_rect(place);
-    painter.rect_filled(place, RADIUS, egui::Color32::BLACK);
-    let slide = show.presentations().iter().find_map(|song| {
-        let (_, slide) = crate::end_mark::last_sung(song)?;
-        song.slide(slide).map(|(_, slide)| slide)
-    });
-    // The last `most` lines of a box of the slide's words.
-    let last_lines = |role: sp_model::Role, most: usize| -> Vec<String> {
-        let words = slide.and_then(|slide| slide.objects.iter().find(|o| o.role.as_ref() == Some(&role)));
-        let words = words.filter(|object| object.holds_song_words()).and_then(|object| object.as_text());
-        let lines: Vec<&str> = words.unwrap_or_default().lines().filter(|line| !line.trim().is_empty()).collect();
-        lines[lines.len().saturating_sub(most)..].iter().map(|line| (*line).to_owned()).collect()
-    };
-    let room = place.width() - 28.0;
-    let lines: Vec<_> = last_lines(sp_model::Role::primary(), 2)
-        .iter()
-        .map(|line| (parts::one_line(ui, line, crate::studio::reading(WORDS), TEXT, room), TEXT))
-        .chain(
-            last_lines(sp_model::Role::translation(), 1)
-                .iter()
-                .map(|line| (parts::one_line(ui, line, crate::studio::reading(TRANSLATION), TEXT_DIM, room), TEXT_DIM)),
-        )
-        .collect();
-    let height: f32 =
-        lines.iter().map(|(line, _)| line.size().y).sum::<f32>() + 2.0 * lines.len().saturating_sub(1) as f32;
-    // The words sit a little above the middle, where they stay with the mark on or off.
-    let mut y = place.center().y - 8.0 - height / 2.0;
-    for (line, ink) in lines {
-        let line_height = line.size().y;
-        painter.galley(pos2(place.center().x - line.size().x / 2.0, y), line, ink);
-        y += line_height + 2.0;
-    }
-    if state.end_mark {
-        let font = crate::studio::reading(WORDS * 0.8);
-        let mark = parts::one_line(ui, END_MARK, font, TEXT, place.width());
-        painter.galley(pos2(place.center().x - mark.size().x / 2.0, y - 2.0 + WORDS * 0.5), mark, TEXT);
-    }
 }
 
 /// The Between slides keys: Cut, Dissolve and Fade, each with a picture of how it looks, and More…
@@ -1378,6 +1379,39 @@ mod tests {
         assert_eq!(state.slide_view, crate::home::SlideView::Table);
         assert!(click(&ctx, &mut state, &show, "Words only"));
         assert_eq!(state.slide_view, crate::home::SlideView::Easy);
+    }
+
+    #[test]
+    fn slides_opens_the_main_themes_end_mark_and_draws_its_mark_on_the_card() {
+        use sp_model::{EndLook, EndMark, Theme};
+        let ctx = crate::studio::tests::styled();
+        let song = sp_model::parse_song_text("Song", "One\nTwo\n");
+        let show = Show::new(vec![std::sync::Arc::new(song)]);
+        let builtin = Theme::builtin();
+        let evening = sp_model::Uuid::from_u128(7);
+        let mut state = HomeState {
+            preferences_open: true,
+            preferences_pane: Pane::Slides,
+            theme_ids: vec![builtin.id, evening],
+            theme_names: vec![builtin.name.clone(), "Evening".to_owned()],
+            theme_end_looks: vec![EndLook::default(), EndLook { mark: EndMark::Dash, ..EndLook::default() }],
+            theme_for_songs: 1,
+            end_mark: true,
+            ..HomeState::default()
+        };
+        // The card's small slide draws the main theme's mark, and its note names that theme.
+        let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
+        let has = |words: &str| crate::studio::tests::place_of(&drawn, words).is_some();
+        assert!(has(&EndMark::Dash.text()) && !has(&EndMark::Star.text()));
+        assert!(has("Its mark, size, colour and place belong to the theme (Evening)."));
+        drawn.drop_without_applying_deltas();
+        // Its key opens the window for the main theme.
+        assert!(click(&ctx, &mut state, &show, "Change how it looks\u{2026}"));
+        let open = state.end_look.expect("the window is open");
+        assert_eq!((open.theme, open.door), (evening, crate::end_look::Door::Settings));
+        let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
+        assert!(crate::studio::tests::place_of(&drawn, "The end of a song \u{b7} Evening").is_some());
+        drawn.drop_without_applying_deltas();
     }
 
     #[test]

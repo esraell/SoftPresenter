@@ -221,5 +221,8 @@
   "inspector.build.order.none": "Жодна поява не чекає клацання. «Далі» одразу переходить до наступного слайда.",
   "inspector.link.timer.short": "{name}",
   "inspector.mirror.title": "AirPlay",
-  "inspector.mirror.fits": "Масштаб"
+  "inspector.mirror.fits": "Масштаб",
+  "inspector.theme.song_end": "Кінець пісні",
+  "inspector.theme.song_end.hint": "Знак під останнім слайдом пісні з цією темою, коли його ввімкнено в розділі Налаштування › Слайди",
+  "inspector.theme.song_end.change": "Змінити…"
 }

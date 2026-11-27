@@ -508,6 +508,152 @@ pub struct Theme {
     /// Other sets of templates, each used while its version is on (the offering, say).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub versions: Vec<ThemeVersion>,
+    /// How the end of a song's mark looks on slides drawn with the theme. A theme that never
+    /// chose one has the look the mark always had, and its file says nothing of it.
+    #[serde(default, skip_serializing_if = "EndLook::is_usual")]
+    pub end_look: EndLook,
+}
+
+/// Which mark ends a song: SoftProjector's seven, in its order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EndMark {
+    #[default]
+    Star,
+    Dash,
+    Degree,
+    Bullet,
+    Dot,
+    SmallSquare,
+    Square,
+}
+
+impl EndMark {
+    pub const ALL: [EndMark; 7] = [
+        EndMark::Star,
+        EndMark::Dash,
+        EndMark::Degree,
+        EndMark::Bullet,
+        EndMark::Dot,
+        EndMark::SmallSquare,
+        EndMark::Square,
+    ];
+
+    /// The mark itself, which is also its name in a theme's file.
+    pub fn glyph(self) -> char {
+        match self {
+            EndMark::Star => '*',
+            EndMark::Dash => '-',
+            EndMark::Degree => '\u{b0}',
+            EndMark::Bullet => '\u{2022}',
+            EndMark::Dot => '\u{25cf}',
+            EndMark::SmallSquare => '\u{25aa}',
+            EndMark::Square => '\u{25a0}',
+        }
+    }
+
+    /// The mark as it is drawn: three of it, kept together and apart by four no-break spaces.
+    pub fn text(self) -> String {
+        let between = "\u{a0}".repeat(4);
+        [self.glyph().to_string(), self.glyph().to_string(), self.glyph().to_string()].join(&between)
+    }
+}
+
+/// Where the end of a song's mark goes on the slide.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EndPlace {
+    /// Half a line under the lowest words' last line.
+    #[default]
+    Under,
+    /// As low as it may go: 3% above the slide's bottom, or just over the copyright line.
+    Bottom,
+}
+
+/// How the end of a song's mark looks, which is a theme's to say: which mark, its size beside
+/// the words', its colour (the words' own unless one is chosen) and its place. The mark always
+/// takes the words' face, outline and shadow. As it comes, it is the mark as it always was:
+/// three stars at 80% of the words' size, in their colour, under the last line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EndLook {
+    pub mark: EndMark,
+    /// A whole percentage of the largest words' size, from 40 to 160 in steps of 10.
+    pub size: u16,
+    pub colour: Option<Rgba>,
+    pub place: EndPlace,
+}
+
+impl Default for EndLook {
+    fn default() -> EndLook {
+        EndLook { mark: EndMark::Star, size: EndLook::USUAL_SIZE, colour: None, place: EndPlace::Under }
+    }
+}
+
+impl EndLook {
+    pub const USUAL_SIZE: u16 = 80;
+    pub const SMALLEST: u16 = 40;
+    pub const LARGEST: u16 = 160;
+    pub const STEP: u16 = 10;
+
+    /// Whether it is the look a theme has as it comes, which its file leaves out.
+    pub fn is_usual(&self) -> bool {
+        *self == EndLook::default()
+    }
+
+    /// The look one step smaller (`bigger` false) or bigger, never past the smallest or largest.
+    pub fn stepped(self, bigger: bool) -> EndLook {
+        let size = if bigger { self.size + EndLook::STEP } else { self.size.saturating_sub(EndLook::STEP) };
+        EndLook { size: size.clamp(EndLook::SMALLEST, EndLook::LARGEST), ..self }
+    }
+
+    /// The look as a theme's file has it, taking what can be read: a mark this copy doesn't
+    /// know, a size that is no number, a colour or a place that can't be read each fall back to
+    /// the usual one, and a size out of range or between steps goes to the nearest step. A
+    /// theme's file is read as one, so a look that failed to read would lose the whole theme.
+    fn read(saved: &serde_json::Value) -> EndLook {
+        let usual = EndLook::default();
+        let mark = saved
+            .get("mark")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|name| EndMark::ALL.into_iter().find(|mark| mark.glyph().to_string() == name))
+            .unwrap_or(usual.mark);
+        let size = saved.get("size").and_then(serde_json::Value::as_f64).filter(|size| size.is_finite()).map_or(
+            usual.size,
+            |size| {
+                let (least, most, step) =
+                    (f64::from(EndLook::SMALLEST), f64::from(EndLook::LARGEST), f64::from(EndLook::STEP));
+                ((size.clamp(least, most) / step).round() * step) as u16
+            },
+        );
+        let colour = saved.get("colour").and_then(|colour| Rgba::deserialize(colour).ok());
+        let place = match saved.get("place").and_then(serde_json::Value::as_str) {
+            Some("bottom") => EndPlace::Bottom,
+            _ => EndPlace::Under,
+        };
+        EndLook { mark, size, colour, place }
+    }
+}
+
+impl Serialize for EndLook {
+    fn serialize<S: serde::Serializer>(&self, to: S) -> Result<S::Ok, S::Error> {
+        #[derive(Serialize)]
+        struct Saved {
+            mark: String,
+            size: u16,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            colour: Option<Rgba>,
+            place: &'static str,
+        }
+        let place = match self.place {
+            EndPlace::Under => "under",
+            EndPlace::Bottom => "bottom",
+        };
+        Saved { mark: self.mark.glyph().to_string(), size: self.size, colour: self.colour, place }.serialize(to)
+    }
+}
+
+impl<'de> Deserialize<'de> for EndLook {
+    fn deserialize<D: serde::Deserializer<'de>>(from: D) -> Result<EndLook, D::Error> {
+        Ok(EndLook::read(&serde_json::Value::deserialize(from)?))
+    }
 }
 
 /// A version as the screens are switched to it: a name shared by every theme that has a
@@ -563,6 +709,8 @@ struct ThemeOnDisk {
     template_names: [Option<String>; 2],
     #[serde(default)]
     versions: Vec<ThemeVersion>,
+    #[serde(default)]
+    end_look: EndLook,
 }
 
 impl From<ThemeOnDisk> for Theme {
@@ -611,6 +759,7 @@ impl From<ThemeOnDisk> for Theme {
             background_picture: file.background_picture,
             // A version left with no templates is not one the theme has.
             versions: file.versions.into_iter().filter(|version| !version.templates.is_empty()).collect(),
+            end_look: file.end_look,
         }
     }
 }
@@ -883,6 +1032,7 @@ impl Theme {
             background: None,
             background_picture: None,
             versions: Vec::new(),
+            end_look: EndLook::default(),
         }
     }
 
@@ -1349,6 +1499,83 @@ pub fn missing_fonts(used: &[String], installed: &[String]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn the_end_marks_look_is_the_themes_and_as_it_comes_it_is_three_stars_at_80_percent() {
+        // As it comes: the mark as it always was, and the theme's file says nothing of it.
+        let theme = Theme::builtin();
+        let usual = EndLook { mark: EndMark::Star, size: 80, colour: None, place: EndPlace::Under };
+        assert_eq!((theme.end_look, EndLook::default()), (usual, usual));
+        assert_eq!(usual.mark.text(), "*\u{a0}\u{a0}\u{a0}\u{a0}*\u{a0}\u{a0}\u{a0}\u{a0}*");
+        let saved = theme.to_json();
+        assert!(!saved.contains("end_look"), "an untouched theme's file is as it was");
+        // A theme file written before themes had the look reads with the usual one.
+        assert_eq!(Theme::from_json(&saved).expect("read").end_look, usual);
+        // A look chosen goes into the file and comes back.
+        let yellow = Rgba::rgb(0xff, 0xc4, 0x00);
+        let chosen = EndLook { mark: EndMark::Bullet, size: 120, colour: Some(yellow), place: EndPlace::Bottom };
+        let dotted = Theme { end_look: chosen, ..theme.clone() };
+        let saved = dotted.to_json();
+        assert!(saved.contains("end_look") && saved.contains("\u{2022}"), "{saved}");
+        let back = Theme::from_json(&saved).expect("read");
+        assert_eq!(back.end_look, chosen);
+        assert_eq!(back, dotted, "and the rest of the theme with it");
+        // SoftProjector's seven, in its order, each three of its mark four spaces apart.
+        let marks: String = EndMark::ALL.iter().map(|mark| mark.glyph()).collect();
+        assert_eq!(marks, "*-\u{b0}\u{2022}\u{25cf}\u{25aa}\u{25a0}");
+        for mark in EndMark::ALL {
+            let text = mark.text();
+            assert_eq!(text.chars().filter(|c| *c == mark.glyph()).count(), 3, "{text}");
+            assert_eq!(text.chars().filter(|c| *c == '\u{a0}').count(), 8, "{text}");
+            let named = Theme { end_look: EndLook { mark, ..usual }, ..theme.clone() };
+            assert_eq!(Theme::from_json(&named.to_json()).expect("read").end_look.mark, mark);
+        }
+    }
+
+    #[test]
+    fn the_end_marks_size_steps_by_ten_and_stops_at_40_and_160() {
+        let mut look = EndLook::default();
+        let mut sizes = vec![look.size];
+        for _ in 0..12 {
+            look = look.stepped(true);
+            sizes.push(look.size);
+        }
+        assert_eq!(sizes, [80, 90, 100, 110, 120, 130, 140, 150, 160, 160, 160, 160, 160]);
+        for _ in 0..20 {
+            look = look.stepped(false);
+        }
+        assert_eq!(look.size, 40, "never under 40");
+        assert_eq!(look.stepped(false).size, 40);
+        assert_eq!(look.stepped(true).size, 50);
+        // Nothing else of the look changes with its size.
+        let chosen = EndLook { mark: EndMark::Square, place: EndPlace::Bottom, ..EndLook::default() };
+        assert_eq!(chosen.stepped(true), EndLook { size: 90, ..chosen });
+    }
+
+    #[test]
+    fn a_look_this_copy_cant_read_keeps_the_theme_and_falls_back_field_by_field() {
+        let theme = Theme::builtin();
+        let with = |look: &str| -> Theme {
+            let mut file: serde_json::Value = serde_json::from_str(&theme.to_json()).expect("a theme's file");
+            file["theme"]["end_look"] = serde_json::from_str(look).expect("JSON");
+            Theme::from_json(&file.to_string()).expect("the theme reads")
+        };
+        let usual = EndLook::default();
+        // A newer copy's mark, a size that is no number, a colour and a place that aren't ones.
+        let odd = with(r#"{"mark": "\u2605", "size": "big", "colour": "red", "place": "top"}"#);
+        assert_eq!(odd.end_look, usual);
+        assert_eq!(odd.templates, theme.templates, "the theme itself is whole");
+        // What can be read is kept beside what can't.
+        let part = with(r#"{"mark": "-", "size": 300, "colour": 7, "place": "bottom"}"#);
+        assert_eq!(part.end_look, EndLook { mark: EndMark::Dash, size: 160, colour: None, place: EndPlace::Bottom });
+        assert_eq!(with(r#"{"size": 12}"#).end_look.size, 40);
+        assert_eq!(with(r#"{"size": 104.9}"#).end_look.size, 100, "to the nearest step");
+        // Not an object at all.
+        for look in ["null", "7", "\"stars\"", "[]"] {
+            assert_eq!(with(look).end_look, usual, "{look}");
+        }
+    }
 
     #[test]
     fn the_built_in_bible_theme_reads_and_has_both_languages_with_their_references() {
@@ -1358,8 +1585,6 @@ mod tests {
         assert_eq!(roles, ["primary", "reference", "translation", "translation-reference"]);
         assert!(theme.background_picture.is_none(), "no picture is built in");
     }
-
-    use super::*;
 
     #[test]
     fn new_looks_use_the_default_typeface_and_a_saved_look_keeps_its_own() {

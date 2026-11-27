@@ -323,6 +323,10 @@ pub struct HomeState {
     pub song_theme_request: Option<(usize, Option<usize>)>,
     /// The id of each theme, in the order of `theme_names`.
     pub theme_ids: Vec<sp_model::Uuid>,
+    /// How each theme draws the end of a song's mark, in the order of `theme_names`.
+    pub theme_end_looks: Vec<sp_model::EndLook>,
+    /// The window for a theme's end mark, while it is open (`end_look`).
+    pub end_look: Option<crate::end_look::Open>,
     /// A change to a song asked for from its menu, and a song waiting to be confirmed deleted.
     pub song_request: Option<(usize, SongRequest)>,
     /// Songs waiting for a yes before they are deleted, and songs to delete now.
@@ -1869,6 +1873,8 @@ pub enum ThemeRequest {
     /// Move the theme at a place in the list to another (never the built-in theme, which stays
     /// first).
     Move(usize, usize),
+    /// The theme of this id draws the end of a song's mark with this look (`end_look`).
+    EndLook(sp_model::Uuid, sp_model::EndLook),
 }
 
 /// The picture of the audience screen for the Program panel: what is there now, what was
@@ -2135,6 +2141,8 @@ impl Default for HomeState {
             decklink: sp_decklink::Found { driver: sp_decklink::Driver::Looking, devices: Vec::new() },
             inspector: crate::inspector::InspectorState::default(),
             theme_edit: None,
+            theme_end_looks: Vec::new(),
+            end_look: None,
             theme_names: Vec::new(),
             themes_kept: vec![0],
             template_names: Vec::new(),
@@ -2431,6 +2439,7 @@ impl HomeState {
     pub fn escape_taken_above_find(&self, ctx: &egui::Context) -> bool {
         egui::Popup::is_any_open(ctx)
             || self.key_sheet
+            || crate::end_look::over_the_operators_window(self)
             || self.alert_open()
             || self.new_song_sheet.is_some()
             || self.setup.is_some()
@@ -2810,6 +2819,8 @@ fn home_view(
     crate::stage_editor::prepare(state);
     if state.editing.is_some() {
         edit_view(ui, show, state, theme, thumb, canvas);
+        // A theme's end mark, opened from the theme's own rows.
+        crate::end_look::window(ui.ctx(), state, show, crate::end_look::Door::Editor);
         return commands;
     }
     if state.props_editor_open && state.theme_edit.is_none() {
@@ -11275,6 +11286,61 @@ mod tests {
         assert_eq!(gone.redo_in_theme(&mut changed, false), Some((None, 0)));
         assert!(changed.versions.is_empty());
         assert_eq!(gone.said(true), format!("Put the template {} back.", one.versions[0].templates[0].name));
+    }
+
+    #[test]
+    fn the_themes_own_rows_have_song_end_which_opens_the_end_marks_window() {
+        let (ctx, show) = (egui::Context::default(), three_songs());
+        let theme = Theme::builtin();
+        let dashes = sp_model::EndLook { mark: sp_model::EndMark::Dash, ..sp_model::EndLook::default() };
+        // A song template open, nothing picked: the theme's own rows.
+        let first = EditDraft::of_slide(theme.templates[0].as_slide(crate::editor::sample_words()), 0);
+        let mut state = HomeState {
+            theme_names: vec![theme.name.clone()],
+            theme_ids: vec![theme.id],
+            theme_end_looks: vec![dashes],
+            theme_edit: Some(ThemeEdit::of(0, theme.clone())),
+            editing: Some(first),
+            ..HomeState::default()
+        };
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), 0.0);
+        assert!(drawn_at(&texts, "Song end").is_some(), "{texts:?}");
+        assert!(
+            drawn_at(&texts, &crate::end_look::chip_words(sp_model::EndMark::Dash)).is_some(),
+            "the theme\u{2019}s mark"
+        );
+        let at = drawn_at(&texts, "Change\u{2026}").expect("its Change\u{2026}");
+        let press = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut time = 0.0;
+        for events in [vec![Event::PointerMoved(at)], vec![press(true)], vec![press(false)]] {
+            time += 0.1;
+            frame_texts(&ctx, &show, &mut state, events, time);
+        }
+        let open = state.end_look.expect("the window is open");
+        assert_eq!((open.theme, open.door), (theme.id, crate::end_look::Door::Editor));
+        // It is drawn over the editor.
+        let texts = frame_texts(&ctx, &show, &mut state, Vec::new(), time + 0.1);
+        assert!(texts.iter().any(|(words, _)| words.starts_with("The end of a song")), "{texts:?}");
+        // A Bible template has no such row.
+        let bible = theme.bible_template_index();
+        let draft = EditDraft::of_slide(theme.templates[bible].as_slide(crate::editor::sample_words()), 0);
+        let mut edit = ThemeEdit::of(0, theme.clone());
+        edit.template = bible;
+        let mut state = HomeState {
+            theme_names: vec![theme.name.clone()],
+            theme_ids: vec![theme.id],
+            theme_end_looks: vec![dashes],
+            theme_edit: Some(edit),
+            editing: Some(draft),
+            ..HomeState::default()
+        };
+        let texts = frame_texts(&egui::Context::default(), &show, &mut state, Vec::new(), 0.0);
+        assert!(drawn_at(&texts, "Song end").is_none());
     }
 
     #[test]

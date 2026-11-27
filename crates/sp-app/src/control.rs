@@ -1321,7 +1321,7 @@ Screens and settings
   groups                       each group's colour, and the letter key that jumps to it
   settings set key=value…      transition=KIND[:SECONDS] media_transition=… copyright=never|first|
                                last|every ccli_licence=N start_audience=on|off continuous=on|off
-                               end_mark=on|off (three stars under a song's last slide as sung)
+                               end_mark=on|off (a mark under a song's last slide as sung)
                                start_with=nothing|media-playlist:NAME|announcements:SONG
                                view=grid|words|table columns=1-12
                                language=auto|en|es|ru|uk (the app's own words)

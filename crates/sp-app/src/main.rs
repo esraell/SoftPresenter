@@ -27,6 +27,7 @@ mod deck;
 mod dialogs;
 mod displays;
 mod editor;
+mod end_look;
 mod end_mark;
 mod ffmpeg_fetch;
 mod file_drop;
@@ -1155,6 +1156,7 @@ fn something_over_the_window(state: &home::HomeState, ctx: &egui::Context) -> bo
 fn window_over_the_window(state: &home::HomeState) -> bool {
     state.settings_open
         || state.key_sheet
+        || end_look::over_the_operators_window(state)
         || state.bible.options.open
         || state.bible.options.manage_open
         || !state.bible.options.details.is_empty()
@@ -1423,7 +1425,7 @@ fn add_key(show: &Show, state: &mut home::HomeState) {
 /// (`typed_key`). A search left open after a drop has given the keys back to the show
 /// (`HomeState::search_resting`).
 fn show_key_held_back(state: &home::HomeState, ctx: &egui::Context, key: &Pressed, f_keys: bool) -> bool {
-    if state.key_sheet || (state.typing_in_find() && !f_row(key)) {
+    if state.key_sheet || end_look::over_the_operators_window(state) || (state.typing_in_find() && !f_row(key)) {
         return true;
     }
     if state.bible_open
@@ -2260,6 +2262,7 @@ impl Panel {
             Panel::Settings => {
                 state.preferences_open = false;
                 state.keys_card.stop();
+                crate::end_look::settings_closed(state);
             }
         }
     }
@@ -9334,6 +9337,7 @@ impl App {
             state.themes_kept =
                 self.themes.iter().enumerate().filter(|(_, theme)| theme.id.is_nil()).map(|(at, _)| at).collect();
             state.theme_ids = self.themes.iter().map(|theme| theme.id).collect();
+            state.theme_end_looks = self.themes.iter().map(|theme| theme.end_look).collect();
             state.theme_for_songs = self.songs_theme;
             state.theme_for_bible = self.bible_theme;
             state.theme_layouts = layouts;
@@ -9379,6 +9383,24 @@ impl App {
                 }
                 if !editing {
                     self.refresh_output();
+                }
+            }
+            // A theme's look for the end of a song's mark, from its window (opened in Settings or
+            // in the Theme Editor, whose copy of the theme takes it too, so that a later change
+            // there doesn't put the old look back).
+            Some(ThemeRequest::EndLook(id, look)) => {
+                let edit = running.home_state.theme_edit.as_mut();
+                if let Some(index) = end_look::give(&mut self.themes, edit, id, look) {
+                    if !self.themes_unsaved.contains(&index) {
+                        self.themes_unsaved.push(index);
+                    }
+                    self.save_unsaved();
+                    self.themes_changed();
+                    // A last slide on screen takes the look at once (not from the Theme Editor,
+                    // which shows the audience its theme when it is left).
+                    if !editing {
+                        self.refresh_output();
+                    }
                 }
             }
             // A template of a theme made the one Bible slides use (from Bible Options; the Theme
@@ -13053,6 +13075,10 @@ impl ApplicationHandler<AppEvent> for App {
                     self.apply(commands);
                     // Add a Key (Settings › Keys) greys the menus' items while it listens.
                     self.tick_menu();
+                    // A theme's end mark changed in its window, opened from Settings › Slides.
+                    if self.running.as_ref().is_some_and(|running| running.home_state.theme_request.is_some()) {
+                        self.handle_themes();
+                    }
                     // Every key (Settings › Keys) opens the list of keys, which is the operator's
                     // window's: that window comes forward to show it.
                     let quiet = self.quiet();
@@ -14092,8 +14118,13 @@ fn main() -> ExitCode {
         }));
     }
     start_steps::mark("event loop made");
-    let (themes, songs_theme, moved_in) = theme_store::load_all();
+    let (mut themes, songs_theme, moved_in) = theme_store::load_all();
     start_steps::mark("themes read");
+    // Testing aid: SOFTPRESENTER_END_LOOK gives the main theme a look for the end of a song's
+    // mark for this run (`end_look::asked_for_the_run`).
+    if let (Some(look), Some(main)) = (end_look::asked_for_the_run(), themes.get_mut(songs_theme)) {
+        main.end_look = look;
+    }
     let (bible_theme, bible_layout) = (songs_theme, themes[songs_theme].bible_template_index());
     // How each song and theme file is now, as it was just read.
     let mut stamps = outside::Stamps::default();

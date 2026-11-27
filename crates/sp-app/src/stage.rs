@@ -258,6 +258,7 @@ pub fn editor_theme(layout: &ThemeTemplate) -> Theme {
         background: None,
         background_picture: None,
         versions: Vec::new(),
+        end_look: sp_model::EndLook::default(),
     }
 }
 
@@ -332,6 +333,7 @@ pub fn theme_for(layout: &ThemeTemplate) -> Theme {
         background: None,
         background_picture: None,
         versions: Vec::new(),
+        end_look: sp_model::EndLook::default(),
     }
 }
 
