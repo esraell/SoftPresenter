@@ -12702,11 +12702,15 @@ fn main() -> ExitCode {
             one_copy::Start::End(code) => return code,
         }
     };
-    // On a Mac the library moves to Documents, once.
-    let to_documents = library_folder::move_to_documents();
-    // Songs named by path or title in files from before songs were found by id are named by
-    // id, once, in whichever library folder is in use.
-    let settled = bible_store::data_dir().map(|dir| song_ids::settle(&dir, true)).unwrap_or_default();
+    // On a Mac the library moves to Documents, once. Songs named by path or title in files from
+    // before songs were found by id are named by id, once, in whichever library folder is in use.
+    // Neither for a list of the displays, which isn't held and may run beside the copy running.
+    let (to_documents, settled) = if options.list_displays {
+        (Vec::new(), Vec::new())
+    } else {
+        let to_documents = library_folder::move_to_documents();
+        (to_documents, bible_store::data_dir().map(|dir| song_ids::settle(&dir, true)).unwrap_or_default())
+    };
     applog::start();
     // Says in the log how the last run ended if it didn't quit, and notes this one until the app
     // has quit (any return from here on). A list of the displays, which may run beside the copy

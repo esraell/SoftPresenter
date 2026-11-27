@@ -1325,9 +1325,8 @@ Everything on the menu bar
   menu ITEM                    choose one, as a click on it does
 
 The window
-  front [--start]              bring it to the front, restored if it was minimised (a quiet copy's
-                               stays behind); --start, as starting SoftPresenter again while it
-                               runs sends, says in the log that another start asked
+  front                        bring it to the front, restored if it was minimised, as starting
+                               SoftPresenter again while it runs does (a quiet copy's stays behind)
 
 Updates (asked only when told to; closed to remote pages and AI assistants)
   update [status]              what the last check found, and when
@@ -3831,41 +3830,52 @@ impl crate::App {
         Ok(Reply::done(format!("Chose {} from the menu.", crate::menubar::id_of(action))))
     }
 
-    /// `front [--start]`: the operator's window brought to the front, restored first if it was
-    /// minimised, as a start of the app turned away by this copy asks (`one_copy`), saying
-    /// `--start` so the log says it was that. A quiet copy (a test's) leaves its window behind
-    /// everything, and says so.
+    /// `front`: the operator's window asked to come to the front, restored first if it was
+    /// minimised. A start of the app turned away by this copy asks for it (`one_copy`) with
+    /// `--start`, which isn't offered to people, so the log says it was that. A quiet copy (a
+    /// test's) leaves its window behind everything, and says so. A copy that is quitting refuses,
+    /// so the start goes on trying and opens the app once this one has gone, rather than ending
+    /// with nothing open. Only what the system says is claimed: in front once the window has the
+    /// keyboard, asked otherwise.
     fn ctl_front(&mut self, args: &[String]) -> Result<Reply, String> {
         let start = match args.get(1) {
             None => false,
             Some(word) if word == "--start" && args.len() == 2 => true,
-            _ => return Err("front [--start]".to_owned()),
+            _ => return Err("front takes nothing after it.".to_owned()),
         };
+        if self.quitting.is_some() || self.left {
+            return Err("SoftPresenter is closing.".to_owned());
+        }
         let quiet = self.quiet();
         let Some(running) = self.running.as_ref() else {
             return Err("The window isn't open yet.".to_owned());
         };
-        if !quiet {
+        let in_front = !quiet && {
             // Windows brings a minimised window to the front only once it is restored.
             if running.home_window.is_minimized() == Some(true) {
                 running.home_window.set_minimized(false);
             }
             running.home_window.focus_window();
-        }
+            running.home_window.has_focus()
+        };
         if start {
             crate::applog::event(
                 "start",
                 if quiet {
                     "another start of SoftPresenter asked for this window to come to the front (a quiet copy's stays behind)"
-                } else {
+                } else if in_front {
                     "another start of SoftPresenter brought this window to the front"
+                } else {
+                    "another start of SoftPresenter asked this window to come to the front (the system hasn't said it came)"
                 },
             );
         }
         Ok(Reply::done(if quiet {
             "A quiet copy's window stays behind everything."
-        } else {
+        } else if in_front {
             "The window is in front."
+        } else {
+            "Asked the window to come to the front."
         }))
     }
 }

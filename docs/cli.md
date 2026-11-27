@@ -1392,7 +1392,7 @@ an AI assistant can't use these: whether a computer sends reports is decided at 
 | `undo`, `redo` | Undoes or redoes the last change to a song or slide, or puts back what was last deleted that Undo brings back (items taken out of a playlist, a playlist, a library, an audio playlist, a timer, message, prop or macro; redo deletes it again), whatever the window shows, and says what it was ("Put the timer Countdown back.") |
 | `job N` | How a background job (a pack with videos, a large pack import, a Bible download) went, or "still going" |
 | `menu`, `menu ITEM` | Lists the commands (every one the window has a place for, though the Mac's menu bar holds only a few of them); chooses one by id (`ClearAll`, `NewSong`) or words ("Clear All"), as a click does |
-| `front`, `front --start` | Brings the window to the front, restored first if it was minimised, as starting SoftPresenter again while it runs does: that start ends, sending `front --start`, and the log says another start asked. A quiet copy's window stays behind everything ("A quiet copy's window stays behind everything."). Closed to remote pages and AI assistants |
+| `front` | Asks the window to come to the front, restored first if it was minimised, as starting SoftPresenter again while it runs does: "The window is in front." once the system says it has the keyboard, else "Asked the window to come to the front." A quiet copy's window stays behind everything ("A quiet copy's window stays behind everything."); a copy that is closing refuses ("SoftPresenter is closing."). Closed to remote pages and AI assistants |
 
     $ sp undo
     Undid a change to River Song, slide 2.

@@ -171,6 +171,20 @@ pub fn let_others_come_forward() {
     windows::let_others_come_forward();
 }
 
+/// The languages Windows shows its own words in for the signed-in user, its first one first, as
+/// tags (`es-ES`): asked at once, as the app's start can't wait for PowerShell. Empty where they
+/// can't be asked, and on other systems.
+pub fn ui_languages() -> Vec<String> {
+    #[cfg(windows)]
+    {
+        windows::ui_languages()
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
 /// Who owns a file or folder and who may open it, read and set with Windows' own security
 /// calls, and the user this program runs as: what keeps the control socket's folder to one
 /// user. Access lists go in and out written down as Windows writes them (SDDL); what they mean

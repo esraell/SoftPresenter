@@ -51,6 +51,23 @@ fn open(path: &PathBuf) -> Option<File> {
     Some(file)
 }
 
+/// Adds one line to the log of the copy running with this data folder, from a start it turned
+/// away, which opens no log of its own (`one_copy`): written to the file's end in one go, as that
+/// copy's own lines are, so neither is cut into the other. Nothing when there is no log there
+/// yet: none is made.
+pub(crate) fn add_from_outside(area: &str, message: &str) {
+    if let Some(dir) = folder() {
+        add_from_outside_in(&dir, area, message);
+    }
+}
+
+fn add_from_outside_in(dir: &std::path::Path, area: &str, message: &str) {
+    let Ok(mut file) = OpenOptions::new().append(true).open(dir.join("SoftPresenter.log")) else { return };
+    let mut said = line(area, message);
+    said.push('\n');
+    let _ = file.write_all(said.as_bytes());
+}
+
 /// Opens the log and says the app has started. Also writes any crash to it.
 pub fn start() {
     STARTED.get_or_init(Instant::now);
@@ -276,6 +293,25 @@ impl Timing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_line_from_a_start_turned_away_goes_at_the_end_of_the_log_and_makes_none() {
+        let dir = std::env::temp_dir().join(format!("softpresenter-applog-outside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("SoftPresenter.log");
+        add_from_outside_in(&dir, "start", "said from outside");
+        assert!(!log.exists(), "no log is made");
+        std::fs::write(&log, "a line of the copy running\n").unwrap();
+        add_from_outside_in(&dir, "start", "said from outside");
+        let written = std::fs::read_to_string(&log).unwrap();
+        let lines: Vec<&str> = written.lines().collect();
+        assert_eq!(lines.len(), 2, "{written:?}");
+        assert_eq!(lines[0], "a line of the copy running");
+        assert!(lines[1].ends_with(" [start] said from outside"), "{}", lines[1]);
+        assert!(written.ends_with('\n'), "a whole line");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn paths_are_written_without_windows_verbatim_prefix() {

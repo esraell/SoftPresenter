@@ -35,5 +35,6 @@
   "dialogs.font.restart": "Después de instalar una fuente, reinicia SoftPresenter.",
   "dialogs.live_menu.app_made": "El versículo o el subtítulo en pantalla no tiene menú.",
   "dialogs.live_menu.none": "Pon una diapositiva en pantalla para abrir su menú.",
-  "dialogs.media.follows_folder": "{name} sigue una carpeta: saca el archivo de la carpeta."
+  "dialogs.media.follows_folder": "{name} sigue una carpeta: saca el archivo de la carpeta.",
+  "dialogs.already_running": "SoftPresenter ya está abierto o todavía se está cerrando: espera un momento y, si sigues sin ver su ventana, finalízalo en el Administrador de tareas."
 }

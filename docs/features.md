@@ -15,7 +15,10 @@ One copy runs per library. Starting SoftPresenter again while it runs (a second 
 icon, or several while an update installs) opens no second copy: the copy running comes to the
 front, restored if it was minimised, and the new start ends, having opened no window, screen or
 NDI source and touched nothing in the library. It holds even for starts made within a moment of
-each other, and a copy that crashed or was ended from Task Manager holds nothing. Files named to
+each other, and a copy that crashed or was ended from Task Manager holds nothing. A start made
+while the copy running is closing waits for it to close, then opens. One whose copy running
+doesn't answer within ten seconds ends, saying so in that copy's log (and on Windows in a
+message: wait, or end it in Task Manager). Files named to
 open on such a start aren't opened (`sp song import`, `sp media add` add them). Copies with data
 folders of their own (`SOFTPRESENTER_DATA`) run side by side.
 

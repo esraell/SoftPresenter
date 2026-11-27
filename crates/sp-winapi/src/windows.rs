@@ -423,3 +423,22 @@ pub fn let_others_come_forward() {
     // and fails harmlessly when this program may not bring a window to the front itself.
     unsafe { AllowSetForegroundWindow(ASFW_ANY) };
 }
+
+pub fn ui_languages() -> Vec<String> {
+    use windows_sys::Win32::Globalization::{GetUserPreferredUILanguages, MUI_LANGUAGE_NAME};
+    let (mut count, mut room) = (0u32, 0u32);
+    // SAFETY: with no buffer the call only writes how many languages there are, and the room
+    // their names need, into the two u32s, which outlive it.
+    let sized = unsafe { GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, null_mut(), &mut room) };
+    if sized == 0 || room == 0 {
+        return Vec::new();
+    }
+    let mut names = vec![0u16; room as usize];
+    // SAFETY: `names` has room for `room` wide characters, which the call is told and writes no
+    // more than; it fails (and is passed over) if the list grew since.
+    if unsafe { GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, names.as_mut_ptr(), &mut room) } == 0 {
+        return Vec::new();
+    }
+    names.truncate(room as usize);
+    names.split(|&c| c == 0).filter(|name| !name.is_empty()).map(String::from_utf16_lossy).collect()
+}

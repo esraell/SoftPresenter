@@ -757,6 +757,10 @@ fn a_run_that_was_closed_from_outside_is_said_once_at_the_next_start() {
 const TURNED_AWAY: &str = "SoftPresenter is already open with this data folder";
 /// What the copy running says in its log when a start turned away asks for it.
 const ASKED_FORWARD: &str = "[start] another start of SoftPresenter";
+/// What a start turned away by a copy that never answered adds to that copy's log (only the test
+/// on a Mac and Linux, where it can hold the folder itself, reads it).
+#[cfg(unix)]
+const NO_ANSWER: &str = "[start] a start of SoftPresenter turned away by this copy got no answer";
 /// How long a start turned away may take to end: it asks the copy running to come to the front,
 /// for ten seconds at most if that one doesn't answer; the rest is for a slow, busy computer.
 const TURNED_AWAY_WITHIN: Duration = Duration::from_secs(40);
@@ -864,7 +868,10 @@ fn the_command_line_works_as_before_while_a_copy_runs() {
     // sp's commands, with ctl and without, and the help sp prints itself.
     assert!(run.sp(&["ctl", "status"]).ok, "ctl status{}", run.context());
     assert!(run.sp(&["status"]).ok, "status{}", run.context());
-    assert!(run.sp(&["help"]).text.contains("sp COMMAND"), "sp help{}", run.context());
+    let help = run.sp(&["help"]).text;
+    assert!(help.contains("sp COMMAND"), "sp help{}", run.context());
+    // `front --start` is for a start turned away, and not offered to people.
+    assert!(help.contains("  front ") && !help.contains("--start"), "{help}");
     // The app's own help, and a list of the displays, run and end as before.
     let mut help = run.program();
     help.arg("--help");
@@ -887,7 +894,7 @@ fn the_command_line_works_as_before_while_a_copy_runs() {
     // `sp front` itself: a quiet copy's window stays behind, and says so; a word it doesn't take is
     // refused with how it goes.
     assert_eq!(copy.ok(&["front"]).text, "A quiet copy's window stays behind everything.");
-    copy.refused(&["front", "now"], "front [--start]");
+    copy.refused(&["front", "now"], "front takes nothing after it");
     copy.quit().assert_clean(&run);
 }
 
@@ -910,6 +917,84 @@ fn a_capture_on_a_folder_in_use_saves_no_picture_and_leaves_the_copy_alone() {
     assert!(!log.contains(ASKED_FORWARD), "the copy running wasn't asked to come forward{}", run.context());
     assert_eq!(starts_logged(&log), 1, "the capture never opened the log{}", run.context());
     copy.quit().assert_clean(&run);
+}
+
+/// A copy that is quitting (here, waiting for its songs to be written to a slow disk) refuses to
+/// come to the front, so a start made meanwhile, as a person restarting it makes, waits for it to
+/// go and then opens the app, rather than ending with nothing open.
+#[test]
+fn a_start_while_the_copy_running_quits_opens_the_app_once_that_copy_has_gone() {
+    /// With each file written 40 ms late, about two and a half seconds of writing after Quit.
+    const SONGS: usize = 60;
+    let Some(run) = Run::new("a_start_while_the_copy_running_quits_opens_the_app_once_that_copy_has_gone") else {
+        return;
+    };
+    let folder = run.file("Songs to write");
+    std::fs::create_dir_all(&folder).expect("the folder of songs");
+    for n in 1..=SONGS {
+        let words = song_text(&[("Verse 1", &format!("The verse of closing test song {n}"))]);
+        std::fs::write(folder.join(format!("Closing Song {n:03}.txt")), words).expect("a song");
+    }
+    let mut first = run.start(&[("SOFTPRESENTER_SLOW_WRITES", "40")]);
+    first.ok(&["song", "import", &folder.to_string_lossy()]);
+    assert!(run.sp(&["menu", "Quit"]).ok, "menu Quit{}", run.context());
+    // While it writes them it still answers, and refuses to come to the front.
+    let refused = run.sp(&["front", "--start"]);
+    assert!(!refused.ok && refused.text.contains("closing"), "{refused:?}{}", run.context());
+    let mut second = run.launch(&[]);
+    let status = first.wait_exit(Duration::from_secs(60)).unwrap_or_else(|| panic!("it didn't quit{}", run.context()));
+    assert!(status.success(), "the first ended with {status}{}", run.context());
+    // The second takes the folder once the first has gone, and opens.
+    let answers = Instant::now();
+    while !run.sp(&["status"]).ok {
+        assert!(
+            second.ended().is_none(),
+            "the second start ended instead of opening: {:?}{}",
+            second.stderr(),
+            run.context()
+        );
+        assert!(answers.elapsed() < START_WITHIN, "the second start never answered{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let log = run.log();
+    assert!(!log.contains(ASKED_FORWARD), "nothing was brought to the front{}", run.context());
+    assert_eq!(starts_logged(&log), 2, "both starts opened the log{}", run.context());
+    assert!(run.sp(&["menu", "Quit"]).ok, "menu Quit{}", run.context());
+    let status = second.ended_within(QUIT_WITHIN).unwrap_or_else(|| panic!("it didn't quit{}", run.context()));
+    let quitted = Quitted { status, log: run.log(), stderr: second.stderr() };
+    quitted.assert_clean(&run);
+}
+
+/// A start whose folder a copy holds that never answers (one that hangs, or whose control socket
+/// never came up) ends once its ten seconds are up, without opening anything, and says so: on its
+/// standard error, and in that copy's log. (On Windows it says so in a message as well, which a
+/// quiet run never shows.)
+#[cfg(unix)]
+#[test]
+fn a_start_held_off_by_a_copy_that_never_answers_ends_and_says_so() {
+    let Some(run) = Run::new("a_start_held_off_by_a_copy_that_never_answers_ends_and_says_so") else { return };
+    // The test holds the folder as a copy would, and answers nothing; the log stands in for that
+    // copy's.
+    std::fs::create_dir_all(&run.data).expect("the data folder");
+    let hold = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(run.data.join("one-copy.lock"))
+        .expect("the lock file");
+    hold.try_lock().expect("the folder held");
+    std::fs::write(run.data.join("SoftPresenter.log"), "").expect("a log");
+    let began = Instant::now();
+    let mut start = run.launch(&[]);
+    let status = turned_away(&run, &mut start, "the start");
+    assert!(status.success(), "it ended with {status}{}", run.context());
+    assert!(began.elapsed() >= Duration::from_secs(9), "it asked for its ten seconds: {:?}", began.elapsed());
+    assert!(start.stderr().contains("didn't answer"), "it said why: {:?}", start.stderr());
+    let log = run.log();
+    assert_eq!(log.matches(NO_ANSWER).count(), 1, "said once in the log: {log:?}");
+    assert_eq!(starts_logged(&log), 0, "it opened nothing{}", run.context());
+    drop(hold);
 }
 
 /// The system lets the hold go when the copy holding it ends without quitting (killed, as Task

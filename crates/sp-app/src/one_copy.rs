@@ -68,9 +68,11 @@ pub enum Start {
 }
 
 /// Takes the hold on this copy's data folder, or, when another copy running has it, asks that one
-/// to come to the front and says to end. A run that only saves a picture (`--capture-home`) asks
-/// nothing of the copy running and ends with a failure, as it saved no picture. `files`: files
-/// were named to open, which a start turned away doesn't open.
+/// to come to the front and says to end. One that never answers is said on the standard error,
+/// in its log, and on Windows (where a start from the icon has no console) in a message. A run
+/// that only saves a picture (`--capture-home`) asks nothing of the copy running and ends with a
+/// failure, as it saved no picture. `files`: files were named to open, which a start turned away
+/// doesn't open.
 pub fn at_start(capturing: bool, files: bool) -> Start {
     let folder = crate::applog::folder();
     let take = || match folder.as_deref() {
@@ -105,16 +107,53 @@ pub fn at_start(capturing: bool, files: bool) -> Start {
     match settle(take, ask, ASK_WITHIN, PAUSE) {
         Settled::Go(held, why) => Start::Go(held, why.map(unsure)),
         Settled::Handed => {
-            eprintln!("{ALREADY_OPEN}; its window was brought to the front.{not_opened}");
+            eprintln!("{ALREADY_OPEN}; it was asked to bring its window to the front.{not_opened}");
             Start::End(ExitCode::SUCCESS)
         }
         Settled::NotAnswered => {
             eprintln!(
                 "{ALREADY_OPEN}. It didn't answer when asked to come to the front; no second copy was opened.{not_opened}"
             );
+            // Said in that copy's log too, which is all a person's report may hold of it.
+            crate::applog::add_from_outside(
+                "start",
+                &format!(
+                    "a start of SoftPresenter turned away by this copy got no answer when it asked this window to come to the front for {} s; it opened nothing",
+                    ASK_WITHIN.as_secs()
+                ),
+            );
+            let quiet = std::env::var_os("SOFTPRESENTER_QUIET").is_some();
+            learn_language();
+            if let Some(words) = message_box_words(&Settled::NotAnswered, std::env::consts::OS, quiet) {
+                show_message(words);
+            }
             Start::End(ExitCode::SUCCESS)
         }
     }
+}
+
+/// The app's language, as well as a start that opens nothing can tell it: the Language setting
+/// saved, else the computer's (Windows' own display languages, asked at once; elsewhere none,
+/// which is English, as nothing here is shown elsewhere).
+fn learn_language() {
+    crate::i18n::set_choice(crate::i18n::Choice::from_code(&crate::service::load_prefs().language));
+    // Testing aid: SOFTPRESENTER_LANGUAGE stands in for the computer's language, as for the app
+    // (`system_language`).
+    match std::env::var("SOFTPRESENTER_LANGUAGE") {
+        Ok(tags) => crate::i18n::set_computer(&tags.split(',').map(str::trim).collect::<Vec<_>>()),
+        Err(_) => crate::i18n::set_computer(&sp_winapi::ui_languages()),
+    }
+}
+
+/// Shows the words in a message of the system's own (the app's file windows' way), and waits for
+/// it to be closed: what a start turned away on Windows has instead of a console.
+fn show_message(words: &str) {
+    let _ = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Warning)
+        .set_title("SoftPresenter")
+        .set_description(words)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
 }
 
 /// How a start that found the folder held settled it.
@@ -153,6 +192,18 @@ fn settle(
         }
         std::thread::sleep(pause.min(within.saturating_sub(began.elapsed())));
     }
+}
+
+/// The words a start that got no answer shows in a message of the system's own, when it shows one:
+/// only on Windows, where a start from its icon has no console to say anything in, and never in a
+/// quiet run (a test's), where nobody would close it.
+fn message_box_words(settled: &Settled, system: &str, quiet: bool) -> Option<&'static str> {
+    (matches!(settled, Settled::NotAnswered) && system == "windows" && !quiet).then(|| {
+        crate::i18n::t(
+            "dialogs.already_running",
+            "SoftPresenter is already running, or still closing: wait a moment, and if you still can't see its window, end it in Task Manager.",
+        )
+    })
 }
 
 /// Takes the hold on `folder`, unless another copy running has it: an exclusive lock on its
@@ -355,6 +406,33 @@ mod tests {
         );
         assert!(matches!(settled, Settled::Go(None, Some(ref why)) if why.contains("can't lock")), "goes on");
         assert!(!asked, "nothing was asked of any other copy");
+    }
+
+    /// A start on Windows that got no answer from the copy running says so in a message (it has no
+    /// console), in the person's language; nothing else shows one.
+    #[test]
+    fn only_a_start_on_windows_that_got_no_answer_shows_a_message() {
+        let words = message_box_words(&Settled::NotAnswered, "windows", false).expect("a message on Windows");
+        assert!(words.contains("Task Manager"), "{words}");
+        let others = [
+            (Settled::NotAnswered, "macos", false, "a Mac says it on the standard error"),
+            (Settled::NotAnswered, "linux", false, "so does Linux"),
+            (Settled::NotAnswered, "windows", true, "a quiet run shows nothing"),
+            (Settled::Handed, "windows", false, "the copy running answered"),
+            (Settled::Go(None, None), "windows", false, "the app opens"),
+        ];
+        for (settled, system, quiet, why) in others {
+            assert!(message_box_words(&settled, system, quiet).is_none(), "{why}");
+        }
+        for (language, words) in [
+            (crate::i18n::Language::Spanish, "Administrador de tareas"),
+            (crate::i18n::Language::Russian, "Диспетчере задач"),
+            (crate::i18n::Language::Ukrainian, "Диспетчері завдань"),
+        ] {
+            let said =
+                crate::i18n::with_language(language, || message_box_words(&Settled::NotAnswered, "windows", false));
+            assert!(said.is_some_and(|said| said.contains(words)), "{said:?}");
+        }
     }
 
     #[test]

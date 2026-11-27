@@ -35,5 +35,6 @@
   "dialogs.font.restart": "После установки шрифта перезапустите SoftPresenter.",
   "dialogs.live_menu.app_made": "У стиха или субтитров на экране нет меню.",
   "dialogs.live_menu.none": "Выведите слайд на экран, чтобы открыть его меню.",
-  "dialogs.media.follows_folder": "{name} берётся из папки: уберите файл из этой папки."
+  "dialogs.media.follows_folder": "{name} берётся из папки: уберите файл из этой папки.",
+  "dialogs.already_running": "SoftPresenter уже запущен или ещё закрывается: подождите немного, а если его окна всё ещё не видно, завершите его в Диспетчере задач."
 }
