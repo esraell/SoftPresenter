@@ -383,6 +383,7 @@ starts); open it with `playlist go` to run through the playlist.
 | `media samples` | Adds the sample backgrounds the bin hasn't got (six pictures and a looping video that come with the app), copied into the library's Media folder and gathered in a media playlist called Sample Backgrounds, which opens in the bin; run again, it puts back only the missing ones, into the same playlist. `sp undo` takes the whole add away. Not from the remote page |
 | `media show ITEM`, `media next`, `media previous` | A picture or video behind the words; the next or previous one in the bin (it wraps around) |
 | `media set ITEM scaling=fit\|fill\|stretch loop=on\|off` | How an item fills the screen, and whether a video loops |
+| `media move ITEM left\|right`, `media move ITEM to N` | Moves an item one place in the bin's order, which All Media shows and `sp media` lists, or to a place by its number, as dragging its tile does. What is on screen stays on screen. The order is kept |
 | `media delete ITEM --yes` | Takes an item out of the bin (the file stays where it is) |
 | `video play\|pause\|restart`, `video seek SECONDS`, `video loop on\|off`, `video mute on\|off` | The video behind the words |
 | `media-playlist play NAME`, `media-playlist stop` | Plays a media playlist item after item |
@@ -401,6 +402,8 @@ starts); open it with `playlist go` to run through the playlist.
     The video is at 1.5 seconds.
     $ sp video seek 99
     The video is 3 seconds long.
+    $ sp media move bars left
+    Bars.mp4 is now number 1 in the media bin.
     $ sp media set blue loop=on
     Blue.png is a picture: loop is for videos.
     $ sp media-playlist play walk-in

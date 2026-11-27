@@ -636,7 +636,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   with ⋯ for its menu, a video with its length in a small dark chip at the lower right of its
   picture ("0:36", or "1:02:09" from an hour on; a picture has nothing there, and the same chip
   is on a video's tile in a playlist); the one showing is ringed in orange, and only orange
-  while it is also picked out). The slides fade into the panel
+  while it is also picked out). A tile drags to a new place in the strip, in All Media as in a
+  media playlist put together by hand: the tile goes faint, an ink line shows the side of the
+  tile it will land beside, no tile moves until it is let go, and what is on screen stays on
+  screen with its ring; the ⋯ menu's Move Left and Move Right move it one place (greyed at
+  either end, and in a media playlist that follows a folder), and `sp media move` does the
+  same. All Media's order is the bin's own, kept for the next start, and the one `sp media` and
+  the phone list. The slides fade into the panel
   just above it. In a narrow window the bar leaves out Undo and Redo, then Continuous, then
   the size, rather than squeeze them (each is in the menu bar too). Add Slide is in a song's ⋯
   menu on its bar, and in the File menu.

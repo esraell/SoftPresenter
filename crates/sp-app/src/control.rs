@@ -1114,6 +1114,7 @@ Running the show
 
 Layers and controls
   media show ITEM | media add FILE… | media samples | media delete ITEM --yes
+  media move ITEM left|right | media move ITEM to N
   media-playlist play NAME | media-playlist stop
   message show NAME | message hide
   prop show NAME | prop hide NAME
@@ -3155,6 +3156,47 @@ impl crate::App {
                     ));
                 }
                 Ok(Reply::with(text, serde_json::json!({"added": names, "playlist": playlist, "skipped": skipped})))
+            }
+            Some("move") => {
+                // The bin's own order, which All Media shows: one place left or right, as the
+                // tile's menu moves it, or to a place by its number.
+                const USAGE: &str = "media move ITEM left|right | media move ITEM to N";
+                let names = self.media_names();
+                let (item, slot) = match &args[2..] {
+                    [item @ .., to, place] if to.eq_ignore_ascii_case("to") && !item.is_empty() => {
+                        let at = find("media item", &names, &item.join(" "))?;
+                        let place: usize = place.parse().map_err(|_| USAGE.to_owned())?;
+                        if !(1..=names.len()).contains(&place) {
+                            return Err(format!("The media bin has {} items; there is no place {place}.", names.len()));
+                        }
+                        // After the item now at that place when it is moving right.
+                        (at, if place - 1 > at { place } else { place - 1 })
+                    }
+                    [item @ .., way] if !item.is_empty() => {
+                        let at = find("media item", &names, &item.join(" "))?;
+                        let right = match way.to_lowercase().as_str() {
+                            "left" => false,
+                            "right" => true,
+                            _ => return Err(USAGE.to_owned()),
+                        };
+                        match (right, at) {
+                            (false, 0) => return Err(format!("{} is already first.", names[at])),
+                            (true, at) if at + 1 == names.len() => {
+                                return Err(format!("{} is already last.", names[at]));
+                            }
+                            (false, at) => (at, at - 1),
+                            (true, at) => (at, at + 2),
+                        }
+                    }
+                    _ => return Err(USAGE.to_owned()),
+                };
+                let name = names[item].clone();
+                let id = self.show.media()[item].id;
+                self.with_state(|state| state.media_request = Some(crate::home::MediaRequest::Move(vec![item], slot)));
+                self.handle_media_request();
+                let names = self.media_names();
+                let place = self.show.media().iter().position(|media| media.id == id).map_or(0, |at| at + 1);
+                Ok(Reply::with(format!("{name} is now number {place} in the media bin."), serde_json::json!(names)))
             }
             Some("delete") => {
                 let yes = args.iter().any(|w| w == "--yes");

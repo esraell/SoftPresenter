@@ -158,6 +158,25 @@ pub fn moved_files(files: &[PathBuf], shown: &[PathBuf], moving: &[PathBuf], slo
     order
 }
 
+/// The media bin's order once `moving` (bin places) have been dragged to `slot` in All Media
+/// (how many of the bin's items are before the ink line): each place the bin has now, in the
+/// order they are to have. They go there together, in the order they had.
+pub fn moved_order(len: usize, moving: &[usize], slot: usize) -> Vec<usize> {
+    let slot = slot.min(len);
+    let before = (0..slot).filter(|at| moving.contains(at)).count();
+    let mut order: Vec<usize> = (0..len).filter(|at| !moving.contains(at)).collect();
+    let carried: Vec<usize> = (0..len).filter(|at| moving.contains(at)).collect();
+    let at = slot - before;
+    order.splice(at..at, carried);
+    order
+}
+
+/// Where the media bin item at `at` is once the bin has been put in `order` (see
+/// [`moved_order`]).
+pub fn place_after_move(at: usize, order: &[usize]) -> Option<usize> {
+    order.iter().position(|was| *was == at)
+}
+
 /// Where a playing media playlist goes next, as a place among `items` (its bin places in its
 /// order): after `shown`, the one on screen, wherever it is now; if it has been taken out, the
 /// one that took its place (`at`, where it was).
@@ -668,6 +687,20 @@ mod tests {
             moved_files(&files, &shown, &[path("one")], 1),
             [path("three"), path("one"), path("four"), path("gone")]
         );
+    }
+
+    #[test]
+    fn all_medias_order_after_a_drag() {
+        // The third dragged to the front; the first two dragged to the end.
+        assert_eq!(moved_order(4, &[2], 0), [2, 0, 1, 3]);
+        assert_eq!(moved_order(4, &[1, 0], 4), [2, 3, 0, 1]);
+        // Let go on either side of where it was: nothing moves.
+        assert_eq!(moved_order(4, &[1], 1), [0, 1, 2, 3]);
+        assert_eq!(moved_order(4, &[1], 2), [0, 1, 2, 3]);
+        // One place right is the far side of its neighbour.
+        assert_eq!(moved_order(4, &[1], 3), [0, 2, 1, 3]);
+        assert_eq!(moved_order(4, &[9], 7), [0, 1, 2, 3], "no such item, and a place past the end");
+        assert_eq!(place_after_move(1, &[0, 2, 1, 3]), Some(2));
     }
 
     #[test]

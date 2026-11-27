@@ -47,6 +47,8 @@
   "media.announce_video.hint": "Sobre las diapositivas, en bucle, hasta que se quite",
   "media.announce_picture.hint": "Sobre las diapositivas hasta que se quite",
   "media.playlists": "Listas multimedia",
+  "media.move_left": "Mover a la izquierda",
+  "media.move_right": "Mover a la derecha",
   "media.playlists.none": "Aún no hay listas multimedia. Crea una desde el menú junto a MULTIMEDIA.",
   "media.remove.hint": "Se quita solo de esta lista multimedia",
   "media.delete": "Eliminar…",

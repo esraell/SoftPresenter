@@ -6348,6 +6348,31 @@ impl App {
         changed
     }
 
+    /// Puts items of the media bin at another place in All Media's order, and keeps it (the
+    /// order is the bin's own, which `sp media` and the phone list too). Only places change:
+    /// what is on screen, a video playing and a media playlist playing go on as they are, and
+    /// nothing is told to the screens.
+    fn move_bin_items(&mut self, moving: &[usize], slot: usize) {
+        let order = media::moved_order(self.show.media().len(), moving, slot);
+        if !self.show.reorder_media(&order) {
+            return;
+        }
+        applog::event("media", &format!("moved {} in the bin to place {}", moving.len(), slot + 1));
+        if let Some(cycle) = self.media_cycle.as_mut()
+            && let Some(at) = media::place_after_move(cycle.shown, &order)
+        {
+            cycle.shown = at;
+        }
+        if let Some(running) = self.running.as_mut() {
+            let state = &mut running.home_state;
+            state.picked_media =
+                state.picked_media.iter().filter_map(|at| media::place_after_move(*at, &order)).collect();
+            state.media_anchor = state.media_anchor.and_then(|at| media::place_after_move(at, &order));
+            running.home_window.request_redraw();
+        }
+        self.save_media_list();
+    }
+
     /// Remembers what is in the media bin, how each item is shown, and the media playlists.
     fn save_media_list(&mut self) {
         match self.media_list_save() {
@@ -6842,6 +6867,7 @@ impl App {
                     running.home_window.request_redraw();
                 }
             }
+            MediaRequest::Move(moving, slot) => self.move_bin_items(&moving, slot),
             MediaRequest::Delete(mut items) => {
                 // From the last to the first, so each place still names the same item.
                 items.sort_unstable();

@@ -140,7 +140,7 @@ pub const OPEN_SUBCOMMANDS: &[(&str, &[&str])] = &[
             "keep",
         ],
     ),
-    ("media", &["", "show", "delete", "next", "previous", "prev", "back", "set"]),
+    ("media", &["", "show", "move", "delete", "next", "previous", "prev", "back", "set"]),
     // The page's status button mirrors the app's: the list, seen, Clear All, and a question's
     // own answers (which the app checks against the question).
     ("notices", &["", "seen", "clear", "answer"]),

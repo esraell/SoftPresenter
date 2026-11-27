@@ -2576,6 +2576,41 @@ fn a_picture_from_the_media_bin_shows_behind_the_words_and_clears() {
 }
 
 #[test]
+fn media_moved_in_the_bin_keeps_showing_and_its_order_survives_a_restart() {
+    let Some(run) = Run::new("media_moved_in_the_bin_keeps_showing_and_its_order_survives_a_restart") else { return };
+    let files: Vec<_> = ["Blue.png", "Green.png", "Red.png"].iter().map(|name| run.file(name)).collect();
+    for (file, colour) in files.iter().zip([[30, 90, 200], [40, 160, 60], [200, 40, 40]]) {
+        write_png(file, colour);
+    }
+    let copy = run.start(&[]);
+    let mut add = vec!["media".to_owned(), "add".to_owned()];
+    add.extend(files.iter().map(|file| file.to_string_lossy().into_owned()));
+    copy.ok(&add.iter().map(String::as_str).collect::<Vec<_>>());
+    copy.ok(&["media", "show", "green"]);
+    // One place at a time, as the tile's menu moves it: what is on screen stays on screen.
+    let moved = copy.ok(&["media", "move", "red", "left"]);
+    assert!(moved.text.contains("Red.png is now number 2"), "{}", moved.text);
+    assert_eq!(copy.ok(&["media"]).data, serde_json::json!(["Blue.png", "Red.png", "Green.png"]));
+    assert_eq!(copy.status()["media"], "Green.png", "the picture on screen is the one it was");
+    // The one on screen moved: still on screen.
+    copy.ok(&["media", "move", "green", "to", "1"]);
+    assert_eq!(copy.ok(&["media"]).data, serde_json::json!(["Green.png", "Blue.png", "Red.png"]));
+    assert_eq!(copy.status()["media"], "Green.png");
+    copy.refused(&["media", "move", "green", "left"], "already first");
+    copy.refused(&["media", "move", "red", "right"], "already last");
+    copy.refused(&["media", "move", "red", "to", "9"], "there is no place 9");
+    // Next goes on from where the one on screen is now.
+    copy.ok(&["media", "next"]);
+    assert_eq!(copy.status()["media"], "Blue.png");
+    copy.ok(&["media", "move", "blue", "right"]);
+    copy.quit().assert_clean(&run);
+    // The order is the bin's own, written by the library's writer: the next start has it.
+    let copy = run.start(&[]);
+    assert_eq!(copy.ok(&["media"]).data, serde_json::json!(["Green.png", "Red.png", "Blue.png"]));
+    copy.quit().assert_clean(&run);
+}
+
+#[test]
 fn a_playlist_is_made_and_run_from_item_to_item() {
     let Some(run) = Run::new("a_playlist_is_made_and_run_from_item_to_item") else { return };
     let alpha = run.file("Alpha.txt");

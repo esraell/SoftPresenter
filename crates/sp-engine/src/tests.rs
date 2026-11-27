@@ -580,6 +580,24 @@ fn removing_or_adding_a_slide_before_the_live_one_keeps_it_live() {
 }
 
 #[test]
+fn media_put_in_another_order_keeps_the_one_on_screen() {
+    let mut s = show();
+    for name in ["a", "b", "c"] {
+        s.add_media(sp_model::MediaItem::new(name.to_owned(), name.into()));
+    }
+    s.apply(Command::ShowMedia(2));
+    let names = |s: &Show| s.media().iter().map(|item| item.name.clone()).collect::<Vec<_>>();
+    assert!(s.reorder_media(&[2, 0, 1]));
+    assert_eq!(names(&s), ["c", "a", "b"]);
+    assert_eq!(s.live_media(), Some(0), "the same picture, at its new place");
+    assert!(!s.reorder_media(&[0, 1, 2]), "the order it has changes nothing");
+    for wrong in [&[0, 1][..], &[0, 0, 1], &[0, 1, 3]] {
+        assert!(!s.reorder_media(wrong), "{wrong:?} is not every item once");
+    }
+    assert_eq!((names(&s), s.live_media()), (vec!["c".to_owned(), "a".to_owned(), "b".to_owned()], Some(0)));
+}
+
+#[test]
 fn removing_a_picture_keeps_the_one_on_screen_or_takes_it_off() {
     let mut s = show();
     for name in ["a", "b", "c"] {

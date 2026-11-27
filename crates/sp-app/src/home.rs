@@ -466,6 +466,9 @@ pub struct HomeState {
     /// Where each result the find box lists was drawn last, in the list's order (for a testing
     /// aid to drag one, and for tests).
     pub find_rows: Vec<Rect>,
+    /// Where each tile of the media strip was drawn last, in the strip's order (for tests, and to
+    /// aim a testing aid's drag).
+    pub media_tiles: Vec<Rect>,
     /// Where the list under the find box was drawn last, its foot line included (for tests).
     pub find_list: Option<Rect>,
     /// The find box's Bible results, and the Bible view's Search's verses as they are typed,
@@ -2091,6 +2094,7 @@ impl Default for HomeState {
             import_menu_request: false,
             live_menu: None,
 
+            media_tiles: Vec::new(),
             media_playlists: Vec::new(),
             media_playlist_shown: None,
             media_playlists_changed: false,
@@ -5274,6 +5278,9 @@ pub enum MediaRequest {
     AddSamples,
     /// Take these items out of the bin (the files stay where they are).
     Delete(Vec<usize>),
+    /// Put these items of the bin together at a place in All Media's order (how many of the
+    /// bin's items are before it): the files and what is on screen stay as they are.
+    Move(Vec<usize>, usize),
     /// A slide showing this media item, added to the song shown after its chosen slide.
     AddAsSlide(usize),
     /// How an item fills the screen, and whether a video loops.
@@ -12124,6 +12131,116 @@ mod tests {
         frame_with(&ctx, &show, &mut state, Some(Key::Enter));
         assert_eq!(state.songs_to_delete, vec![0, 2], "Return deletes both");
         assert!(state.confirm_delete_songs.is_empty() && state.picked_songs.is_empty());
+    }
+
+    /// Three pictures in the bin, the second on screen.
+    fn show_with_three_media() -> Show {
+        let mut show = show(3);
+        for name in ["a.png", "b.png", "c.png"] {
+            show.add_media(sp_model::MediaItem::new(name.into(), name.into()));
+        }
+        show.apply(Command::ShowMedia(1));
+        show
+    }
+
+    /// The media strip's tiles, as one frame draws them.
+    fn media_tiles(show: &Show, state: &mut HomeState) -> Vec<Rect> {
+        frame_with(&egui::Context::default(), show, state, None);
+        state.media_tiles.clone()
+    }
+
+    #[test]
+    fn a_tile_dragged_in_all_media_is_asked_to_move_where_the_line_is() {
+        let show = show_with_three_media();
+        let mut state = HomeState::default();
+        let tiles = media_tiles(&show, &mut state);
+        assert_eq!(tiles.len(), 3);
+        // The third let go over the first's near half: before it.
+        drag_in_grid(&mut state, &show, tiles[2].center(), tiles[0].left_center() + vec2(3.0, 0.0));
+        assert_eq!(state.media_request, Some(MediaRequest::Move(vec![2], 0)));
+        assert!(state.sweep.is_none(), "the drag is over");
+        // The first let go over the second's far half: after it.
+        state.media_request = None;
+        drag_in_grid(&mut state, &show, tiles[0].center(), tiles[1].right_center() - vec2(3.0, 0.0));
+        assert_eq!(state.media_request, Some(MediaRequest::Move(vec![0], 2)));
+        // Dragging never shows anything: the picture on screen is the one it was.
+        assert_eq!(show.live_media(), Some(1));
+    }
+
+    #[test]
+    fn a_tile_let_go_on_itself_or_beside_where_it_was_moves_nothing() {
+        let show = show_with_three_media();
+        let mut state = HomeState::default();
+        let tiles = media_tiles(&show, &mut state);
+        for to in [
+            tiles[1].center() + vec2(20.0, 4.0),
+            tiles[1].left_center() + vec2(3.0, 0.0),
+            tiles[0].right_center() - vec2(3.0, 0.0),
+            tiles[2].left_center() + vec2(3.0, 0.0),
+        ] {
+            drag_in_grid(&mut state, &show, tiles[1].center(), to);
+            assert_eq!(state.media_request, None, "let go at {to:?}");
+            assert!(!state.media_playlists_changed);
+        }
+    }
+
+    #[test]
+    fn a_tile_dragged_in_a_media_playlist_moves_in_it_alone_and_not_in_one_that_follows_a_folder() {
+        let show = show_with_three_media();
+        let mut playlist = crate::media::Playlist::new("Loop".to_owned());
+        playlist.files = vec!["c.png".into(), "a.png".into()];
+        let mut state = HomeState {
+            media_playlist_shown: Some(playlist.id),
+            media_playlists: vec![playlist],
+            ..HomeState::default()
+        };
+        let tiles = media_tiles(&show, &mut state);
+        assert_eq!(tiles.len(), 2);
+        drag_in_grid(&mut state, &show, tiles[1].center(), tiles[0].left_center() + vec2(3.0, 0.0));
+        let files = |state: &HomeState| state.media_playlists[0].files.clone();
+        assert_eq!(files(&state), [std::path::PathBuf::from("a.png"), "c.png".into()]);
+        assert!(state.media_playlists_changed);
+        assert_eq!(state.media_request, None, "the bin's own order is left alone");
+        // One that follows a folder keeps the folder's order.
+        state.media_playlists[0].folder = Some("/a".into());
+        state.media_playlists_changed = false;
+        drag_in_grid(&mut state, &show, tiles[1].center(), tiles[0].left_center() + vec2(3.0, 0.0));
+        assert_eq!(files(&state), [std::path::PathBuf::from("a.png"), "c.png".into()]);
+        assert!(!state.media_playlists_changed && state.media_request.is_none());
+    }
+
+    #[test]
+    fn move_left_and_move_right_go_one_place_and_are_greyed_at_either_end() {
+        use crate::studio::{media_moves, move_media_one};
+        let show = show_with_three_media();
+        let mut state = HomeState::default();
+        // All Media: the first has no left, the last no right.
+        assert_eq!(media_moves(&show, &state, 0), (None, Some(2)));
+        assert_eq!(media_moves(&show, &state, 1), (Some(0), Some(3)));
+        assert_eq!(media_moves(&show, &state, 2), (Some(1), None));
+        assert!(!move_media_one(&mut state, &show, 0, false) && state.media_request.is_none());
+        assert!(move_media_one(&mut state, &show, 0, true));
+        let asked = state.media_request.take();
+        assert_eq!(asked, Some(MediaRequest::Move(vec![0], 2)));
+        assert_eq!(crate::media::moved_order(3, &[0], 2), [1, 0, 2], "one place right");
+        assert!(move_media_one(&mut state, &show, 2, false));
+        assert_eq!(state.media_request.take(), Some(MediaRequest::Move(vec![2], 1)));
+        assert_eq!(crate::media::moved_order(3, &[2], 1), [0, 2, 1], "one place left");
+        // A media playlist: its own order, and its own ends.
+        let mut playlist = crate::media::Playlist::new("Loop".to_owned());
+        playlist.files = vec!["c.png".into(), "a.png".into()];
+        state.media_playlist_shown = Some(playlist.id);
+        state.media_playlists = vec![playlist];
+        assert_eq!(media_moves(&show, &state, 2), (None, Some(2)));
+        assert_eq!(media_moves(&show, &state, 0), (Some(0), None));
+        assert_eq!(media_moves(&show, &state, 1), (None, None), "not in this playlist");
+        assert!(move_media_one(&mut state, &show, 2, true));
+        assert_eq!(state.media_playlists[0].files, [std::path::PathBuf::from("a.png"), "c.png".into()]);
+        assert!(state.media_playlists_changed && state.media_request.is_none());
+        // One that follows a folder: both greyed.
+        state.media_playlists[0].folder = Some("/a".into());
+        assert_eq!(media_moves(&show, &state, 0), (None, None));
+        assert_eq!(media_moves(&show, &state, 2), (None, None));
     }
 
     #[test]

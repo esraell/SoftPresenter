@@ -47,6 +47,8 @@
   "media.announce_video.hint": "Поверх слайдов, по кругу, пока его не уберут",
   "media.announce_picture.hint": "Поверх слайдов, пока её не уберут",
   "media.playlists": "Медиасписки",
+  "media.move_left": "Влево",
+  "media.move_right": "Вправо",
   "media.playlists.none": "Медиасписков пока нет. Создайте его в меню рядом с МЕДИА.",
   "media.remove.hint": "Убирается только из этого медиасписка",
   "media.delete": "Удалить…",

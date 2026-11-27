@@ -286,6 +286,22 @@ impl Show {
         }
     }
 
+    /// Puts the media bin in another order: `order` names every item once by the place it has
+    /// now, in the order they are to have (anything else changes nothing). What is on screen
+    /// stays on screen: only its place changes, so nothing is told to the screens.
+    pub fn reorder_media(&mut self, order: &[usize]) -> bool {
+        let mut seen = vec![false; self.media.len()];
+        let whole = order.len() == self.media.len()
+            && order.iter().all(|at| seen.get_mut(*at).is_some_and(|seen| !std::mem::replace(seen, true)));
+        if !whole || order.iter().enumerate().all(|(now, was)| now == *was) {
+            return false;
+        }
+        let mut items: Vec<Option<MediaItem>> = std::mem::take(&mut self.media).into_iter().map(Some).collect();
+        self.media = order.iter().filter_map(|was| items[*was].take()).collect();
+        self.live_media = self.live_media.and_then(|live| order.iter().position(|was| *was == live));
+        true
+    }
+
     /// Takes a picture out of the media bin. If it was on screen it is taken off.
     pub fn remove_media(&mut self, index: usize) -> Changes {
         if index >= self.media.len() {

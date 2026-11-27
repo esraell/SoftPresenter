@@ -2736,7 +2736,8 @@ pub fn drop_slot_across(tiles: &[Rect], x: f32) -> usize {
 }
 
 /// As [`paint_rows_moving`], for tiles side by side (the media strip's): the ink line stands
-/// upright, midway between two tiles (`slot`, from [`drop_slot_across`]).
+/// upright, midway between two tiles (`slot`, from [`drop_slot_across`]), 3 wide and as tall as
+/// the tiles, and the tiles being moved show at 35%.
 pub fn paint_tiles_moving(
     painter: &egui::Painter,
     tiles: &[Rect],
@@ -2746,6 +2747,11 @@ pub fn paint_tiles_moving(
 ) {
     paint_moving(painter, tiles, moving, slot, ground, true);
 }
+
+/// How wide the ink line between the media strip's tiles is, and how much of a tile being
+/// moved still shows.
+pub const TILE_INK_LINE: f32 = 3.0;
+const TILE_MOVING_SHOWS: f32 = 0.35;
 
 /// The things being moved go faint, and the ink line goes between the two either side of `slot`:
 /// across a list, or (`across`) upright between tiles side by side.
@@ -2759,7 +2765,8 @@ fn paint_moving(
 ) {
     for (at, row) in rows.iter().enumerate() {
         if moving(at) {
-            painter.rect_filled(*row, RADIUS, ground.gamma_multiply(0.6));
+            let covered = if across { 1.0 - TILE_MOVING_SHOWS } else { 0.6 };
+            painter.rect_filled(row.expand(if across { 3.0 } else { 0.0 }), RADIUS, ground.gamma_multiply(covered));
         }
     }
     let start = |row: &Rect| if across { row.min.x } else { row.min.y };
@@ -2773,7 +2780,11 @@ fn paint_moving(
     let stroke = Stroke::new(2.0, TEXT);
     let Some(first) = rows.first() else { return };
     if across {
-        painter.line_segment([pos2(at, first.min.y + 4.0), pos2(at, first.max.y - 4.0)], stroke);
+        let line = Rect::from_min_max(
+            pos2(at - TILE_INK_LINE / 2.0, first.min.y),
+            pos2(at + TILE_INK_LINE / 2.0, first.max.y),
+        );
+        painter.rect_filled(line, 2.0, TEXT);
     } else {
         painter.line_segment([pos2(first.min.x + 4.0, at), pos2(first.max.x - 4.0, at)], stroke);
     }
@@ -6529,8 +6540,9 @@ pub fn media_strip(
                     carried: false,
                 });
             }
-            // A media playlist shows only its own files, in the order it plays them; one put
-            // together by hand (not following a folder) is reordered by dragging them.
+            // A media playlist shows only its own files, in the order it plays them. All Media
+            // and a playlist put together by hand (not following a folder) are reordered by
+            // dragging their tiles.
             let shown = state
                 .media_playlist_shown
                 .and_then(|id| state.media_playlists.iter().find(|playlist| playlist.id == id))
@@ -6539,7 +6551,7 @@ pub fn media_strip(
                 Some(playlist) => crate::media::playlist_places(&playlist.files, show.media()),
                 None => (0..show.media().len()).collect(),
             };
-            let reorders = shown.as_ref().is_some_and(crate::media::Playlist::arranged_by_hand);
+            let reorders = shown.as_ref().is_none_or(crate::media::Playlist::arranged_by_hand);
             state.picked_media.retain(|at| order.contains(at));
             let scroll = egui::scroll_area::ScrollSource::MOUSE_WHEEL | egui::scroll_area::ScrollSource::SCROLL_BAR;
             egui::ScrollArea::horizontal().id_salt("media row").scroll_source(scroll).auto_shrink([false, false]).show(
@@ -6562,10 +6574,11 @@ pub fn media_strip(
                             if crate::keys::Numbers::picked(numbers, crate::keys::NumbersOf::Media, placed.len() - 1) {
                                 show_media_item(show, state, index, commands);
                             }
-                            // A drag starting on an item picks out the items it passes over while it
-                            // stays in the bin (in a media playlist's own view, moves it there);
-                            // dragged out onto a slide it becomes what the slide shows, onto the
-                            // space under the slides a slide of its own.
+                            // A drag starting on an item moves it to another place in the strip
+                            // (in a media playlist that follows a folder, whose order is the
+                            // folder's, it picks out the items it passes over); dragged out onto
+                            // a slide it becomes what the slide shows, onto the space under the
+                            // slides a slide of its own.
                             if response.drag_started()
                                 && let Some(start) = pointer
                             {
@@ -6653,6 +6666,7 @@ pub fn media_strip(
                             crate::keys::number_badge(ui.painter(), *rect, place + 1);
                         }
                     }
+                    state.media_tiles = placed.iter().map(|(_, rect)| *rect).collect();
                     sweep_media(ui, state, (&placed, show), bin, pointer, down, reorders);
                 },
             );
@@ -6691,9 +6705,10 @@ fn dashed_rect(painter: &egui::Painter, rect: Rect, stroke: Stroke) {
 /// Carries on a drag across the media bin (see `Sweep`): while the pointer is in the bin, a box
 /// from where it started to the pointer picks out every item it touches, and the row scrolls
 /// at its ends; once a drag that started on an item leaves the bin, that item is carried to be
-/// dropped on a slide. With `reorders` (a media playlist put together by hand is shown), a drag
-/// that started on an item moves it instead, with the others picked out with it: they go faint,
-/// an ink line shows where they would go, and letting go in the strip puts them there.
+/// dropped on a slide. With `reorders` (All Media, or a media playlist put together by hand, is
+/// shown), a drag that started on an item moves it instead, with the others picked out with it:
+/// they go faint, an ink line shows where they would go, no tile moves meanwhile, and letting go
+/// in the strip puts them there. What is on screen stays on screen.
 fn sweep_media(
     ui: &mut egui::Ui,
     state: &mut HomeState,
@@ -6716,7 +6731,7 @@ fn sweep_media(
             && moved(at)
         {
             let slot = drop_slot_across(&tiles, at.x);
-            move_in_media_playlist(state, show, placed, &moving, slot);
+            move_in_strip(state, show, placed, &moving, slot);
         }
         state.sweep = None;
         return;
@@ -6757,22 +6772,68 @@ fn sweep_media(
     scroll_strip_at_ends(ui, bin, at);
 }
 
-/// Puts `moving` (bin places, in the order shown) at `slot` among the items the media playlist
-/// shown has in the strip (`placed`, in its order), and keeps the change.
-fn move_in_media_playlist(state: &mut HomeState, show: &Show, placed: &[(usize, Rect)], moving: &[usize], slot: usize) {
+/// Puts `moving` (bin places, in the order shown) at `slot` among the items the strip shows
+/// (`placed`, in its order), and keeps the change: in the media playlist shown, its own order;
+/// in All Media, the bin's (the app is asked, since places in the bin change with it).
+fn move_in_strip(state: &mut HomeState, show: &Show, placed: &[(usize, Rect)], moving: &[usize], slot: usize) {
+    move_shown_media(state, show, &placed.iter().map(|(index, _)| *index).collect::<Vec<_>>(), moving, slot);
+}
+
+/// As [`move_in_strip`], by the bin places the strip shows, in its order (`shown`).
+fn move_shown_media(state: &mut HomeState, show: &Show, shown: &[usize], moving: &[usize], slot: usize) {
     let path = |index: &usize| show.media().get(*index).map(|item| item.path.clone());
-    let shown: Vec<std::path::PathBuf> = placed.iter().filter_map(|(index, _)| path(index)).collect();
     let carried: Vec<std::path::PathBuf> = moving.iter().filter_map(path).collect();
     let Some(playlist) =
         state.media_playlist_shown.and_then(|id| state.media_playlists.iter_mut().find(|playlist| playlist.id == id))
     else {
+        // All Media shows the whole bin, in the bin's order.
+        let order = crate::media::moved_order(show.media().len(), moving, slot);
+        if order.iter().enumerate().any(|(now, was)| now != *was) {
+            state.media_request = Some(crate::home::MediaRequest::Move(moving.to_vec(), slot));
+        }
         return;
     };
+    if !playlist.arranged_by_hand() {
+        return;
+    }
+    let shown: Vec<std::path::PathBuf> = shown.iter().filter_map(path).collect();
     let files = crate::media::moved_files(&playlist.files, &shown, &carried, slot);
     if files != playlist.files {
         playlist.files = files;
         state.media_playlists_changed = true;
     }
+}
+
+/// The bin places the media strip shows, in its order: the media playlist shown's files, or in
+/// All Media the whole bin.
+fn media_shown(show: &Show, state: &HomeState) -> Vec<usize> {
+    match state.media_playlist_shown.and_then(|id| state.media_playlists.iter().find(|p| p.id == id)) {
+        Some(playlist) => crate::media::playlist_places(&playlist.files, show.media()),
+        None => (0..show.media().len()).collect(),
+    }
+}
+
+/// Where Move Left and Move Right in a tile's menu would put the bin's item `index`, as the
+/// place among the strip's items [`move_shown_media`] takes: none for the one that can't be
+/// chosen (the first has no left, the last no right; a media playlist that follows a folder
+/// has neither).
+pub(crate) fn media_moves(show: &Show, state: &HomeState, index: usize) -> (Option<usize>, Option<usize>) {
+    let by_hand = state
+        .media_playlist_shown
+        .and_then(|id| state.media_playlists.iter().find(|p| p.id == id))
+        .is_none_or(crate::media::Playlist::arranged_by_hand);
+    let shown = media_shown(show, state);
+    let Some(at) = shown.iter().position(|place| *place == index).filter(|_| by_hand) else { return (None, None) };
+    (at.checked_sub(1), (at + 1 < shown.len()).then_some(at + 2))
+}
+
+/// Move Left (or, `right`, Move Right) for the bin's item `index`, as its menu does it; whether
+/// there was a place to go.
+pub(crate) fn move_media_one(state: &mut HomeState, show: &Show, index: usize, right: bool) -> bool {
+    let (left, to_right) = media_moves(show, state, index);
+    let Some(slot) = (if right { to_right } else { left }) else { return false };
+    move_shown_media(state, show, &media_shown(show, state), &[index], slot);
+    true
 }
 
 /// While something is dragged in the media strip, it scrolls when the pointer is near its ends.
@@ -7331,6 +7392,18 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
             }
         }
     });
+    ui.separator();
+    // One place at a time, as a drag moves it: greyed at either end (and in a media playlist
+    // that follows a folder, whose order is the folder's).
+    let (left, right) = media_moves(show, state, index);
+    for (to, right, words) in
+        [(left, false, t("media.move_left", "Move Left")), (right, true, t("media.move_right", "Move Right"))]
+    {
+        if ui.add_enabled(to.is_some(), egui::Button::new(words)).clicked() {
+            move_media_one(state, show, index, right);
+            ui.close();
+        }
+    }
     ui.separator();
     // Every item picked out, when this is one of them.
     let these = if state.picked_media.contains(&index) { state.picked_media.clone() } else { vec![index] };

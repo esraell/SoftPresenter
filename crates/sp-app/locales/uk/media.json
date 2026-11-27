@@ -63,6 +63,8 @@
   "media.play_playlist": "Відтворити цей список",
   "media.play_playlist.hint": "Його зображення (по 8 секунд) і відео (до кінця) по черзі, по колу",
   "media.playlists": "Медіасписки",
+  "media.move_left": "Перемістити ліворуч",
+  "media.move_right": "Перемістити праворуч",
   "media.playlists.none": "Медіасписків ще немає. Створіть його в меню біля МЕДІА.",
   "media.remove": "Вилучити з {name}",
   "media.remove.hint": "Вилучається лише з цього медіасписку",
