@@ -1387,12 +1387,14 @@ fn add_key(show: &Show, state: &mut home::HomeState) {
 /// nothing runs the show; while the numbers show (after modifier-1 to 7), a number and Escape
 /// are theirs, a number by the digit it types or by its place (a digit added does its row only
 /// when no numbers show); in an open menu the arrows, Space and Enter move in it and choose,
-/// whatever they are set to. In the Bible view a key typing a letter or a number starts the next
-/// reference in Scripture Lookup (see `bible_area` in `home.rs`), never a jump to a group of the
-/// song on screen, and a letter or a digit added there types too, whatever its row says: after
-/// Return has picked a verse and given the keyboard back, typing "ps 23" must not put the song's
-/// second verse up with its "s". A row that is no letter's or digit's place does its action
-/// there, as in the Service view: "." clears on any layout, though it types ю on a Russian one.
+/// whatever they are set to. In the Bible view a key typing a letter or a digit starts the next
+/// reference in Scripture Lookup (see `bible_area` in `home.rs`), whatever its place's row says,
+/// never a jump to a group of the song on screen: after Return has picked a verse and given the
+/// keyboard back, typing "ps 23" must not put the song's second verse up with its "s", and on a
+/// Russian or Ukrainian layout the "." key typing ю types it (a screen cleared by chance is seen
+/// by the whole room; a stray letter in the reference box is not). A key typing anything else
+/// with a row does its action there, as in the Service view ("." on a US keyboard clears), and
+/// so do the keys that type nothing (the F rows, Space).
 /// While the find box is being typed in every key is the box's, before the box has drawn with the
 /// keyboard too: a letter typed straight after `/` is typed in it, never a slide's hot key or a
 /// group's letter, and Escape closes it, clearing nothing. Only the F rows reach the show from it
@@ -1403,9 +1405,9 @@ fn show_key_held_back(state: &home::HomeState, ctx: &egui::Context, key: &Presse
         return true;
     }
     if state.bible_open
-        && matches!(key.logical, Key::Character(_))
+        && let Key::Character(typed) = &key.logical
         && !opens_find(&key.logical)
-        && state.keys.row_of(key, f_keys).is_none_or(ShowKey::is_letter_or_digit)
+        && (typed.chars().next().is_some_and(char::is_alphanumeric) || state.keys.row_of(key, f_keys).is_none())
     {
         return true;
     }
@@ -1461,17 +1463,37 @@ fn home_key_command(
     Some(press)
 }
 
-/// What a key does to a slide picked (`running::pick_key`) while it is set to `action`: only Next
-/// and Previous touch the pick. Space doing Next takes it; any other key doing Next or Previous
-/// (Space doing Previous too) moves it the way its action goes. A key set to anything else does
+/// What a key does to a slide picked (`running::pick_key`) while it is set to `action`, as the
+/// prototype has it: only Next and Previous touch the pick. → doing Next moves it on; any other
+/// key doing Next takes it, as Space and Enter do, since Next starts what is lined up when
+/// nothing is on screen (so Page Down, a clicker's forward, puts the picked slide up); any key
+/// doing Previous moves it back (Page Up, a clicker's back, too). A key set to anything else does
 /// that, so Space set to Clear All clears, never putting the pick on screen.
 fn pick_key_for(key: &Pressed, action: KeyAction, picked: bool, showing: bool, editing: bool) -> running::PickKey {
     let (next, previous) = (action == KeyAction::Next, action == KeyAction::Previous);
     if !next && !previous {
         return running::PickKey::Pass;
     }
-    let space = matches!(key.logical, Key::Named(NamedKey::Space)) && next;
-    running::pick_key(space, next, previous, picked, showing, editing)
+    // → by what the window says it is: the number pad's 6 with Num Lock off is → too.
+    let right = next && matches!(key.logical, Key::Named(NamedKey::ArrowRight));
+    running::pick_key(next && !right, right, previous, picked, showing, editing)
+}
+
+/// What a key set to `action` does to the slide picked (`pick_key_for`), from the window's state
+/// as it is: a pick that moves is moved here, to the next or the previous slide of its passage or
+/// song in the order sung (at either end it stays, with no notice); taking it is the caller's, as
+/// Enter takes it (`App::enter_key`).
+fn pick_key_press(show: &Show, state: &mut home::HomeState, key: &Pressed, action: KeyAction) -> running::PickKey {
+    let picked = state.pick(show);
+    let decided = pick_key_for(key, action, picked.is_some(), show.live().is_some(), state.edit_kind().is_some());
+    if let (running::PickKey::Move(forward), Some(at)) = (decided, picked) {
+        let bible = state.picked.as_ref().is_some_and(|picked| picked.passage.is_some());
+        let order = show.presentations().get(at.presentation).map(|song| song.order()).unwrap_or_default();
+        if let Some(slide) = running::pick_beside(&order, at.slide, forward) {
+            state.set_pick(show, sp_engine::SlideRef { presentation: at.presentation, slide }, bible);
+        }
+    }
+    decided
 }
 
 /// Whether `/` is free to open the find box: the keyboard is not in a text field, the Edit view
@@ -4914,39 +4936,25 @@ impl App {
     }
 
     /// The keys doing Next or Previous while a slide is picked and nothing is on screen (the
-    /// owner's rule of 2026-11-21, for Space and the arrows): Space doing Next puts the picked
-    /// slide on, as Enter does; any other key doing Next or Previous (→ and ← as they come) moves
-    /// the pick to the next or the previous slide of its passage or song, in the order sung,
-    /// putting nothing on. With something on screen they run it as ever (false: not taken here),
-    /// so a song can be finished with a reading picked and waiting for Enter. A key set to
+    /// owner's rule of 2026-11-21, for Space and the arrows, and the prototype's for every key):
+    /// a key doing Next puts the picked slide on, as Enter does, but → moves the pick on; a key
+    /// doing Previous moves it back, to the previous slide of its passage or song in the order
+    /// sung, putting nothing on. With something on screen they run it as ever (false: not taken
+    /// here), so a song can be finished with a reading picked and waiting for Enter. A key set to
     /// anything else does that (`pick_key_for`).
     fn pick_key(&mut self, key: &Pressed, action: KeyAction) -> bool {
-        let Some(running) = self.running.as_ref() else { return false };
-        let state = &running.home_state;
-        let picked = state.pick(&self.show);
-        let decided =
-            pick_key_for(key, action, picked.is_some(), self.show.live().is_some(), state.edit_kind().is_some());
-        let (running::PickKey::Move(forward), Some(at)) = (decided, picked) else {
-            if decided == running::PickKey::TakeIt {
+        let Some(running) = self.running.as_mut() else { return false };
+        match pick_key_press(&self.show, &mut running.home_state, key, action) {
+            running::PickKey::Pass => false,
+            running::PickKey::TakeIt => {
                 self.enter_key();
-                return true;
+                true
             }
-            return false;
-        };
-        let bible = state.picked.as_ref().is_some_and(|picked| picked.passage.is_some());
-        let order = self.show.presentations().get(at.presentation).map(|song| song.order()).unwrap_or_default();
-        let next = running::pick_beside(&order, at.slide, forward);
-        let Some(running) = self.running.as_mut() else { return true };
-        // At either end the pick stays, with no notice.
-        if let Some(slide) = next {
-            running.home_state.set_pick(
-                &self.show,
-                sp_engine::SlideRef { presentation: at.presentation, slide },
-                bible,
-            );
+            running::PickKey::Move(_) => {
+                running.home_window.request_redraw();
+                true
+            }
         }
-        running.home_window.request_redraw();
-        true
     }
 
     /// Enter: the slide picked goes on screen; otherwise the open item of the playlist from its
@@ -15097,15 +15105,23 @@ mod tests {
         assert_eq!(picked(&space, KeyAction::Next), PickKey::TakeIt);
         assert_eq!(picked(&right, KeyAction::Next), PickKey::Move(true));
         assert_eq!(picked(&left, KeyAction::Previous), PickKey::Move(false));
+        // Any other key doing Next takes it, as Space does (the prototype's way): Page Down, a
+        // clicker's forward, and ← set to Next. Page Up, doing Previous, moves it back.
+        assert_eq!(picked(&Key::Named(NamedKey::PageDown), KeyAction::Next), PickKey::TakeIt);
+        assert_eq!(picked(&left, KeyAction::Next), PickKey::TakeIt);
+        assert_eq!(picked(&Key::Named(NamedKey::PageUp), KeyAction::Previous), PickKey::Move(false));
+        // → with Num Lock off on the number pad is → too.
+        let pad_right = Pressed::at(Key::Named(NamedKey::ArrowRight), winit::keyboard::KeyCode::Numpad6);
+        assert_eq!(pick_key_for(&pad_right, KeyAction::Next, true, false, false), PickKey::Move(true));
         // A key set to anything else does that, never touching the pick: Space set to Clear All
         // clears, putting nothing on screen.
         assert_eq!(picked(&space, KeyAction::ClearAll), PickKey::Pass);
         assert_eq!(picked(&right, KeyAction::HideWords), PickKey::Pass);
-        // The pick moves the way the key's action goes; only Space doing Next takes it, so Space
-        // set to Previous never puts it on screen.
+        // A key doing Previous moves the pick back, whichever key it is, so Space set to Previous
+        // never puts it on screen; only → doing Next moves it on.
         assert_eq!(picked(&space, KeyAction::Previous), PickKey::Move(false));
         assert_eq!(picked(&right, KeyAction::Previous), PickKey::Move(false));
-        assert_eq!(picked(&Key::Named(NamedKey::End), KeyAction::Next), PickKey::Move(true));
+        assert_eq!(picked(&Key::Named(NamedKey::End), KeyAction::Next), PickKey::TakeIt);
         // With something on screen, or in the Edit view, the keys run the show as ever.
         assert_eq!(pick_key_for(&us(&space), KeyAction::Next, true, true, false), PickKey::Pass);
         assert_eq!(pick_key_for(&us(&space), KeyAction::Next, true, false, true), PickKey::Pass);
@@ -15300,6 +15316,16 @@ mod tests {
             }
         }
 
+        /// A key set to `action`, as `App::key_press` carries it out: a slide picked first has its
+        /// say (`pick_key_press`: taken as Enter takes it, or moved), else the action (`act`).
+        fn key_action(&mut self, key: &Pressed, action: KeyAction) {
+            match pick_key_press(&self.show, &mut self.state, key, action) {
+                running::PickKey::Pass => self.act(action),
+                running::PickKey::TakeIt => self.enter(),
+                running::PickKey::Move(_) => {}
+            }
+        }
+
         /// A key pressed, as the window gets it: drawn first if it waits for what is waiting.
         fn press(&mut self, key: Key) {
             self.press_as(key, false);
@@ -15322,12 +15348,12 @@ mod tests {
                 KeyGoes::Show(KeyPress::Letter(command)) => {
                     self.show.apply(command);
                 }
-                KeyGoes::Show(KeyPress::Action(action)) => self.act(action),
+                KeyGoes::Show(KeyPress::Action(action)) => self.key_action(&key, action),
                 // An F row typed in the find box or Scripture Lookup: what it leaves is done as
                 // anywhere, as `App::typed_key_press` does.
                 KeyGoes::Typed(action) => {
                     if let Some(action) = typed_key(&mut self.state, &self.ctx, action) {
-                        self.act(action);
+                        self.key_action(&key, action);
                     }
                 }
                 KeyGoes::Enter => self.enter(),
@@ -16311,9 +16337,12 @@ mod tests {
         assert_eq!(goes(&state, &period, false), does(KeyAction::ClearAll), "on a Mac too");
         state.keys.set_style(KeyStyle::SoftProjector);
         assert_eq!(goes(&state, &period, true), does(KeyAction::HideWords), "Hide the Words like SoftProjector");
-        // In the Bible view too: "." is no letter's place, whatever it types.
+        // In the Bible view, where a letter typed starts a reference, ю types; "." on a US
+        // keyboard, which is no letter, still does its row there.
         state.bible_open = true;
-        assert_eq!(goes(&state, &period, true), does(KeyAction::HideWords), "in the Bible view");
+        assert_eq!(goes(&state, &period, true), KeyGoes::Window, "ю starts a reference in the Bible view");
+        let us_period = us(&Key::Character(".".into()));
+        assert_eq!(goes(&state, &us_period, true), does(KeyAction::HideWords), "a US \".\" in the Bible view");
         state.bible_open = false;
         // The key at "/" types "." there: it is no row, and the window has it.
         assert_eq!(goes(&state, &Pressed::at(Key::Character(".".into()), KeyCode::Slash), true), KeyGoes::Window);
@@ -16480,5 +16509,101 @@ mod tests {
         keyboard.press(Key::Named(NamedKey::F3));
         keyboard.draw();
         assert_eq!(keyboard.live(), Some((0, 0)));
+    }
+
+    /// The keyboard, with Alpha's second slide picked and nothing on screen.
+    fn picked_with_nothing_on_screen(state: home::HomeState) -> Keyboard {
+        let mut keyboard = Keyboard::new(state);
+        keyboard.show.apply(Command::ClearAll);
+        let second = sp_engine::SlideRef { presentation: 0, slide: 1 };
+        keyboard.state.set_pick(&keyboard.show, second, false);
+        assert_eq!((keyboard.live(), keyboard.state.pick(&keyboard.show)), (None, Some(second)));
+        keyboard
+    }
+
+    #[test]
+    fn page_down_puts_the_picked_slide_up_when_nothing_is_on_screen() {
+        // A clicker's forward, with Next starting what is lined up: the slide picked.
+        for style in [key_table::KeyStyle::SoftPresenter, key_table::KeyStyle::SoftProjector] {
+            let mut state = home::HomeState::default();
+            state.keys.set_style(style);
+            let mut keyboard = picked_with_nothing_on_screen(state);
+            keyboard.press(Key::Named(NamedKey::PageDown));
+            assert_eq!(keyboard.live(), Some((0, 1)), "{style:?}: Page Down put the picked slide up");
+            keyboard.press(Key::Named(NamedKey::PageDown));
+            assert_eq!(keyboard.live(), Some((0, 2)), "{style:?}: then on, as Next");
+        }
+        // A key added and set to Next does the same.
+        let mut state = home::HomeState::default();
+        let b = Key::Character("b".into());
+        assert_eq!(state.keys.add(&us(&b), true), Ok(ShowKey::Other(winit::keyboard::KeyCode::KeyB)));
+        state.keys.set(ShowKey::Other(winit::keyboard::KeyCode::KeyB), KeyAction::Next);
+        let mut keyboard = picked_with_nothing_on_screen(state);
+        keyboard.press(b);
+        assert_eq!(keyboard.live(), Some((0, 1)), "B set to Next put the picked slide up");
+    }
+
+    #[test]
+    fn only_the_right_arrow_moves_the_pick_on_and_previous_moves_it_back() {
+        let mut keyboard = picked_with_nothing_on_screen(home::HomeState::default());
+        let pick = |keyboard: &Keyboard| keyboard.state.pick(&keyboard.show).map(|at| (at.presentation, at.slide));
+        keyboard.press(Key::Named(NamedKey::ArrowRight));
+        assert_eq!((keyboard.live(), pick(&keyboard)), (None, Some((0, 2))), "→ moved the pick on, nothing up");
+        keyboard.press(Key::Named(NamedKey::PageUp));
+        assert_eq!((keyboard.live(), pick(&keyboard)), (None, Some((0, 1))), "Page Up moved it back");
+        keyboard.press(Key::Named(NamedKey::ArrowLeft));
+        assert_eq!((keyboard.live(), pick(&keyboard)), (None, Some((0, 0))), "← moved it back");
+        keyboard.press(Key::Named(NamedKey::Space));
+        assert_eq!(keyboard.live(), Some((0, 0)), "Space put it up");
+    }
+
+    #[test]
+    fn in_the_bible_view_a_letter_typed_starts_the_reference_whatever_its_place() {
+        use winit::keyboard::KeyCode;
+        // A Ukrainian layout: the "." key types ю.
+        let yu = || Pressed::at(Key::Character("\u{44e}".into()), KeyCode::Period);
+        let mut bible = Keyboard::new(home::HomeState { bible_open: true, ..home::HomeState::default() });
+        bible.press_key(yu(), false);
+        bible.draw();
+        assert_eq!(bible.state.bible.lookup, "\u{44e}", "ю started a reference");
+        assert_eq!(bible.live(), Some((0, 0)), "and the screen was not cleared");
+        // The same key in the Service view does its row: Clear All.
+        let mut service = Keyboard::new(home::HomeState::default());
+        service.press_key(yu(), false);
+        assert_eq!(service.live(), None, "Clear All in the Service view");
+        // "." on a US keyboard types no letter, so it does its row in the Bible view too.
+        let mut bible = Keyboard::new(home::HomeState { bible_open: true, ..home::HomeState::default() });
+        bible.press(Key::Character(".".into()));
+        bible.draw();
+        assert_eq!(bible.live(), None, "a US \".\" cleared in the Bible view");
+        assert_eq!(bible.state.bible.lookup, "");
+        // And б at the place of "," (added, set to Clear All) types, for "Буття" and "Бытие".
+        let mut keys = KeyTable::default();
+        assert_eq!(keys.add(&us(&Key::Character(",".into())), true), Ok(ShowKey::Other(KeyCode::Comma)));
+        keys.set(ShowKey::Other(KeyCode::Comma), KeyAction::ClearAll);
+        let mut bible = Keyboard::new(home::HomeState { keys, bible_open: true, ..home::HomeState::default() });
+        bible.press_key(Pressed::at(Key::Character("\u{431}".into()), KeyCode::Comma), false);
+        bible.draw();
+        assert_eq!((bible.state.bible.lookup.as_str(), bible.live()), ("\u{431}", Some((0, 0))));
+    }
+
+    #[test]
+    fn a_digit_with_a_row_starts_the_reference_in_the_bible_view() {
+        use winit::keyboard::KeyCode;
+        // For "1 Кор" and "2 Peter".
+        let one = Key::Character("1".into());
+        let mut keys = KeyTable::default();
+        assert_eq!(keys.add(&us(&one), true), Ok(ShowKey::Other(KeyCode::Digit1)));
+        keys.set(ShowKey::Other(KeyCode::Digit1), KeyAction::ClearAll);
+        let mut bible =
+            Keyboard::new(home::HomeState { keys: keys.clone(), bible_open: true, ..home::HomeState::default() });
+        bible.press(one.clone());
+        bible.draw();
+        assert_eq!(bible.state.bible.lookup, "1", "1 started a reference");
+        assert_eq!(bible.live(), Some((0, 0)), "and cleared nothing");
+        // In the Service view it does its row.
+        let mut service = Keyboard::new(home::HomeState { keys, ..home::HomeState::default() });
+        service.press(one);
+        assert_eq!(service.live(), None, "1 set to Clear All cleared");
     }
 }

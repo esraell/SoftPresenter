@@ -505,7 +505,9 @@ impl ShowKey {
 
     /// Whether it is a letter's or a digit's place: a to z, 0 to 9 and the number pad's 0 to 9.
     /// Added, these do their row in the Service view in place of a slide's hot key or a group's
-    /// letter, and in the Bible view they always type a reference, whatever their row says.
+    /// letter (Settings › Keys says so in their note). In the Bible view what a key types decides
+    /// (`show_key_held_back` in `main.rs`): a letter or a digit always starts a reference.
+    #[allow(dead_code)] // Settings › Keys' notes read it, next.
     pub fn is_letter_or_digit(self) -> bool {
         let ShowKey::Other(code) = self else { return false };
         // a to z and 0 to 9 are named by themselves.
