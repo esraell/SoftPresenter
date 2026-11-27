@@ -508,16 +508,31 @@ pub fn time_of_day(time: i64, form: &crate::clock::TimeForm) -> String {
 
 /// Why a file couldn't be written, for the end of a notice: the usual reasons in plain words in
 /// the language set (a full disk, a place SoftPresenter may not write in, a disk that can only be
-/// read), and any other as the system gives it.
+/// read, a file another program has open), and any other as the system gives it, without the
+/// error's number ("(os error 32)"), which the log keeps.
 pub fn write_problem(error: &std::io::Error) -> String {
     use std::io::ErrorKind;
+    // Windows' "The process cannot access the file because it is being used by another process"
+    // (32) and "another process has locked a portion of the file" (33).
+    let in_use = cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33));
     match error.kind() {
+        _ if in_use => t("notices.reason.in_use", "another program has the file open").to_owned(),
+        ErrorKind::ResourceBusy => t("notices.reason.in_use", "another program has the file open").to_owned(),
         ErrorKind::StorageFull => t("notices.reason.disk_full", "the disk is full").to_owned(),
         ErrorKind::PermissionDenied => {
             t("notices.reason.not_allowed", "SoftPresenter isn't allowed to write there").to_owned()
         }
         ErrorKind::ReadOnlyFilesystem => t("notices.reason.read_only", "the disk can only be read").to_owned(),
-        _ => error.to_string(),
+        _ => without_error_number(&error.to_string()).to_owned(),
+    }
+}
+
+/// A system's error sentence without the number Rust adds at its end: "Access is denied." for
+/// "Access is denied. (os error 5)".
+fn without_error_number(said: &str) -> &str {
+    match said.rfind(" (os error ") {
+        Some(at) if said.ends_with(')') => said[..at].trim_end(),
+        _ => said,
     }
 }
 
@@ -945,6 +960,31 @@ mod tests {
         // Any other reason is the system's own.
         let other = Error::other("the cable came out");
         assert_eq!(write_problem(&other), "the cable came out");
+    }
+
+    #[test]
+    fn a_file_another_program_holds_is_said_in_plain_words_and_no_error_number_is_shown() {
+        use crate::i18n::{Language, with_language};
+        use std::io::{Error, ErrorKind};
+        // A file another program has open: on Windows a sharing or lock violation (the system's
+        // own words end "(os error 32)"), elsewhere a busy file.
+        let mut held = vec![Error::from(ErrorKind::ResourceBusy)];
+        if cfg!(windows) {
+            held.extend([Error::from_raw_os_error(32), Error::from_raw_os_error(33)]);
+        }
+        for error in &held {
+            with_language(Language::English, || {
+                assert_eq!(write_problem(error), "another program has the file open", "{error}");
+            });
+            with_language(Language::Russian, || assert_eq!(write_problem(error), "файл открыт в другой программе"));
+        }
+        // Any other system sentence is kept, without the number Rust adds to it.
+        let numbered = Error::from_raw_os_error(if cfg!(windows) { 1117 } else { 5 });
+        assert!(numbered.to_string().contains("(os error"), "{numbered}");
+        let said = write_problem(&numbered);
+        assert!(!said.contains("os error") && !said.is_empty(), "{said}");
+        assert_eq!(without_error_number("Access is denied. (os error 5)"), "Access is denied.");
+        assert_eq!(without_error_number("no number (here)"), "no number (here)");
     }
 
     #[test]

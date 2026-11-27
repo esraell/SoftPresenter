@@ -13,11 +13,14 @@
 //!   never an empty or half-written one. A save that fails takes its half-written file away.
 //!
 //! A file the app isn't allowed to open (macOS kept it out of Documents) that can't be moved
-//! either is left where it is, and only the log says so: no save can go over it while its folder
-//! stays shut (a save is written in the same folder and renamed over it), and what keeps the app
-//! out is said once elsewhere (`library_folder.rs`), not once for each settings file. One that
-//! can't be opened for another reason, or can't be read, and can't be moved is told, saying the
-//! old file couldn't be kept.
+//! either is left where it is, and only the log says so at the start: what keeps the app out is
+//! said once elsewhere (`library_folder.rs`), not once for each settings file. One that can't be
+//! opened for another reason (another program has it open), or can't be read, and can't be moved
+//! is told, saying the old file couldn't be kept. Either way **no save goes over it for the rest
+//! of the run** ([`refuses`]), even once the app could write there (the operator lets it into
+//! Documents, the other program lets the file go): what is in it may be the church's real
+//! settings, and the app is running on the usual ones. The first save refused of a file not told
+//! at the start says so ([`refusal`]); starting the app again reads the file.
 //!
 //! These files are small, but flushing one waits for the disk: on an Apple silicon Mac about
 //! 5.4 ms a file, 10.8 ms with its folder. So none is written on the window's thread or the
@@ -26,6 +29,7 @@
 //! slider dragged doesn't write one at every step.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use crate::i18n::{t, tf};
 
@@ -137,7 +141,11 @@ impl Unread {
                 "The old file is kept as {file}.",
                 &[("file", &crate::applog::plain_paths(&kept.display().to_string()))],
             ),
-            Err(error) => tf("notices.unread.not_kept", "The old file could not be kept: {error}", &[("error", error)]),
+            Err(error) => tf(
+                "notices.unread.not_kept",
+                "The old file could not be kept ({error}), so SoftPresenter won't save over it until it is started again.",
+                &[("error", error)],
+            ),
         };
         format!("{first} {then}")
     }
@@ -163,7 +171,8 @@ pub fn tell(notices: &mut crate::notices::Notices, unread: impl IntoIterator<Ite
 /// Reads a settings file whole: `Ok(None)` when there is none. One that is there but can't be
 /// read, isn't text, or that `parse` refuses (with a reason, for the log) is kept aside and comes
 /// back as the [`Unread`] to tell the operator. One the app isn't allowed to open that can't be
-/// moved either is `Ok(None)` too, said only in the log (see the module's notes).
+/// moved either is `Ok(None)` too, said only in the log (see the module's notes). One that is
+/// there and neither read nor kept aside is never saved over this run ([`refuses`]).
 pub fn read<T>(path: &Path, what: What, parse: impl FnOnce(&str) -> Result<T, String>) -> Result<Option<T>, Unread> {
     let name = path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
     let bytes = match std::fs::read(path) {
@@ -172,8 +181,16 @@ pub fn read<T>(path: &Path, what: What, parse: impl FnOnce(&str) -> Result<T, St
         Err(e) => {
             let refused = e.kind() == std::io::ErrorKind::PermissionDenied;
             return match set_aside(path, None, &format!("{name} could not be read ({e}).")) {
-                Err(_) if refused => Ok(None),
-                kept => Err(Unread { what, kept }),
+                Err(_) if refused => {
+                    leave_unread(path, what, false);
+                    Ok(None)
+                }
+                kept => {
+                    if kept.is_err() {
+                        leave_unread(path, what, true);
+                    }
+                    Err(Unread { what, kept })
+                }
             };
         }
     };
@@ -181,10 +198,65 @@ pub fn read<T>(path: &Path, what: What, parse: impl FnOnce(&str) -> Result<T, St
         Ok(text) => parse(text),
         Err(e) => Err(format!("it is not text (byte {} is not UTF-8)", e.valid_up_to() + 1)),
     };
-    parsed.map(Some).map_err(|why| Unread {
-        what,
-        kept: set_aside(path, Some(&bytes), &format!("{name}: {}.", why.trim_end_matches('.'))),
+    parsed.map(Some).map_err(|why| {
+        let kept = set_aside(path, Some(&bytes), &format!("{name}: {}.", why.trim_end_matches('.')));
+        if kept.is_err() {
+            leave_unread(path, what, true);
+        }
+        Unread { what, kept }
     })
+}
+
+/// A settings file this run found there but could neither read nor keep aside.
+struct NotRead {
+    path: PathBuf,
+    /// Whether the operator has been told no save goes over it (at the start, or at the first
+    /// save refused).
+    told: bool,
+}
+
+/// The settings files this run found there but could neither read nor keep aside, for the whole
+/// run: one process, one library, one run (the one-copy lock keeps other copies out).
+static NOT_READ: Mutex<Vec<NotRead>> = Mutex::new(Vec::new());
+
+fn not_read() -> std::sync::MutexGuard<'static, Vec<NotRead>> {
+    NOT_READ.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Notes a file neither read nor kept aside, so no save goes over it this run; `told` when the
+/// start's notice says so already.
+fn leave_unread(path: &Path, what: What, told: bool) {
+    crate::applog::problem(
+        "settings",
+        &format!("{} ({what:?}) is not saved over until SoftPresenter starts again.", path.display()),
+    );
+    let mut left = not_read();
+    if !left.iter().any(|left| left.path == path) {
+        left.push(NotRead { path: path.to_path_buf(), told });
+    }
+}
+
+/// Whether a save of `path` is refused this run: the file was there at the start and could be
+/// neither read nor kept aside, so what is in it may be the church's real settings. The library's
+/// writer asks before every save (`writer`).
+pub fn refuses(path: &Path) -> bool {
+    not_read().iter().any(|left| left.path == path)
+}
+
+/// Why a save of `path` was refused, for the end of a notice ("Could not save the screens: …"),
+/// the first time only, and never when the start's notice said so already (`None` then; the log
+/// has each).
+pub fn refusal(path: &Path) -> Option<String> {
+    let mut left = not_read();
+    let left = left.iter_mut().find(|left| left.path == path && !left.told)?;
+    left.told = true;
+    Some(
+        t(
+            "notices.reason.not_read",
+            "the file couldn't be read when SoftPresenter started, so it won't be saved over until SoftPresenter is started again",
+        )
+        .to_owned(),
+    )
 }
 
 /// [`read`], with the usual value when there is no file or it was kept aside.
@@ -217,17 +289,20 @@ pub fn set_aside(path: &Path, bytes: Option<&[u8]>, why: &str) -> Result<PathBuf
         })
         // Looked at without following it: a link of that name is a file there too.
         .find(|candidate| std::fs::symlink_metadata(candidate).is_err());
-    let kept = match free {
-        None => Err(std::io::Error::other(format!("{KEPT_MOST} copies of it are kept already"))),
-        Some(aside) => std::fs::rename(path, &aside)
-            .or_else(|renaming| match bytes {
-                Some(bytes) => write_new(&aside, bytes).map_err(|_| renaming),
-                None => Err(renaming),
-            })
-            .map(|()| aside),
+    let Some(aside) = free else {
+        crate::applog::problem(
+            "settings",
+            &format!("{why} It could not be kept: {KEPT_MOST} copies of it are kept already."),
+        );
+        let n = KEPT_MOST.to_string();
+        return Err(tf("notices.reason.kept_most", "{n} copies of it are kept already", &[("n", &n)]));
     };
+    let kept = std::fs::rename(path, &aside).or_else(|renaming| match bytes {
+        Some(bytes) => write_new(&aside, bytes).map_err(|_| renaming),
+        None => Err(renaming),
+    });
     match kept {
-        Ok(aside) => {
+        Ok(()) => {
             if let Some(folder) = path.parent() {
                 flush_folder(folder);
             }
@@ -272,13 +347,35 @@ pub fn replace(path: &Path, temporary: &Path, bytes: &[u8]) -> std::io::Result<(
 
 /// Renames a file just written into place. On Windows the rename itself is written through to
 /// the disk, as its folder can't be flushed; one it doesn't take (a path longer than Windows' old
-/// limit) is renamed as before.
+/// limit) is renamed as before, and the log says so the first time, so a computer where it never
+/// takes is seen.
 fn rename_into_place(temporary: &Path, path: &Path) -> std::io::Result<()> {
-    if cfg!(windows) {
-        sp_winapi::move_written_through(temporary, path).or_else(|_| std::fs::rename(temporary, path))
-    } else {
-        std::fs::rename(temporary, path)
+    if !cfg!(windows) {
+        return std::fs::rename(temporary, path);
     }
+    sp_winapi::move_written_through(temporary, path).or_else(|error| {
+        static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        #[cfg(test)]
+        FELL_BACK_HERE.with(|count| count.set(count.get() + 1));
+        if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            crate::applog::problem(
+                "saving",
+                &format!(
+                    "{} couldn't be renamed into place written through to the disk ({error}); renamed as before \
+                     (said once a run)",
+                    path.display()
+                ),
+            );
+        }
+        std::fs::rename(temporary, path)
+    })
+}
+
+// How many renames on this thread the written-through rename didn't take: for the test that it
+// is used.
+#[cfg(test)]
+thread_local! {
+    static FELL_BACK_HERE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Flushes a file's bytes to the disk (on a Mac, past the disk's own cache too). A disk that
@@ -485,13 +582,124 @@ pub mod tests {
             assert_eq!(std::fs::read(&path).unwrap(), b"[]", "left as it was");
             assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 2, "nothing else made there");
             let told = other.expect("the other is told");
-            assert!(
-                told.starts_with(
-                    "SoftPresenter couldn't read its macros, so it started with none. The old file could not be kept: "
-                ),
-                "{told}"
+            assert_eq!(
+                told,
+                "SoftPresenter couldn't read its macros, so it started with none. The old file could not be kept \
+                 (SoftPresenter isn't allowed to write there), so SoftPresenter won't save over it until it is \
+                 started again."
             );
         }
+    }
+
+    /// Hands one save to a writer of its own and says what became of it.
+    fn saved(save: crate::writer::Save) -> Vec<crate::writer::Done> {
+        let writer = crate::writer::Writer::start(|| {});
+        writer.write(save);
+        writer.drain();
+        writer.finished()
+    }
+
+    fn refused_as_not_read(done: &[crate::writer::Done], what: What) -> bool {
+        matches!(done, [crate::writer::Done::NotRead { kind: crate::writer::Kind::Settings(w), .. }] if *w == what)
+    }
+
+    /// A damaged file that can't be kept aside (every name a copy could take is taken) is never
+    /// saved over this run: the save is refused, the file is left as it was, and the start's
+    /// notice says so, so the refusal adds none. Another file there is saved as usual.
+    #[test]
+    fn a_file_neither_read_nor_kept_aside_is_never_saved_over_this_run() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let dir = TestDir::new("not-kept");
+            let path = dir.0.join("macros.json");
+            for n in 1..=KEPT_MOST {
+                let more = if n == 1 { String::new() } else { format!(" {n}") };
+                std::fs::write(dir.0.join(format!("macros (could not be read{more}).json")), "older").unwrap();
+            }
+            let damaged = br#"[{"name":"Before the serv"#;
+            std::fs::write(&path, damaged).unwrap();
+            let parse = |text: &str| serde_json::from_str::<serde_json::Value>(text).map_err(|e| e.to_string());
+            let unread = read(&path, What::Macros, parse).expect_err("not read");
+            assert_eq!(unread.kept, Err("999 copies of it are kept already".to_owned()));
+            assert_eq!(
+                unread.told(),
+                "SoftPresenter couldn't read its macros, so it started with none. The old file could not be kept \
+                 (999 copies of it are kept already), so SoftPresenter won't save over it until it is started again."
+            );
+            assert!(refuses(&path));
+            let done = saved(settings_save(path.clone(), What::Macros, b"[]".to_vec()));
+            assert!(refused_as_not_read(&done, What::Macros), "{done:?}");
+            assert_eq!(std::fs::read(&path).unwrap(), damaged, "left as it was");
+            assert!(!dir.0.join("macros.json.part").exists());
+            assert_eq!(refusal(&path), None, "the start's notice said so already");
+            let timers = dir.0.join("timers.json");
+            assert!(!refuses(&timers));
+            written(settings_save(timers.clone(), What::Timers, b"[]".to_vec()));
+            assert_eq!(std::fs::read(&timers).unwrap(), b"[]");
+        });
+    }
+
+    /// A file the app was kept out of at the start (macOS kept it out of Documents) is not
+    /// saved over once it is let in while it runs: the start read none of it, so it runs on the
+    /// usual settings, and the file may hold the church's real ones. The first save refused says
+    /// so, once.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_the_app_was_kept_out_of_is_not_saved_over_once_it_is_let_in() {
+        use std::os::unix::fs::PermissionsExt;
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let dir = TestDir::new("let-in");
+            let folder = dir.0.join("shut");
+            std::fs::create_dir_all(&folder).unwrap();
+            let path = folder.join("screens.json");
+            std::fs::write(&path, "the church's screens").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+            // Run as the system's administrator, which every file lets in, there is nothing to
+            // check.
+            let shut = std::fs::read(&path).is_err();
+            let read = shut.then(|| read(&path, What::Screens, |_| -> Result<u32, String> { Ok(1) }));
+            // The operator lets the app in.
+            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let Some(read) = read else { return };
+            assert!(matches!(read, Ok(None)), "the usual settings, said only in the log");
+            let done = saved(settings_save(path.clone(), What::Screens, b"{}".to_vec()));
+            assert!(refused_as_not_read(&done, What::Screens), "{done:?}");
+            assert_eq!(std::fs::read(&path).unwrap(), b"the church's screens", "never saved over");
+            let said = refusal(&path).expect("said the first time");
+            assert_eq!(
+                crate::writer::Kind::Settings(What::Screens).problem(&path, &std::io::Error::other(said)),
+                "Could not save the screens: the file couldn't be read when SoftPresenter started, so it won't be \
+                 saved over until SoftPresenter is started again"
+            );
+            assert_eq!(refusal(&path), None, "once");
+            assert!(refused_as_not_read(
+                &saved(settings_save(path.clone(), What::Screens, b"{}".to_vec())),
+                What::Screens
+            ));
+        });
+    }
+
+    /// A file another program had open at the start (Windows won't read or rename it then) is
+    /// told, in plain words, and not saved over once that program lets it go.
+    #[cfg(windows)]
+    #[test]
+    fn a_file_another_program_held_at_the_start_is_not_saved_over_once_it_is_let_go() {
+        use std::os::windows::fs::OpenOptionsExt;
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let dir = TestDir::new("held");
+            let path = dir.0.join("screens.json");
+            std::fs::write(&path, "the church's screens").unwrap();
+            // Opened sharing nothing, as some sync tools and virus scanners open a file.
+            let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+            let unread = read(&path, What::Screens, |_| -> Result<u32, String> { Ok(1) }).expect_err("told");
+            assert_eq!(unread.kept, Err("another program has the file open".to_owned()));
+            drop(held);
+            let done = saved(settings_save(path.clone(), What::Screens, b"{}".to_vec()));
+            assert!(refused_as_not_read(&done, What::Screens), "{done:?}");
+            assert_eq!(std::fs::read(&path).unwrap(), b"the church's screens", "never saved over");
+            assert_eq!(refusal(&path), None, "the start's notice said so already");
+        });
     }
 
     #[test]
@@ -563,6 +771,29 @@ pub mod tests {
             all.as_secs_f64(),
             all.as_secs_f64() * 1000.0 / 300.0
         );
+    }
+
+    /// On Windows a save takes the place of the file there by the rename written through to the
+    /// disk, never the plain rename it falls back on.
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_a_save_is_renamed_over_the_file_there_written_through() {
+        let dir = TestDir::new("through");
+        let path = dir.0.join("preferences.json");
+        std::fs::write(&path, "before").unwrap();
+        let before = FELL_BACK_HERE.with(std::cell::Cell::get);
+        replace(&path, &dir.0.join("preferences.json.part"), b"after").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"after");
+        assert_eq!(FELL_BACK_HERE.with(std::cell::Cell::get), before, "renamed written through, not as before");
+        assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 1, "only the file");
+        // A song's save, into a folder of its own, the same way.
+        let songs = dir.0.join("Songs");
+        std::fs::create_dir_all(&songs).unwrap();
+        let song = songs.join("a.sppres");
+        replace(&song, &songs.join(".a.sppres.saving"), b"{}").unwrap();
+        replace(&song, &songs.join(".a.sppres.saving"), b"{ }").unwrap();
+        assert_eq!(std::fs::read(&song).unwrap(), b"{ }");
+        assert_eq!(FELL_BACK_HERE.with(std::cell::Cell::get), before);
     }
 
     #[test]

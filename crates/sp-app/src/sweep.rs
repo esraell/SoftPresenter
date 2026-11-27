@@ -604,7 +604,9 @@ fn file_name(path: &Path) -> String {
 /// What kind of file a file in the library is, for reading it for names.
 #[derive(Debug, PartialEq, Eq)]
 enum Kind {
-    /// Half-written by a save that was cut short: read as far as it goes, never stops the tidy.
+    /// Half-written by a save that was cut short, or a settings file the start couldn't read,
+    /// kept aside as it was (`screens (could not be read).json`, `whole_file::set_aside`): read as
+    /// far as it goes, for the ids in it, and never stops the tidy, as it is damaged.
     Leftover,
     /// One of the app's own (a song, a theme, a settings file): must read whole.
     Own,
@@ -617,7 +619,7 @@ enum Kind {
 fn kind_of(path: &Path) -> Kind {
     let name = file_name(path);
     let ending = path.extension().map(|ext| ext.to_string_lossy().to_lowercase()).unwrap_or_default();
-    if ["part", "saving", "ids-part", "renaming"].contains(&ending.as_str()) {
+    if ["part", "saving", "ids-part", "renaming"].contains(&ending.as_str()) || name.contains(" (could not be read") {
         Kind::Leftover
     } else if OWN_ENDINGS.contains(&ending.as_str()) {
         Kind::Own
@@ -948,6 +950,28 @@ mod tests {
         let (outcome, moved) = tidy(&library, month_on());
         assert_eq!(moved, [format!("{UNUSED}.png")], "{outcome:?}");
         assert!(outcome.kept[0].starts_with("kept services.json.part:"), "{outcome:?}");
+    }
+
+    /// A settings file the start kept aside as it was, damaged (`whole_file::set_aside`), is read
+    /// as far as it goes: the ids it names still count, and it never stops the tidy, day after
+    /// day, while it is kept.
+    #[test]
+    fn a_damaged_settings_file_kept_aside_never_stops_the_tidy_and_its_ids_still_count() {
+        let library = library("kept-aside");
+        write(&library.join(format!("Images/{USED}.png")), "picture");
+        write(&library.join(format!("Images/{UNUSED}.png")), "picture");
+        // Cut short by a power cut after the picture's id.
+        write(
+            &library.join("media (could not be read).json"),
+            &format!("{{\"entries\": [{{\"id\": \"{USED}\", \"path\": \"/l/Images/{USED}.png\"}}, {{\"id\": "),
+        );
+        write(&library.join("screens (could not be read 2).json"), "\0\0\0\0");
+        let (outcome, moved) = tidy(&library, month_on());
+        assert!(!outcome.unread && outcome.stopped.is_none(), "{outcome:?}");
+        assert_eq!(moved, [format!("{UNUSED}.png")], "{outcome:?}");
+        assert!(library.join(format!("Images/{USED}.png")).is_file(), "named in the copy kept");
+        assert!(library.join("media (could not be read).json").is_file(), "the copy kept stays");
+        assert!(library.join("screens (could not be read 2).json").is_file());
     }
 
     #[test]

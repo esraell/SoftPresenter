@@ -106,11 +106,17 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   be read 2).json` and so on, never over a copy kept before), the app starts with the usual
   ones, and the notices say so once, in trouble's amber, with where the copy is ("SoftPresenter
   couldn't read its screen settings, so it started with new ones. The old file is kept as …");
-  the log says why. A file that isn't there yet is the usual settings, and nothing is said; so
-  is one the app isn't allowed to open (macOS kept it out of Documents) and can't move, which no
-  save can go over while its folder stays shut, and the log says so. A start turned away because
-  another copy has the library only looks at the settings, and leaves a damaged file to that
-  copy.
+  the log says why. A file that isn't there yet is the usual settings, and nothing is said. One
+  the app can neither read nor keep aside (another program has it open, which the notice says in
+  plain words, or every name for a copy is taken) is told, and **never saved over until the app
+  starts again**, even once the app could write there: what is in it may be the church's real
+  settings. So is one the app isn't allowed to open (macOS kept it out of Documents), which only
+  the log names at the start, as what keeps the app out is said once; the first change that
+  can't be saved then says so, once ("Could not save the screens: the file couldn't be read when
+  SoftPresenter started, …"). A start turned away because another copy has the library, and a
+  list of the displays (`--list-displays`), only look at the settings, and leave a damaged file to
+  the copy that opens the window. A copy kept aside never stops the library's daily tidy: what it
+  names still counts.
 - **Saved whole, never on the window's thread.** Every song and settings file is written under
   another name beside it, flushed to the disk, then renamed into place (on Windows by a rename
   written through to the disk), and its folder flushed after (on a Mac and Linux), so a power
@@ -2561,7 +2567,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   song, theme, playlist and library, the media bin and media playlists (a folder one follows is
   left whole), props, stage layouts, macros, settings, Not saved and the backups, and songs kept
   elsewhere that a playlist, library or macro names. If any of them can't be read whole, or a
-  folder such a song is in can't be reached, nothing moves and the log says why. Only files the
+  folder such a song is in can't be reached, nothing moves and the log says why; a settings file
+  kept aside as damaged ("… (could not be read).json") is read as far as it goes instead. Only files the
   app named itself go (a picture put in the folder by hand stays), never one changed in the last
   week, never while a song pack is being opened, and it stops if a song or setting is saved while
   it works. A half-saved file stays if it may be the only copy of what was being saved. The log

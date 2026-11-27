@@ -2265,6 +2265,9 @@ struct App {
     /// When the bin's small copies started being read at the start, and how many there are,
     /// until they all have been (for the log).
     bin_started: Option<(Instant, usize)>,
+    /// Pictures and videos named on the command line, put in the media bin once the start has
+    /// opened the window (`fill_media_bin`).
+    media_named: Vec<PathBuf>,
     /// Videos added to the bin by hand this run whose picture is still being read by a reader
     /// (see `add_media_file`): one that can't be read says so as it leaves the bin.
     added_by_hand: std::collections::HashSet<Uuid>,
@@ -6138,6 +6141,15 @@ impl App {
                 writer::Done::Failed { path, seq, kind, error } => {
                     self.stamps.written(&path, seq, None);
                     kind.problem(&path, &error)
+                }
+                // A settings file the start could neither read nor keep aside: said the first
+                // time, unless the start's notice said so already.
+                writer::Done::NotRead { path, seq, kind } => {
+                    self.stamps.written(&path, seq, None);
+                    match whole_file::refusal(&path) {
+                        Some(why) => kind.problem(&path, &std::io::Error::other(why)),
+                        None => continue,
+                    }
                 }
                 writer::Done::Problem(said) => {
                     applog::problem("saving", &said);
@@ -10904,39 +10916,11 @@ impl App {
             (!song.copyright.is_empty() && state.copyright_show.shows_on(at.slide, song.slide_count()))
                 .then(|| song.copyright.line(&song.title, state.ccli_licence.trim()))
         });
+        self.hand_over_lists(false);
         let Some(running) = self.running.as_mut() else {
             return;
         };
         let state = &mut running.home_state;
-        if std::mem::take(&mut state.timers_changed) {
-            let save = timers::to_save(&state.timers);
-            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
-        }
-        if std::mem::take(&mut state.messages_changed) {
-            let save = messages::to_save(&state.messages);
-            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
-        }
-        if std::mem::take(&mut state.props_changed) {
-            let save = props::to_save(&state.props);
-            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
-        }
-        if std::mem::take(&mut state.macros_changed) {
-            let save = macros::to_save(&state.macros);
-            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
-        }
-        if std::mem::take(&mut state.stage_layouts_changed) {
-            let save = stage::layouts_to_save(&state.stage_layouts);
-            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
-        }
-        // Handed to the library's writer, after the songs a library has just been given.
-        if std::mem::take(&mut state.libraries_changed) {
-            match libraries::to_save(&state.libraries) {
-                Ok(save) => {
-                    self.writer.write(save);
-                }
-                Err(problem) => state.notices.trouble(problem),
-            }
-        }
         // Props that clear themselves, once their time is up.
         let props = &state.props;
         state.props_live.retain(|(id, since)| {
@@ -11419,10 +11403,138 @@ impl App {
         }
     }
 
+    /// The pictures that were in the media bin last time, then any named on the command line,
+    /// as the start opens the window. Every item is in the bin from the start, in its place and
+    /// with its id, so slide actions, playlists and what plays at the start find it; its small
+    /// copy is read on a reader's thread, so the window opens at once and the bin fills in. One
+    /// whose file can't be read leaves the bin then, as it was never let in before.
+    fn fill_media_bin(&mut self) {
+        let (saved, unread) = media::load_list();
+        self.unread.extend(unread);
+        self.media_playlists = saved.playlists;
+        let mut pictures_to_load = saved.entries;
+        for path in std::mem::take(&mut self.media_named) {
+            if !pictures_to_load.iter().any(|entry| entry.path == path) {
+                pictures_to_load.push(media::Entry {
+                    id: Uuid::new_v4(),
+                    path,
+                    fit: sp_model::ImageFit::Fill,
+                    looping: true,
+                    followed: false,
+                    sample: None,
+                });
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        for entry in &pictures_to_load {
+            let path = &entry.path;
+            // A file listed twice (as an earlier version could save it) is shown once.
+            if !seen.insert(path.clone()) || self.show.media().iter().any(|item| item.id == entry.id) {
+                continue;
+            }
+            let name = path.file_name().map_or_else(|| "Picture".to_owned(), |n| n.to_string_lossy().into_owned());
+            // Its id is kept between runs, so a slide's action that shows it still finds it.
+            self.show.add_media(MediaItem {
+                id: entry.id,
+                fit: entry.fit,
+                looping: entry.looping,
+                sample: entry.sample.clone(),
+                ..MediaItem::new(name, path.clone())
+            });
+            self.bin_pictures.read(entry.id, path);
+            if entry.followed {
+                self.followed_items.insert(entry.id);
+            }
+        }
+        self.bin_started = Some((Instant::now(), self.show.media().len()));
+    }
+
+    /// Hands the library's writer the Bible page's set-up (translations, boxes, options) and the
+    /// passages that were on screen, the small choices (transition, view, slide size) and the
+    /// playlists, each the moment it changes, so it is as it was left at the next start. The
+    /// small choices wait until the window has drawn a few times, so a start's own settling isn't
+    /// saved; `quitting`, they don't: a quit hands over whatever changed a moment before (an `sp`
+    /// command just answered, the window not drawn since). The playlists go after the songs a
+    /// playlist has just been given.
+    fn hand_over_choices(&mut self, quitting: bool) {
+        let Some(running) = self.running.as_mut() else { return };
+        let state = &mut running.home_state;
+        let now = state.bible.choices();
+        if now != self.bible_page_saved {
+            let page = service::SavedPassage { lookup: String::new(), ..state.bible.settings() };
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, service::bible_page_to_save(&page));
+            self.bible_page_saved = now;
+        }
+        if std::mem::take(&mut state.bible.history_changed) {
+            let save = service::bible_history_to_save(&state.bible.history);
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
+        }
+        let now = state.prefs();
+        if self.prefs_saved.as_ref() != Some(&now) && (self.frames_since_start > 10 || quitting) {
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, service::prefs_to_save(&now));
+            self.prefs_saved = Some(now);
+        }
+        let services = &mut state.services;
+        if std::mem::take(&mut services.changed) {
+            services.fresh = false;
+            match service::to_save(services) {
+                Ok(save) => {
+                    self.writer.write(save);
+                }
+                Err(problem) => state.notices.trouble(problem),
+            }
+        }
+    }
+
+    /// Hands the library's writer the timers, messages, props, macros, stage layouts and
+    /// libraries changed since this was last done (each loop, and at quit); `quitting`, the
+    /// screens too, which the loop hands over as it places them (`sync_screens`), and never in a
+    /// test copy, which keeps the screens it was started with. The libraries go after the songs
+    /// a library has just been given.
+    fn hand_over_lists(&mut self, quitting: bool) {
+        let quiet = self.quiet();
+        let Some(running) = self.running.as_mut() else { return };
+        let state = &mut running.home_state;
+        if std::mem::take(&mut state.timers_changed) {
+            let save = timers::to_save(&state.timers);
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
+        }
+        if std::mem::take(&mut state.messages_changed) {
+            let save = messages::to_save(&state.messages);
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
+        }
+        if std::mem::take(&mut state.props_changed) {
+            let save = props::to_save(&state.props);
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
+        }
+        if std::mem::take(&mut state.macros_changed) {
+            let save = macros::to_save(&state.macros);
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
+        }
+        if std::mem::take(&mut state.stage_layouts_changed) {
+            let save = stage::layouts_to_save(&state.stage_layouts);
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
+        }
+        if std::mem::take(&mut state.libraries_changed) {
+            match libraries::to_save(&state.libraries) {
+                Ok(save) => {
+                    self.writer.write(save);
+                }
+                Err(problem) => state.notices.trouble(problem),
+            }
+        }
+        if quitting && !quiet && std::mem::take(&mut state.screens_changed) {
+            let save = screens::to_save(&state.screens);
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
+        }
+    }
+
     /// What a quit does at once, however it came: what was changed is handed to be saved, and
     /// the screens close (their NDI sources stopped, see `NdiOutput::stop`).
     fn begin_quit(&mut self) {
         self.save_unsaved();
+        self.hand_over_choices(true);
+        self.hand_over_lists(true);
         self.paced.flush(&self.writer);
         self.keep_held_aside();
         // A sync under way is stopped, and the screens close first: nothing waits in front of
@@ -11459,6 +11571,8 @@ impl App {
             self.begin_quit();
         }
         // A settings change since the quit began is handed over too.
+        self.hand_over_choices(true);
+        self.hand_over_lists(true);
         self.paced.flush(&self.writer);
         self.finish_saves();
         self.writer.drain();
@@ -11558,6 +11672,10 @@ impl ApplicationHandler<AppEvent> for App {
         let _starting = stall::inside(stall::Doing::Starting);
         match self.start(el) {
             Ok(Some(mut running)) => {
+                // The media bin as it was left, read only by a start that opened the window: a
+                // list of the displays, or a start that failed, never keeps its file aside
+                // unsaid.
+                self.fill_media_bin();
                 // The Bible page and the small choices are as they were left.
                 let (page, unread) = service::load_bible_page();
                 self.unread.extend(unread);
@@ -12363,49 +12481,13 @@ impl ApplicationHandler<AppEvent> for App {
                 self.handle_songbooks();
                 self.handle_free_songbooks();
                 self.handle_catalog_songs();
-                // The Bible page's set-up (translations, boxes, options) is remembered the
-                // moment it changes, so it is as it was left at the next start.
+                // The Bible page, the small choices and the playlists, as they change.
+                self.hand_over_choices(false);
                 if let Some(running) = self.running.as_mut() {
-                    let now = running.home_state.bible.choices();
-                    if now != self.bible_page_saved {
-                        let page =
-                            service::SavedPassage { lookup: String::new(), ..running.home_state.bible.settings() };
-                        let save = service::bible_page_to_save(&page);
-                        save_setting(&mut self.paced, &self.writer, &mut running.home_state.notices, save);
-                        self.bible_page_saved = now;
-                    }
-                }
-                // And the passages that were on screen.
-                if let Some(running) = self.running.as_mut()
-                    && std::mem::take(&mut running.home_state.bible.history_changed)
-                {
-                    let save = service::bible_history_to_save(&running.home_state.bible.history);
-                    save_setting(&mut self.paced, &self.writer, &mut running.home_state.notices, save);
-                }
-                // So are the small choices: transition, view, slide size.
-                if let Some(running) = self.running.as_mut() {
-                    let now = running.home_state.prefs();
-                    if self.prefs_saved.as_ref() != Some(&now) && self.frames_since_start > 10 {
-                        let save = service::prefs_to_save(&now);
-                        save_setting(&mut self.paced, &self.writer, &mut running.home_state.notices, save);
-                        self.prefs_saved = Some(now);
-                    }
                     self.frames_since_start = self.frames_since_start.saturating_add(1);
-                }
-                // The services are handed to the library's writer as soon as they change (after
-                // the songs a playlist has just been given). Until then, the first playlist of a
-                // first start is named in the language set.
-                if let Some(running) = self.running.as_mut() {
-                    let services = &mut running.home_state.services;
-                    if std::mem::take(&mut services.changed) {
-                        services.fresh = false;
-                        match service::to_save(services) {
-                            Ok(save) => {
-                                self.writer.write(save);
-                            }
-                            Err(problem) => running.home_state.notices.trouble(problem),
-                        }
-                    } else if services.follow_language() {
+                    // Until the playlists change, the first playlist of a first start is named in
+                    // the language set.
+                    if running.home_state.services.follow_language() {
                         running.home_window.request_redraw();
                     }
                 }
@@ -12450,9 +12532,16 @@ impl ApplicationHandler<AppEvent> for App {
     /// crashed the process on every quit (exit 139).
     ///
     /// On every system this is also where an end that did not come through the app's own Quit is
-    /// caught (see `leave_at_once`): its Quit leaves nothing to do here.
+    /// caught (see `leave_at_once`). Once the app has left (its Quit, or the system ending it), a
+    /// settings change made since (an `sp` command answered on the way out) is still handed over
+    /// and written, every time.
     fn exiting(&mut self, _el: &ActiveEventLoop) {
-        if !self.left {
+        if self.left {
+            self.hand_over_choices(true);
+            self.hand_over_lists(true);
+            self.paced.flush(&self.writer);
+            self.writer.drain();
+        } else {
             self.leave_at_once();
         }
         #[cfg(target_os = "linux")]
@@ -13200,6 +13289,7 @@ fn main() -> ExitCode {
         frames_since_start: 0,
         player: audio::Player::default(),
         held: winit::keyboard::ModifiersState::empty(),
+        media_named: media_paths,
         capture_selects_box: false,
         focused: None,
         #[cfg(target_os = "macos")]
@@ -13213,50 +13303,6 @@ fn main() -> ExitCode {
         terminate_asked: false,
         left: false,
     };
-    // The pictures that were in the media bin last time, then any named on the command line.
-    start_steps::mark("app filled in");
-    let (saved, unread) = media::load_list();
-    app.unread.extend(unread);
-    app.media_playlists = saved.playlists;
-    let mut pictures_to_load = saved.entries;
-    for path in &media_paths {
-        if !pictures_to_load.iter().any(|entry| &entry.path == path) {
-            pictures_to_load.push(media::Entry {
-                id: Uuid::new_v4(),
-                path: path.clone(),
-                fit: sp_model::ImageFit::Fill,
-                looping: true,
-                followed: false,
-                sample: None,
-            });
-        }
-    }
-    // Every item is in the bin from the start, in its place and with its id, so slide actions,
-    // playlists and what plays at the start find it; its small copy is read on a reader's
-    // thread, so the window opens at once and the bin fills in. One whose file can't be read
-    // leaves the bin then, as it was never let in before.
-    let mut seen = std::collections::HashSet::new();
-    for entry in &pictures_to_load {
-        let path = &entry.path;
-        // A file listed twice (as an earlier version could save it) is shown once.
-        if !seen.insert(path.clone()) || app.show.media().iter().any(|item| item.id == entry.id) {
-            continue;
-        }
-        let name = path.file_name().map_or_else(|| "Picture".to_owned(), |n| n.to_string_lossy().into_owned());
-        // Its id is kept between runs, so a slide's action that shows it still finds it.
-        app.show.add_media(MediaItem {
-            id: entry.id,
-            fit: entry.fit,
-            looping: entry.looping,
-            sample: entry.sample.clone(),
-            ..MediaItem::new(name, path.clone())
-        });
-        app.bin_pictures.read(entry.id, path);
-        if entry.followed {
-            app.followed_items.insert(entry.id);
-        }
-    }
-    app.bin_started = Some((Instant::now(), app.show.media().len()));
     start_steps::mark("app made");
     // The log says when the window's thread is held up, and with what.
     stall::watch();

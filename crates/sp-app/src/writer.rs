@@ -17,6 +17,8 @@
 //!   between, both are written, in order.
 //! - **Never over a change made outside the app:** a save carries how the app last saw the file
 //!   ([`Guard`]), and is left undone, and said, if the file has changed since.
+//! - **Never over a settings file the start couldn't read** and couldn't keep aside
+//!   (`whole_file::refuses`): it is left as it was until the app starts again ([`Done::NotRead`]).
 //! - **At quit** the app waits until everything handed over is written. If it is killed, what
 //!   was still waiting is lost, as a save under way would have been before.
 //!
@@ -119,6 +121,9 @@ pub enum Done {
     Written { path: PathBuf, seq: u64, stamp: Option<Stamp> },
     /// Left undone: the file changed outside the app since it was last read or written.
     ChangedOutside { path: PathBuf, seq: u64 },
+    /// Left undone: a settings file there at the start that could be neither read nor kept
+    /// aside, never saved over this run (`whole_file::refuses`).
+    NotRead { path: PathBuf, seq: u64, kind: Kind },
     /// Couldn't be written.
     Failed { path: PathBuf, seq: u64, kind: Kind, error: std::io::Error },
     /// A job handed over with [`Writer::then`] went wrong; what to tell the operator.
@@ -423,6 +428,13 @@ fn work(shared: &Shared, wake: &dyn Fn(), slow: Option<Duration>) {
 /// Writes one file, unless its guard says it changed outside the app.
 fn write_one(seq: u64, save: Save, left: &mut HashMap<PathBuf, Left>, slow: Option<Duration>) -> Done {
     let Save { path, kind, guard, make_folder, keep_old_in, content } = save;
+    if crate::whole_file::refuses(&path) {
+        crate::applog::problem(
+            "saving",
+            &format!("did not write {}: it couldn't be read at the start", path.display()),
+        );
+        return Done::NotRead { path, seq, kind };
+    }
     let expected = match guard {
         Guard::Any => None,
         Guard::Unchanged(then) => Some(then),

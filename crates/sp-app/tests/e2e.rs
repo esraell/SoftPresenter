@@ -840,6 +840,54 @@ fn a_damaged_screens_file_is_kept_aside_and_said_at_the_start() {
     assert_eq!(std::fs::read(&kept).ok().as_deref(), Some(&damaged[..]), "still kept after the quit{}", run.context());
 }
 
+/// A list of the displays (`--list-displays`) may run beside the copy running on its folder and
+/// opens no window: it never reads the media bin's file, so it can't keep a damaged one aside
+/// with nobody told, leaving the next start an empty bin and no notice. The start that opens the
+/// window keeps it aside and says so.
+#[test]
+fn a_list_of_the_displays_leaves_a_damaged_media_bin_to_the_start_that_opens_the_window() {
+    let name = "a_list_of_the_displays_leaves_a_damaged_media_bin_to_the_start_that_opens_the_window";
+    let Some(run) = Run::new(name) else { return };
+    let damaged = br#"{"entries":[{"id":"0f5f6b0e-1111-4c4c-8888-0000000000"#;
+    std::fs::create_dir_all(&run.data).expect("the copy's data folder");
+    let media = run.data.join("media.json");
+    std::fs::write(&media, damaged).expect("the damaged file");
+    let mut command = run.program();
+    command.arg("--list-displays");
+    let (status, stdout, stderr, _) = run_to_end(command, None, COMMAND_WITHIN);
+    assert!(status.is_some_and(|status| status.success()), "--list-displays: {status:?} {stdout:?} {stderr:?}");
+    assert!(stdout.contains("display "), "it listed the displays: {stdout:?}");
+    let kept = run.data.join("media (could not be read).json");
+    assert_eq!(std::fs::read(&media).ok().as_deref(), Some(&damaged[..]), "left as it was{}", run.context());
+    assert!(!kept.exists(), "nothing kept aside by a list of the displays");
+    let copy = run.start(&[]);
+    assert_eq!(std::fs::read(&kept).ok().as_deref(), Some(&damaged[..]), "kept by the start{}", run.context());
+    let reply = copy.ok(&["notices"]);
+    let told = reply.data.as_array().into_iter().flatten().filter(|notice| {
+        notice["text"].as_str().is_some_and(|text| text.starts_with("SoftPresenter couldn't read its media bin"))
+    });
+    assert_eq!(told.count(), 1, "said once: {}{}", reply.text, run.context());
+    copy.quit().assert_clean(&run);
+}
+
+/// A setting changed a moment before quitting, while its save waits its turn (the small
+/// settings files are written at most every 300 ms each), is on disk after the quit.
+#[test]
+fn settings_changed_just_before_quitting_are_saved() {
+    let Some(run) = Run::new("settings_changed_just_before_quitting_are_saved") else { return };
+    let copy = run.start(&[]);
+    copy.ok(&["settings", "set", "columns=5"]);
+    copy.ok(&["settings", "set", "columns=7"]);
+    copy.ok(&["timer", "new", "Walk-in", "countdown", "5:00"]);
+    copy.ok(&["timer", "set", "Walk-in", "name", "Doors open"]);
+    copy.quit().assert_clean(&run);
+    let prefs: Value = serde_json::from_str(&std::fs::read_to_string(run.data.join("preferences.json")).unwrap())
+        .expect("the settings file reads");
+    assert_eq!(prefs["columns"], 7, "the last change is on disk: {prefs}");
+    let timers = std::fs::read_to_string(run.data.join("timers.json")).expect("the timers file");
+    assert!(timers.contains("Doors open") && !timers.contains("Walk-in"), "the last change is on disk: {timers}");
+}
+
 // ---------------------------------------------------------------------------------------------
 // One copy per data folder
 

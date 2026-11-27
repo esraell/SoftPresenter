@@ -274,6 +274,34 @@ mod tests {
         assert_eq!(path_without(r"C:\Tools", bin), None);
     }
 
+    /// The rename a save takes the place of a file by: over a file there, onto a name no file has,
+    /// and refused, with the system's reason, when there is nothing to move or a name holds a NUL.
+    #[test]
+    fn a_file_is_moved_over_the_one_there_written_through() {
+        let dir = std::env::temp_dir().join(format!("sp-winapi-move-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (part, file) = (dir.join("preferences.json.part"), dir.join("preferences.json"));
+        std::fs::write(&file, "before").unwrap();
+        std::fs::write(&part, "after").unwrap();
+        super::move_written_through(&part, &file).expect("moved over the file there");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "after");
+        assert!(!part.exists(), "moved, not copied");
+        let new = dir.join("timers.json");
+        std::fs::write(&part, "[]").unwrap();
+        super::move_written_through(&part, &new).expect("moved to a new name");
+        assert_eq!(std::fs::read_to_string(&new).unwrap(), "[]");
+        let gone = super::move_written_through(&part, &file).expect_err("nothing to move");
+        assert_eq!(gone.kind(), std::io::ErrorKind::NotFound, "{gone}");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "after", "left as it was");
+        #[cfg(windows)]
+        {
+            let nul = super::move_written_through(&new, &dir.join("a\0b")).expect_err("a NUL in a name");
+            assert_eq!(nul.kind(), std::io::ErrorKind::InvalidInput);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[cfg(windows)]
     #[test]
     fn a_name_is_held_by_one_holder_at_a_time_and_is_free_again_once_let_go() {
