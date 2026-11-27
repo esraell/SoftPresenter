@@ -517,8 +517,8 @@ impl crate::App {
         self.redraw_settings();
     }
 
-    /// Carries out what the card asked: Find, Stop, Search Another Folder… and Import. Called
-    /// after each drawing of the Settings window.
+    /// Carries out what the card asked: Find, Stop, Choose a Folder… (or Search Another Folder…)
+    /// and Import. Called after each drawing of the Settings window.
     pub(crate) fn handle_find_songs(&mut self) {
         let Some(running) = self.running.as_mut() else { return };
         let asks = std::mem::take(&mut running.home_state.find_songs.asks);
@@ -532,7 +532,7 @@ impl crate::App {
                 Ask::AnotherFolder => {
                     // The system's own window for choosing a folder, as the app's others are.
                     let chosen = rfd::FileDialog::new()
-                        .set_title(t("notices.dialog.find_folder", "Search Another Folder"))
+                        .set_title(t("notices.dialog.find_folder", "Look in one more folder"))
                         .pick_folder();
                     match chosen {
                         Some(folder) => self.add_find_folder(folder),
@@ -552,7 +552,7 @@ impl crate::App {
         }
     }
 
-    /// Adds a folder to where it looks. Before a search, it joins the places shown; after one,
+    /// Adds a folder to where it looks. Before a search, it joins the line's sentence; after one,
     /// a search starts again at once, so what the card says it looked in stays true.
     fn add_find_folder(&mut self, folder: PathBuf) -> Result<(), String> {
         let Some(running) = self.running.as_mut() else { return Ok(()) };

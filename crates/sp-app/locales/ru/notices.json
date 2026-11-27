@@ -394,7 +394,7 @@
   "notices.ndi.stopped": "Источник NDI {source} перестал передавать. Его слайды показываются без него, пока он не вернётся.",
   "notices.ask.allow": "Разрешить",
   "notices.ask.dont_allow": "Не разрешать",
-  "notices.dialog.find_folder": "Искать в другой папке",
+  "notices.dialog.find_folder": "Искать ещё в одной папке",
   "notices.import.why.not_songbook": "это не сборник SoftProjector, который SoftPresenter может прочитать",
   "notices.import.why.no_songs": "в нём нет песен",
   "notices.import.why.zip_no_songbook": "в нём нет сборника SoftProjector, который SoftPresenter может прочитать",

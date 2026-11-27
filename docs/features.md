@@ -328,8 +328,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   system: beside its program, its VirtualStore copy or ProgramData on Windows, inside the app on
   a Mac), folders of `.pro` song documents (a library), and folders of song files (ChordPro and
   lyric files, SoftPresenter's own, and `.txt` whose words name a song's parts). It looks in
-  Documents, Downloads, Desktop and SoftProjector's folder, and in any folder added with Search
-  Another Folder…, on a thread of its own: never into hidden folders (named with a dot, or
+  Documents, Downloads, Desktop and SoftProjector's folder, and in any folder added with Choose
+  a Folder… (Search Another Folder… once a search has found nothing), on a thread of its own.
+  Before a search the card is one line, Look for songs you already have, whose sentence says
+  where it looks, a folder added joining it ("…SoftProjector's folder and Worship songs."), and
+  that nothing comes in until you choose, with Choose a Folder… and Find at its right. The
+  sentence keeps three lines' room from the start (or what it takes alone, where that is more:
+  four or five lines beside the keys in the narrowest Settings window), so choosing a folder
+  moves nothing; a name too long for that room is cut in its middle with "…", the folders' whole
+  paths under the pointer. It never
+  looks into hidden folders (named with a dot, or
   marked hidden on Windows), app or library bundles, Safari's downloads under way,
   `node_modules` and caches, never through a link (on Windows a junction or a mounted drive is
   one too), eight folders deep, 200,000 files and 90 seconds at most, and never in

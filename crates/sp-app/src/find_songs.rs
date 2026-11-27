@@ -471,7 +471,7 @@ pub fn places(added: &[PathBuf]) -> Vec<Looked> {
     places
 }
 
-/// A folder's name as a chip shows it: its last part (the whole path for a drive's top).
+/// A folder's name as the card says it: its last part (the whole path for a drive's top).
 pub fn folder_name(folder: &Path) -> String {
     folder.file_name().map_or_else(|| folder.display().to_string(), |name| name.to_string_lossy().into_owned())
 }
@@ -1451,7 +1451,8 @@ pub enum Phase {
 pub enum Ask {
     Find,
     Stop,
-    /// Search another folder: the system's folder window.
+    /// Look in one more folder (Choose a Folder…, or Search Another Folder… once a search has
+    /// found nothing): the system's folder window.
     AnotherFolder,
     Import,
 }
@@ -1541,15 +1542,6 @@ impl Card {
         let new = new_in(self.chosen().into_iter().map(|at| &self.sources[at]));
         self.new_ticked.set(Some((key, new)));
         new
-    }
-
-    /// The places where it looks: the usual ones, then the folders added.
-    pub fn places(&self) -> Vec<PlaceName> {
-        Usual::ALL
-            .iter()
-            .map(|usual| PlaceName::Usual(*usual))
-            .chain(self.added.iter().map(|folder| PlaceName::Folder(folder_name(folder))))
-            .collect()
     }
 }
 

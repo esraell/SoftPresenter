@@ -9962,6 +9962,12 @@ impl App {
                         state.preferences_pane = home::Pane::SongFiles;
                         state.find_songs.asks.push(find_songs::Ask::Find);
                     }
+                    // Song files before a search, with a folder added to where it looks: its
+                    // name joins the line's sentence (find-songs-folder).
+                    "find-songs-folder" => {
+                        state.preferences_pane = home::Pane::SongFiles;
+                        state.find_songs.added.push(std::path::PathBuf::from("Worship songs"));
+                    }
                     // TimelyChurch's page, where it is offered.
                     "timelychurch" | "timelychurch-end" => {
                         state.preferences_pane = home::Pane::Integrations;

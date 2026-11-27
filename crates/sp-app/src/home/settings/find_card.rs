@@ -1,16 +1,17 @@
 //! Settings › Song files › Find songs on this computer, the page's first card, as the design
-//! draws it (26 November): where it looks, with Search Another Folder… and Find; looking, with
-//! Stop, the rows coming in as they are found; a row for each songbook, library or folder of
-//! song files, ticked to import; bringing them in; and what came in. Nothing comes in until the
-//! operator chooses. What the card asks for is carried out by the app (`find_songs_cli`), and
-//! its search and dry run are `find_songs`.
+//! draws it (26 November): before a search, one line, Look for songs you already have, saying
+//! where it looks, with Choose a Folder… and Find; looking, with Stop, the rows coming in as
+//! they are found; a row for each songbook, library or folder of song files, ticked to import;
+//! bringing them in; and what came in. Nothing comes in until the operator chooses. What the
+//! card asks for is carried out by the app (`find_songs_cli`), and its search and dry run are
+//! `find_songs`.
 
 use std::sync::Arc;
 
 use egui::{FontId, Pos2, Rect, Sense, Stroke, pos2, vec2};
 
-use super::parts::{self, Key, card, chips_row, keys_line, note};
-use crate::find_songs::{Ask, Card, Kind, Phase, Source, brought_words, row_words};
+use super::parts::{self, Key, card, keys_line, note};
+use crate::find_songs::{Ask, Card, Kind, Phase, Source, brought_words, folder_name, row_words};
 use crate::i18n::{t, tf, tn};
 use crate::studio::{CARE, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, fixed_semibold, semibold};
 
@@ -22,7 +23,7 @@ fn found_words(n: usize) -> String {
 /// The card, in the phase it is in.
 pub fn find_card(ui: &mut egui::Ui, state: &mut Card) {
     let about = match state.phase {
-        Phase::Before => t("settings.find.about", "Songbooks, libraries and song files you already have").to_owned(),
+        Phase::Before => t("settings.find.about", "Songbooks, libraries and song files").to_owned(),
         Phase::Searching => t("settings.find.about.looking", "Looking\u{2026}").to_owned(),
         Phase::Found if state.sources.is_empty() => t("settings.find.about.none", "Nothing found").to_owned(),
         Phase::Found => found_words(state.sources.len()),
@@ -39,33 +40,120 @@ pub fn find_card(ui: &mut egui::Ui, state: &mut Card) {
     });
 }
 
-/// Search Another Folder…, the folder window's key.
+/// Search Another Folder…, the folder window's key once a search has found nothing.
 fn another_folder() -> &'static str {
     t("settings.find.another", "Search Another Folder\u{2026}")
 }
+
+/// Choose a Folder…, the folder window's key before a search.
+fn choose_folder() -> &'static str {
+    t("settings.find.choose_folder", "Choose a Folder\u{2026}")
+}
+
+/// How wide Find is at least, as the design draws its main key.
+const FIND_WIDTH: f32 = 84.0;
 
 fn find_again() -> &'static str {
     t("settings.find.again", "Find Again")
 }
 
-/// Before a search: where it looks, Search Another Folder… and Find, and that nothing comes in
-/// unasked.
+/// How many lines the sentence before a search keeps room for from the start, in every
+/// language (or as many as it takes with no folder, where that is more: four or five beside the
+/// keys in the narrowest Settings window), so choosing a folder moves nothing (the owner:
+/// nothing changes size when clicked).
+const SENTENCE_LINES: usize = 3;
+
+/// Before a search, one line (the owner, 26 November): Look for songs you already have, with
+/// where it looks and that nothing comes in unasked in its sentence, and Choose a Folder… and
+/// Find at its right. The sentence keeps three lines' room, its folders' names cut in their
+/// middle where it would take more, with their whole paths under the pointer.
 fn before(ui: &mut egui::Ui, state: &mut Card) {
-    let places: Vec<String> = state.places().iter().map(|place| place.words()).collect();
-    chips_row(ui, t("settings.find.where", "Where it looks"), &places);
-    let find = t("settings.find.find", "Find");
-    match keys_line(ui, "find before", "", &[Key::plain(another_folder()), Key::main(find)]) {
+    let label = t("settings.find.look", "Look for songs you already have");
+    let keys = [Key::plain(choose_folder()), Key::main(t("settings.find.find", "Find")).at_least(FIND_WIDTH)];
+    let room = parts::keys_row_note_room(ui, ui.available_width(), &keys);
+    let kept = SENTENCE_LINES.max(parts::note_lines(ui, &looks_in_words(&[]), room));
+    let sentence = looks_in_fitted(ui, &state.added, room, kept);
+    let top = ui.cursor().min;
+    let clicked = parts::keys_row_keeping(ui, "find before", label, (&sentence, kept), &keys);
+    if !state.added.is_empty() {
+        let words = Rect::from_min_max(top, pos2(top.x + room, ui.cursor().min.y));
+        ui.interact(words, ui.scope_id().with("find before folders"), Sense::hover())
+            .on_hover_text(added_paths(&state.added));
+    }
+    match clicked {
         Some(0) => state.asks.push(Ask::AnotherFolder),
         Some(_) => state.asks.push(Ask::Find),
         None => {}
     }
-    note(
-        ui,
-        t(
-            "settings.find.note",
-            "Nothing comes in until you choose. A song already in your library, word for word under the same title, is never brought in twice.",
+}
+
+/// The folders added, whole, one a line: the hover of the line's words.
+fn added_paths(added: &[std::path::PathBuf]) -> String {
+    added.iter().map(|folder| folder.display().to_string()).collect::<Vec<_>>().join("\n")
+}
+
+/// Where it looks, as the line's sentence says it: the usual places, then each folder added
+/// with Choose a Folder…, by its own name.
+fn looks_in_words(added: &[std::path::PathBuf]) -> String {
+    looks_in_named(&added.iter().map(|folder| folder_name(folder)).collect::<Vec<_>>())
+}
+
+/// The sentence, with these names for the folders added.
+fn looks_in_named(folders: &[String]) -> String {
+    match folders {
+        [] => t(
+            "settings.find.looks_in",
+            "Looks in Documents, Downloads, the Desktop and SoftProjector\u{2019}s folder. Nothing comes in until you choose.",
+        )
+        .to_owned(),
+        [folder] => tf(
+            "settings.find.looks_in_one",
+            "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder and {folder}. Nothing comes in until you choose.",
+            &[("folder", folder)],
         ),
-    );
+        [list @ .., last] => tf(
+            "settings.find.looks_in_more",
+            "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder, {list} and {last}. Nothing comes in until you choose.",
+            &[("list", &list.join(", ")), ("last", last)],
+        ),
+    }
+}
+
+/// The sentence as the line shows it, in `kept` lines at most at `room` wide: the folders' names
+/// whole where that fits, else each cut in its middle to the most letters that fit ("Worship
+/// so\u{2026}Elm Street"). Should even "…" for each take more (many folders), the line cuts the
+/// sentence's end.
+fn looks_in_fitted(ui: &egui::Ui, added: &[std::path::PathBuf], room: f32, kept: usize) -> String {
+    let names: Vec<String> = added.iter().map(|folder| folder_name(folder)).collect();
+    let cut_to = |keep: usize| looks_in_named(&names.iter().map(|name| cut_middle(name, keep)).collect::<Vec<_>>());
+    let fits = |sentence: &str| parts::note_lines(ui, sentence, room) <= kept;
+    let longest = names.iter().map(|name| name.chars().count()).max().unwrap_or(0);
+    let whole = cut_to(longest);
+    if fits(&whole) {
+        return whole;
+    }
+    // The fewest letters kept that don't fit: the sentence grows with what each name keeps.
+    let (mut fit, mut over) = (0, longest);
+    while over - fit > 1 {
+        let keep = (fit + over) / 2;
+        if fits(&cut_to(keep)) { fit = keep } else { over = keep }
+    }
+    cut_to(fit)
+}
+
+/// `name` in `keep` letters at most: its start and its end, with "…" between them where it is
+/// longer ("…" alone for none).
+fn cut_middle(name: &str, keep: usize) -> String {
+    let letters: Vec<char> = name.chars().collect();
+    if letters.len() <= keep {
+        return name.to_owned();
+    }
+    let end = keep / 2;
+    let start = keep - end;
+    let mut cut: String = letters[..start].iter().collect();
+    cut.push('\u{2026}');
+    cut.extend(&letters[letters.len() - end..]);
+    cut
 }
 
 /// Looking: where, how many found so far and Stop, and the rows found, coming in as they are.
@@ -484,7 +572,7 @@ mod tests {
     fn each_key_asks_for_what_it_says() {
         let mut state = state_in(Phase::Before);
         assert!(click(&mut state, "Find"));
-        assert!(click(&mut state, "Search Another Folder\u{2026}"));
+        assert!(click(&mut state, "Choose a Folder\u{2026}"));
         assert_eq!(state.find_songs.asks, [Ask::Find, Ask::AnotherFolder]);
         let mut state = state_in(Phase::Searching);
         assert!(click(&mut state, "Stop"));
@@ -536,10 +624,12 @@ mod tests {
             (
                 Phase::Before,
                 &[
-                    "Where it looks",
-                    "Documents",
-                    "SoftProjector\u{2019}s folder",
-                    "SONGBOOKS, LIBRARIES AND SONG FILES YOU ALREADY HAVE",
+                    "Find songs on this computer",
+                    "SONGBOOKS, LIBRARIES AND SONG FILES",
+                    "Look for songs you already have",
+                    "Looks in Documents, Downloads, the Desktop and SoftProjector\u{2019}s folder. Nothing comes in until you choose.",
+                    "Choose a Folder\u{2026}",
+                    "Find",
                 ][..],
             ),
             (Phase::Searching, &["Looking in Downloads\u{2026} 6 songbooks and libraries found", "LOOKING\u{2026}"]),
@@ -571,6 +661,22 @@ mod tests {
             }
             drawn.drop_without_applying_deltas();
         }
+        // Before a search, one line: no row of where it looks with its folders' pills, no note
+        // under it, and the key to add a folder is Choose a Folder….
+        let mut state = state_in(Phase::Before);
+        let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
+        for gone in [
+            "Where it looks",
+            "Documents",
+            "Downloads",
+            "Desktop",
+            "SoftProjector\u{2019}s folder",
+            "Search Another Folder\u{2026}",
+            "Nothing comes in until you choose. A song already in your library, word for word under the same title, is never brought in twice.",
+        ] {
+            assert!(crate::studio::tests::place_of(&drawn, gone).is_none(), "{gone} is still drawn");
+        }
+        drawn.drop_without_applying_deltas();
         // Found nothing names the places it looked in.
         let mut state = state_in(Phase::Found);
         state.find_songs.sources.clear();
@@ -793,6 +899,30 @@ mod tests {
         texts: Vec<(Arc<egui::Galley>, Pos2)>,
         rules: Vec<(f32, f32)>,
         boxes: Vec<Rect>,
+        /// Every key's block (a filled rectangle 30 high).
+        keys: Vec<Rect>,
+        /// Every rectangle drawn, filled or outlined, in the order drawn.
+        rects: Vec<Rect>,
+    }
+
+    impl Painted {
+        /// The first piece of text that says `words`, with where its top left is.
+        fn text(&self, words: &str) -> Option<(Arc<egui::Galley>, Pos2)> {
+            self.texts.iter().find(|(galley, _)| galley.text() == words).cloned()
+        }
+
+        /// Whether everything is where it is in `other`, at its size: the same words in the
+        /// same places, and the same rectangles and lines.
+        fn same_place(&self, other: &Painted) -> bool {
+            let texts = |painted: &Painted| -> Vec<(String, Rect)> {
+                painted
+                    .texts
+                    .iter()
+                    .map(|(galley, at)| (galley.text().to_owned(), Rect::from_min_size(*at, galley.size())))
+                    .collect()
+            };
+            texts(self) == texts(other) && self.rects == other.rects && self.rules == other.rules
+        }
     }
 
     fn painted(output: &egui::FullOutput) -> Painted {
@@ -802,7 +932,15 @@ mod tests {
                 egui::Shape::LineSegment { points: [a, b], .. } if (a.y - b.y).abs() < 0.01 => {
                     into.rules.push((a.y, a.x.max(b.x)));
                 }
-                egui::Shape::Rect(square) if square.rect.size() == vec2(16.0, 16.0) => into.boxes.push(square.rect),
+                egui::Shape::Rect(rect) => {
+                    if rect.rect.size() == vec2(16.0, 16.0) {
+                        into.boxes.push(rect.rect);
+                    }
+                    if rect.rect.height() == 30.0 && rect.fill != egui::Color32::TRANSPARENT {
+                        into.keys.push(rect.rect);
+                    }
+                    into.rects.push(rect.rect);
+                }
                 egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
                 _ => {}
             }
@@ -810,6 +948,215 @@ mod tests {
         let mut into = Painted::default();
         output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut into));
         into
+    }
+
+    #[test]
+    fn a_folder_chosen_joins_the_sentence_of_where_it_looks() {
+        use crate::i18n::{Language, with_language};
+        use std::path::PathBuf;
+        let folders = |names: &[&str]| -> Vec<PathBuf> {
+            names.iter().map(|name| PathBuf::from("/Volumes/Old laptop").join(name)).collect()
+        };
+        let english = |names: &[&str]| with_language(Language::English, || looks_in_words(&folders(names)));
+        assert_eq!(
+            english(&[]),
+            "Looks in Documents, Downloads, the Desktop and SoftProjector\u{2019}s folder. Nothing comes in until you choose."
+        );
+        assert_eq!(
+            english(&["Worship songs 2019"]),
+            "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder and Worship songs 2019. Nothing comes in until you choose.",
+            "a folder joins the sentence by its own name"
+        );
+        assert_eq!(
+            english(&["Worship songs 2019", "Choir"]),
+            "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder, Worship songs 2019 and Choir. Nothing comes in until you choose."
+        );
+        assert_eq!(
+            english(&["Worship songs 2019", "Choir", "Youth"]),
+            "Looks in Documents, Downloads, the Desktop, SoftProjector\u{2019}s folder, Worship songs 2019, Choir and Youth. Nothing comes in until you choose."
+        );
+        // Every language has its own words for each, with every folder in them.
+        for language in [Language::Spanish, Language::Russian, Language::Ukrainian] {
+            for names in [&[][..], &["Worship songs 2019"][..], &["Worship songs 2019", "Choir", "Youth"][..]] {
+                let said = with_language(language, || looks_in_words(&folders(names)));
+                assert_ne!(said, english(names), "{language:?} has no words for {names:?}");
+                assert!(!said.contains('{') && !said.contains('}'), "{language:?}: {said}");
+                assert!(names.iter().all(|name| said.contains(name)), "{language:?}: {said}");
+            }
+        }
+        // The card says it, with the folder added.
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut state = state_in(Phase::Before);
+        state.find_songs.added = folders(&["Worship songs 2019"]);
+        let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
+        assert!(crate::studio::tests::place_of(&drawn, &english(&["Worship songs 2019"])).is_some());
+        drawn.drop_without_applying_deltas();
+    }
+
+    #[test]
+    fn the_line_before_a_search_holds_still_when_its_keys_are_pressed_or_a_folder_is_chosen() {
+        // Before a search, in every language, in the narrowest Settings window (820), its usual
+        // width (1040) and a wide one:
+        // Choose a Folder… and Find sit at the right of the line, beside its words, Find at least
+        // the design's 84 points wide; pointing at either key or pressing it moves nothing on
+        // the page and changes the size of nothing; and a folder chosen changes only the
+        // sentence, which stays within three lines (below).
+        use crate::i18n::{Language, with_language};
+        use std::path::PathBuf;
+        for language in Language::ALL {
+            with_language(language, || {
+                let choose = t("settings.find.choose_folder", "Choose a Folder\u{2026}");
+                let find = t("settings.find.find", "Find");
+                let label = t("settings.find.look", "Look for songs you already have");
+                for width in [820.0, 1040.0, 1280.0] {
+                    let ctx = crate::studio::tests::styled();
+                    let show = Show::new(Vec::new());
+                    let frame = |state: &mut HomeState, events: &dyn Fn(&Painted) -> Vec<egui::Event>| {
+                        let mut drawn = Painted::default();
+                        for round in 0..3 {
+                            let raw = egui::RawInput {
+                                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 4000.0))),
+                                events: if round == 2 { events(&drawn) } else { Vec::new() },
+                                ..egui::RawInput::default()
+                            };
+                            let output = ctx.run_ui(raw, |ui| settings_ui(ui, state, &show));
+                            drawn = painted(&output);
+                            output.drop_without_applying_deltas();
+                        }
+                        drawn
+                    };
+                    let say = |what: &str| format!("{language:?} at {width}: {what}");
+                    let mut state = state_in(Phase::Before);
+                    let rest = frame(&mut state, &|_| Vec::new());
+                    let sentence = looks_in_words(&[]);
+                    let (sentence_galley, sentence_at) =
+                        rest.text(&sentence).unwrap_or_else(|| panic!("{}", say("no sentence")));
+                    let (label_galley, label_at) = rest.text(label).unwrap_or_else(|| panic!("{}", say("no label")));
+                    let key_of = |drawn: &Painted, words: &str| {
+                        let (galley, at) = drawn.text(words).unwrap_or_else(|| panic!("{}", say(words)));
+                        let middle = Rect::from_min_size(at, galley.size()).center();
+                        drawn
+                            .keys
+                            .iter()
+                            .copied()
+                            .find(|key| key.contains(middle))
+                            .unwrap_or_else(|| panic!("{}", say(&format!("no key under {words}"))))
+                    };
+                    let (choose_key, find_key) = (key_of(&rest, choose), key_of(&rest, find));
+                    // At the right of the line, beside its words, Find last.
+                    assert!(find_key.width() >= 84.0 - 0.01, "{}", say(&format!("Find is {} wide", find_key.width())));
+                    assert!(choose_key.max.x < find_key.min.x, "{}", say("Choose a Folder\u{2026} comes before Find"));
+                    let words_right =
+                        (sentence_at.x + sentence_galley.size().x).max(label_at.x + label_galley.size().x);
+                    assert!(words_right < choose_key.min.x, "{}", say("the keys are beside the line\u{2019}s words"));
+                    let words_rows = label_at.y..=sentence_at.y + sentence_galley.size().y;
+                    assert!(
+                        words_rows.contains(&find_key.center().y),
+                        "{}",
+                        say("the keys are on the line\u{2019}s height")
+                    );
+                    // Pointing at a key, then pressing it, moves nothing.
+                    for words in [choose, find] {
+                        let at = |drawn: &Painted| key_of(drawn, words).center();
+                        let pointed = frame(&mut state, &|drawn| vec![egui::Event::PointerMoved(at(drawn))]);
+                        let pressed = frame(&mut state, &|drawn| {
+                            vec![
+                                egui::Event::PointerMoved(at(drawn)),
+                                egui::Event::PointerButton {
+                                    pos: at(drawn),
+                                    button: egui::PointerButton::Primary,
+                                    pressed: true,
+                                    modifiers: egui::Modifiers::NONE,
+                                },
+                            ]
+                        });
+                        for (drawn, how) in [(&pointed, "pointed at"), (&pressed, "pressed")] {
+                            assert!(drawn.same_place(&rest), "{}", say(&format!("{words} {how} moved something")));
+                        }
+                        state.find_songs.asks.clear();
+                    }
+                    // A folder chosen joins the sentence, and only the sentence changes, whatever
+                    // its name: the sentence keeps three lines' room from the start (or what it
+                    // takes with no folder, where that is more), so the keys, the card's height
+                    // and everything under it stay where they are. A name too long for that room
+                    // is cut in its middle with "…", never past it, even a very long one in the
+                    // narrowest window and the longest language.
+                    // About as long as a folder's name can be (255 bytes).
+                    let very_long = "Worship songs 2019 from the old church on Elm Street, kept by the choir director before the move to the new building across town, with the youth group's songs, the Christmas cantata and the hymns the choir sang the year the roof was mended, all together";
+                    for folder in ["Choir", "Worship songs", very_long] {
+                        let mut chosen = state_in(Phase::Before);
+                        chosen.find_songs.added = vec![PathBuf::from("/Volumes/Old laptop").join(folder)];
+                        let after = frame(&mut chosen, &|_| Vec::new());
+                        let (shown, shown_at) = after
+                            .texts
+                            .iter()
+                            .find(|(galley, at)| *at == sentence_at && galley.text() != label)
+                            .cloned()
+                            .unwrap_or_else(|| panic!("{}", say(&format!("no sentence for {folder}"))));
+                        let said = shown.text();
+                        // Three lines at most, or as many as the sentence takes with no folder
+                        // where that is more (four or five beside the keys at 820).
+                        let alone = sentence_galley.rows.len();
+                        assert!(
+                            shown.rows.len() <= SENTENCE_LINES.max(alone),
+                            "{}",
+                            say(&format!("{} lines for {folder}: {said}", shown.rows.len()))
+                        );
+                        let whole = looks_in_words(&chosen.find_songs.added);
+                        if said != whole {
+                            let cut = (0..folder.chars().count())
+                                .any(|keep| said == looks_in_named(&[cut_middle(folder, keep)]));
+                            assert!(cut, "{}", say(&format!("not {folder} cut in its middle: {said}")));
+                        }
+                        if folder == very_long {
+                            assert_ne!(said, whole, "{}", say("a very long name is cut"));
+                        }
+                        assert_eq!(shown_at, sentence_at);
+                        for words in [choose, find] {
+                            assert_eq!(
+                                key_of(&rest, words),
+                                key_of(&after, words),
+                                "{}",
+                                say(&format!("{words} moved for {folder}"))
+                            );
+                        }
+                        let others = |painted: &Painted, sentence: &str| -> Vec<(String, Rect)> {
+                            painted
+                                .texts
+                                .iter()
+                                .filter(|(galley, _)| galley.text() != sentence)
+                                .map(|(galley, at)| (galley.text().to_owned(), Rect::from_min_size(*at, galley.size())))
+                                .collect()
+                        };
+                        assert_eq!(
+                            others(&after, said),
+                            others(&rest, &sentence),
+                            "{}",
+                            say(&format!("something moved for {folder}"))
+                        );
+                        assert_eq!(
+                            after.rects,
+                            rest.rects,
+                            "{}",
+                            say(&format!("a block moved or changed size for {folder}"))
+                        );
+                        assert_eq!(after.rules, rest.rules, "{}", say(&format!("a line moved for {folder}")));
+                    }
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn a_folders_name_is_cut_in_its_middle_and_its_whole_path_is_under_the_pointer() {
+        assert_eq!(cut_middle("Worship songs 2019", 18), "Worship songs 2019");
+        assert_eq!(cut_middle("Worship songs 2019", 7), "Wors\u{2026}019");
+        assert_eq!(cut_middle("Worship songs 2019", 1), "W\u{2026}");
+        assert_eq!(cut_middle("Worship songs 2019", 0), "\u{2026}");
+        assert_eq!(cut_middle("Песни хора", 4), "Пе\u{2026}ра", "letters, not bytes");
+        let added = [std::path::PathBuf::from("/Volumes/Old laptop/Choir"), std::path::PathBuf::from("/Users/a/Youth")];
+        assert_eq!(added_paths(&added), "/Volumes/Old laptop/Choir\n/Users/a/Youth");
     }
 
     #[test]
