@@ -2283,10 +2283,21 @@ fn remote_control_sends_a_change_at_once_and_one_that_happens_by_itself_with_it(
     let on = message_layer(&mut socket, true, shown);
     assert!(on < Duration::from_millis(400), "the message reached the page after {on:?}");
     // The message leaves by itself after a second, on a pass of the loop that no event asked
-    // for: the page is told with the screens, not a backstop's second later.
-    let gone = message_layer(&mut socket, false, shown);
-    assert!(gone >= Duration::from_millis(900), "the page was told the message left after {gone:?}");
-    assert!(gone < Duration::from_millis(1_800), "the page was told the message left after {gone:?}");
+    // for. `status --wait` is answered on that same pass, so the page must be told within a
+    // moment of it: not on a window's next drawing or the backstop's time.
+    let token = copy.ok(&["status"]).data["token"].as_str().expect("status has a token").to_owned();
+    let (gone, status_said) = std::thread::scope(|scope| {
+        let waiting = scope.spawn(|| {
+            let said = copy.ok(&["status", "--wait", "5", "--since", &token]);
+            assert!(!said.text.starts_with("Nothing changed"), "the message never left: {}", said.text);
+            shown.elapsed()
+        });
+        let gone = message_layer(&mut socket, false, shown);
+        (gone, waiting.join().expect("the wait"))
+    });
+    assert!(status_said >= Duration::from_millis(900), "status said the message left after {status_said:?}");
+    let gap = gone.abs_diff(status_said);
+    assert!(gap < Duration::from_millis(150), "the page heard {gap:?} from the screens ({gone:?}, {status_said:?})");
     copy.quit().assert_clean(&run);
 }
 
