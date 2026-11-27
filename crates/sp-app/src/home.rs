@@ -5810,7 +5810,9 @@ fn library_search(
     // the results'; Escape still ends the search.
     let typing = !state.search_resting;
     let Some((query, picked)) = state.library_search.as_mut() else { return };
-    let asked = state.typed_key.take();
+    // An F row's key is the find box's only while it is typed in: with the search resting, one
+    // pressed in Scripture Lookup is left for Scripture Lookup.
+    let asked = if typing { state.typed_key.take() } else { None };
     // Worked out again only when what is typed, or the songs, change: not on every frame the
     // list is open (the cursor blinking, the mouse moving).
     let epoch = state.lists.songs.epoch();
@@ -11324,6 +11326,34 @@ mod tests {
         assert_eq!(gone.redo_in_theme(&mut changed, false), Some((None, 0)));
         assert!(changed.versions.is_empty());
         assert_eq!(gone.said(true), format!("Put the template {} back.", one.versions[0].templates[0].name));
+    }
+
+    #[test]
+    fn an_f_rows_key_is_the_find_boxs_only_while_it_is_typed_in() {
+        use crate::key_table::KeyAction;
+        let show = three_songs();
+        // "Two" in the find box, which finds the song Two, and a key set to Show Selected
+        // pressed at each of three frames. Whether the find box took it as its Return, which
+        // opens what is picked and asks the app for Enter after.
+        let taken = |resting: bool| {
+            let ctx = egui::Context::default();
+            let mut state = HomeState {
+                library_search: Some(("Two".to_owned(), 0)),
+                search_resting: resting,
+                ..HomeState::default()
+            };
+            let mut took = false;
+            for frame in 0..3 {
+                state.typed_key = Some(KeyAction::ShowSelected);
+                frame_texts(&ctx, &show, &mut state, Vec::new(), f64::from(frame) * 0.1);
+                took |= std::mem::take(&mut state.enter_after);
+            }
+            (took, state.library_search.is_some())
+        };
+        assert_eq!(taken(false), (true, false), "typed in, the find box takes it: its Return opens Two");
+        // Resting after a drag, the search leaves it alone (it is Scripture Lookup's, if that
+        // has the keyboard), and rests on.
+        assert_eq!(taken(true), (false, true), "resting, the search takes no key");
     }
 
     #[test]
