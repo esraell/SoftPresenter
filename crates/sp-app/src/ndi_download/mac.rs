@@ -263,7 +263,7 @@ pub fn read(
         .filter(|file| std::fs::symlink_metadata(file).is_ok_and(|about| about.is_file() && about.len() < 64 * 1024))
         .and_then(|file| std::fs::read_to_string(file).ok())
         .and_then(|info| package_version(&info))
-        .unwrap_or_else(|| "6".to_owned());
+        .unwrap_or_default();
     Ok(Contents { licence: None, notices, runtime: runtime.clone(), runtime_size, runtime_sha256, version })
 }
 

@@ -196,7 +196,8 @@ pub fn installed_in(folder: &Path) -> Option<Installed> {
         return None;
     }
     let info = std::fs::read(folder.join(INFO_FILE)).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
-    Some(info.unwrap_or_else(|| Installed { version: "6".to_owned(), ..Installed::default() }))
+    // Without its note, its version isn't known here: the runtime itself is asked.
+    Some(info.unwrap_or_default())
 }
 
 /// A new runtime waiting in `folder` to take the old one's place at the next start.
@@ -489,13 +490,13 @@ impl NdiDownload {
     /// for the next start, else what the open runtime says, else what the app noted when it
     /// installed it, else what a thread asked the runtime ([`NdiDownload::ask_version`]).
     pub fn version(&mut self) -> Option<String> {
-        if let Some(waiting) = self.waiting() {
+        if let Some(waiting) = self.waiting().filter(|waiting| !waiting.version.is_empty()) {
             return Some(waiting.version.clone());
         }
         if let Some(open) = sp_ndi::version() {
             return Some(open.to_owned());
         }
-        if let Some(installed) = self.installed() {
+        if let Some(installed) = self.installed().filter(|installed| !installed.version.is_empty()) {
             return Some(installed.version.clone());
         }
         self.asked_version.clone().flatten()
@@ -881,7 +882,8 @@ impl NdiDownload {
     }
 
     fn installed_now(&mut self, installed: Option<Installed>, waits: bool) {
-        let version = installed.as_ref().map(|installed| installed.version.clone());
+        let version =
+            installed.as_ref().map(|installed| installed.version.clone()).filter(|version| !version.is_empty());
         crate::applog::event(
             "ndi",
             &format!(
@@ -1144,7 +1146,7 @@ fn install(
         Taken::Package(contents) => mac::install(contents, &next),
     };
     let installed = Installed {
-        version: ready.version().unwrap_or("6").to_owned(),
+        version: ready.version().unwrap_or("").to_owned(),
         downloaded: chrono::Local::now().format("%Y-%m-%d").to_string(),
         marks: ready.marks.clone(),
         licence: licence_mark(ready.licence()),

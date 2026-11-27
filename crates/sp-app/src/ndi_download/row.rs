@@ -485,6 +485,12 @@ mod tests {
             assert_eq!(row(&mut outside, true).line, "NDI is installed.");
             outside.asked_version = Some(Some("6.4.0.2".to_owned()));
             assert_eq!(row(&mut outside, true).line, "NDI 6.4.0.2 is installed.");
+            // A runtime in the app's folder with no note of its version (put there by hand, or
+            // its note lost) claims none: the runtime itself is asked, as for any other.
+            let mut bare = fresh("bare");
+            bare.installed = Some(Some(Installed::default()));
+            assert_eq!(bare.version(), None);
+            assert_eq!(row(&mut bare, true).line, "NDI is installed.");
             // Checked today: when, and that nothing newer was found.
             download.checked =
                 Some(Some(Checked { at: chrono::Utc::now().timestamp(), newer: false, marks: Marks::default() }));
