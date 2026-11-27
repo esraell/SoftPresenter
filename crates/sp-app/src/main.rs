@@ -424,19 +424,32 @@ fn frame_theme<'a>(show: &Show, songs: &'a Arc<Theme>, theme_of: impl Fn(usize) 
 /// place: a Bible passage, the VoxLive item, a song of the song catalog). The same while the
 /// song's words are hidden: the audience screens leave it out with them
 /// (`output::copyright_shown`), in the same dissolve, and the stage screens keep it.
+///
+/// "Last slide" is the song's last slide as sung (`last`, by the presentation's place:
+/// `end_mark::last_sung`), where the end of a song's mark goes too, so the two always land
+/// together: with an arrangement the slide its order ends on, and never a blank slide after
+/// the last words. What has no song's words (a deck) keeps its written last slide.
 fn copyright_line(
     show: &Show,
     app_made: impl Fn(usize) -> bool,
     when: service::CopyrightShow,
     licence: &str,
+    last: impl FnOnce(usize) -> Option<end_mark::Last>,
 ) -> Option<String> {
     let at = show.live()?;
     if app_made(at.presentation) {
         return None;
     }
     let song = show.presentations().get(at.presentation)?;
-    (!song.copyright.is_empty() && when.shows_on(at.slide, song.slide_count()))
-        .then(|| song.copyright.line(&song.title, licence))
+    if song.copyright.is_empty() {
+        return None;
+    }
+    let sung_last = || last(at.presentation).map(|last| show.step().is_some_and(|step| last == (step, at.slide)));
+    let shown = match when {
+        service::CopyrightShow::LastSlide => sung_last().unwrap_or_else(|| when.shows_on(at.slide, song.slide_count())),
+        _ => when.shows_on(at.slide, song.slide_count()),
+    };
+    shown.then(|| song.copyright.line(&song.title, licence))
 }
 
 /// What Clear All, Clear Messages and Clear Props take off: the message and the props. Returns
@@ -2504,6 +2517,10 @@ impl ScreenWindow {
 }
 
 struct App {
+    /// A song's last slide as sung (`end_mark::last_sung`), as last worked out: for which
+    /// songs (`Show::version`), which presentation, and what it came to. Asked on every wake
+    /// while the end of a song is marked or the copyright line shows on last slides.
+    last_sung: std::cell::Cell<Option<(u64, usize, Option<end_mark::Last>)>>,
     options: Options,
     /// Wakes the event loop from other threads (the output thread, for a new live preview).
     waker: Option<winit::event_loop::EventLoopProxy<AppEvent>>,
@@ -9223,13 +9240,40 @@ impl App {
     /// (`Frame::end_mark`) and what the Program preview draws.
     fn end_mark_now(&self) -> Option<f32> {
         let state = &self.running.as_ref()?.home_state;
+        // Off, as it is for most: nothing more is looked at.
+        if !state.end_mark {
+            return None;
+        }
         let at = self.show.live()?;
         let song = self.show.presentations().get(at.presentation)?;
-        let step = self.show.position().map(|(step, _)| step);
-        let due = end_mark::due(state.end_mark, self.app_made(at.presentation), self.show.words_hidden(), song, step);
-        let copyright =
-            || copyright_line(&self.show, |at| self.app_made(at), state.copyright_show, state.ccli_licence.trim());
+        let (app_made, hidden) = (self.app_made(at.presentation), self.show.words_hidden());
+        if app_made || hidden || song.loops {
+            return None;
+        }
+        let last = self.last_sung(at.presentation);
+        let due = end_mark::due(true, app_made, hidden, song, last, at.slide, self.show.step());
+        let copyright = || self.copyright_line_now(state);
         due.then(|| end_mark::floor(copyright().is_some()))
+    }
+
+    /// The copyright line of the song on screen, on the slides Settings says ([`copyright_line`]).
+    fn copyright_line_now(&self, state: &HomeState) -> Option<String> {
+        let (when, licence) = (state.copyright_show, state.ccli_licence.trim());
+        copyright_line(&self.show, |at| self.app_made(at), when, licence, |at| self.last_sung(at))
+    }
+
+    /// A presentation's last slide as sung (`end_mark::last_sung`), worked out once for the
+    /// songs as they stand: any change to a song makes them another version.
+    fn last_sung(&self, presentation: usize) -> Option<end_mark::Last> {
+        let songs = self.show.version();
+        if let Some((have, of, last)) = self.last_sung.get()
+            && (have, of) == (songs, presentation)
+        {
+            return last;
+        }
+        let last = self.show.presentations().get(presentation).and_then(|song| end_mark::last_sung(song));
+        self.last_sung.set(Some((songs, presentation, last)));
+        last
     }
 
     /// The theme a presentation's slides are drawn with: the Bible theme for a Bible passage,
@@ -11661,10 +11705,7 @@ impl App {
         // Linked text showing the time or a timer keeps the preview ticking.
         let links_tick = self.show.live_slide().is_some_and(|(_, slide)| links::ticks(slide));
         // The copyright line of the song on screen, on the slides Settings says.
-        let copyright_line = self.running.as_ref().and_then(|running| {
-            let state = &running.home_state;
-            copyright_line(&self.show, |at| self.app_made(at), state.copyright_show, state.ccli_licence.trim())
-        });
+        let copyright_line = self.running.as_ref().and_then(|running| self.copyright_line_now(&running.home_state));
         self.hand_over_lists(false);
         let Some(running) = self.running.as_mut() else {
             return;
@@ -14166,6 +14207,7 @@ fn main() -> ExitCode {
         mcp_jobs: mcp::Jobs::default(),
         _control: control,
         show,
+        last_sung: std::cell::Cell::new(None),
         sources,
         bible_slots,
         voxlive_slot,
@@ -16391,15 +16433,77 @@ mod tests {
     }
 
     #[test]
+    fn the_copyright_lines_last_slide_is_the_one_the_end_mark_is_on() {
+        // Written verse, chorus, verse, then a blank slide; sung verse, chorus, verse, chorus,
+        // blank: the end is the chorus sung the second time, not the written last slide.
+        let mut song = parse_song_text("River Song", "[Verse 1]\nOne\n\n[Chorus]\nSing\n\n[Verse 2]\nTwo\n");
+        song.copyright.author = "A. Writer".to_owned();
+        song.groups.push(sp_model::Group {
+            id: sp_model::Uuid::new_v4(),
+            name: "Ending".to_owned(),
+            slides: vec![Slide::new(Vec::new())],
+            ..song.groups[0].clone()
+        });
+        let ids: Vec<sp_model::Uuid> = song.groups.iter().map(|group| group.id).collect();
+        let sung = sp_model::Arrangement {
+            id: sp_model::Uuid::new_v4(),
+            name: "Sung".to_owned(),
+            groups: vec![ids[0], ids[1], ids[2], ids[1], ids[3]],
+            auto: false,
+        };
+        song.arrangement = Some(sung.id);
+        song.arrangements.push(sung);
+        assert_eq!(song.order(), [0, 1, 2, 1, 3]);
+        let mut show = Show::new(vec![Arc::new(song)]);
+        let last = |show: &Show| end_mark::last_sung(&show.presentations()[0]);
+        let line = |show: &Show| {
+            copyright_line(show, |_| false, service::CopyrightShow::LastSlide, "", |_| last(show)).is_some()
+        };
+        let marked = |show: &Show| {
+            let at = show.live().expect("on screen");
+            end_mark::due(true, false, false, &show.presentations()[0], last(show), at.slide, show.step())
+        };
+        show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        let mut seen = Vec::new();
+        loop {
+            assert_eq!(line(&show), marked(&show), "the line and the stars land together");
+            seen.push((show.live().map(|at| at.slide), line(&show)));
+            if show.upcoming().is_none() {
+                break;
+            }
+            show.apply(Command::Next);
+        }
+        assert_eq!(
+            seen,
+            [(Some(0), false), (Some(1), false), (Some(2), false), (Some(1), true), (Some(3), false)],
+            "on the chorus sung last, never on the blank slide after it"
+        );
+        // What has no song's words keeps its written last slide for the line.
+        let mut deck = parse_song_text("Deck", "One\n\nTwo\n");
+        deck.copyright.author = "A. Writer".to_owned();
+        for slide in &mut deck.groups[0].slides {
+            slide.objects[0].role = None;
+        }
+        let mut show = Show::new(vec![Arc::new(deck)]);
+        show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        assert!(!line(&show));
+        show.apply(Command::Next);
+        assert!(line(&show) && last(&show).is_none());
+    }
+
+    #[test]
     fn hide_the_words_leaves_the_copyright_line_as_it_is() {
         let mut song = parse_song_text("River Song", "One\n\nTwo\n");
         song.copyright.author = "A. Writer".to_owned();
         let mut show = Show::new(vec![Arc::new(song)]);
         show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
-        let line = |show: &Show| copyright_line(show, |_| false, service::CopyrightShow::EverySlide, "1234");
+        let last = |show: &Show| end_mark::last_sung(&show.presentations()[0]);
+        let line =
+            |show: &Show| copyright_line(show, |_| false, service::CopyrightShow::EverySlide, "1234", |_| last(show));
         let shown = line(&show).expect("the copyright line on the slide on screen");
         assert!(shown.contains("A. Writer"), "{shown}");
-        assert_eq!(copyright_line(&show, |_| true, service::CopyrightShow::EverySlide, ""), None, "app-made");
+        let app_made = copyright_line(&show, |_| true, service::CopyrightShow::EverySlide, "", |_| last(&show));
+        assert_eq!(app_made, None, "app-made");
 
         // What `sync_overlay` sends over the slides stays as it is, so it sends nothing and
         // tells the screens nothing again: the audience screens leave the line out with the

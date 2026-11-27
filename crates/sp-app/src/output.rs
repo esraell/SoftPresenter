@@ -128,7 +128,8 @@ fn going_on(was: &Frame, now: &Frame) -> GoingOn {
 /// has one for it, with its linked text filled in, and while its words are hidden
 /// (`words_hidden`), without them ([`Slide::words_hidden`]: laid out as ever, not drawn); with
 /// the end of a song's mark under its words when that is due (`end_mark`: how far down it may
-/// reach, see [`Slide::end_mark`]), which goes with the words while they are hidden. A
+/// reach, see [`Slide::end_mark`]), which goes with the words while they are hidden and waits
+/// for the slide's builds to have played. A
 /// stage screen's picture is made from the slide as it is, words and all.
 pub(crate) fn drawn_slide(
     slide: &Slide,
@@ -140,12 +141,26 @@ pub(crate) fn drawn_slide(
     end_mark: Option<f32>,
 ) -> Arc<Slide> {
     let in_version = version.and_then(|version| theme.slide_in_version(slide, version));
-    let (built, _) = in_version.as_ref().unwrap_or(slide).built(theme, clock);
+    let of = in_version.as_ref().unwrap_or(slide);
+    let (built, moving) = of.built(theme, clock);
     let filled = crate::links::fill(&built, values);
     let mut drawn = filled.into_owned();
     drawn.words_hidden = words_hidden;
-    drawn.end_mark = end_mark.filter(|_| !words_hidden);
+    // The mark comes once every build on the slide has played: after the last lines a click
+    // brings, never over words still coming in.
+    drawn.end_mark = end_mark.filter(|_| !words_hidden && !moving && builds_played(of, clock));
     Arc::new(drawn)
+}
+
+/// Whether every build on a slide has been set going: each click it waits for has come, and
+/// the slide is fully on, which is when the builds that start with it do. (Whether one is still
+/// under way is `Slide::built`'s to say.)
+fn builds_played(slide: &Slide, clock: sp_model::BuildClock) -> bool {
+    let clicked =
+        |object: &sp_model::Object| object.build_in.is_some_and(|build| build.on_click) || object.build_out.is_some();
+    let timed = |object: &sp_model::Object| object.build_in.is_some_and(|build| !build.on_click);
+    (!slide.objects.iter().any(clicked) || clock.step >= slide.click_steps().len())
+        && (clock.since_on.is_some() || !slide.objects.iter().any(timed))
 }
 
 /// The copyright line over the slide on an audience screen (and the Program preview's picture
@@ -4852,7 +4867,8 @@ mod tests {
         let mut show = sp_engine::Show::new(vec![Arc::new(song)]);
         show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
         let line = |show: &sp_engine::Show| {
-            crate::copyright_line(show, |_| false, crate::service::CopyrightShow::EverySlide, "1234")
+            let last = |_| crate::end_mark::last_sung(&show.presentations()[0]);
+            crate::copyright_line(show, |_| false, crate::service::CopyrightShow::EverySlide, "1234", last)
         };
         (show, line)
     }
@@ -4954,6 +4970,49 @@ mod tests {
         let layout = crate::stage::builtin_layouts().remove(0);
         let stage = crate::stage::slide(marked.slide.as_deref(), None, &Overlay::default(), &marked.about, &layout);
         assert_eq!(stage.end_mark, None);
+    }
+
+    #[test]
+    fn the_end_mark_waits_until_every_build_on_the_slide_has_played() {
+        use sp_model::{Build, BuildClock, BuildEffect};
+        let theme = Theme::builtin();
+        let floor = Some(crate::end_mark::floor(false));
+        let drawn = |slide: &Slide, clock: BuildClock| {
+            drawn_slide(slide, &theme, None, clock, &no_values(), false, floor).end_mark.is_some()
+        };
+        let last = || sp_model::parse_song_text("Song", "One\nTwo\nThree\n").groups[0].slides[0].clone();
+        // Its three paragraphs come a click each: the mark after the third, once it is in.
+        let mut clicked = last();
+        clicked.objects[0].build_in =
+            Some(Build { on_click: true, by_paragraph: true, ..Build::of(BuildEffect::Dissolve) });
+        assert_eq!(clicked.click_steps().len(), 3);
+        for step in 0..3 {
+            assert!(!drawn(&clicked, BuildClock::settled(step)), "after {step} of three clicks");
+        }
+        assert!(drawn(&clicked, BuildClock::settled(3)), "every paragraph in");
+        // Words that dissolve in whole on a click: not before the click, not while they are
+        // still coming in, and then.
+        let mut whole = last();
+        whole.objects[0].build_in = Some(Build { on_click: true, ..Build::of(BuildEffect::Dissolve) });
+        assert!(!drawn(&whole, BuildClock::settled(0)));
+        let coming = BuildClock { step: 1, since_on: Some(60.0), since_step: 0.05 };
+        assert!(!drawn(&whole, coming), "never over words still coming in");
+        assert!(drawn(&whole, BuildClock::settled(1)));
+        // Words that come in by themselves with the slide: the mark once they are in.
+        let mut timed = last();
+        timed.objects[0].build_in = Some(Build::of(BuildEffect::Dissolve));
+        assert!(!drawn(&timed, BuildClock { step: 0, since_on: Some(0.05), since_step: 0.05 }));
+        assert!(!drawn(&timed, BuildClock { step: 0, since_on: None, since_step: 0.0 }), "the slide still coming on");
+        assert!(drawn(&timed, BuildClock::settled(0)));
+        // A shape that leaves on a click: the mark after that click.
+        let mut leaving = last();
+        let mut shape = sp_model::Object::shape(sp_model::Shape::Rectangle);
+        shape.build_out = Some(Build::of(BuildEffect::Dissolve));
+        leaving.objects.push(shape);
+        assert!(!drawn(&leaving, BuildClock::settled(0)) && drawn(&leaving, BuildClock::settled(1)));
+        // No builds: at once.
+        assert!(drawn(&last(), BuildClock::settled(0)));
+        assert!(drawn(&last(), BuildClock { step: 0, since_on: Some(0.0), since_step: 0.0 }));
     }
 
     #[test]

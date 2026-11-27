@@ -8,23 +8,37 @@ use sp_model::Presentation;
 /// The mark is never drawn into the lowest 3% of the slide.
 const FOOT: f32 = 0.03;
 
+/// A song's last slide as sung: its place in the play order, and the slide there.
+pub type Last = (usize, usize);
+
 /// Whether the slide on screen gets the mark: Settings has it `on`, the slide is a song's (not
 /// one the app made: a Bible passage, the VoxLive captions, a song of the song catalog), its
-/// words aren't hidden, the song doesn't go round, and the slide is the last one sung
-/// ([`last_sung`]): `step` is its place in the song's play order, so a chorus written once and
-/// sung after each verse is marked only when it is sung last.
-pub fn due(on: bool, app_made: bool, words_hidden: bool, song: &Presentation, step: Option<usize>) -> bool {
-    on && !app_made && !words_hidden && !song.loops && step.is_some() && step == last_sung(song)
+/// words aren't hidden, the song doesn't go round, and the slide is the last one sung (`last`,
+/// from [`last_sung`]). `slide` is the slide on screen and `step` its place in the song's play
+/// order: a chorus written once and sung after each verse is marked only when it is sung last,
+/// and a place that no longer names the slide (the order changed under it) marks nothing.
+pub fn due(
+    on: bool,
+    app_made: bool,
+    words_hidden: bool,
+    song: &Presentation,
+    last: Option<Last>,
+    slide: usize,
+    step: Option<usize>,
+) -> bool {
+    on && !app_made && !words_hidden && !song.loops && step.zip(last).is_some_and(|(step, last)| last == (step, slide))
 }
 
-/// The place in a song's play order of the last slide with words: the blank slides many songs
-/// end on (those brought in from other programs, often) are passed over, so the mark goes under
-/// the song's real last words. `None` for a song with no words at all.
-pub fn last_sung(song: &Presentation) -> Option<usize> {
-    let worded = |slide: &usize| {
-        song.slide(*slide).is_some_and(|(_, slide)| slide.texts().iter().any(|(_, words)| !words.trim().is_empty()))
-    };
-    song.order().iter().rposition(worded)
+/// A song's last slide as sung: the last place in its play order whose slide has a song's words
+/// (`Slide::has_song_words`: the main language's or the translation's) and isn't disabled, as
+/// Next and Last pass over a disabled slide. Blank slides at the end (songs brought in from
+/// other programs often end on one) are passed over, so the mark goes under the song's real
+/// last words. `None` for what has no song's words at all: a deck of text boxes or pictures is
+/// no song, and never gets the mark.
+pub fn last_sung(song: &Presentation) -> Option<Last> {
+    let order = song.order();
+    let sung = |slide: &usize| song.slide(*slide).is_some_and(|(_, slide)| slide.enabled && slide.has_song_words());
+    order.iter().rposition(sung).map(|step| (step, order[step]))
 }
 
 /// How far down the slide the mark may reach, in slide units: 3% above the slide's bottom, or
@@ -46,7 +60,14 @@ mod tests {
     fn due_on(show: &Show) -> bool {
         let at = show.live().expect("a slide is on screen");
         let step = show.position().map(|(step, _)| step);
-        due(true, false, show.words_hidden(), &show.presentations()[at.presentation], step)
+        let song = &show.presentations()[at.presentation];
+        due(true, false, show.words_hidden(), song, last_sung(song), at.slide, step)
+    }
+
+    /// Whether the mark is due at a place in a song's order, on the slide that is there.
+    fn due_at(on: bool, app_made: bool, song: &sp_model::Presentation, step: Option<usize>) -> bool {
+        let slide = step.and_then(|step| song.order().get(step).copied()).unwrap_or(0);
+        due(on, app_made, false, song, last_sung(song), slide, step)
     }
 
     fn at(slide: usize) -> Command {
@@ -97,11 +118,11 @@ mod tests {
         assert!(due_on(&show));
         // Settings' switch off: never.
         let last = Some(song.order().len() - 1);
-        assert_eq!(last_sung(&song), last);
-        assert!(due(true, false, false, &song, last));
-        assert!(!due(false, false, false, &song, last));
+        assert_eq!(last_sung(&song), Some((3, 1)));
+        assert!(due_at(true, false, &song, last));
+        assert!(!due_at(false, false, &song, last));
         // A slide whose place in the order isn't known is not taken for the last.
-        assert!(!due(true, false, false, &song, None));
+        assert!(!due_at(true, false, &song, None));
 
         // Sung as written, the written last slide is the one.
         let plain = parse_song_text("Song", "[Verse 1]\nOne\n\n[Chorus]\nSing\n\n[Verse 2]\nTwo\n");
@@ -122,7 +143,7 @@ mod tests {
                 last.slides.push(last.slides[0].empty_copy());
             }
             assert_eq!(ended.slide_count(), 2 + blanks);
-            assert_eq!(last_sung(&ended), Some(1), "{blanks} blank at the end");
+            assert_eq!(last_sung(&ended), Some((1, 1)), "{blanks} blank at the end");
             let mut show = Show::new(vec![Arc::new(ended)]);
             let marked: Vec<bool> = (0..2 + blanks)
                 .map(|slide| {
@@ -137,11 +158,11 @@ mod tests {
         // A blank slide in the middle is no end, and a song with no words has none.
         let mut gap = parse_song_text("Song", "One\n\nTwo\n");
         gap.groups[0].slides.insert(1, sp_model::Slide::new(Vec::new()));
-        assert_eq!(last_sung(&gap), Some(2));
+        assert_eq!(last_sung(&gap), Some((2, 2)));
         let mut wordless = parse_song_text("Pictures", "One\n");
         wordless.groups[0].slides = vec![sp_model::Slide::new(Vec::new()); 2];
         assert_eq!(last_sung(&wordless), None);
-        assert!(!due(true, false, false, &wordless, Some(1)));
+        assert!(!due_at(true, false, &wordless, Some(1)));
 
         // A song of one slide: that slide.
         let mut show = Show::new(vec![Arc::new(parse_song_text("Short", "Only\n"))]);
@@ -160,8 +181,69 @@ mod tests {
         // What the app made (a Bible passage, the VoxLive captions while they are up, a song of
         // the song catalog) is no song of the library's: never.
         let passage = parse_song_text("John 3", "For God so loved the world\n");
-        assert!(due(true, false, false, &passage, Some(0)));
-        assert!(!due(true, true, false, &passage, Some(0)), "a Bible passage, or VoxLive's captions");
+        assert!(due_at(true, false, &passage, Some(0)));
+        assert!(!due_at(true, true, &passage, Some(0)), "a Bible passage, or VoxLive's captions");
+    }
+
+    #[test]
+    fn a_disabled_last_slide_passes_the_mark_to_the_one_before_as_next_passes_it_over() {
+        let mut song = parse_song_text("Song", "One\n\nTwo\n\nThree\n");
+        song.groups[0].slides[2].enabled = false;
+        assert_eq!(last_sung(&song), Some((1, 1)));
+        let mut show = Show::new(vec![Arc::new(song.clone())]);
+        show.apply(at(0));
+        show.apply(Command::Next);
+        assert_eq!(show.live().map(|at| at.slide), Some(1));
+        // Next has nowhere to go from here: this is the song's end, and it is marked.
+        assert!(show.upcoming().is_none() && due_on(&show));
+        // The disabled slide itself, were it up at its place, is not the end.
+        assert!(!due(true, false, false, &song, last_sung(&song), 2, Some(2)));
+        // Every slide with words disabled: no end.
+        for slide in &mut song.groups[0].slides {
+            slide.enabled = false;
+        }
+        assert_eq!(last_sung(&song), None);
+    }
+
+    #[test]
+    fn a_deck_of_text_boxes_is_no_song_and_a_footer_box_is_no_words() {
+        use sp_model::{Group, Object, Presentation, Role, Slide};
+        // Slides as a presentation file brings them in: text boxes of no role.
+        let boxed = |words: &str| {
+            let mut text = Object::text(Role::primary(), words);
+            text.role = None;
+            Slide::new(vec![text])
+        };
+        let song = parse_song_text("Song", "One\n\nTwo\n");
+        let deck = Presentation {
+            title: "Sermon".to_owned(),
+            groups: vec![Group { slides: vec![boxed("Point one"), boxed("Point two")], ..song.groups[0].clone() }],
+            ..song.clone()
+        };
+        assert_eq!(last_sung(&deck), None);
+        let mut show = Show::new(vec![Arc::new(deck)]);
+        for slide in [0, 1] {
+            show.apply(at(slide));
+            assert!(!due_on(&show), "slide {slide} of a deck");
+        }
+        // A song whose last slide has only a caption in a box of its own: the slide before it,
+        // with the song's words, is the end.
+        let mut captioned = song.clone();
+        captioned.groups[0].slides.push(boxed("Please stand"));
+        captioned.groups[0].slides.push(Slide::new(vec![Object::text(Role("title".to_owned()), "Song")]));
+        assert_eq!(last_sung(&captioned), Some((1, 1)));
+    }
+
+    #[test]
+    fn a_place_that_no_longer_names_the_slide_marks_nothing() {
+        let song = parse_song_text("Song", "One\n\nTwo\n");
+        let last = last_sung(&song);
+        assert_eq!(last, Some((1, 1)));
+        assert!(due(true, false, false, &song, last, 1, Some(1)));
+        // The place says the last, the slide on screen is another (the order changed under it).
+        assert!(!due(true, false, false, &song, last, 0, Some(1)));
+        assert!(!due(true, false, false, &song, last, 1, Some(0)));
+        assert!(!due(true, false, false, &song, None, 1, Some(1)));
     }
 
     #[test]

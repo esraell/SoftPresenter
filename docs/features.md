@@ -2235,22 +2235,33 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Words only or Table, how a song's slides are laid out in the window, and Interface size.
 - **The end of a song's mark** (Settings › Slides › End of a song, or `sp settings set
   end_mark=on|off`; off until switched on): three stars, `*    *    *`, under the words of a
-  song's last slide, as SoftProjector draws them. The card shows a small slide with a song's last
-  words and the mark under them, beside Mark the end of a song, On or Off. On the screens the
-  mark takes the face, weight, colour, outline and shadow of the largest words on the slide, at
-  80% of the size those words were fitted to, its top half a line of theirs under the last line
-  of the lowest words (the lower block, with two languages), centred on that box. It is a layer
-  of its own, drawn by the painter after each screen's own theme has laid the words out
-  (`sp-render`'s `end_mark_place`), so the words keep their size and place with it on or off,
-  and it goes on and off with the slide's own transition (`Frame::end_mark`). The last slide is
-  the last one sung that has words (blank slides at a song's end are passed over, so a song
-  brought in with a blank last slide is still marked under its last words): with an arrangement, the slide the order ends on, each time it is sung last
-  and not when the same slide is sung earlier; a slide clicked takes its next place in the
-  order, as Next does. No mark: on a song that loops, on what the app makes (a Bible passage,
-  VoxLive's captions, a song of the song catalog), on a slide with no words, on words that
-  scroll or sit in a turned box, while the words are hidden (it dissolves out and back with
-  them), on stage screens and thumbnails, and where it would reach into the lowest 3% of the
-  slide, or past the copyright line's top on the slides that show one.
+  song's last slide, as SoftProjector draws them. The card shows a small slide with the first
+  song's last words (and the last line of their translation, when it has one) and the mark
+  under them, beside Mark the end of a song, On or Off.
+  - **Which slide.** The last place in the order the song is sung in whose slide has the song's
+    words and isn't disabled (`end_mark::last_sung`). The song's words are those in its main
+    language's and translation's boxes: a caption, a clock or a title in another box is not.
+    Blank slides at a song's end are passed over, so a song brought in with a blank last slide
+    is still marked under its last words. With an arrangement it is the slide the order ends
+    on, when it is sung last and not when the same slide is sung earlier; a slide clicked takes
+    its next place in the order, as Next does.
+  - **Where and how.** The mark takes the face, weight, colour, outline and shadow of the
+    largest of the song's words on the slide, at 80% of the size those words were fitted to,
+    its top half a line of theirs under the last line of the lowest words (the lower block,
+    with two languages), centred on that box, and no more solid than those boxes are. It is a
+    layer of its own, drawn by the painter after each screen's own theme has laid the words out
+    (`sp-render`'s `end_mark_place`), so the words keep their size and place with it on or
+    off. It comes to the screens with the slide (`Frame::end_mark`), so it goes on and off with
+    the slide's own transition. On a slide with builds it comes once every build has played:
+    after the last lines a click brings, never over words still coming in.
+  - **Never.** On a song that loops; on what the app makes (a Bible passage, VoxLive's
+    captions, a song of the song catalog); on what has no song's words (a deck of text boxes
+    or pictures brought in from a presentation file); under words that scroll or sit in a
+    turned box; while the words are hidden (it dissolves out and back with them); on stage
+    screens and thumbnails; and where it would reach into the lowest 3% of the slide, or past
+    the copyright line's top on the slides that show one.
+  - **The copyright line's Last slide** is this same slide, so the line and the stars always
+    land together; what has no song's words keeps its written last slide for the line.
 - **Interface size** (Settings › Slides › In your window, or `sp settings set interface_size=`):
   how large the operator's windows draw everything. **Automatic**, the usual, draws a window
   bigger than 1440 × 900 points (the size the layout was drawn for) larger in proportion, by the

@@ -179,7 +179,7 @@
   "settings.transition.more.about": "Усі види, їхня тривалість і напрям",
   "settings.transition.own": "Пісня чи слайд можуть мати власний",
   "settings.slides.end.title": "Кінець пісні",
-  "settings.slides.end.caption": "Що бачить зала під останнім слайдом пісні",
+  "settings.slides.end.caption": "Що бачить зал під останнім слайдом пісні",
   "settings.slides.end.line": "Позначати кінець пісні",
   "settings.slides.end.note": "Три зірочки під словами останнього слайда пісні в порядку виконання, на екранах для залу, як їх малює SoftProjector",
   "settings.transition.title": "Між слайдами",

@@ -170,6 +170,11 @@ impl Show {
         self.live.is_some() && self.build_step < self.build_steps()
     }
 
+    /// Where the cursor is in its presentation's play order, when its place there is known.
+    pub fn step(&self) -> Option<usize> {
+        self.cursor.and(self.step)
+    }
+
     /// Where the cursor is in its presentation's play order, and how long that order is.
     pub fn position(&self) -> Option<(usize, usize)> {
         let cursor = self.cursor?;

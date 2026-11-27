@@ -1922,9 +1922,10 @@ fn a_song_from_text_runs_slide_by_slide_and_each_layer_clears() {
 }
 
 /// `sp settings set end_mark=on|off` switches the end of a song's mark as Settings › Slides
-/// does: off until asked for, said by `sp settings`, kept between runs; and with it on, a song
-/// runs to its last slide, its words are hidden and shown again, and the copy quits cleanly.
-/// (What the mark looks like and where it goes is the renderer's tests'.)
+/// does: off until asked for, said by `sp settings`, kept between runs; and with a song's last
+/// slide up, switching it off and on again leaves the slide up and the copy quits cleanly.
+/// (Which slide is marked is `end_mark`'s tests'; what the mark looks like and where it goes,
+/// the renderer's.)
 #[test]
 fn sp_settings_sets_end_mark() {
     let Some(run) = Run::new("sp_settings_sets_end_mark") else { return };
@@ -1941,7 +1942,7 @@ fn sp_settings_sets_end_mark() {
     assert!(settings.text.contains("end mark: on"), "{}", settings.text);
     assert_eq!(settings.data["end_mark"], true, "{}", settings.data);
     copy.refused(&["settings", "set", "end_mark=maybe"], "end_mark is on or off");
-    // With the mark on, the song's last slide goes up, loses its words and gets them back.
+    // With the song's last slide up, the mark is switched off and on again: the slide stays.
     copy.ok(&["song", "import", &file.to_string_lossy()]);
     copy.ok(&["go", "Hill Road"]);
     copy.ok(&["last"]);

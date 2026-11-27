@@ -669,6 +669,15 @@ impl Object {
         }
     }
 
+    /// True for a box that holds a song's words to sing: the main language's or the
+    /// translation's, shown, with words in it. A deck's text boxes, a title, a clock or a caption
+    /// in a box of another role (or of none) are not a song's words.
+    pub fn holds_song_words(&self) -> bool {
+        !self.hidden
+            && self.role.as_ref().is_some_and(|role| matches!(role.0.as_str(), "primary" | "translation"))
+            && self.as_text().is_some_and(|words| !words.trim().is_empty())
+    }
+
     pub fn as_text(&self) -> Option<&str> {
         match &self.kind {
             ObjectKind::Text { text, .. } => Some(text),
@@ -824,6 +833,11 @@ impl Slide {
             })
             .collect();
         Slide { template: self.template, ..Slide::new(objects) }
+    }
+
+    /// True when the slide has a song's words on it ([`Object::holds_song_words`]).
+    pub fn has_song_words(&self) -> bool {
+        self.objects.iter().any(Object::holds_song_words)
     }
 
     /// The text of the first text object with this role.
@@ -1693,6 +1707,26 @@ mod tests {
         let (first, at) = empty.with_slide_added();
         assert_eq!((first.slide_count(), at), (1, 0));
         assert_eq!(first.slide(0).unwrap().1.objects[0].role, Some(Role::primary()));
+    }
+
+    #[test]
+    fn a_songs_words_are_those_of_its_main_and_translation_boxes() {
+        let words = |object: Object| Slide::new(vec![object]).has_song_words();
+        assert!(words(Object::text(Role::primary(), "One")));
+        assert!(words(Object::text(Role::translation(), "Uno")));
+        // No words in the box, or the box hidden.
+        assert!(!words(Object::text(Role::primary(), "  \n")));
+        let mut hidden = Object::text(Role::primary(), "One");
+        hidden.hidden = true;
+        assert!(!words(hidden));
+        // A box of another role, or of none (a deck's text box, a caption), and what isn't text.
+        assert!(!words(Object::text(Role("title".to_owned()), "Song")));
+        assert!(!words(Object::text(Role::reference(), "John 3:16")));
+        let mut loose = Object::text(Role::primary(), "A caption");
+        loose.role = None;
+        assert!(!words(loose));
+        assert!(!words(Object::shape(Shape::Rectangle)));
+        assert!(!Slide::new(Vec::new()).has_song_words());
     }
 
     #[test]

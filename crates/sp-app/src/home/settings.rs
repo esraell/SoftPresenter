@@ -708,34 +708,45 @@ fn end_of_a_song(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     ui.add_space(10.0);
 }
 
-/// The small slide the end of a song is shown on: the last two lines of the first song's last
-/// slide with words as sung, and under them the mark as the screens draw it (80% of the words' size, half a
-/// line under them) while it is on. The words keep their place either way.
+/// The small slide the end of a song is shown on: the first song's last slide as sung (the one
+/// the screens mark, `end_mark::last_sung`), the last two lines of its words and the last line
+/// of its translation when it has one, and under them the mark as the screens draw it (80% of
+/// the words' size, half a line under the lowest words) while it is on. The words keep their
+/// place either way.
 fn end_sample(ui: &mut egui::Ui, state: &HomeState, show: &Show, size: egui::Vec2) {
     const WORDS: f32 = 15.0;
+    const TRANSLATION: f32 = 11.0;
     let (place, _) = ui.allocate_exact_size(size, Sense::hover());
     let painter = ui.painter().with_clip_rect(place);
     painter.rect_filled(place, RADIUS, egui::Color32::BLACK);
-    let words: Vec<String> = show
-        .presentations()
-        .first()
-        .and_then(|song| song.slide(*song.order().get(crate::end_mark::last_sung(song)?)?))
-        .and_then(|(_, slide)| slide.texts().into_iter().next())
-        .map(|(_, words)| {
-            let lines: Vec<&str> = words.lines().filter(|line| !line.trim().is_empty()).collect();
-            lines[lines.len().saturating_sub(2)..].iter().map(|line| (*line).to_owned()).collect()
-        })
-        .unwrap_or_default();
-    let lines: Vec<_> = words
+    let slide = show.presentations().iter().find_map(|song| {
+        let (_, slide) = crate::end_mark::last_sung(song)?;
+        song.slide(slide).map(|(_, slide)| slide)
+    });
+    // The last `most` lines of a box of the slide's words.
+    let last_lines = |role: sp_model::Role, most: usize| -> Vec<String> {
+        let words = slide.and_then(|slide| slide.objects.iter().find(|o| o.role.as_ref() == Some(&role)));
+        let words = words.filter(|object| object.holds_song_words()).and_then(|object| object.as_text());
+        let lines: Vec<&str> = words.unwrap_or_default().lines().filter(|line| !line.trim().is_empty()).collect();
+        lines[lines.len().saturating_sub(most)..].iter().map(|line| (*line).to_owned()).collect()
+    };
+    let room = place.width() - 28.0;
+    let lines: Vec<_> = last_lines(sp_model::Role::primary(), 2)
         .iter()
-        .map(|line| parts::one_line(ui, line, crate::studio::reading(WORDS), TEXT, place.width() - 28.0))
+        .map(|line| (parts::one_line(ui, line, crate::studio::reading(WORDS), TEXT, room), TEXT))
+        .chain(
+            last_lines(sp_model::Role::translation(), 1)
+                .iter()
+                .map(|line| (parts::one_line(ui, line, crate::studio::reading(TRANSLATION), TEXT_DIM, room), TEXT_DIM)),
+        )
         .collect();
-    let height: f32 = lines.iter().map(|line| line.size().y).sum::<f32>() + 2.0 * lines.len().saturating_sub(1) as f32;
+    let height: f32 =
+        lines.iter().map(|(line, _)| line.size().y).sum::<f32>() + 2.0 * lines.len().saturating_sub(1) as f32;
     // The words sit a little above the middle, where they stay with the mark on or off.
     let mut y = place.center().y - 8.0 - height / 2.0;
-    for line in lines {
+    for (line, ink) in lines {
         let line_height = line.size().y;
-        painter.galley(pos2(place.center().x - line.size().x / 2.0, y), line, TEXT);
+        painter.galley(pos2(place.center().x - line.size().x / 2.0, y), line, ink);
         y += line_height + 2.0;
     }
     if state.end_mark {
@@ -1400,6 +1411,24 @@ mod tests {
         let ([.., line_off, last_off], mark_off, ..) = page(&mut state);
         assert!(mark_off.is_none());
         assert_eq!((last_off, line_off), (last, line));
+        // The sample is the first song's last slide as sung, with its translation's last
+        // line, the mark under that: a deck in front of the song, and the song's blank and
+        // disabled slides after its last words, are passed over.
+        let mut deck = sp_model::parse_song_text("Sermon", "Point one\n");
+        deck.groups[0].slides[0].objects[0].role = None;
+        let mut song = sp_model::parse_song_text("Song", "One\n\nMorning\nlight\n--\nRanok\nsvitlo\n\nLeft out\n");
+        song.groups[0].slides[2].enabled = false;
+        song.groups[0].slides.push(sp_model::Slide::new(Vec::new()));
+        let show = Show::new(vec![std::sync::Arc::new(deck), std::sync::Arc::new(song)]);
+        state.end_mark = true;
+        let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
+        let place = |words: &str| crate::studio::tests::place_of(&drawn, words);
+        let [light, translated, stars] = ["light", "svitlo", mark].map(|words| place(words).expect(words));
+        assert!(light.y < translated.y && translated.y < stars.y, "{light:?} {translated:?} {stars:?}");
+        for absent in ["Left out", "One", "Ranok"] {
+            assert!(place(absent).is_none(), "{absent}");
+        }
+        drawn.drop_without_applying_deltas();
         // Saved with the other choices, and off in a file from before it.
         state.end_mark = true;
         assert!(state.prefs().end_mark);
