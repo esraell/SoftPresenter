@@ -1809,7 +1809,7 @@ fn a_media_playlist_goes_on_from_a_video_of_it_that_never_starts() {
     assert_eq!(
         not_started_notices(&copy),
         [
-            "Stuck.mkv: this video hasn\u{2019}t started after 1 second, so the media playlist \u{201c}Loop\u{201d} went on \
+            "Stuck.mkv: this video hasn\u{2019}t started after 1 second, so the media playlist \u{201c}Loop\u{201d} goes on \
           to its next item."
         ],
         "{}",
@@ -1822,6 +1822,60 @@ fn a_media_playlist_goes_on_from_a_video_of_it_that_never_starts() {
     );
     copy.ok(&["media-playlist", "stop"]);
     copy.ok(&["clear", "media"]);
+    let quitted = copy.quit();
+    quitted.assert_clean(&run);
+}
+
+/// A media playlist whose videos all can't play (their files written over with junk) never
+/// races round, opening one after another: each is up as long as a picture (its still, or
+/// nothing) before the next is tried, and once a whole round has gone by with none playing the
+/// playlist stops going round, on the last of them, and says so once.
+#[test]
+fn a_media_playlist_of_videos_that_cant_play_never_races_round_and_stops_after_a_round() {
+    let name = "a_media_playlist_of_videos_that_cant_play_never_races_round_and_stops_after_a_round";
+    let Some(run) = Run::new(name) else { return };
+    let Some(made) = video_for_ffmpeg(&run, name) else { return };
+    let (first, second) = (run.file("Junk one.mkv"), run.file("Junk two.mkv"));
+    std::fs::copy(&made, &first).expect("the first video");
+    std::fs::copy(&made, &second).expect("the second video");
+    let copy = run.start(&[]);
+    copy.ok(&["media", "add", &first.to_string_lossy(), &second.to_string_lossy()]);
+    copy.ok(&["media-playlist", "new", "Loop"]);
+    copy.ok(&["media-playlist", "add", "junk one", "junk two", "to", "Loop"]);
+    // Both written over with junk once in the bin, their stills read.
+    let added = Instant::now();
+    while !run.log().contains("read the bin's") {
+        assert!(added.elapsed() < Duration::from_secs(30), "the bin never read its videos' stills{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    std::fs::write(&first, "not a video at all").expect("junk");
+    std::fs::write(&second, "not a video at all either").expect("junk");
+    let opens = |log: &str| log.matches("[video] opening ").count();
+    let began = Instant::now();
+    copy.ok(&["media-playlist", "play", "Loop"]);
+    // Ten seconds in: the first tried once and up as long as a picture, the second maybe tried.
+    while began.elapsed() < Duration::from_secs(10) {
+        copy.ok(&["status"]);
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    let early = opens(&run.log());
+    assert!((1..=3).contains(&early), "{early} videos opened in the first ten seconds{}", run.context());
+    // A whole round with none playing: it stops going round, and says so once.
+    let stop = "None of the videos in \u{201c}Loop\u{201d} would play, so it stopped going round.";
+    let said =
+        |copy: &Copy| copy.ok(&["notices"]).data.as_array().into_iter().flatten().filter(|n| n["text"] == stop).count();
+    while said(&copy) == 0 {
+        assert!(began.elapsed() < Duration::from_secs(40), "it never stopped going round{}", run.context());
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    let stopped = copy.status();
+    assert!(stopped["media_playlist"].is_null(), "the playlist stopped: {stopped}");
+    assert_eq!(stopped["media"], "Junk two.mkv", "on the last of them");
+    // Nothing more is tried, and nothing more said.
+    std::thread::sleep(Duration::from_secs(3));
+    let log = run.log();
+    assert!(opens(&log) <= 3, "{} videos opened in all{}", opens(&log), run.context());
+    assert_eq!(said(&copy), 1, "said once");
     let quitted = copy.quit();
     quitted.assert_clean(&run);
 }

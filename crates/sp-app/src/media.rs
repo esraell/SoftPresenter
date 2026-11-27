@@ -172,12 +172,13 @@ pub fn next_in_cycle(items: &[usize], at: usize, shown: usize) -> usize {
 }
 
 /// Whether a playing media playlist is done with the video it shows, and goes on to its next
-/// item: once the video has played to its end, once no picture of it has come within the most
-/// a video's first picture is waited for (`video_wait`), or once it is known it can't play, so
-/// a video that won't play never holds the playlist up. Only with `others` to go on to: one
-/// alone loops, and is never done.
-pub fn video_done(others: bool, ended: bool, overdue: bool, refused: bool) -> bool {
-    others && (ended || overdue || refused)
+/// item: once the video has played to its end; or, for one that won't play (no picture of it
+/// came within the most a video's first picture is waited for, `video_wait`, or it is known it
+/// can't play), once it has been up as long as a picture is (`dwelt`), its still or nothing
+/// shown meanwhile, so a playlist of videos that won't play never races round. Only with
+/// `others` to go on to: one alone loops, and is never done.
+pub fn video_done(others: bool, ended: bool, wont_play: bool, dwelt: bool) -> bool {
+    others && (ended || (wont_play && dwelt))
 }
 
 /// A name no media playlist has: "New Media Playlist", "New Media Playlist 2", and so on
@@ -602,15 +603,16 @@ mod tests {
 
     use super::*;
 
-    /// A playlist goes on from a video that ended, that never gave a picture in time, or that
-    /// can't play; never from one still playing or still within its wait, and never from the
-    /// only item, which loops.
+    /// A playlist goes on from a video that ended at once, and from one that won't play (never
+    /// gave a picture in time, or can't play) only once it has been up as long as a picture;
+    /// never from one still playing or still within its wait, and never from the only item,
+    /// which loops.
     #[test]
     fn a_playlist_goes_on_from_a_video_that_ends_never_starts_or_cant_play() {
         assert!(video_done(true, true, false, false), "played to its end");
-        assert!(video_done(true, false, true, false), "no picture in time");
-        assert!(video_done(true, false, false, true), "it can't play");
-        assert!(!video_done(true, false, false, false), "playing, or still within its wait");
+        assert!(!video_done(true, false, true, false), "won't play, but not up a picture's time yet");
+        assert!(video_done(true, false, true, true), "won't play, and up a picture's time");
+        assert!(!video_done(true, false, false, true), "playing, or still within its wait");
         assert!(!video_done(false, true, true, true), "alone, it loops");
     }
 

@@ -772,6 +772,7 @@ impl crate::App {
                     .and_then(|index| self.show.media().get(index))
                     .is_some_and(|item| crate::media::is_video(&item.path));
                 if live_video && self.video.is_none() {
+                    self.video_refused = None;
                     self.refresh_output();
                 }
             }

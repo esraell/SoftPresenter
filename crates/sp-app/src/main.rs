@@ -2727,6 +2727,9 @@ struct App {
     /// What the operator was told of videos a playing media playlist went on from because no
     /// picture came in time, by their media bin item: taken back once that item plays.
     skipped_videos: HashMap<Uuid, String>,
+    /// How many items in a row the playing media playlist has gone on from without any of them
+    /// playing (videos that wouldn't): a whole round of them, and it stops going round.
+    cycle_failed: usize,
     /// The media playlists read at the start, handed to the window's state once it is made.
     media_playlists: Vec<media::Playlist>,
     /// The settings files the start couldn't read, kept aside (`whole_file`): told in the notices
@@ -3301,6 +3304,7 @@ impl App {
             return;
         };
         self.media_cycle = Some(MediaCycle { playlist: id, at: 0, since: Instant::now(), shown: first });
+        self.cycle_failed = 0;
         if let Some(running) = self.running.as_mut() {
             running.home_state.media_playing = Some(id);
         }
@@ -3340,12 +3344,47 @@ impl App {
     }
 
     /// Whether the media playlist playing goes on from the video on screen if it won't play: it
-    /// shows that video, and has other items to go on to.
-    fn cycle_goes_on_from_video(&self) -> bool {
+    /// shows that video, has other items to go on to, and it wouldn't be the last of a whole
+    /// round that wouldn't play (where the playlist stops going round instead,
+    /// `none_would_play`). With `now`, only once the video has been up as long as a picture,
+    /// when it goes on at once.
+    fn cycle_goes_on_from_video(&self, now: bool) -> bool {
         let Some(cycle) = self.media_cycle.as_ref() else { return false };
+        let items = self.playlist_media(cycle.playlist).len();
         self.show.live_media() == Some(cycle.shown)
             && self.show.media().get(cycle.shown).is_some_and(|item| media::is_video(&item.path))
-            && self.playlist_media(cycle.playlist).len() > 1
+            && items > 1
+            && self.cycle_failed + 1 < items
+            && (!now || cycle.since.elapsed() >= Duration::from_secs_f32(PICTURE_SECONDS))
+    }
+
+    /// A whole round of the media playlist playing went by and none of its videos would play:
+    /// it stops going round, on the last of them (its still, or nothing), and the operator is
+    /// told once.
+    fn none_would_play(&mut self, playlist: Uuid) {
+        let name = self
+            .running
+            .as_ref()
+            .and_then(|running| running.home_state.media_playlists.iter().find(|p| p.id == playlist))
+            .map(|p| p.name.clone())
+            .unwrap_or_default();
+        applog::event(
+            "media",
+            &format!(
+                "a whole round of the media playlist {name} went by and none of its videos would play: it stops going round"
+            ),
+        );
+        self.stop_media_playlist();
+        self.cycle_failed = 0;
+        let said = crate::i18n::tf(
+            "notices.media_playlist.none_played",
+            "None of the videos in \u{201c}{playlist}\u{201d} would play, so it stopped going round.",
+            &[("playlist", &name)],
+        );
+        if let Some(running) = self.running.as_mut() {
+            running.home_state.notices.lasting_trouble(said);
+            running.home_window.request_redraw();
+        }
     }
 
     /// Moves a playing media playlist on: a picture after 8 seconds, a video when it ends (or
@@ -3360,19 +3399,29 @@ impl App {
         }
         let items = self.playlist_media(id);
         let is_video = self.show.media().get(shown).is_some_and(|item| media::is_video(&item.path));
-        let done = if is_video {
+        let dwelt = since.elapsed() >= Duration::from_secs_f32(PICTURE_SECONDS);
+        let (done, wont_play) = if is_video {
             // One video on its own loops, so it never ends; with others, it plays to its end, or
-            // is gone on from when it never starts or can't play.
+            // is gone on from when it never starts or can't play, once it has been up as long
+            // as a picture.
             let shown_id = self.show.media().get(shown).map(|item| item.id);
             let ended = self.video.as_ref().is_some_and(|(_, player)| player.ended());
             let overdue = self.video.as_ref().is_some_and(|(id, _)| Some(*id) == shown_id)
                 && self.video_wait.as_ref().is_some_and(video_wait::FirstPicture::overdue);
             let refused = shown_id.is_some() && self.video_refused == shown_id;
-            media::video_done(items.len() > 1, ended, overdue, refused)
+            let wont_play = !ended && (overdue || refused);
+            (media::video_done(items.len() > 1, ended, wont_play, dwelt), wont_play)
         } else {
-            since.elapsed() >= Duration::from_secs_f32(PICTURE_SECONDS)
+            (dwelt, false)
         };
         if done && items.len() > 1 {
+            // A whole round of items that wouldn't play: it stops going round, on the last of
+            // them, and says so once.
+            self.cycle_failed = if wont_play { self.cycle_failed + 1 } else { 0 };
+            if self.cycle_failed >= items.len() {
+                self.none_would_play(id);
+                return None;
+            }
             // After the one on screen, wherever it is now: its playlist may have been reordered,
             // or had things taken out, while it played.
             let next_at = media::next_in_cycle(&items, at, shown);
@@ -3610,6 +3659,11 @@ impl App {
             .cloned();
         if self.video_refused.is_some() && self.video_refused != live.as_ref().map(|item| item.id) {
             self.video_refused = None;
+        }
+        // One that said it can't play isn't opened again while it stays on screen: each try
+        // runs FFmpeg's prober, and the screens would be told something new each time.
+        if self.video.is_none() && self.video_refused.is_some() {
+            return;
         }
         if self.video.as_ref().map(|(id, _)| *id) == live.as_ref().map(|item| item.id) {
             // The same video: it may have been told to loop or not.
@@ -4350,7 +4404,7 @@ impl App {
             self.end_video_wait();
             return Change::Nothing;
         }
-        let goes_on = self.cycle_goes_on_from_video();
+        let goes_on = self.cycle_goes_on_from_video(false);
         let Some((item, player)) = self.video.as_ref() else { return Change::Nothing };
         let Some(wait) = self.video_wait.as_mut() else { return Change::Nothing };
         let now = Instant::now();
@@ -4399,9 +4453,9 @@ impl App {
                     "notices.media.video_not_started_skipped",
                     seconds,
                     "this video hasn\u{2019}t started after {n} second, so the media playlist \u{201c}{playlist}\u{201d} \
-                     went on to its next item.",
+                     goes on to its next item.",
                     "this video hasn\u{2019}t started after {n} seconds, so the media playlist \u{201c}{playlist}\u{201d} \
-                     went on to its next item.",
+                     goes on to its next item.",
                     &[("playlist", &playlist)],
                 )
             );
@@ -4467,7 +4521,7 @@ impl App {
         let change = self.look_at_first_picture();
         // A media playlist playing goes on to its next item from one that never started
         // (`tick_media_cycle`, straight after): the screens go there, not to its still first.
-        let goes_on = change == video_wait::Change::GaveUp && self.cycle_goes_on_from_video();
+        let goes_on = change == video_wait::Change::GaveUp && self.cycle_goes_on_from_video(true);
         if kept && !goes_on && (change != video_wait::Change::Nothing || self.video_wait.is_none()) {
             self.refresh_output();
         }
@@ -14343,6 +14397,7 @@ fn main() -> ExitCode {
         lined_up_wait: Default::default(),
         video_refused: None,
         skipped_videos: HashMap::new(),
+        cycle_failed: 0,
         unsaved_since: None,
         was_editing: false,
         theme: Arc::new(themes[songs_theme].clone()),
