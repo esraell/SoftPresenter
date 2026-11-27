@@ -1960,6 +1960,35 @@ fn sp_settings_sets_end_mark() {
     copy.quit().assert_clean(&run);
 }
 
+/// A setting changed by `sp` is kept when the copy quits straight after, its window hardly
+/// drawn (as with the window covered or minimised): the small choices are saved as the window
+/// is drawn, which a quiet copy's, behind everything, seldom is; quitting saves them too.
+#[test]
+fn a_setting_changed_by_sp_is_kept_when_the_copy_quits_straight_after() {
+    let Some(run) = Run::new("a_setting_changed_by_sp_is_kept_when_the_copy_quits_straight_after") else { return };
+    let copy = run.start(&[]);
+    assert_eq!(copy.ok(&["settings"]).data["end_mark"], false);
+    copy.ok(&["settings", "set", "end_mark=on"]);
+    copy.quit().assert_clean(&run);
+    let saved = |said: &str| -> serde_json::Value {
+        let file = std::fs::read_to_string(run.data.join("preferences.json"));
+        serde_json::from_str(&file.unwrap_or_else(|e| panic!("{said}: the preferences file: {e}"))).expect("JSON")
+    };
+    let on = saved("after the first quit");
+    assert_eq!(on["end_mark"], true, "{on}");
+    let copy = run.start(&[]);
+    let settings = copy.ok(&["settings"]);
+    assert_eq!(settings.data["end_mark"], true, "kept between runs: {}", settings.data);
+    // Switched off and quit at once again: nothing else in the file moves, though the window
+    // was hardly drawn either time.
+    copy.ok(&["settings", "set", "end_mark=off"]);
+    copy.quit().assert_clean(&run);
+    let mut off = saved("after the second quit");
+    assert_eq!(off["end_mark"], false, "{off}");
+    off["end_mark"] = true.into();
+    assert_eq!(off, on, "only the end mark's switch changed");
+}
+
 #[test]
 fn a_bible_passage_goes_on_screen_and_steps_verse_by_verse() {
     let Some(run) = Run::new("a_bible_passage_goes_on_screen_and_steps_verse_by_verse") else { return };
