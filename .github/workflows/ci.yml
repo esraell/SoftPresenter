@@ -15,34 +15,135 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  SOFTPRESENTER_QUIET: "1"
+  CARGO_TERM_COLOR: always
+
+# The Mac check runs as jobs side by side, on Macs of their own, as the Windows check does:
+# formatting, the build and lints; the tests other than the end-to-end ones; and the end-to-end
+# tests in two parts. The job "Format, lints and tests", the name the check had when it was one
+# job, passes only when every one of them did. Two parts, not three as on Windows: on a Mac the
+# end-to-end tests take three minutes, not ten, and GitHub runs at most five Mac jobs at once
+# for the whole account, so one push takes four.
+#
+# The tests run with cargo-nextest, each as a process of its own (.config/nextest.toml, profile
+# ci). Each job compiles what it runs, as on Windows.
 jobs:
-  checks:
-    name: Format, lints and tests
+  build-and-lints:
+    name: Mac build, lints and sp-render tests
     runs-on: macos-latest
     timeout-minutes: 45
-    env:
-      SOFTPRESENTER_QUIET: "1"
-      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the Rust version in rust-toolchain.toml
+        run: rustup toolchain install
+      # A cache of its own: the program as it ships (without the tests' features) and clippy's
+      # checking are built here only. Saved from master only; a pull request reads master's.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: mac-build-and-lints
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
+        with:
+          tool: cargo-nextest@0.9.152
+      - name: Formatting
+        run: cargo fmt --all --check
+      # After formatting, but run whatever it found, so that one problem doesn't hide the others.
+      - name: Build
+        if: success() || failure()
+        run: cargo build --workspace
+      - name: Tests (sp-render, without the picture tests)
+        if: success() || failure()
+        run: cargo nextest run --profile ci -p sp-render --lib --no-fail-fast
+      - name: Lints
+        if: success() || failure()
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Say which tests were left out
+        if: success() || failure()
+        run: >-
+          echo "::notice title=Picture tests skipped::crates/sp-render/tests/golden.rs compares
+          against pictures made on the maintainer's Mac with its GPU and fonts, so it runs there,
+          not here."
+
+  tests:
+    name: Mac tests, all but the end-to-end ones
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install the Rust version in rust-toolchain.toml
+        run: rustup toolchain install
+      # One cache for this job and the end-to-end ones, which build a part of what this job
+      # builds, with the same packages and so the same features. This job alone saves it, and
+      # only on master.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: mac
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
+        with:
+          tool: cargo-nextest@0.9.152
+      # Every test but the end-to-end ones, which the jobs below run, so a test binary added
+      # later runs here.
+      - name: Tests
+        run: >-
+          cargo nextest run --profile ci --workspace --exclude sp-render --no-fail-fast
+          -E 'not binary_id(sp-app::e2e)'
+      # nextest doesn't run documentation tests. There are none today; this runs any added later.
+      - name: Documentation tests
+        if: success() || failure()
+        run: cargo test --workspace --exclude sp-render --doc --no-fail-fast
+
+  end-to-end:
+    name: Mac end-to-end tests, part ${{ matrix.part }} of 2
+    runs-on: macos-latest
+    timeout-minutes: 45
+    strategy:
+      # Each part runs to its end whatever the other does, as cargo test --no-fail-fast did.
+      fail-fast: false
+      matrix:
+        part: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install the Rust version in rust-toolchain.toml
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - name: Formatting
-        run: cargo fmt --all --check
-      - name: Lints
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      # The end-to-end tests (crates/sp-app/tests/e2e.rs) are among them: they start the app
-      # itself, as a quiet copy, drawing with the machine's Metal.
-      - name: Tests
-        run: cargo test --workspace --exclude sp-render --no-fail-fast
-      - name: Tests (sp-render, without the picture tests)
-        run: cargo test -p sp-render --lib --no-fail-fast
-      - name: Say which tests were left out
+        with:
+          shared-key: mac
+          save-if: false
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
+        with:
+          tool: cargo-nextest@0.9.152
+      # The end-to-end tests (crates/sp-app/tests/e2e.rs) start the app itself, as a quiet copy,
+      # drawing with the machine's Metal. One copy at a time, as the harness's own lock keeps
+      # them under cargo test: --no-capture runs the tests one after another (nextest's
+      # processes are out of that lock's reach), and passes their output straight through,
+      # notices and timings. The same packages as the job above, so the app is built with the
+      # same features. The parts are dealt out in turn from the tests in name order.
+      - name: End-to-end tests
         run: >-
-          echo "::notice title=Picture tests skipped::crates/sp-render/tests/golden.rs compares
-          against pictures made on the maintainer's Mac with its GPU and fonts, so it runs there,
-          not here."
+          cargo nextest run --profile ci --workspace --exclude sp-render --test e2e --no-fail-fast
+          --no-capture --partition slice:${{ matrix.part }}/2
+
+  # The name the check had as one job, so anything that waits on it by name still finds it.
+  checks:
+    name: Format, lints and tests
+    needs: [build-and-lints, tests, end-to-end]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every Mac job passed
+        env:
+          RESULTS: ${{ needs.build-and-lints.result }} ${{ needs.tests.result }} ${{ needs.end-to-end.result }}
+        run: |
+          echo "Build and lints, tests, end-to-end tests: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != success ]; then
+              echo "::error title=Mac checks::A Mac job did not pass ($RESULTS)."
+              exit 1
+            fi
+          done
 
   dco:
     name: Sign-offs

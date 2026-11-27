@@ -150,8 +150,10 @@ message.
 through `sp`, as a script would: songs, slides and the six clears, a Bible passage, a picture
 behind the words, a playlist, audio, a 300-song import on a slow disk, Remote Control's sign-in,
 snapshot and sign-out over HTTPS, Check for Updates against a stand-in on this computer, and a
-`--capture-home` picture. It runs with `cargo test` (on all three systems in CI), in about half
-a minute on a Mac. One test alone:
+`--capture-home` picture. It runs with `cargo test`, in about half a minute on a Mac. The
+automatic checks run it on all three systems with cargo-nextest, apart from the other tests and
+one test at a time (`--no-capture`: the harness's one-copy-at-a-time lock holds within one
+process, and nextest gives each test a process of its own). One test alone:
 
     cargo test -p sp-app --test e2e remote_control -- --nocapture
 

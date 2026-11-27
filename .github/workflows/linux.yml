@@ -43,19 +43,42 @@ jobs:
           libgl1-mesa-dri
       - name: Install the Rust version in rust-toolchain.toml
         run: rustup toolchain install
+      # Saved from master only; a pull request reads master's.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
+        with:
+          tool: cargo-nextest@0.9.152
       - name: Build
         run: cargo build --workspace
-      # On a virtual display, for the end-to-end tests (crates/sp-app/tests/e2e.rs), which start
-      # the app; the other tests don't notice it. Without a display those tests fail here, as a
-      # skip nobody chose is a failure on GitHub (on a computer they skip, saying so).
-      - name: Tests (on a virtual display, for the end-to-end tests)
+      # The tests run with cargo-nextest, each as a process of its own (.config/nextest.toml,
+      # profile ci): first all but the end-to-end ones, so a test binary added later runs here.
+      # On a virtual display as the end-to-end tests are, as before; these tests don't notice it.
+      - name: Tests, all but the end-to-end ones
         run: >-
           xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24"
-          cargo test --workspace --exclude sp-render --no-fail-fast
+          cargo nextest run --profile ci --workspace --exclude sp-render --no-fail-fast
+          -E 'not binary_id(sp-app::e2e)'
+      # nextest doesn't run documentation tests. There are none today; this runs any added later.
+      - name: Documentation tests
+        if: success() || failure()
+        run: cargo test --workspace --exclude sp-render --doc --no-fail-fast
+      # The end-to-end tests (crates/sp-app/tests/e2e.rs) start the app, on a virtual display.
+      # Without a display they fail here, as a skip nobody chose is a failure on GitHub (on a
+      # computer they skip, saying so). One copy at a time, as the harness's own lock keeps them
+      # under cargo test: --no-capture runs the tests one after another (nextest's processes are
+      # out of that lock's reach), and passes their output straight through, notices and
+      # timings. The same packages as the step above, so nothing is built again.
+      - name: End-to-end tests (on a virtual display)
+        if: success() || failure()
+        run: >-
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24"
+          cargo nextest run --profile ci --workspace --exclude sp-render --test e2e --no-fail-fast
+          --no-capture
       - name: Tests (sp-render, without the picture tests)
         if: success() || failure()
-        run: cargo test -p sp-render --lib --no-fail-fast
+        run: cargo nextest run --profile ci -p sp-render --lib --no-fail-fast
       - name: Lints
         if: success() || failure()
         run: cargo clippy --workspace --all-targets -- -D warnings

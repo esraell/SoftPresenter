@@ -20,8 +20,8 @@ env:
 # other than the end-to-end ones, and the end-to-end tests in three parts. The last job, "Build
 # and tests on Windows", passes only when every one of them did.
 #
-# The end-to-end tests are dealt out with cargo-nextest, which runs each test as a process of
-# its own; the other tests run with cargo test, as before. Each job compiles what it runs: Cargo
+# The tests run with cargo-nextest, each as a process of its own (.config/nextest.toml, profile
+# ci), and the end-to-end tests are dealt out with it. Each job compiles what it runs: Cargo
 # builds the program again for the tests anyway (sp-app's dev-dependencies switch on sp-model's
 # test-documents), so a build shared between jobs would only make the tests wait for it.
 jobs:
@@ -46,15 +46,19 @@ jobs:
       - name: Install the Rust version in rust-toolchain.toml
         run: rustup toolchain install
       # A cache of its own: the program as it ships (without the tests' features) and clippy's
-      # checking are built here only.
+      # checking are built here only. Saved from master only; a pull request reads master's.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: windows-build-and-lints
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
+        with:
+          tool: cargo-nextest@0.9.152
       - name: Build
         run: cargo build --workspace
       - name: Tests (sp-render, without the picture tests)
         if: success() || failure()
-        run: cargo test -p sp-render --lib --no-fail-fast
+        run: cargo nextest run --profile ci -p sp-render --lib --no-fail-fast
       # After the tests, so that a lint only Windows' own compiler finds doesn't hide their
       # results.
       - name: Lints
@@ -86,17 +90,25 @@ jobs:
       - name: Install the Rust version in rust-toolchain.toml
         run: rustup toolchain install
       # One cache for this job and the end-to-end ones, which build a part of what this job
-      # builds, with the same packages and so the same features. This job alone saves it.
+      # builds, with the same packages and so the same features. This job alone saves it, and
+      # only on master.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: windows
-      # Every test as before, the documentation tests among them, but for the end-to-end ones:
-      # the jobs below run those, and here they skip themselves, saying why, as the switch
-      # makes them. So a test binary added later runs here.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
+        with:
+          tool: cargo-nextest@0.9.152
+      # Every test but the end-to-end ones, which the jobs below run, so a test binary added
+      # later runs here.
       - name: Tests
-        env:
-          SOFTPRESENTER_E2E: "off (the end-to-end jobs run them)"
-        run: cargo test --workspace --exclude sp-render --no-fail-fast
+        run: >-
+          cargo nextest run --profile ci --workspace --exclude sp-render --no-fail-fast
+          -E 'not binary_id(sp-app::e2e)'
+      # nextest doesn't run documentation tests. There are none today; this runs any added later.
+      - name: Documentation tests
+        if: success() || failure()
+        run: cargo test --workspace --exclude sp-render --doc --no-fail-fast
       - name: Say what Windows logged about stopped programs
         if: failure()
         shell: pwsh
@@ -135,7 +147,7 @@ jobs:
       # in turn from the tests in name order.
       - name: End-to-end tests
         run: >-
-          cargo nextest run --workspace --exclude sp-render --test e2e --no-fail-fast
+          cargo nextest run --profile ci --workspace --exclude sp-render --test e2e --no-fail-fast
           --no-capture --partition slice:${{ matrix.part }}/3
       - name: Say what Windows logged about stopped programs
         if: failure()

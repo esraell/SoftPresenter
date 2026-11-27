@@ -1,0 +1,18 @@
+# cargo-nextest's settings for the automatic checks (.github/workflows), which run it with
+# --profile ci. A run without that profile, on your own computer, keeps nextest's defaults.
+#
+# nextest runs each test as a process of its own and keeps back what a test that passes prints.
+# A few tests print a notice on the GitHub run when they pass: a video test skipped for want of
+# FFmpeg, or a timing not judged on a busy machine (`::notice` written straight to standard
+# output). What those packages' tests print is shown at the end of the run, where GitHub reads
+# the notices. A test elsewhere that starts printing one belongs in the filter below too. The
+# end-to-end jobs run with --no-capture, which passes everything straight through.
+[profile.ci]
+# Every test runs to the end, as cargo test --no-fail-fast did.
+fail-fast = false
+# A failing test's output as it fails, and again at the end, under the list of what failed.
+failure-output = "immediate-final"
+
+[[profile.ci.overrides]]
+filter = "package(sp-video) | package(sp-ndi)"
+success-output = "final"
