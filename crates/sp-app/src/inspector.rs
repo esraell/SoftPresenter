@@ -944,9 +944,9 @@ fn ndi_source(
     let (words, amber) = crate::ndi_in::line(runtime, view.sources.len(), source, stopped);
     let ink = if amber { crate::studio::CARE } else { crate::studio::TEXT_DIM };
     ui.label(egui::RichText::new(words).size(11.5).color(ink));
-    // On Linux, where NDI Tools doesn't exist, the app downloads NDI itself.
-    if !installed || download.under_way() {
-        crate::ndi_download::ui(ui, download, installed);
+    // Without NDI, the key that opens the Install NDI window.
+    if !installed && ui.button(crate::ndi_download::install_key()).clicked() {
+        download.open(crate::ndi_download::Place::Home);
     }
     ui.add_space(4.0);
     let row = |ui: &mut egui::Ui, label: &str, add: &mut dyn FnMut(&mut egui::Ui)| {
@@ -2276,5 +2276,40 @@ mod tests {
                 "{tab:?} spans {spans} selected {select}: ends at {widest}, the edge is {edge}"
             );
         }
+    }
+
+    #[test]
+    fn an_ndi_source_box_without_ndi_has_the_key_that_opens_the_install_window() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let ctx = egui::Context::default();
+            let data = std::env::temp_dir().join(format!("softpresenter-inspector-ndi-{}", std::process::id()));
+            let mut download = crate::ndi_download::NdiDownload::in_folder(data);
+            let mut view = crate::ndi_in::NdiView::default();
+            let (mut source, mut fit, mut quality, mut sound) =
+                (String::new(), sp_model::ImageFit::ALL[0], sp_model::NdiQuality::Full, false);
+            let object = sp_model::Uuid::new_v4();
+            let mut draw = |ui: &mut egui::Ui, installed: bool, download: &mut crate::ndi_download::NdiDownload| {
+                ui.set_width(INNER);
+                ndi_source(
+                    ui,
+                    object,
+                    (&mut source, &mut fit, &mut quality, &mut sound),
+                    &mut view,
+                    installed,
+                    download,
+                );
+            };
+            // With NDI here there is no such key.
+            let words = crate::ndi_download::testing::drawn(&ctx, Vec::new(), &mut |ui| draw(ui, true, &mut download));
+            assert!(!words.iter().any(|(text, _)| text.contains("Install NDI")), "{words:?}");
+            // Without it: the line that says so, and the key.
+            let words = crate::ndi_download::testing::drawn(&ctx, Vec::new(), &mut |ui| draw(ui, false, &mut download));
+            assert!(words.iter().any(|(text, _)| text.ends_with("so this box has nothing to show yet.")), "{words:?}");
+            let clicked = crate::ndi_download::testing::click(&ctx, "Install NDI\u{2026}", &mut |ui| {
+                draw(ui, false, &mut download)
+            });
+            assert!(clicked, "the key is drawn");
+            assert_eq!(download.shown_in(), Some(crate::ndi_download::Place::Home));
+        });
     }
 }

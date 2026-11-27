@@ -556,13 +556,30 @@ pub const CARD_RUNNING: Color32 = Color32::from_rgb(0x25, 0x3a, 0x2c);
 pub const CARD_SHOWN: Color32 = Color32::from_rgb(0x46, 0x29, 0x22);
 
 /// How a flat button is drawn: plain (the button grey), on (the lighter grey of a choice that
-/// is on, with a faint inner edge), or the one main action of its place (the ink, with dark
-/// words).
+/// is on, with a faint inner edge), the one main action of its place (the ink, with dark
+/// words), or amber, which marks what is new (the key that brings an update in): amber mixed
+/// 26% into the button grey, with an inner edge of amber at 55%, and the usual words.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Flat {
     Plain,
     On,
     Main,
+    Amber,
+}
+
+/// `over` mixed into `under`, `part` of the way.
+fn mixed(over: Color32, under: Color32, part: f32) -> Color32 {
+    let mix = |over: u8, under: u8| (f32::from(over) * part + f32::from(under) * (1.0 - part)).round() as u8;
+    Color32::from_rgb(mix(over.r(), under.r()), mix(over.g(), under.g()), mix(over.b(), under.b()))
+}
+
+/// The dimmed window, the soft shadow and the panel of a sheet shown over a window (the list
+/// of keys, What's new, Install NDI): `sheet` is where the panel stands in the window `screen`.
+pub fn paint_sheet(painter: &egui::Painter, screen: Rect, sheet: Rect) {
+    painter.rect_filled(screen, 0.0, Color32::from_black_alpha(153));
+    painter.rect_filled(sheet.translate(vec2(0.0, 30.0)).expand(30.0), 48.0, Color32::from_black_alpha(40));
+    painter.rect_filled(sheet, 18.0, Color32::from_rgb(0x1f, 0x1f, 0x1f));
+    painter.rect_stroke(sheet, 18.0, Stroke::new(1.0, LINE), StrokeKind::Inside);
 }
 
 /// Paints a flat button's block in `rect` with corners of `corner`, lighter under the pointer.
@@ -577,6 +594,10 @@ pub fn paint_flat(painter: &egui::Painter, rect: Rect, corner: f32, look: Flat, 
         }
         Flat::Main => {
             painter.rect_filled(rect, corner, if hovered { Color32::WHITE } else { TEXT });
+        }
+        Flat::Amber => {
+            painter.rect_filled(rect, corner, mixed(CARE, BUTTON, if hovered { 0.34 } else { 0.26 }));
+            painter.rect_stroke(rect, corner, Stroke::new(1.0, CARE.gamma_multiply(0.55)), StrokeKind::Inside);
         }
     }
 }

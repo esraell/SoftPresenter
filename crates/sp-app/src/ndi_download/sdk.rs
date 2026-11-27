@@ -64,8 +64,20 @@ pub enum Problem {
     TooLarge,
     /// A file couldn't be written on this computer.
     Disk(String),
-    /// The download couldn't be made; the words say why, plainly.
+    /// A file couldn't be written because the disk is full.
+    DiskFull,
+    /// NDI's server couldn't be reached: this computer isn't online.
+    Offline,
+    /// The secure connection was refused for its certificate, as on a network that looks into
+    /// secure connections with a certificate of its own.
+    Blocked,
+    /// NDI's server answered, but not with the download (or it took too long, or broke off);
+    /// the words are for the log.
     Network(String),
+    /// The download isn't signed by NDI. The words are for the log.
+    Unsigned(String),
+    /// NDI's own installer ended before it had installed NDI.
+    Closed,
     /// The operator stopped it.
     Cancelled,
 }
@@ -78,9 +90,21 @@ impl std::fmt::Display for Problem {
             Problem::NoRuntime(processor) => write!(f, "no runtime for {processor}"),
             Problem::TooLarge => write!(f, "larger than NDI's SDK should be"),
             Problem::Disk(why) => write!(f, "could not be saved: {why}"),
+            Problem::DiskFull => write!(f, "could not be saved: the disk is full"),
+            Problem::Offline => write!(f, "could not be downloaded: NDI's server couldn't be reached"),
+            Problem::Blocked => write!(f, "could not be downloaded: the secure connection's certificate was refused"),
             Problem::Network(why) => write!(f, "could not be downloaded: {why}"),
+            Problem::Unsigned(why) => write!(f, "not signed by NDI: {why}"),
+            Problem::Closed => write!(f, "NDI's installer ended before it finished"),
             Problem::Cancelled => write!(f, "cancelled"),
         }
+    }
+}
+
+impl Problem {
+    /// Why a file couldn't be written: a full disk is said as one.
+    pub fn disk(e: io::Error) -> Problem {
+        if e.kind() == io::ErrorKind::StorageFull { Problem::DiskFull } else { Problem::Disk(e.to_string()) }
     }
 }
 
@@ -96,6 +120,14 @@ pub struct Contents {
     runtime_size: u64,
     /// The runtime's version, from its file's name ("6.3.2").
     pub version: String,
+}
+
+impl Contents {
+    /// Testing aid: contents with this licence and nothing to install, for a picture of the
+    /// Licence step (`NdiDownload::demo`).
+    pub fn sample(licence: String) -> Contents {
+        Contents { licence, notices: None, runtime: String::new(), runtime_size: 0, version: "6.1.1".to_owned() }
+    }
 }
 
 /// Reads NDI's download through and finds NDI's licence and the runtime for `processor`
@@ -173,7 +205,7 @@ pub fn install(
     cancel: &AtomicBool,
 ) -> Result<(), Problem> {
     let machine = machine(processor).ok_or_else(|| Problem::NoRuntime(processor.to_owned()))?;
-    let disk = |e: io::Error| Problem::Disk(e.to_string());
+    let disk = Problem::disk;
     std::fs::create_dir_all(into).map_err(disk)?;
     let part = into.join(format!(".{RUNTIME_FILE}.part"));
     let _ = std::fs::remove_file(&part);
@@ -228,7 +260,7 @@ pub fn install(
 
 /// Writes a file whole under its name in `folder`: into a hidden new file first, then renamed.
 pub fn write_whole(folder: &Path, name: &str, bytes: &[u8]) -> Result<(), Problem> {
-    let disk = |e: io::Error| Problem::Disk(e.to_string());
+    let disk = Problem::disk;
     let part = folder.join(format!(".{name}.part"));
     let _ = std::fs::remove_file(&part);
     let written = std::fs::OpenOptions::new()

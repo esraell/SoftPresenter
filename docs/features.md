@@ -1591,9 +1591,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Source menu the keyboard. The menu lists the sources found (as "Camera 1 · STREAM-PC"), with
   Look again beside it; SoftPresenter's own NDI outputs are never offered (a source shown in
   a slide would show itself). One line under it says what is so: how many are found, that it is
-  still looking, that NDI isn't installed (SoftPresenter uses the NDI Tools you install
-  yourself, as for sending; on Linux, Download NDI… under the line installs NDI, as in the
-  Screens window), or, in amber, that the chosen source isn't sending. Then Fits
+  still looking, that NDI isn't installed (with Install NDI… under the line, which opens the
+  Install NDI window), or, in amber, that the chosen source isn't sending. Then Fits
   (Fit, Fill or Stretch), Quality (Full, or Light: the sender's smaller picture, less network
   and less of the computer) and Sound (Off or On; the setting is kept, and the box says
   "Sound comes later": the app has no way yet to play a source's sound, so none is faked).
@@ -1611,8 +1610,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   a second and show the slide without it, never a frozen picture; it fades back in when the
   source returns. The operator gets an amber notice ("NDI "Camera 1" stopped sending. Its
   slides show without it until it is back."), and the editor shows an amber dashed box tagged
-  "· not sending". The runtime is the one NDI Tools installs (on Linux, the one Download NDI…
-  installs), opened as for sending. The
+  "· not sending". The runtime is the one on the computer (SoftPresenter's own install, or
+  NDI's), opened as for sending. The
   remote page shows the box as drawn and can't add one (there is no remote command for it).
   Songs with an NDI box are saved as version 4 of the song file; older SoftPresenters say to
   update. Not yet: sound, and `sp` has no command to add one (`sp slide SONG N` lists it).
@@ -1902,21 +1901,55 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the system and the first line filled in. A test's copy shows no window and says the same on
   the standard error. The program ends when a key is pressed. The window has not been tried
   on a screen.
-- **NDI on Linux.** NDI Tools, which installs NDI's runtime on a Mac and on Windows, doesn't
-  exist for Linux, so there, while NDI isn't installed, an NDI screen in the Screens window (and
-  an NDI Source box in the inspector) has **Download NDI…** beside the ndi.video link. It
-  downloads NDI's SDK for Linux over HTTPS from NDI's own server (68 MB in November 2026), on a thread of
-  its own, saying how far it has got ("Downloading NDI… 12 of 68 MB", with a bar and Cancel),
-  then "Checking the download…", and shows NDI's licence from inside it, in a box to scroll,
-  with Accept and Cancel. Only Accept installs anything: NDI's runtime for the computer's
-  processor (64-bit Intel or AMD; 64-bit ARM where the SDK has it), with NDI's licence and the
-  licences the runtime is built with, goes into `NDI/` in the data folder, never a system
-  folder, and no administrator password is asked for. Cancel, a failure, and a finished
-  install all delete the download. NDI screens that found no NDI start at once, without a
-  restart, and it then says "NDI 6.3.2 installed (downloaded 24 Nov 2026)", with Remove (NDI
-  stays in use until SoftPresenter restarts, and it says so). A download that isn't laid out as
-  NDI's SDK is (NDI may have changed it), is damaged or cut short, or has no runtime for the
-  processor installs nothing, and says which. A Mac and Windows still point to NDI Tools.
+- **Installing NDI.** NDI's runtime is NDI's own software, which SoftPresenter never carries.
+  Settings › Integrations has an **NDI** card with NDI's logo: not installed, installed with
+  its version (asked of the runtime itself), or, in amber, that an update may be out. Its page
+  has one row that keeps its height and its key's width: **Install NDI**; "NDI 6.1.1 is
+  installed." with **Check for Updates** and when it was last checked; "A newer NDI may be
+  available. You have 6.1.1." with an amber **Install Update**; then Where it's used (a key
+  to Screens), Remove NDI (**Remove…**, which asks first) and NDI's trademark line. A screen
+  sent over NDI, an NDI Source box in the inspector and the setup's Screens step each have
+  **Install NDI…** while NDI isn't installed, opening the same window.
+  - **The Install NDI window** is one sheet at one size with a step line (1 Download ·
+    2 Licence · 3 Install; on Windows 1 Download · 2 Install). It says what NDI is; downloads
+    it over HTTPS from NDI's own server on a thread of its own ("Downloading NDI… 61%",
+    "41 of 68 MB", a bar and Cancel); shows NDI's licence; installs; and ends with what was
+    installed and the two things it is for. Accept works as soon as the licence shows. Esc puts
+    the window away and it carries on: the card's row says so, and Show… brings it back.
+    Cancel, a failure, and a finished install all delete the download. A failure says why at
+    its step, with Try Again: no internet connection; a network that checks secure connections
+    (a certificate the computer doesn't trust); a full disk; a download that isn't what NDI
+    usually sends; on Windows, NDI's installer closed before it finished.
+  - **Linux:** the download is NDI's SDK for Linux (68 MB in November 2026). NDI's licence
+    from inside it is shown whole, in a box that scrolls and takes the keyboard. Only Accept
+    installs anything: NDI's runtime for the computer's processor (64-bit Intel or AMD; 64-bit
+    ARM where the SDK has it), with NDI's licence and the licences the runtime is built with,
+    goes into `NDI/` in the data folder, never a system folder, and no password is asked for.
+  - **Mac:** the download is NDI's runtime package (5 MB). Its signature is checked with
+    macOS's own tools (NDI's Developer ID, on the package and on the library in it), it is
+    laid out without installing it, and its library goes into the same `NDI/` folder: no
+    installer runs and no password is asked for. NDI's package carries no licence text, so the
+    Licence step says that installing NDI accepts NDI's licence and has a key that opens
+    NDI's own page for it.
+  - **Windows:** NDI's runtime can only be installed by NDI's own installer, as an
+    administrator. SoftPresenter downloads it (12 MB), has Windows check that NDI's company
+    signed it, and opens it as it is; NDI's installer shows NDI's licence and Windows asks for
+    an administrator's permission (SoftPresenter never asks for a password). The window waits
+    for it, with Stop Waiting. Remove… opens NDI's own uninstaller the same way, and only for
+    an NDI that NDI's runtime installer put there, never NDI Tools.
+  - **Updates.** NDI publishes no list of versions, so Check for Updates (and, at most once a
+    day, opening the card; never in the background) asks NDI's server only what it says of
+    its download: when it was last changed, the mark that changes with its contents, and its
+    size. For an NDI SoftPresenter installed, those were noted at the time, and a difference
+    means "A newer NDI may be available"; for an NDI installed some other way, the download's
+    date is set against the runtime file's. No version number is ever claimed for the newer
+    one. Install Update runs in the row with no window ("Updating NDI… 45%", "31 of 68 MB", a
+    thin bar, Cancel; then "NDI 6.2.0 is installed." "Updated at 2:07."), unless NDI's licence
+    is not the one accepted before, when the window opens at its Licence step. The new runtime
+    is unpacked and checked beside the old one and only then takes its place: at once when NDI
+    isn't in use, or else the next time SoftPresenter starts, so live NDI screens keep working.
+    A failed update leaves the installed NDI as it was, and says so.
+  NDI screens that found no NDI start at once after an install, without a restart.
 - **DeckLink outputs** (SoftPresenter for Blackmagic Design DeckLink). With Blackmagic's driver,
   Desktop Video 16.0 or later, installed, each output the card offers is a choice for any
   audience or stage screen, named as the driver names it ("DeckLink Duo (1)": a DeckLink Duo 2

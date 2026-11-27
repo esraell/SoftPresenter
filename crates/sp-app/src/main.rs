@@ -9870,6 +9870,8 @@ impl App {
             if running.ndi_checked.is_none() || found != running.home_state.ndi_available {
                 applog::event("ndi", if found { "the NDI runtime was found" } else { "the NDI runtime was not found" });
             }
+            // (A made-up state shown for a picture says for itself whether NDI is here.)
+            let found = running.home_state.ndi_download.demo_found().unwrap_or(found);
             running.home_state.ndi_available = found;
             running.ndi_checked = Some(Instant::now());
         }
@@ -10982,6 +10984,14 @@ impl App {
                 let media = std::env::var("SOFTPRESENTER_CAPTURE_MEDIA").ok().and_then(|n| n.parse().ok()).unwrap_or(0);
                 commands.push(Command::ShowMedia(media));
             }
+            // Testing aid: SOFTPRESENTER_NDI_DEMO=<state> shows the Install NDI window in the home
+            // window in a made-up state (see `ndi_download::NdiDownload::demo`).
+            if running.frames == GO_LIVE_AT + 2
+                && let Ok(demo) = std::env::var("SOFTPRESENTER_NDI_DEMO")
+            {
+                let state = &mut running.home_state;
+                state.ndi_available = state.ndi_download.demo(&demo, ndi_download::Place::Home);
+            }
             // Testing aid: open the Settings window.
             if running.frames == GO_LIVE_AT + 2
                 && let Ok(pane) = std::env::var("SOFTPRESENTER_CAPTURE_PREFERENCES")
@@ -11010,6 +11020,15 @@ impl App {
                             "mcp-apps" => Part::OtherApps,
                             _ => Part::WhatIsCopied,
                         });
+                    }
+                    // NDI's page; with a state after it (ndi-newer, ndi-install, ndi-licence…),
+                    // as `ndi_download::NdiDownload::demo` draws it, with made-up numbers.
+                    name if name == "ndi" || name.starts_with("ndi-") => {
+                        state.preferences_pane = home::Pane::Integrations;
+                        state.ndi_card_open = true;
+                        if let Some(demo) = name.strip_prefix("ndi-") {
+                            state.ndi_available = state.ndi_download.demo(demo, ndi_download::Place::Settings);
+                        }
                     }
                     // The songbooks' page, where the song catalog is offered.
                     "songbooks" => {
@@ -14304,12 +14323,11 @@ fn main() -> ExitCode {
     for done in &settled {
         applog::event("song ids", done);
     }
-    // On Linux, NDI downloaded in the app is kept in its own folder, looked in for NDI's
-    // runtime; a download a quit left part of the way through is deleted.
-    if ndi_download::offered()
-        && let Some(folder) = ndi_download::folder()
-    {
-        ndi_download::tidy(&folder);
+    // NDI downloaded in the app is kept in its own folder, looked in for NDI's runtime. Before
+    // it is looked for: a new one unpacked while the old was in use takes its place, and a
+    // download a quit left part of the way through is deleted.
+    if let Some(folder) = ndi_download::folder() {
+        ndi_download::settle(&folder);
         sp_ndi::set_own_folder(folder);
     }
     // Picture objects on slides are read from the app's Images folder.

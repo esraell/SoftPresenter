@@ -680,8 +680,10 @@ pub struct HomeState {
     pub ndi_available: bool,
     /// The NDI sources found, and which are wanted and not sending (for the inspector).
     pub ndi: crate::ndi_in::NdiView,
-    /// Download NDI… on Linux, as far as it has got, and the NDI the app installed.
+    /// Installing NDI, as far as it has got, and the NDI the app installed.
     pub ndi_download: crate::ndi_download::NdiDownload,
+    /// True while NDI's page is open in Settings › Integrations.
+    pub ndi_card_open: bool,
     /// The DeckLink devices found, and how the driver stands (no devices without it).
     pub decklink: sp_decklink::Found,
     /// The Edit view's right-hand panel.
@@ -2150,6 +2152,7 @@ impl Default for HomeState {
             ndi_available: true,
             ndi: crate::ndi_in::NdiView::default(),
             ndi_download: crate::ndi_download::NdiDownload::default(),
+            ndi_card_open: false,
             decklink: sp_decklink::Found { driver: sp_decklink::Driver::Looking, devices: Vec::new() },
             inspector: crate::inspector::InspectorState::default(),
             theme_edit: None,
@@ -2733,7 +2736,13 @@ fn home_view(
     // A press that ends on a slider or a menu leaves the keyboard to the show again.
     release_focus(ui.ctx());
     crate::studio::toolbar(ui, show, state, &mut commands);
-    crate::setup::setup_ui(ui.ctx(), show, state, &mut commands);
+    // The Install NDI window, opened from the setup's Screens step or from an NDI Source box,
+    // stands in the setup's place while it is shown; left, the setup is back at its step.
+    let installing_ndi = state.ndi_download.shown_in() == Some(crate::ndi_download::Place::Home);
+    if !installing_ndi {
+        crate::setup::setup_ui(ui.ctx(), show, state, &mut commands);
+    }
+    crate::ndi_download::window::window(ui.ctx(), &mut state.ndi_download, crate::ndi_download::Place::Home);
     if ui.input(|input| command_key(input, egui::Key::Comma, false)) {
         state.preferences_open = true;
     }
@@ -6759,25 +6768,22 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             ui.add_space(6.0);
         }
         ui.label(egui::RichText::new(about).size(11.5).color(TEXT_DIM));
-        // Where NDI comes from, wherever it is chosen; and, without it, that it isn't installed.
-        // On Linux, where NDI Tools doesn't exist, the app downloads NDI itself.
+        // Where NDI comes from, wherever it is chosen; and, without it, that it isn't installed,
+        // with the key that opens the Install NDI window.
         if matches!(screen.output, Output::Ndi(_)) {
-            let download = crate::ndi_download::offered();
             ui.horizontal_wrapped(|ui| {
                 if !state.ndi_available {
-                    let words = if download {
-                        t("screens.ndi.not_installed", "NDI isn't installed on this computer.")
-                    } else {
-                        t(
-                            "screens.ndi.not_installed.install",
-                            "NDI isn't installed on this computer. Install NDI Tools (free), then turn this screen on again:",
-                        )
-                    };
+                    let words = t(
+                        "screens.ndi.cant_send",
+                        "NDI isn\u{2019}t installed on this computer, so this screen can\u{2019}t be sent yet.",
+                    );
                     ui.label(egui::RichText::new(words).size(11.5).color(Color32::from_rgb(255, 170, 120)));
+                    if ui.small_button(crate::ndi_download::install_key()).clicked() {
+                        state.ndi_download.open(crate::ndi_download::Place::Screens);
+                    }
                 }
                 ui.hyperlink_to(egui::RichText::new("ndi.video").size(11.5), sp_ndi::DOWNLOAD_URL);
             });
-            crate::ndi_download::ui(ui, &mut state.ndi_download, state.ndi_available);
         }
         // An audience screen's look: which layers it shows, its colour, its covered edges.
         if screen.kind == Kind::Audience {
@@ -6884,6 +6890,8 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
         });
     });
     state.screens_changed |= changed;
+    // The Install NDI window, from a screen sent over NDI where NDI isn't installed.
+    crate::ndi_download::window::window(ui.ctx(), &mut state.ndi_download, crate::ndi_download::Place::Screens);
     commands
 }
 
@@ -16570,6 +16578,42 @@ mod tests {
             assert_eq!(state.screens, screens);
         }
         assert_eq!(output_label(&screens[2].output, &[]), "Gone   (disconnected)");
+    }
+
+    #[test]
+    fn a_screen_sent_over_ndi_without_ndi_has_the_key_that_opens_the_install_window() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let ctx = egui::Context::default();
+            let data = std::env::temp_dir().join(format!("softpresenter-screens-ndi-{}", std::process::id()));
+            let mut state = HomeState {
+                settings_open: true,
+                screens: vec![Screen::new("Stream".to_owned(), Output::Ndi("Main".to_owned()))],
+                ndi_available: false,
+                ndi_download: crate::ndi_download::NdiDownload::in_folder(data),
+                ..HomeState::default()
+            };
+            let mut draw = |ui: &mut egui::Ui| {
+                screens_ui(ui, &mut state, true);
+            };
+            let words = crate::ndi_download::testing::drawn(&ctx, Vec::new(), &mut draw);
+            assert!(
+                words.iter().any(|(text, _)| text.contains("so this screen can\u{2019}t be sent yet.")),
+                "{words:?}"
+            );
+            assert!(crate::ndi_download::testing::click(&ctx, "Install NDI\u{2026}", &mut draw), "the key is drawn");
+            // The same window, over the Screens window, at its first step.
+            let words = crate::ndi_download::testing::drawn(&ctx, Vec::new(), &mut draw);
+            assert!(words.iter().any(|(text, _)| text.contains("NDI sends video over your network")), "{words:?}");
+            assert_eq!(state.ndi_download.shown_in(), Some(crate::ndi_download::Place::Screens));
+            // With NDI here, the line and its key are gone.
+            state.ndi_download.cancel();
+            state.ndi_available = true;
+            let mut draw = |ui: &mut egui::Ui| {
+                screens_ui(ui, &mut state, true);
+            };
+            let words = crate::ndi_download::testing::drawn(&ctx, Vec::new(), &mut draw);
+            assert!(!words.iter().any(|(text, _)| text.contains("Install NDI")), "{words:?}");
+        });
     }
 
     #[test]

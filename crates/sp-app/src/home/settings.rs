@@ -282,6 +282,8 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     }
     // The What's new window, over the whole of Settings, from About.
     crate::whats_new::window(ui.ctx(), &mut state.whats_new);
+    // The Install NDI window, from NDI's card.
+    crate::ndi_download::window::window(ui.ctx(), &mut state.ndi_download, crate::ndi_download::Place::Settings);
 }
 
 /// The list: "Settings", the groups and their rows, and Set up SoftPresenter under them.
@@ -439,7 +441,22 @@ fn pane_contents(ui: &mut egui::Ui, state: &mut HomeState, show: &Show, pane: Pa
         Pane::Language => language_page(ui),
         Pane::Integrations => {
             let songbooks = crate::catalog::offered().then_some(&mut state.songbooks);
-            crate::integrations::pane(ui, &mut state.voxlive, &mut state.canva, songbooks, &mut state.timelychurch);
+            let ndi = crate::integrations::Ndi {
+                download: &mut state.ndi_download,
+                found: state.ndi_available,
+                open: &mut state.ndi_card_open,
+            };
+            // NDI's page has a key to Screens, where NDI is chosen for a screen.
+            if crate::integrations::pane(
+                ui,
+                &mut state.voxlive,
+                &mut state.canva,
+                songbooks,
+                &mut state.timelychurch,
+                ndi,
+            ) {
+                state.preferences_pane = Pane::Screens;
+            }
         }
         Pane::AiAssistants => crate::mcp::pane::page(ui, &mut state.mcp),
         Pane::PhoneRemote => crate::remote::pane::pane(ui, &mut state.remote),

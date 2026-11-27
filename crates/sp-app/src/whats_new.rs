@@ -396,8 +396,6 @@ const SIDE: f32 = 18.0;
 const PARTS_APART: f32 = 10.0;
 /// Between the versions before it.
 const VERSIONS_APART: f32 = 20.0;
-/// The window's own grey, a step under the parts' well grey.
-const SHEET: Color32 = Color32::from_rgb(0x1f, 0x1f, 0x1f);
 /// The words on the bright Done key.
 const DONE_INK: Color32 = PANEL;
 
@@ -451,12 +449,8 @@ fn draw(ctx: &egui::Context, view: &mut View, all: &[Version], running: &str) {
         if outside.clicked() && !outside.interact_pointer_pos().is_some_and(|at| sheet.contains(at)) {
             close = true;
         }
-        // Shared with keys.rs's sheet: move into studio before a third copy.
         let painter = ui.painter().clone();
-        painter.rect_filled(screen, 0.0, Color32::from_black_alpha(153));
-        painter.rect_filled(sheet.translate(vec2(0.0, 30.0)).expand(30.0), 48.0, Color32::from_black_alpha(40));
-        painter.rect_filled(sheet, 18.0, SHEET);
-        painter.rect_stroke(sheet, 18.0, Stroke::new(1.0, LINE), StrokeKind::Inside);
+        crate::studio::paint_sheet(&painter, screen, sheet);
         let room = sheet.width() - 2.0 * SIDE - 42.0;
         let heading = painter.layout(title, semibold(15.0), TEXT, room);
         painter.galley(pos2(sheet.min.x + SIDE, sheet.min.y + 29.0 - heading.size().y / 2.0), heading, TEXT);

@@ -7,6 +7,17 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 Settings and playlists that couldn't be saved are tried again.
 
+### New
+
+- **Install NDI.** Settings › Integrations has an NDI card, with Install NDI where NDI isn't on the computer. One window downloads NDI from NDI's own server, shows or names NDI's licence for you to accept, and installs it. On a Mac and Linux SoftPresenter keeps NDI in its own folder and asks for no password; on Windows it opens NDI's own installer, and Windows asks for an administrator's permission. Esc puts the window away while it carries on, and Cancel deletes what was downloaded.
+- **Install NDI where it is needed.** A screen sent over NDI, an NDI Source box in the Edit view and the setup's Screens step each have an Install NDI… key that opens the same window when NDI isn't installed.
+- **NDI updates.** The NDI card says which NDI is installed, and Check for Updates asks NDI's server whether its download has changed. When it has, the card says a newer NDI may be available, and Install Update brings it in right there in the row, with a bar and Cancel. Screens already sent over NDI keep working and use the new NDI from the next start.
+- **Remove NDI.** Remove… on the NDI card takes away the NDI that SoftPresenter installed, after asking. On Windows it opens NDI's own uninstaller.
+
+### Better
+
+- **NDI trouble in plain words.** When NDI can't be downloaded, SoftPresenter says whether there is no internet, the network blocked the secure connection, the disk is full or the download wasn't what NDI usually sends, with Try Again.
+
 ### Fixed
 
 - **Settings and playlists saved again.** A setting, playlist, library or the media bin that couldn't be saved because another program held its file for a moment (a virus scanner, a sync tool) was lost at quit unless something else changed; now SoftPresenter keeps trying, as it does for songs and themes, says when it is saved, and at quit keeps any change it still couldn't save in the library's Not saved folder.

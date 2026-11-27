@@ -88,8 +88,6 @@
   "inspector.ndi.look_again": "Buscar otra vez",
   "inspector.ndi.look_again.short": "Buscar",
   "inspector.ndi.look_again.hint": "Volver a buscar fuentes NDI en la red",
-  "inspector.ndi.not_installed.download": "NDI no está instalado en este ordenador. Descargar NDI…, aquí debajo, lo trae (gratis, de NDI), para recibir y para enviar.",
-  "inspector.ndi.not_installed.tools": "NDI no está instalado en este ordenador. SoftPresenter usa las NDI Tools que instalas tú, igual que para enviar.",
   "inspector.ndi.not_sending": "{source} no está enviando ahora. En pantalla, la diapositiva se muestra sin ella hasta que vuelva.",
   "inspector.ndi.live": "La imagen se muestra en directo mientras la diapositiva está en pantalla.",
   "inspector.ndi.looking": "Buscando NDI en esta red. Una fuente aparece aquí en cuanto empieza a enviar.",
@@ -223,5 +221,6 @@
   "inspector.mirror.fits": "Ajuste",
   "inspector.theme.song_end": "Final de canción",
   "inspector.theme.song_end.hint": "La marca bajo la última diapositiva de una canción dibujada con este tema, cuando Ajustes › Diapositivas la tiene activada",
-  "inspector.theme.song_end.change": "Cambiar…"
+  "inspector.theme.song_end.change": "Cambiar…",
+  "inspector.ndi.nothing_to_show": "NDI no está instalado en este ordenador, así que este cuadro aún no tiene nada que mostrar."
 }

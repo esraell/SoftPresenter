@@ -4,8 +4,9 @@
 //! page in place, every page the same way, in the cards and rows of the rest of Settings: the way
 //! back, its logo and how it stands, what it brings, then what the service shows first, then the
 //! presentation or the connection, then the account; every hint is a line on the page. Worship Leader App's free songbooks (where the song catalog is
-//! offered, `songbooks`), VoxLive, Canva Sync, and TimelyChurch (where it is offered,
-//! `timelychurch`); a service not offered yet is greyed as coming soon.
+//! offered, `songbooks`), VoxLive, Canva Sync, TimelyChurch (where it is offered,
+//! `timelychurch`) and NDI (installing it, its updates and removing it, `ndi_download`); a
+//! service not offered yet is greyed as coming soon.
 
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 
@@ -38,17 +39,30 @@ pub enum Request {
     CloseLook,
 }
 
+/// NDI's card: installing it, as far as that has got; whether NDI is on this computer; and
+/// whether its page is open.
+pub struct Ndi<'a> {
+    pub download: &'a mut crate::ndi_download::NdiDownload,
+    pub found: bool,
+    pub open: &'a mut bool,
+}
+
 /// The pane: the list of services, or the page of the one open, or a screen's look.
 /// `songbooks` is given only where the song catalog is offered; TimelyChurch's card is greyed
-/// as coming soon unless it is offered (`timelychurch.offered`).
+/// as coming soon unless it is offered (`timelychurch.offered`). True when NDI's page asked for
+/// Settings › Screens.
 pub fn pane(
     ui: &mut egui::Ui,
     view: &mut View,
     canva: &mut crate::canva::View,
     mut songbooks: Option<&mut crate::songbooks::View>,
     timelychurch: &mut crate::timelychurch::View,
-) {
+    ndi: Ndi<'_>,
+) -> bool {
     let songbooks_open = songbooks.as_ref().is_some_and(|songbooks| songbooks.open);
+    if *ndi.open {
+        return ndi_page(ui, ndi);
+    }
     if view.look.is_some() {
         look_page(ui, view);
     } else if view.open {
@@ -63,8 +77,50 @@ pub fn pane(
     } else if let (true, Some(songbooks)) = (songbooks_open, songbooks.as_deref_mut()) {
         songbooks_page(ui, songbooks);
     } else {
-        list(ui, view, canva, songbooks, timelychurch);
+        list(ui, view, canva, songbooks, timelychurch, ndi);
     }
+    false
+}
+
+/// How NDI stands, for its card and the head of its page: not installed, installed (with the
+/// version where it is known), or that an update may be out, in amber.
+fn ndi_state(ndi: &mut Ndi<'_>) -> (Color32, String) {
+    let row = crate::ndi_download::row::row(ndi.download, ndi.found);
+    let installed = ndi.found || row.act != Some(crate::ndi_download::row::Act::Open);
+    if row.amber {
+        (CARE, t("integrations.ndi.state.update", "Update may be out").to_owned())
+    } else if !installed {
+        (TEXT_FAINT, t("integrations.ndi.state.none", "Not installed").to_owned())
+    } else {
+        match ndi.download.version() {
+            Some(version) => {
+                (GOOD, tf("integrations.ndi.state.installed", "Installed \u{b7} {version}", &[("version", &version)]))
+            }
+            None => (GOOD, t("integrations.ndi.state.installed.unversioned", "Installed").to_owned()),
+        }
+    }
+}
+
+/// Settings › Integrations › NDI: how NDI stands, with the key that installs it, checks for a
+/// newer one or brings an update in; where it is used; removing it; and NDI's trademark line.
+/// True when Screens was asked for.
+fn ndi_page(ui: &mut egui::Ui, mut ndi: Ndi<'_>) -> bool {
+    let state = ndi_state(&mut ndi);
+    let what = t("integrations.ndi.what", "Send a screen over the network, and bring a camera into a slide");
+    if page_head(ui, Mark::Logo(Logo::Ndi), "NDI", state, what) {
+        *ndi.open = false;
+    }
+    let mut to_screens = false;
+    parts::card(
+        ui,
+        "NDI",
+        t("integrations.ndi.card.about", "Video over the network: screens out, cameras in"),
+        None,
+        |ui| to_screens = crate::ndi_download::row::rows(ui, ndi.download, ndi.found),
+    );
+    // NDI's site, linked wherever NDI is offered, as NDI's SDK asks.
+    ui.hyperlink_to(egui::RichText::new("ndi.video").size(12.5), sp_ndi::DOWNLOAD_URL);
+    to_screens
 }
 
 /// Testing aid: `SOFTPRESENTER_CAPTURE_PREFERENCES=voxlive-end` (`canva-end`,
@@ -111,6 +167,7 @@ fn list(
     canva: &mut crate::canva::View,
     songbooks: Option<&mut crate::songbooks::View>,
     timelychurch: &mut crate::timelychurch::View,
+    mut ndi: Ndi<'_>,
 ) {
     let about = t("integrations.list.about", "Other services SoftPresenter works with. Every one opens the same way.");
     let width = ui.available_width();
@@ -169,6 +226,14 @@ fn list(
             },
             soon: !timelychurch.offered,
         },
+        Service {
+            mark: Mark::Logo(Logo::Ndi),
+            name: "NDI",
+            about: t("integrations.ndi.what", "Send a screen over the network, and bring a camera into a slide"),
+            state: ndi_state(&mut ndi),
+            key: open,
+            soon: false,
+        },
     ];
     // Worship Leader App's card only where the song catalog is offered, as before (releases
     // don't offer it until Worship Leader App answers).
@@ -203,6 +268,7 @@ fn list(
         Some(1) => view.open = true,
         Some(2) => canva.open = true,
         Some(3) => timelychurch.open = true,
+        Some(4) => *ndi.open = true,
         _ => {}
     }
 }
@@ -264,7 +330,8 @@ fn service_card(ui: &mut egui::Ui, rect: Rect, service: &Service, index: usize) 
         0 => t("integrations.songbooks.hint", "Download songbooks, or remove them"),
         1 => t("integrations.voxlive.row.hint", "Connect VoxLive, or see its screens"),
         2 => t("integrations.canva.row.hint", "Connect Canva Sync, choose the presentation, or sync now"),
-        _ => t("integrations.timelychurch.row.hint", "Connect TimelyChurch, or see its services"),
+        3 => t("integrations.timelychurch.row.hint", "Connect TimelyChurch, or see its services"),
+        _ => t("integrations.ndi.row.hint", "Install NDI, check for a newer one, or remove it"),
     };
     let hint = if service.soon { t("integrations.state.soon", "Coming soon") } else { hint };
     response.on_hover_text(hint).clicked()
@@ -1592,7 +1659,10 @@ mod tests {
         let mut not_offered = crate::timelychurch::View::default();
         let mut drawn = ctx.run_ui(egui::RawInput::default(), |ui| {
             let timelychurch = timelychurch.as_deref_mut().unwrap_or(&mut not_offered);
-            pane(ui, &mut voxlive, &mut canva, songbooks.as_deref_mut(), timelychurch);
+            let mut download =
+                crate::ndi_download::NdiDownload::in_folder(std::env::temp_dir().join("softpresenter-no-ndi"));
+            let ndi = Ndi { download: &mut download, found: false, open: &mut false };
+            pane(ui, &mut voxlive, &mut canva, songbooks.as_deref_mut(), timelychurch, ndi);
         });
         drawn.textures_delta.clear();
         let mut words = Vec::new();
@@ -1679,7 +1749,10 @@ mod tests {
             let output = ctx.run_ui(raw, |ui| {
                 egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
                     let Services { voxlive, canva, timelychurch } = services;
-                    pane(ui, voxlive, canva, None, timelychurch);
+                    let mut download =
+                        crate::ndi_download::NdiDownload::in_folder(std::env::temp_dir().join("softpresenter-no-ndi"));
+                    let ndi = Ndi { download: &mut download, found: false, open: &mut false };
+                    pane(ui, voxlive, canva, None, timelychurch, ndi);
                 });
             });
             words.clear();

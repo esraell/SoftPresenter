@@ -88,8 +88,6 @@
   "inspector.ndi.look_again": "Искать снова",
   "inspector.ndi.look_again.short": "Искать",
   "inspector.ndi.look_again.hint": "Снова поискать источники NDI в сети",
-  "inspector.ndi.not_installed.download": "NDI не установлен на этом компьютере. Кнопка «Скачать NDI…» ниже установит его (бесплатно, от NDI) — для приёма и для передачи.",
-  "inspector.ndi.not_installed.tools": "NDI не установлен на этом компьютере. SoftPresenter использует NDI Tools, которые вы устанавливаете сами, как и для передачи.",
   "inspector.ndi.not_sending": "Источник {source} сейчас не передаёт. На экране слайд показывается без него, пока он не вернётся.",
   "inspector.ndi.live": "Картинка показывается вживую, пока слайд на экране.",
   "inspector.ndi.looking": "Ищем NDI в этой сети. Источник появится здесь, как только начнёт передавать.",
@@ -223,5 +221,6 @@
   "inspector.mirror.fits": "Размещение",
   "inspector.theme.song_end": "Конец песни",
   "inspector.theme.song_end.hint": "Знак под последним слайдом песни с этой темой, когда он включён в разделе Настройки › Слайды",
-  "inspector.theme.song_end.change": "Изменить…"
+  "inspector.theme.song_end.change": "Изменить…",
+  "inspector.ndi.nothing_to_show": "NDI на этом компьютере не установлен, поэтому этому блоку пока нечего показывать."
 }

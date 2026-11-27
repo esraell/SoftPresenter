@@ -37,7 +37,6 @@
   "setup.screens.stage.none": "Sin pantalla del escenario",
   "setup.screens.identify": "Identificar pantallas",
   "setup.screens.identify.stop": "Dejar de identificar",
-  "setup.screens.identify.about": "Muestra en cada pantalla su nombre",
   "setup.songs.title": "Trae tus canciones",
   "setup.songs.look.mac": "SoftPresenter puede buscar en tu carpeta Documentos una biblioteca de documentos de canciones (archivos .pro) para traerla. Puede que macOS pregunte si SoftPresenter puede usar la carpeta Documentos: elige Aceptar.",
   "setup.songs.look": "SoftPresenter puede buscar en tu carpeta Documentos una biblioteca de documentos de canciones (archivos .pro) para traerla.",
@@ -78,5 +77,10 @@
   "setup.free_songs.about": "Canciones gratis de Worship Leader App, un cancionero para cada idioma. Se guardan en este ordenador, aparte de tus canciones, y solo pasan a tu biblioteca cuando usas una.",
   "setup.free_songs.others": "Otros idiomas…",
   "setup.free_songs.later": "Los cancioneros marcados se descargan en segundo plano cuando termina la configuración. Puedes descargar más, o quitarlos, en Ajustes › Integraciones.",
-  "setup.free_songs.not_now": "Ahora no"
+  "setup.free_songs.not_now": "Ahora no",
+  "setup.screens.ndi.install.hover": "NDI envía las diapositivas por tu red, a una retransmisión o a otro ordenador. Es gratis.",
+  "setup.screens.ndi.installed": "NDI {version} está instalado",
+  "setup.screens.ndi.installed.unversioned": "NDI está instalado",
+  "setup.screens.identify.with_ndi": "Identificar muestra en cada pantalla su nombre. Una pantalla se puede enviar por tu red: elige NDI para ella en Ajustes › Pantallas.",
+  "setup.screens.identify.without_ndi": "Identificar muestra en cada pantalla su nombre. NDI envía las diapositivas por tu red, para una retransmisión; también se puede añadir más tarde."
 }

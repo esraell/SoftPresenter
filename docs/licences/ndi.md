@@ -17,7 +17,7 @@ publishing or selling anything that includes NDI.
 ## Receiving
 
 NDI sources in slides are received with the same runtime, opened the same way as for sending
-(the user's own NDI Tools install, or on Linux the runtime they had the app download from NDI;
+(the user's own NDI Tools install, or the runtime they had the app download from NDI;
 nothing from the SDK is in this repository). The few
 receiving and finding functions are declared in `sp-ndi`'s `runtime` module following
 `Processing.NDI.Find.h` and `Processing.NDI.Recv.h`, under the same MIT notice as the sending
@@ -78,24 +78,40 @@ ones. The app asks for the picture only, never audio, and shows it as it arrives
   headers are under the MIT licence, unlike the rest of the SDK, and their notice is kept in
   that file. No header or other SDK file is in the repository.
 - The app is not linked with the NDI runtime. When an NDI screen is turned on, it looks for
-  the runtime that NDI Tools (or the SDK) installed, the way the SDK's own "dynamic loading"
-  header describes (the folder `NDI_RUNTIME_DIR_V6` names, then `/usr/local/lib`, then the
-  SDK's copy), and on a Mac with NDI Tools but not NDI's runtime installer, the copy NDI ships
+  the runtime on the computer, the way the SDK's own "dynamic loading" header describes (the
+  folder `NDI_RUNTIME_DIR_V6` names, then the app's own `NDI/` folder, then `/usr/local/lib`,
+  then the SDK's copy), and on a Mac with NDI Tools but not NDI's runtime installer, the copy NDI ships
   inside its own apps (NDI Virtual Input, NDI Scan Converter; never another company's app),
   and opens it on that screen's own thread. Without it, the screen says NDI
   isn't installed and links to https://ndi.video/, and the rest of the app is unaffected.
   Nothing from NDI is copied into the app or its download.
-- On Linux, where NDI Tools doesn't exist and the runtime comes only inside the NDI SDK for
-  Linux, the person using the app can have it fetch that SDK themselves (Download NDI…, in
-  `crates/sp-app/src/ndi_download.rs`): from NDI's own server
-  (`https://downloads.ndi.tv/SDK/NDI_SDK_Linux/Install_NDI_SDK_v6_Linux.tar.gz`), never from
-  us, so SoftPresenter distributes nothing of NDI's. The app shows them NDI's licence
-  (`NDI SDK License Agreement.txt`, from inside the download) and installs only if they press
-  Accept: it never accepts for them, and never runs NDI's script. It then takes, unchanged,
-  only what using NDI needs: the runtime for their processor (`libndi.so.6`), the licence they
-  accepted, and the runtime's own licence list (`libndi_licenses.txt`, which goes beside the
-  runtime), into `NDI/` in the app's data folder, for SoftPresenter alone; the rest of the SDK
-  (headers, examples, tools, documentation) is never unpacked, and the download is deleted.
+- Where NDI isn't installed, the person using the app can have it fetch NDI themselves
+  (Install NDI, in `crates/sp-app/src/ndi_download.rs`): from NDI's own server
+  (`downloads.ndi.tv`, the files NDI's own links `ndi.link/NDIRedistV6Apple` and
+  `ndi.link/NDIRedistV6` lead to, and NDI's SDK for Linux), never from us, so SoftPresenter
+  distributes nothing of NDI's. It never accepts NDI's licence for them, and never runs
+  NDI's Linux script.
+  - **Linux:** the runtime comes only inside the NDI SDK for Linux. The app shows NDI's
+    licence (`NDI SDK License Agreement.txt`, from inside the download) and installs only on
+    Accept. It then takes, unchanged, only what using NDI needs: the runtime for their
+    processor (`libndi.so.6`), the licence they accepted, and the runtime's own licence list
+    (`libndi_licenses.txt`, which goes beside the runtime), into `NDI/` in the app's data
+    folder, for SoftPresenter alone; the rest of the SDK (headers, examples, tools,
+    documentation) is never unpacked, and the download is deleted.
+  - **Mac:** NDI's runtime package (`libNDI_for_Mac.pkg`) holds `libndi.dylib` and
+    `libndi_licenses.txt`, and no licence text (its installer names an EULA file that is not
+    in the package). The app checks NDI's signature, lays the package out with macOS's own
+    `pkgutil` without installing it, and copies those two files, unchanged, into `NDI/`. The
+    Licence step says that installing NDI accepts NDI's licence and links to NDI's own page
+    for it (`ndi.link/ndisdk_license`, the address NDI's notices file gives).
+  - **Windows:** NDI's runtime installer can't be kept to a folder of the app's (tried on 27
+    November 2026: it installs as an administrator whatever it is asked, re-points the
+    computer's NDI settings and resets Windows' network settings). So the app opens NDI's
+    installer as NDI ships it, after Windows has checked its signature; NDI's installer shows
+    NDI's licence itself.
+  - The licence accepted is noted by a hash of its text, so an update asks again only when
+    NDI's licence has changed. The agreement says nothing of accepting it anew for an update
+    (its clause 5, Updates, is about NDI changing the SDK).
   `NDI/` sits in the library folder, so anything that copies or shares the whole library
   (a backup, a sync) must leave it out: nothing of NDI's goes anywhere from SoftPresenter.
   The runtime is then opened as any other, right after the folder

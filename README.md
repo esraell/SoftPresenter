@@ -203,10 +203,12 @@ Linux). Settings › Set Up SoftPresenter… opens it again.
 
 Two things are optional:
 
-- **NDI Tools** (free, from [ndi.video](https://ndi.video)) to send a screen over NDI. Without
-  it, NDI screens say NDI isn't installed and everything else works. NDI Tools doesn't exist
-  for Linux: there, Download NDI… in the Screens window fetches NDI's SDK from NDI, shows
-  NDI's licence, and once it is accepted installs NDI's runtime for SoftPresenter alone.
+- **NDI** (free, from [ndi.video](https://ndi.video)) to send a screen over NDI, or show a
+  camera in a slide. Without it, NDI screens say NDI isn't installed and everything else
+  works. Install NDI, in Settings › Integrations, downloads it from NDI's own server once you
+  accept NDI's licence: into SoftPresenter's own folder on a Mac and Linux, with no password;
+  through NDI's own installer on Windows. An NDI already on the computer (NDI Tools) is used
+  as it is.
 - **Desktop Video** 16.0 or later (free, from Blackmagic Design, for the Mac, Windows and
   Linux) to play a screen out of a DeckLink card. Without it there are no DeckLink outputs to
   choose.

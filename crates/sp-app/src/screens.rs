@@ -794,17 +794,10 @@ pub fn decklink_playing_words(what: &str) -> String {
 /// What the operator is told when NDI isn't installed, in the window's language: the words of
 /// `sp_ndi::NOT_INSTALLED`, which the log and `sp` keep as they are.
 pub fn ndi_not_installed() -> &'static str {
-    if cfg!(target_os = "linux") {
-        t(
-            "screens.ndi.not_installed.linux",
-            "NDI isn't installed on this computer. Download NDI\u{2026} in the Screens window gets it (free, from NDI).",
-        )
-    } else {
-        t(
-            "screens.ndi.not_installed.tools",
-            "NDI isn't installed on this computer. Install NDI Tools (free, from https://ndi.video/), then turn this screen on again.",
-        )
-    }
+    t(
+        "screens.ndi.not_installed.get",
+        "NDI isn\u{2019}t installed on this computer. Install NDI in Settings \u{203a} Integrations gets it (free, from NDI).",
+    )
 }
 
 /// How the DeckLink driver stands, in the window's language: the words of

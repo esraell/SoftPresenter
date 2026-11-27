@@ -26,6 +26,8 @@ pub enum Logo {
     ChatGpt,
     /// Worship Leader App's note (its own site), used without its owner's approval.
     WorshipLeaderApp,
+    /// NDI's own logo, the light one for dark grounds (NDI's logo package), for NDI's card.
+    Ndi,
 }
 
 impl Logo {
@@ -38,6 +40,7 @@ impl Logo {
             Logo::Grok => Some(("logo grok", include_bytes!("../../../assets/logos/third-party/grok.png"))),
             Logo::Claude => Some(("logo claude", include_bytes!("../../../assets/logos/third-party/claude.png"))),
             Logo::ChatGpt => Some(("logo chatgpt", include_bytes!("../../../assets/logos/third-party/chatgpt.png"))),
+            Logo::Ndi => Some(("logo ndi", include_bytes!("../../../assets/logos/third-party/ndi.png"))),
             Logo::WorshipLeaderApp => Some((
                 "logo worship leader app",
                 include_bytes!("../../../assets/logos/third-party/worship-leader-app.png"),
@@ -77,7 +80,13 @@ pub fn tile(ui: &egui::Ui, rect: Rect, mark: Mark, fill: Color32) {
         Mark::Logo(Logo::VoxLive) => voxlive(painter, Rect::from_center_size(rect.center(), rect.size() * 0.78)),
         Mark::Logo(logo) => {
             if let Some(texture) = texture(ui.ctx(), logo) {
-                let picture = Rect::from_center_size(rect.center(), rect.size() * 0.66);
+                // NDI's logo is wide and carries its own safety margins in its file, so it
+                // takes the tile's whole width, as tall as its shape makes it (1047 to 550).
+                let picture = if logo == Logo::Ndi {
+                    Rect::from_center_size(rect.center(), vec2(rect.width(), rect.width() * 550.0 / 1047.0))
+                } else {
+                    Rect::from_center_size(rect.center(), rect.size() * 0.66)
+                };
                 painter.image(texture, picture, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
             }
         }

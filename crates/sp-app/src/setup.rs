@@ -649,12 +649,56 @@ fn screens(ui: &mut egui::Ui, state: &mut HomeState) {
         if button(ui, identify, false).clicked() {
             state.identify = !state.identify;
         }
-        ui.label(
-            RichText::new(t("setup.screens.identify.about", "Shows each screen's name on it"))
-                .size(11.5)
-                .color(TEXT_FAINT),
-        );
+        // NDI beside it: the key that opens the Install NDI window (the setup is back at this
+        // step when it is left), or, once NDI is here, that it is, with a green light.
+        if state.ndi_available {
+            let wake = {
+                let ctx = ui.ctx().clone();
+                move || ctx.request_repaint()
+            };
+            state.ndi_download.ask_version(true, wake);
+            let words = ndi_installed_words(state.ndi_download.version().as_deref());
+            let (light, _) = ui.allocate_exact_size(vec2(13.0, 30.0), Sense::hover());
+            crate::studio::paint_light(ui.painter(), light.center(), Some(READY));
+            ui.label(RichText::new(words).size(12.5).color(TEXT_DIM));
+        } else if button(ui, crate::ndi_download::install_key(), false)
+            .on_hover_text(t(
+                "setup.screens.ndi.install.hover",
+                "NDI sends the slides over your network, to a live stream or another computer. It\u{2019}s free.",
+            ))
+            .clicked()
+        {
+            state.ndi_download.open(crate::ndi_download::Place::Home);
+        }
     });
+    ui.add_space(4.0);
+    ui.add(
+        egui::Label::new(RichText::new(identify_and_ndi_words(state.ndi_available)).size(11.5).color(TEXT_FAINT))
+            .wrap(),
+    );
+}
+
+/// "NDI 6.1.1 is installed", in the place of the Install NDI… key once NDI is here.
+fn ndi_installed_words(version: Option<&str>) -> String {
+    match version {
+        Some(version) => tf("setup.screens.ndi.installed", "NDI {version} is installed", &[("version", version)]),
+        None => t("setup.screens.ndi.installed.unversioned", "NDI is installed").to_owned(),
+    }
+}
+
+/// The one line under Identify Screens and NDI: what each is for.
+fn identify_and_ndi_words(ndi: bool) -> &'static str {
+    if ndi {
+        t(
+            "setup.screens.identify.with_ndi",
+            "Identify shows each screen\u{2019}s name on it. A screen can be sent over your network: choose NDI for it in Settings \u{203a} Screens.",
+        )
+    } else {
+        t(
+            "setup.screens.identify.without_ndi",
+            "Identify shows each screen\u{2019}s name on it. NDI sends the slides over your network, for a live stream; it can be added later too.",
+        )
+    }
 }
 
 /// What the Songs step says before looking: a Mac asks before the Documents folder is read.
@@ -1092,5 +1136,79 @@ mod tests {
         });
         assert!(main.starts_with("The main display (Built-in) is kept"));
         assert!(window.starts_with("The display SoftPresenter's own window is on is kept"));
+    }
+
+    fn setup_at_screens(ndi: bool, name: &str) -> HomeState {
+        let display = |index: usize, name: &str, main: bool| DisplayInfo {
+            index,
+            name: name.into(),
+            x: 1920 * index as i32,
+            w: 1920,
+            h: 1080,
+            main,
+            ..Default::default()
+        };
+        let data = std::env::temp_dir().join(format!("softpresenter-setup-ndi-{name}-{}", std::process::id()));
+        HomeState {
+            ndi_available: ndi,
+            ndi_download: crate::ndi_download::NdiDownload::in_folder(data),
+            displays: vec![display(0, "Built-in", true), display(1, "Projector", false), display(2, "Stage TV", false)],
+            setup: Some(Setup::opened_at("screens")),
+            ..HomeState::default()
+        }
+    }
+
+    #[test]
+    fn the_screens_step_has_ndi_beside_identify_and_still_fits_a_small_window() {
+        with_language(Language::English, || {
+            let show = Show::new(Vec::new());
+            for (ndi, key, line) in [
+                (false, "Install NDI\u{2026}", "NDI sends the slides over your network, for a live stream"),
+                (true, "NDI is installed", "choose NDI for it in Settings \u{203a} Screens"),
+            ] {
+                let ctx = egui::Context::default();
+                let mut state = setup_at_screens(ndi, "fit");
+                let mut draw = |ui: &mut egui::Ui| {
+                    let mut commands = Vec::new();
+                    setup_ui(ui.ctx(), &show, &mut state, &mut commands);
+                };
+                crate::ndi_download::testing::drawn(&ctx, Vec::new(), &mut draw);
+                let words = crate::ndi_download::testing::drawn(&ctx, Vec::new(), &mut draw);
+                let said = |wanted: &str| words.iter().any(|(text, _)| text.contains(wanted));
+                assert!(said("Identify Screens") && said(key) && said(line), "{ndi}: {words:?}");
+                assert!(said("Identify shows each screen\u{2019}s name on it."));
+                // Identify and NDI share one row: the key (or the line that NDI is here) starts
+                // level with Identify Screens, to its right.
+                let place =
+                    |wanted: &str| words.iter().find(|(text, _)| text.contains(wanted)).map(|(_, place)| *place);
+                let (identify, beside) = (place("Identify Screens").unwrap(), place(key).unwrap());
+                assert!(beside.min.x > identify.max.x, "{identify:?} {beside:?}");
+                assert!((beside.center().y - identify.center().y).abs() < 4.0, "{identify:?} {beside:?}");
+                // The whole setup stays inside a window of 1100 by 700, with nothing to scroll.
+                let whole = ctx.memory(|memory| memory.area_rect(egui::Id::unique("setup"))).unwrap();
+                assert!(whole.min.y >= 0.0 && whole.max.y <= 700.0, "{ndi}: {whole:?}");
+                assert!(whole.min.x >= 0.0 && whole.max.x <= 1100.0, "{ndi}: {whole:?}");
+                for (text, at) in &words {
+                    assert!(at.max.y <= whole.max.y + 0.5 || !whole.contains(at.center()), "{text:?} is cut off");
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn install_ndi_in_the_setup_opens_the_window_over_the_home_window() {
+        with_language(Language::English, || {
+            let show = Show::new(Vec::new());
+            let ctx = egui::Context::default();
+            let mut state = setup_at_screens(false, "open");
+            let clicked = crate::ndi_download::testing::click(&ctx, "Install NDI\u{2026}", &mut |ui| {
+                let mut commands = Vec::new();
+                setup_ui(ui.ctx(), &show, &mut state, &mut commands);
+            });
+            assert!(clicked, "the key is drawn");
+            assert_eq!(state.ndi_download.shown_in(), Some(crate::ndi_download::Place::Home));
+            // The setup keeps its step, to come back to when the window is left.
+            assert!(state.setup.as_ref().is_some_and(|setup| setup.step == Step::Screens));
+        });
     }
 }

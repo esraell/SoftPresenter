@@ -19,7 +19,7 @@ use egui::{Align2, Color32, FontId, Key, Rect, Stroke, StrokeKind, pos2, vec2};
 use crate::home::HomeState;
 use crate::i18n::t;
 use crate::key_table::{KeyAction, KeyTable};
-use crate::studio::{CARE, LINE, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, fixed, fixed_semibold, semibold};
+use crate::studio::{CARE, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, fixed, fixed_semibold, semibold};
 
 /// How long the numbers after modifier-1 to 7 (or Shift-modifier-M) stay.
 pub const NUMBERS_FOR: f64 = 4.0;
@@ -692,11 +692,8 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
             state.key_sheet = false;
         }
         // The window under it is dimmed, in the sheet's own layer so the sheet stays bright.
-        ui.painter().with_clip_rect(screen).rect_filled(screen, 0.0, Color32::from_black_alpha(153));
         let painter = ui.painter().clone();
-        painter.rect_filled(sheet.translate(vec2(0.0, 30.0)).expand(30.0), 48.0, Color32::from_black_alpha(40));
-        painter.rect_filled(sheet, 18.0, Color32::from_rgb(0x1f, 0x1f, 0x1f));
-        painter.rect_stroke(sheet, 18.0, Stroke::new(1.0, LINE), StrokeKind::Inside);
+        crate::studio::paint_sheet(&painter, screen, sheet);
         painter.text(
             pos2(sheet.min.x + 18.0, sheet.min.y + 29.0),
             Align2::LEFT_CENTER,

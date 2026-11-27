@@ -100,26 +100,19 @@ pub fn offered(found: &[String], own: &[String]) -> Vec<String> {
     found.iter().filter(|source| !own.iter().any(|name| source.ends_with(&format!("({name})")))).cloned().collect()
 }
 
-/// What the line under the Source menu says without NDI: the NDI Tools the operator installs,
-/// or, where the app downloads NDI itself (Linux), the button under it.
-fn not_installed(app_downloads: bool) -> &'static str {
-    if app_downloads {
-        t(
-            "inspector.ndi.not_installed.download",
-            "NDI isn't installed on this computer. Download NDI\u{2026}, below, gets it (free, from NDI), for receiving and for sending.",
-        )
-    } else {
-        t(
-            "inspector.ndi.not_installed.tools",
-            "NDI isn't installed on this computer. SoftPresenter uses the NDI Tools you install yourself, as it does for sending.",
-        )
-    }
+/// What the line under the Source menu says without NDI; the key under it opens the Install
+/// NDI window.
+fn not_installed() -> &'static str {
+    t(
+        "inspector.ndi.nothing_to_show",
+        "NDI isn\u{2019}t installed on this computer, so this box has nothing to show yet.",
+    )
 }
 
 /// The line under the Source menu, and whether it is amber.
 pub fn line(installed: bool, found: usize, source: &str, stopped: bool) -> (String, bool) {
     if !installed {
-        return (not_installed(crate::ndi_download::offered()).to_owned(), false);
+        return (not_installed().to_owned(), false);
     }
     if !source.is_empty() && stopped {
         return (
@@ -359,14 +352,8 @@ mod tests {
         assert_eq!(words, "Looking for NDI on this network. A source shows here as soon as it starts sending.");
         assert!(!amber);
         let (words, amber) = line(false, 0, "", false);
-        assert_eq!(words, not_installed(crate::ndi_download::offered()));
+        assert_eq!(words, "NDI isn\u{2019}t installed on this computer, so this box has nothing to show yet.");
         assert!(!amber);
-        // NDI Tools on a Mac and on Windows; on Linux, where NDI Tools doesn't exist, the app's
-        // own download.
-        assert!(not_installed(false).starts_with(
-            "NDI isn't installed on this computer. SoftPresenter uses the NDI Tools you install yourself"
-        ));
-        assert!(not_installed(true).starts_with("NDI isn't installed on this computer. Download NDI\u{2026}"));
         let (words, amber) = line(true, 2, "STREAM-PC (Camera 1)", true);
         assert_eq!(
             words,
