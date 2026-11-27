@@ -2292,10 +2292,17 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     Theme Editor, the window holds the keys that run the show only while the editor is there,
     and goes with the editor however it is left (a view asked for by a key, a menu, `sp` or
     the phone).
+  - **The Theme Editor put away to show something else** (Go to the Slide on Screen, a
+    passage asked for by `sp` or the phone, a find result opened, an import that has finished,
+    a new song, Reflow, a song of the song catalog) is closed, and its theme saved; the keys
+    that run the show act from that moment, with the window drawn or not. The slide that is up
+    is not drawn again with the theme: it reaches the screens with the next slide. Left with
+    Done or for another view, the theme is shown at once.
   - **While a last slide is up.** A change of the look dissolves on the screens, as switching
     the mark on does, and the slide's own transition isn't played again; the same on a screen
-    with a theme of its own. With the Theme Editor open, nothing reaches the screens until it
-    is left, as with every change to a theme.
+    with a theme of its own. With the Theme Editor open, the slide that is up is not drawn
+    again for it: as with every change made to a theme there, it reaches the screens with the
+    next slide, or when the editor is left with Done or for another view.
   - **Which slide.** The last place in the order the song is sung in whose slide has the song's
     words and isn't disabled (`end_mark::last_sung`). The song's words are those in its main
     language's and translation's boxes: a caption, a clock or a title in another box is not.

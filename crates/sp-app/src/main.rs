@@ -9481,8 +9481,9 @@ impl App {
                     // on the window's thread, with every song that waits to be saved.
                     self.unsaved_since = Some(Instant::now());
                     self.themes_changed();
-                    // A last slide on screen takes the look at once (not from the Theme Editor,
-                    // which shows the audience its theme when it is left).
+                    // A last slide on screen takes the look at once (not while the Theme Editor
+                    // is open: what is changed there reaches the screens with the next slide,
+                    // or when the editor is left).
                     if !editing {
                         self.refresh_output();
                     }
@@ -9620,12 +9621,16 @@ impl App {
             // and on quitting.
         }
         if leave {
-            if let Some(running) = self.running.as_mut() {
-                running.home_state.close_theme_editor();
-            }
-            // The theme is finished with: write it, and let the audience see it.
+            let left = self.running.as_mut().and_then(|running| running.home_state.leave_theme_editor());
+            // The theme is written either way. Left by its own way out or for another view, it
+            // is finished with, and the audience sees it. With its draft put away to show
+            // something else (Go to the Slide on Screen, a passage from `sp`), the slide that
+            // is up is not drawn again with it, which would play its transition again in front
+            // of the room: the theme reaches the screens with the next slide.
             self.save_unsaved();
-            self.refresh_output();
+            if left == Some(home::EditorLeft::Asked) {
+                self.refresh_output();
+            }
         }
     }
 
@@ -13818,6 +13823,11 @@ impl ApplicationHandler<AppEvent> for App {
         let close_at = self.tick_close_buttons();
         // The display kept awake while the screens are on: looked at now and then.
         let keep_awake_at = self.tick_keep_awake();
+        // A Theme Editor left with the window not being drawn (minimised, covered), where the
+        // drawing that would close it never comes: closed here, and its theme saved.
+        if self.running.as_ref().is_some_and(|running| running.home_state.theme_editor_is_left()) {
+            self.handle_themes();
+        }
         // Songs changed in the Edit view are written once typing has paused for a second.
         const SAVE_AFTER: Duration = Duration::from_secs(1);
         let save_at = self.unsaved_since.map(|since| since + SAVE_AFTER);
@@ -16050,23 +16060,32 @@ mod tests {
         keyboard
     }
 
-    /// After a way out of the Theme Editor was taken with its end mark's window open: no key
-    /// is held back by a window that is over nothing, at once, before anything is drawn; then
-    /// the window is drawn, the app closes the editor as it does after every frame
-    /// (`handle_themes`), and the keys that run the show act: Space goes on a slide, and Escape
-    /// clears the screens.
-    fn the_show_keys_run_the_show(keyboard: &mut Keyboard, said: &str) {
+    /// After a way out of the Theme Editor was taken with its end mark's window open, and
+    /// before anything is drawn or closed: no key is held back by a window that is over
+    /// nothing, and the keys that run the show act (Space goes on a slide, Escape clears the
+    /// screens). Then the app's own close (`HomeState::leave_theme_editor`, which
+    /// `App::handle_themes` runs after a drawing and from the idle loop) says how the editor
+    /// was left, and leaves nothing of it.
+    fn the_show_keys_run_the_show(keyboard: &mut Keyboard, said: &str, left: home::EditorLeft) {
         let (space, escape) = (us(&Key::Named(NamedKey::Space)), us(&Key::Named(NamedKey::Escape)));
-        keyboard.draw();
-        assert!(keyboard.state.theme_editor_is_left(), "{said}: the editor is to be closed");
-        keyboard.state.close_theme_editor();
-        assert!(keyboard.state.theme_edit.is_none() && keyboard.state.editing.is_none(), "{said}");
-        assert_eq!(keyboard.state.end_look, None, "{said}: the window went with the editor");
+        assert!(keyboard.state.theme_edit.is_some(), "{said}: nothing has closed the editor yet");
+        assert_eq!(keyboard.state.edit_kind(), None, "{said}: the window is not in the Edit view");
         assert!(!show_key_held_back(&keyboard.state, &keyboard.ctx, &space, true), "{said}: Space is held back");
         assert!(!show_key_held_back(&keyboard.state, &keyboard.ctx, &escape, true), "{said}: Escape is held back");
         assert!(!escape_closes_something(&keyboard.state, &keyboard.ctx), "{said}: Escape has nothing to close");
+        let commands = |key: NamedKey| {
+            home_key_goes(&keyboard.state, &keyboard.ctx, &keyboard.show, &us(&Key::Named(key)), false, true)
+        };
+        for key in [NamedKey::Space, NamedKey::ArrowRight, NamedKey::ArrowLeft, NamedKey::PageDown, NamedKey::PageUp] {
+            assert!(matches!(commands(key), KeyGoes::Show(_)), "{said}: {key:?} runs the show: {:?}", commands(key));
+        }
         keyboard.press(Key::Named(NamedKey::Space));
-        assert_eq!(keyboard.live(), Some((0, 1)), "{said}: Space went on a slide");
+        assert_eq!(keyboard.live(), Some((0, 1)), "{said}: Space went on a slide, with nothing drawn since");
+        assert!(keyboard.state.theme_editor_is_left(), "{said}: the editor is to be closed");
+        assert_eq!(keyboard.state.leave_theme_editor(), Some(left), "{said}: how it was left");
+        assert!(keyboard.state.theme_edit.is_none() && keyboard.state.editing.is_none(), "{said}");
+        assert_eq!(keyboard.state.end_look, None, "{said}: the window went with the editor");
+        assert_eq!(keyboard.state.leave_theme_editor(), None, "{said}: closed once");
         keyboard.press(Key::Named(NamedKey::Escape));
         assert_eq!(keyboard.live(), None, "{said}: Escape cleared the screens");
     }
@@ -16091,13 +16110,21 @@ mod tests {
         keyboard.press(Key::Named(NamedKey::Space));
         assert_eq!(keyboard.live(), Some((0, 0)), "Space ran nothing under the window");
         assert!(!keyboard.state.theme_editor_is_left(), "and the editor stays");
+        assert_eq!(keyboard.state.leave_theme_editor(), None, "nothing closes an editor that is open");
+        assert!(keyboard.state.theme_edit.is_some() && keyboard.state.editing.is_some());
 
         // The Service or the Bible view asked for (Command-1, Command-2, the View menu, `sp
         // view`, the phone, an assistant): the bar asks the app to leave the editor.
         for view in [0, 2] {
             let mut keyboard = end_mark_window_open_in_the_theme_editor();
             keyboard.state.view_request = Some(view);
-            the_show_keys_run_the_show(&mut keyboard, if view == 0 { "the Service view" } else { "the Bible view" });
+            keyboard.draw();
+            // Asked to leave, the editor stays until the app closes it, which shows the theme.
+            assert!(keyboard.state.theme_edit.as_ref().is_some_and(|edit| edit.leave));
+            assert_eq!(keyboard.state.leave_theme_editor(), Some(home::EditorLeft::Asked));
+            assert_eq!(keyboard.state.end_look, None, "the window went with the editor");
+            keyboard.press(Key::Named(NamedKey::Space));
+            assert_eq!(keyboard.live(), Some((0, 1)), "view {view}: Space went on a slide");
         }
 
         // Go to the Slide on Screen (Command-L, and the Program preview's key), as `menu_action`
@@ -16106,7 +16133,7 @@ mod tests {
         keyboard.state.editing = None;
         keyboard.state.bible_open = false;
         the_window_is_over_nothing(&keyboard, "Go to the Slide on Screen");
-        the_show_keys_run_the_show(&mut keyboard, "Go to the Slide on Screen");
+        the_show_keys_run_the_show(&mut keyboard, "Go to the Slide on Screen", home::EditorLeft::DraftGone);
 
         // `sp bible John 3:16` (and the phone's and an assistant's passage), as `ctl_bible`
         // does it: the Bible view, the editor's draft put away.
@@ -16114,7 +16141,7 @@ mod tests {
         keyboard.state.bible_open = true;
         keyboard.state.editing = None;
         the_window_is_over_nothing(&keyboard, "a passage asked for from outside");
-        the_show_keys_run_the_show(&mut keyboard, "a passage asked for from outside");
+        the_show_keys_run_the_show(&mut keyboard, "a passage asked for from outside", home::EditorLeft::DraftGone);
 
         // The app closed the editor between two frames (as it does when asked to leave) with
         // the window still noted as open: no key waits for a frame to clear it.

@@ -1855,6 +1855,18 @@ impl ThemeEdit {
     }
 }
 
+/// How the Theme Editor was left ([`HomeState::leave_theme_editor`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditorLeft {
+    /// By its own way out, or by another view asked for: the theme is finished with, so the
+    /// audience is shown it at once.
+    Asked,
+    /// Its draft was put away to show something else: the theme is saved, and reaches the
+    /// screens with the next slide, never by drawing the slide that is up again with a theme
+    /// half changed.
+    DraftGone,
+}
+
 /// Something asked of the app about themes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemeRequest {
@@ -2183,7 +2195,9 @@ impl HomeState {
 
     /// Which kind of the Edit view is open, if it is: the one answer to "is the editor open".
     pub fn edit_kind(&self) -> Option<EditKind> {
-        if self.theme_edit.is_some() {
+        // The Theme Editor is open while it has its draft: with the draft put away to show
+        // something else, the window is in that view already, whatever is still to be closed.
+        if self.theme_edit.is_some() && self.editing.is_some() {
             Some(EditKind::Themes)
         } else if let Some(draft) = self.editing.as_ref() {
             Some(match draft.at.presentation {
@@ -2375,20 +2389,26 @@ impl HomeState {
     }
 
     /// Whether the Theme Editor is to be closed now: it was asked to leave (its own way out, or
-    /// another view asked for), or its draft has gone without that, as Go to the Slide on Screen
-    /// and a passage asked for by `sp` or the phone put it away. The window then shows another
-    /// view; left half open, the keys that run the show would go on following the Edit view's
-    /// rule there, and the theme would wait unsaved.
+    /// another view asked for), or its draft has gone without that. Go to the Slide on Screen,
+    /// a passage asked for by `sp` or the phone, a find result opened, an import that has
+    /// finished, a new song, Reflow and a song of the song catalog all put the draft away to
+    /// show something else. From that moment the window is not in the Edit view
+    /// ([`HomeState::edit_kind`]), so the keys that run the show act at once; the app closes
+    /// what is left of the editor after the next drawing, or from its idle loop when the
+    /// window isn't being drawn.
     pub fn theme_editor_is_left(&self) -> bool {
         self.theme_edit.as_ref().is_some_and(|edit| edit.leave || self.editing.is_none())
     }
 
-    /// Closes the Theme Editor: its theme and its draft go, and its end mark's window with them.
-    /// The app saves the theme and shows it to the audience (`App::handle_themes`).
-    pub fn close_theme_editor(&mut self) {
+    /// Closes the Theme Editor when it is to be closed ([`HomeState::theme_editor_is_left`]):
+    /// its theme and its draft go, and its end mark's window with them. Says how it was left,
+    /// which decides what the app does for the audience (`App::handle_themes`).
+    pub fn leave_theme_editor(&mut self) -> Option<EditorLeft> {
+        let asked = self.theme_edit.as_ref().filter(|_| self.theme_editor_is_left())?.leave;
         self.theme_edit = None;
         self.editing = None;
         crate::end_look::editor_left(self);
+        Some(if asked { EditorLeft::Asked } else { EditorLeft::DraftGone })
     }
 
     /// Lists the themes as the window knows them, each by its place: their names, which are the
