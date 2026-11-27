@@ -168,6 +168,9 @@ pub struct Remote {
     /// When the state was last published, and its seldom-changing parts.
     pub(crate) published: Option<Instant>,
     pub(crate) published_slow: Option<Instant>,
+    /// Something has happened since the state was last published that may have changed it: an
+    /// event came, or a clock's time ([`Remote::stir`]).
+    pub(crate) stirred: bool,
     /// The language the state was last published in: when the app's language changes, every
     /// part is published at once, so a page never shows two languages.
     pub(crate) published_language: Option<crate::i18n::Language>,
@@ -213,6 +216,7 @@ impl Remote {
             thumbs_waiting: VecDeque::new(),
             published: None,
             published_slow: None,
+            stirred: false,
             published_language: None,
             clock: Clock::new(),
             looks: state::Looks::default(),
@@ -234,6 +238,14 @@ impl Remote {
 
     pub fn is_on(&self) -> bool {
         self.running.is_some()
+    }
+
+    /// Something happened that may have changed the state pages are sent: an event came to the
+    /// app (a key, a click, a drawing of a window, a command, a thread's news) or the loop woke at
+    /// a clock's time. The state is published once the loop has done what it came for, so a
+    /// change goes to the pages at once, while a loop that wakes for nothing publishes nothing.
+    pub fn stir(&mut self) {
+        self.stirred = true;
     }
 
     pub fn shared(&self) -> Option<&Arc<server::Shared>> {
@@ -331,6 +343,7 @@ impl Remote {
         self.fingerprint = Some(fingerprint);
         self.published = None;
         self.published_slow = None;
+        self.stirred = true;
         self.published_language = None;
         self.set_on(true);
         Ok(())

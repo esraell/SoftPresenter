@@ -5,7 +5,11 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-Nothing yet.
+Remote Control uses less of the computer.
+
+### Better
+
+- **Calmer Remote Control.** With a phone's page open and nothing happening, the app now wakes about a fifth as often and uses much less of the computer.
 
 ## 0.9.0-dev.27 — 27 November 2026 (development build)
 

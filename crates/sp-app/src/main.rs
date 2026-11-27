@@ -11746,13 +11746,21 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn new_events(&mut self, _el: &ActiveEventLoop, cause: winit::event::StartCause) {
-        repaints::woke(matches!(cause, winit::event::StartCause::ResumeTimeReached { .. }));
+        let by_clock = matches!(cause, winit::event::StartCause::ResumeTimeReached { .. });
+        repaints::woke(by_clock);
+        // A clock's time may change what pages are shown (a slide that moves on by itself, a
+        // timer that ends); a wake for nothing (the system's own, which macOS gives several of a
+        // second) changes nothing, and publishes nothing.
+        if by_clock || matches!(cause, winit::event::StartCause::Init | winit::event::StartCause::Poll) {
+            self.remote.stir();
+        }
     }
 
     fn user_event(&mut self, el: &ActiveEventLoop, event: AppEvent) {
         let _busy = reports::stats::BusyGuard::new(reports::stats::Who::Ui);
         let _stall = stall::busy();
         repaints::event(|| format!("the app was told {}", event.name()));
+        self.remote.stir();
         let id = match event {
             AppEvent::Menu(id) => id,
             // A command from `softpresenter ctl`: done now, and its outcome sent back.
@@ -11949,6 +11957,7 @@ impl ApplicationHandler<AppEvent> for App {
             };
             format!("{which} told {}", repaints::event_name(&event))
         });
+        self.remote.stir();
         reports::ui::window_event(&event);
         match &event {
             WindowEvent::ModifiersChanged(now) => self.held = now.state(),
@@ -12498,8 +12507,12 @@ impl ApplicationHandler<AppEvent> for App {
         let save_at = self.unsaved_since.map(|since| since + SAVE_AFTER);
         // `status --wait`s held: answered now if anything changed, or their time is up.
         let waiting_at = self.answer_waiting();
-        // Remote Control: what Settings asked, the state for pages (at most twenty times a
-        // second, only while one is connected) and the slides they asked to see.
+        // Remote Control: what Settings asked, the state for pages (when something has happened,
+        // at most twenty times a second, only while one is connected) and the slides they asked
+        // to see.
+        if repaints::redraw_asked() {
+            self.remote.stir();
+        }
         let remote_at = self.tick_remote();
         // AirPlay: what Settings asked, what the receiving program said, and a still
         // screen's picture kept from fading.

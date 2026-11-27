@@ -94,6 +94,51 @@ fn slow_now(force: bool, slow_due: Instant, now: Instant, language_changed: bool
     force || slow_due <= now || language_changed
 }
 
+/// What the loop does about the state for pages each time round, while any are connected.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Publish {
+    /// Publish it now; the seldom-changing parts too, with `slow`.
+    Now { slow: bool },
+    /// Nothing now: look again then.
+    At(Instant),
+}
+
+/// When the state was last published (all of it, and its seldom-changing parts), and whether
+/// anything has happened since that may have changed it ([`super::Remote::stir`]).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Cadence {
+    pub published: Option<Instant>,
+    pub published_slow: Option<Instant>,
+    pub stirred: bool,
+}
+
+impl Cadence {
+    /// Whether the state is published now (`force`: for a page just connected; with the app's
+    /// language changed, every part goes at once, in the new one), or when to look again.
+    ///
+    /// What happened is published as soon as the loop has done it, at most every
+    /// [`PUBLISH_EVERY`]: something that comes sooner is published when that time comes. The
+    /// seldom-changing parts go with any publish from a little before their time, so the drawing
+    /// of the window each second for its clock carries them, with no wake of their own. When
+    /// nothing happens, the loop wakes for the state only a little after their time, a backstop
+    /// for anything changed without stirring the loop, never at the rate of [`PUBLISH_EVERY`]: a
+    /// loop that woke for nothing once kept publishing twenty times a second, and woke more than
+    /// thirty times a second, with a page connected and nothing happening.
+    pub fn next(&self, now: Instant, force: bool, language_changed: bool) -> Publish {
+        let slow_due = self.published_slow.map_or(now, |at| at + SLOW_EVERY);
+        let slow = slow_now(force, slow_due, now + PUBLISH_EVERY, language_changed);
+        if force {
+            return Publish::Now { slow };
+        }
+        if self.stirred || language_changed {
+            let due = self.published.map_or(now, |at| at + PUBLISH_EVERY);
+            return if due <= now { Publish::Now { slow } } else { Publish::At(due) };
+        }
+        let backstop = self.published_slow.map_or(now, |at| at + SLOW_EVERY + PUBLISH_EVERY);
+        if backstop <= now { Publish::Now { slow: true } } else { Publish::At(backstop) }
+    }
+}
+
 /// What makes a slide's picture what it is, cached per theme: hashing a theme's JSON each time
 /// would cost more than drawing.
 #[derive(Default)]
@@ -270,11 +315,10 @@ impl crate::App {
 
     /// What is on screen, and the switches beside it: `sp status` less what ticks, and more.
     fn remote_live(&mut self) -> Value {
-        let mut live = self.ctl_status().data;
+        let mut live = self.status_reply(false).data;
         if let Some(said) = live.as_object_mut() {
             said.remove("timers");
             said.remove("audio");
-            said.remove("token");
         }
         let clock = self.remote.clock;
         let on_screen = self.show.live();
@@ -515,8 +559,9 @@ impl crate::App {
         json!({"versions": versions, "on": on})
     }
 
-    /// Publishes the state for pages, if any are connected and it is due (`force`: now, for a page
-    /// just connected); says when to look again. Draws a few slides pages asked for, too.
+    /// Publishes the state for pages, if any are connected and something happened since it was
+    /// last published (`force`: now, for a page just connected); says when to look again (see
+    /// [`Cadence::next`]). Draws a few slides pages asked for, too.
     pub(crate) fn tick_remote_state(&mut self, force: bool) -> Option<Instant> {
         let now = Instant::now();
         let mut wake = None;
@@ -536,28 +581,35 @@ impl crate::App {
         if shared.page_count() == 0 && !force {
             return wake;
         }
-        let due = self.remote.published.map_or(now, |at| at + PUBLISH_EVERY);
-        if force || due <= now {
-            let slow_due = self.remote.published_slow.map_or(now, |at| at + SLOW_EVERY);
-            let slow = slow_now(force, slow_due, now, self.remote.published_language != Some(language));
-            let parts = self.remote_parts(slow);
-            shared.publish(parts);
-            self.remote.published = Some(now);
-            self.remote.published_language = Some(language);
-            if slow {
-                self.remote.published_slow = Some(now);
-                // The versions a picture may be asked for in (any other is drawn as usual).
-                if let Some(state) = self.running.as_ref().map(|r| &r.home_state) {
-                    shared.set_versions(state.versions.iter().map(|version| version.id));
-                }
-                return wake;
+        let language_changed = self.remote.published_language != Some(language);
+        let cadence = Cadence {
+            published: self.remote.published,
+            published_slow: self.remote.published_slow,
+            stirred: self.remote.stirred,
+        };
+        let slow = match cadence.next(now, force, language_changed) {
+            Publish::Now { slow } => slow,
+            Publish::At(at) => return [wake, Some(at)].into_iter().flatten().min(),
+        };
+        let parts = self.remote_parts(slow);
+        shared.publish(parts);
+        self.remote.published = Some(now);
+        self.remote.published_language = Some(language);
+        self.remote.stirred = false;
+        if slow {
+            self.remote.published_slow = Some(now);
+            // The versions a picture may be asked for in (any other is drawn as usual).
+            if let Some(state) = self.running.as_ref().map(|r| &r.home_state) {
+                shared.set_versions(state.versions.iter().map(|version| version.id));
             }
-            // The seldom-changing parts are looked at once more when they are due, in case
-            // whatever just happened changed them.
-            return [wake, Some(slow_due)].into_iter().flatten().min();
         }
-        // Something happened since it was last published: look again when it is due.
-        [wake, Some(due)].into_iter().flatten().min()
+        // Nothing more until something happens, but for the seldom-changing parts' backstop
+        // (sooner when they didn't go with this publish, in case whatever happened changed them).
+        let after = Cadence { published: Some(now), published_slow: self.remote.published_slow, stirred: false };
+        match after.next(now, false, false) {
+            Publish::At(at) => [wake, Some(at)].into_iter().flatten().min(),
+            Publish::Now { .. } => wake,
+        }
     }
 }
 
@@ -717,6 +769,109 @@ mod tests {
         assert!(sent[0]["text"].as_str().is_some_and(|text| text.starts_with("Esta canción se cambió")), "{sent}");
         assert_eq!(sent[0]["actions"][0]["label"], "Recargar");
         assert_eq!(sent[0]["actions"][1]["label"], "Mantener la mía");
+    }
+
+    /// The loop's passes over a stretch of time with a page connected, as the event loop makes
+    /// them: one at each of `stirs` (milliseconds in; true for a pass that something stirred: an
+    /// event, a clock), and one at each time the state's own clock asks for. What was published
+    /// (when, and whether with the seldom-changing parts), and how many passes the state's own
+    /// clock made (those that nothing else made).
+    fn passes(stirs: &[(u64, bool)], length: Duration) -> (Vec<(Duration, bool)>, usize) {
+        let start = Instant::now();
+        let mut cadence = Cadence::default();
+        let (mut published, mut own) = (Vec::new(), 0);
+        let mut ahead: std::collections::VecDeque<(Duration, bool)> =
+            stirs.iter().map(|(ms, stirred)| (Duration::from_millis(*ms), *stirred)).collect();
+        let mut asked: Option<Duration> = None;
+        loop {
+            // The next pass: the next stir's, or the state's own clock's when that is sooner.
+            let next = ahead.front().map(|(at, _)| *at);
+            let theirs = match (next, asked) {
+                (Some(at), Some(own_at)) => at <= own_at,
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (None, None) => break,
+            };
+            let (at, stirred) =
+                if theirs { ahead.front().copied().unwrap_or_default() } else { (asked.unwrap_or_default(), false) };
+            if at > length {
+                break;
+            }
+            if theirs {
+                ahead.pop_front();
+            } else {
+                own += 1;
+            }
+            let now = start + at;
+            cadence.stirred |= stirred;
+            asked = match cadence.next(now, false, false) {
+                Publish::At(when) => Some(when - start),
+                Publish::Now { slow } => {
+                    published.push((at, slow));
+                    cadence.published = Some(now);
+                    cadence.stirred = false;
+                    if slow {
+                        cadence.published_slow = Some(now);
+                    }
+                    match cadence.next(now, false, false) {
+                        Publish::At(when) => Some(when - start),
+                        Publish::Now { .. } => panic!("published again at once at {at:?}"),
+                    }
+                }
+            };
+        }
+        (published, own)
+    }
+
+    #[test]
+    fn a_page_connected_to_an_idle_app_costs_about_two_publishes_a_second() {
+        const MINUTE: Duration = Duration::from_secs(60);
+        // Each second the clock's time stirs the loop, and the window is drawn for it a moment
+        // later (macOS adds a couple of wakes of its own after each, which nothing stirs): two
+        // publishes a second, the second 50 ms after the first, by the state's own clock (one
+        // wake a second), and the seldom-changing parts go with one of them.
+        let mut stirs = Vec::new();
+        for second in 0..60u64 {
+            let at = second * 1000 + 4 + second % 3;
+            stirs.extend([(at, true), (at + 2, false), (at + 20, true), (at + 29, false)]);
+        }
+        let (published, own) = passes(&stirs, MINUTE);
+        assert!((115..=122).contains(&published.len()), "{} publishes: {published:?}", published.len());
+        assert!((55..=62).contains(&own), "{own} wakes of its own: {published:?}");
+        let slow = published.iter().filter(|(_, slow)| *slow).count();
+        assert!((55..=62).contains(&slow), "{slow} slow publishes: {published:?}");
+        // A covered window isn't drawn: wakes that nothing stirred, five a second. Only the
+        // backstop publishes, about once a second.
+        let quiet: Vec<(u64, bool)> = (0..300).map(|n| (n * 200 + 7, false)).collect();
+        let (published, own) = passes(&quiet, MINUTE);
+        assert!((55..=60).contains(&published.len()), "{} publishes: {published:?}", published.len());
+        assert!(own <= published.len(), "{own} wakes of its own");
+        // Before, every wake within 50 ms of a publish set the state's clock 50 ms on, which
+        // published and set it again: twenty publishes a second, whatever happened.
+    }
+
+    #[test]
+    fn a_change_after_a_quiet_spell_goes_at_once_and_a_burst_at_most_every_50_ms() {
+        // A page connects, then nothing happens for three seconds (the backstop's publishes), then
+        // a press at 3 s 500 ms: published in that same pass.
+        let (published, _) = passes(&[(0, true), (3_500, true)], Duration::from_secs(4));
+        assert!(published.contains(&(Duration::from_millis(3_500), false)), "{published:?}");
+        // A drag stirring the loop every 5 ms for a second: published 50 ms apart, never sooner,
+        // and the last change within 50 ms of it.
+        let drag: Vec<(u64, bool)> = (0..200).map(|n| (5_000 + n * 5, true)).collect();
+        let (published, _) = passes(&drag, Duration::from_secs(7));
+        let during: Vec<Duration> = published.iter().map(|(at, _)| *at).filter(|at| at.as_millis() >= 5_000).collect();
+        assert!(during.windows(2).all(|two| two[1] - two[0] >= PUBLISH_EVERY), "{during:?}");
+        assert!((19..=22).contains(&during.iter().filter(|at| at.as_millis() < 6_000).count()), "{during:?}");
+        let last = Duration::from_millis(5_000 + 199 * 5);
+        assert!(during.iter().any(|at| *at >= last && *at <= last + PUBLISH_EVERY), "{during:?}");
+        // A page just connected, and a change of language, go at once with every part.
+        let now = Instant::now();
+        let just = Cadence { published: Some(now), published_slow: Some(now), stirred: false };
+        assert_eq!(just.next(now, true, false), Publish::Now { slow: true });
+        let later = now + PUBLISH_EVERY;
+        assert_eq!(just.next(later, false, true), Publish::Now { slow: true });
+        assert_eq!(just.next(later, false, false), Publish::At(now + SLOW_EVERY + PUBLISH_EVERY));
     }
 
     #[test]

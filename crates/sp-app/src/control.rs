@@ -1865,6 +1865,13 @@ impl crate::App {
     }
 
     pub(crate) fn ctl_status(&self) -> Reply {
+        self.status_reply(true)
+    }
+
+    /// `status`, with its change `token` or (for Remote Control's pages, which have no use for
+    /// it) without: the token writes out every playlist, library and media playlist to hash
+    /// them, which a page connected would otherwise pay for each time the state is published.
+    pub(crate) fn status_reply(&self, token: bool) -> Reply {
         let live = self.show.live();
         let song = live.and_then(|at| self.show.presentations().get(at.presentation));
         let words = live.and_then(|at| song?.slide(at.slide)).map(|(_, slide)| {
@@ -2007,7 +2014,9 @@ impl crate::App {
             "selected_song": selected,
         });
         let mut data = data;
-        data["token"] = serde_json::json!(self.change_token(&data));
+        if token {
+            data["token"] = serde_json::json!(self.change_token(&data));
+        }
         Reply::with(lines.join("\n"), data)
     }
 

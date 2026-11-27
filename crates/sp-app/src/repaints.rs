@@ -19,6 +19,7 @@
 
 use std::collections::BTreeMap;
 use std::panic::Location;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -107,6 +108,16 @@ fn short_place(file: &str) -> String {
     }
 }
 
+/// Whether the operator's window has been asked to draw since [`redraw_asked`] last said: a
+/// change found by a loop pass that no event woke (a thread's flag, a clock) asks for one, and
+/// Remote Control counts that as something that happened.
+static REDRAW_ASKED: AtomicBool = AtomicBool::new(false);
+
+/// Whether the operator's window was asked to draw since this was last called.
+pub fn redraw_asked() -> bool {
+    REDRAW_ASKED.swap(false, Ordering::Relaxed)
+}
+
 /// The operator's window. Asked to draw, it notes what asked when the log is to say it (see
 /// [`on`]); it is the window in every other way.
 pub struct HomeWindow(Arc<Window>);
@@ -119,6 +130,7 @@ impl HomeWindow {
     /// Asks for the window to be drawn, noting the caller's place.
     #[track_caller]
     pub fn request_redraw(&self) {
+        REDRAW_ASKED.store(true, Ordering::Relaxed);
         if on() {
             let at = Location::caller();
             asked(Why::Call(at.file(), at.line()));
@@ -128,6 +140,7 @@ impl HomeWindow {
 
     /// Asks for the window to be drawn, for the reason given (made only when it is noted).
     pub fn request_redraw_for(&self, why: impl FnOnce() -> Why) {
+        REDRAW_ASKED.store(true, Ordering::Relaxed);
         if on() {
             asked(why());
         }
