@@ -136,6 +136,14 @@ pub(crate) fn drawn_slide(
     Arc::new(if words_hidden { filled.without_words() } else { filled.into_owned() })
 }
 
+/// The copyright line over the slide on an audience screen (and the Program preview's picture
+/// of one), as a slide: it goes with the slide's words, so there is none on a screen that leaves
+/// the slide out (`slides`), nor while the words are hidden. The stage screens show the line
+/// as `Overlay::copyright` has it.
+pub(crate) fn copyright_shown(copyright: Option<&str>, slides: bool, words_hidden: bool) -> Option<Slide> {
+    copyright.filter(|_| slides && !words_hidden).map(crate::props::copyright_slide)
+}
+
 /// What is shown over the slides: a message on the audience screens; the stage message and the
 /// timers on the stage screens.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -2523,7 +2531,6 @@ impl Output {
             crate::messages::slide(&words, *look)
         });
         // Props and the message share the layer over the slide.
-        let copyright = self.overlay.copyright.as_deref().map(crate::props::copyright_slide);
         let values = crate::links::Values {
             timers: &self.overlay.timers,
             title: frame.about.title.as_deref(),
@@ -2538,7 +2545,7 @@ impl Output {
             Vec::new()
         };
         // The copyright line goes with the slide's words.
-        under.extend(copyright.filter(|_| look.slides));
+        under.extend(copyright_shown(self.overlay.copyright.as_deref(), look.slides, frame.words_hidden));
         let over = crate::props::overlay(&under, message.as_ref()).map(Arc::new);
         // The slide as far as its builds have got, with its linked text filled in; in the
         // version that is on, when this screen's theme has it for the slide's kind; without its
@@ -4809,6 +4816,83 @@ mod tests {
         let next = going_on(&hidden, &frame_of(&show, push));
         assert!(next.new_slide, "{next:?}");
         assert_eq!(next.look, push);
+    }
+
+    #[test]
+    fn an_audience_screen_leaves_the_copyright_line_out_while_the_words_are_hidden() {
+        let line = Some("\u{201c}River Song\u{201d}  \u{b7}  A. Writer");
+        let shown = copyright_shown(line, true, false).expect("with the words");
+        assert_eq!(shown.texts().len(), 1);
+        assert!(copyright_shown(line, true, true).is_none(), "the words hidden: the line goes with them");
+        assert!(copyright_shown(line, false, false).is_none(), "a screen that leaves the slide out");
+        assert!(copyright_shown(None, true, false).is_none());
+    }
+
+    /// The song on screen with its copyright line shown on every slide, as Settings can set it,
+    /// and the line `sync_overlay` sends the screens for it.
+    fn with_copyright_line() -> (sp_engine::Show, impl Fn(&sp_engine::Show) -> Option<String>) {
+        use sp_engine::{Command, SlideRef};
+        let mut song = sp_model::parse_song_text("River Song", "One\n\nTwo\n");
+        song.copyright.author = "A. Writer".to_owned();
+        let mut show = sp_engine::Show::new(vec![Arc::new(song)]);
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        let line = |show: &sp_engine::Show| {
+            crate::copyright_line(show, |_| false, crate::service::CopyrightShow::EverySlide, "1234")
+        };
+        (show, line)
+    }
+
+    #[test]
+    fn with_the_copyright_line_up_hide_the_words_reaches_the_screens_as_one_dissolve() {
+        use sp_engine::Command;
+        use sp_model::{Transition, TransitionKind};
+        let (mut show, line) = with_copyright_line();
+        let push = Transition::of(TransitionKind::Push);
+        let sent = line(&show).expect("the copyright line is up");
+        let before = frame_of(&show, push);
+        assert!(copyright_shown(Some(&sent), true, before.words_hidden).is_some(), "over the words");
+
+        show.apply(Command::HideWords);
+        // The line `sync_overlay` works out is the same, so it sends no new overlay and doesn't
+        // tell the screens again: the one frame `apply` sends is all they get.
+        assert_eq!(line(&show).as_deref(), Some(sent.as_str()));
+        let hidden = frame_of(&show, push);
+        let going = going_on(&before, &hidden);
+        assert!(going.words && !going.new_slide, "{going:?}");
+        assert_eq!(going.look, Transition::default(), "one dissolve, not the slide's push");
+        // In that same dissolve the copyright line leaves the audience screens with the words.
+        assert!(copyright_shown(Some(&sent), true, hidden.words_hidden).is_none());
+
+        // Show Again: the same, the other way.
+        show.apply(Command::ShowAgain);
+        assert_eq!(line(&show).as_deref(), Some(sent.as_str()));
+        let back = frame_of(&show, push);
+        assert_eq!(going_on(&hidden, &back).look, Transition::default());
+        assert!(copyright_shown(Some(&sent), true, back.words_hidden).is_some(), "back with the words");
+    }
+
+    #[test]
+    fn while_the_words_are_hidden_the_stage_keeps_its_copyright_line() {
+        use sp_model::{Object, Role, TextLink};
+        let (mut show, line) = with_copyright_line();
+        show.apply(sp_engine::Command::HideWords);
+        let overlay = Overlay { copyright: line(&show), ..Overlay::default() };
+        // A stage layout with a box that shows the copyright line, beside the words.
+        let mut layout = crate::stage::builtin_layouts().remove(0);
+        let mut copyright = Object::text(Role("copyright".to_owned()), "");
+        copyright.link = Some(TextLink::Copyright);
+        layout.objects = crate::stage::objects(&layout).into_owned();
+        layout.objects.push(copyright);
+        let frame = frame_of(&show, sp_model::Transition::default());
+        let stage = crate::stage::slide(frame.slide.as_deref(), None, &overlay, &frame.about, &layout);
+        let texts = stage.texts();
+        assert!(
+            texts
+                .iter()
+                .any(|(role, words)| role.as_ref().is_some_and(|r| r.0 == "copyright") && words.contains("A. Writer")),
+            "{texts:?}"
+        );
+        assert!(texts.iter().any(|(_, words)| words == "One"), "and the words: {texts:?}");
     }
 
     #[test]

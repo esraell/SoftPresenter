@@ -412,17 +412,24 @@ fn frame_slide(show: &Show) -> Option<Arc<Slide>> {
     show.live_slide().map(|(_, slide)| Arc::new(slide.clone()))
 }
 
+/// The theme the screens draw the slide on screen with: its presentation's (`theme_of`, by the
+/// presentation's place), its words hidden or not; with nothing on screen, `songs`.
+fn frame_theme<'a>(show: &Show, songs: &'a Arc<Theme>, theme_of: impl Fn(usize) -> &'a Arc<Theme>) -> &'a Arc<Theme> {
+    show.live().map_or(songs, |at| theme_of(at.presentation))
+}
+
 /// The copyright line of the song on screen, on the slides Settings says (`when`), with the
 /// church's CCLI licence number: none for what the app made (`app_made`, by the presentation's
-/// place: a Bible passage, the VoxLive item, a song of the song catalog), and none while the
-/// song's words are hidden, since the line goes with them.
+/// place: a Bible passage, the VoxLive item, a song of the song catalog). The same while the
+/// song's words are hidden: the audience screens leave it out with them
+/// (`output::copyright_shown`), in the same dissolve, and the stage screens keep it.
 fn copyright_line(
     show: &Show,
     app_made: impl Fn(usize) -> bool,
     when: service::CopyrightShow,
     licence: &str,
 ) -> Option<String> {
-    let at = show.live().filter(|_| !show.words_hidden())?;
+    let at = show.live()?;
     if app_made(at.presentation) {
         return None;
     }
@@ -4984,7 +4991,7 @@ impl App {
             ndi.push(sp_render::MIRROR_SOURCE.to_owned());
         }
         let media_fit = self.live_media_fit();
-        let theme = self.show.live().map_or(&self.theme, |at| self.theme_of(at.presentation)).clone();
+        let theme = frame_theme(&self.show, &self.theme, |at| self.theme_of(at)).clone();
         let about = self.stage_about();
         let Some(running) = self.running.as_mut() else {
             return;
@@ -5067,7 +5074,7 @@ impl App {
         let media_fit = self.live_media_fit();
         // The preview shows a screen that shows slides: without announcements a slide took off.
         let announcement = self.announcing.as_ref().filter(|a| a.shown.on_slide_screens).map(|a| a.shown.clone());
-        let theme = self.show.live().map_or(&self.theme, |at| self.theme_of(at.presentation)).clone();
+        let theme = frame_theme(&self.show, &self.theme, |at| self.theme_of(at)).clone();
         let about = self.stage_about();
         let Some(running) = self.running.as_mut() else {
             return;
@@ -5116,10 +5123,10 @@ impl App {
             .iter()
             .filter_map(|(id, _)| state.props.iter().find(|prop| prop.id == *id).map(|prop| prop.slide.clone()))
             .collect();
-        // The copyright line as last worked out; a change to it redraws the preview again.
-        live_props.extend(
-            running.overlay_sent.as_ref().and_then(|sent| sent.copyright.as_deref()).map(props::copyright_slide),
-        );
+        // The copyright line as last worked out (a change to it redraws the preview again),
+        // gone with the words while they are hidden, as on the audience screens.
+        let copyright = running.overlay_sent.as_ref().and_then(|sent| sent.copyright.as_deref());
+        live_props.extend(output::copyright_shown(copyright, true, self.show.words_hidden()));
         let over = props::overlay(&live_props, message.as_ref());
         let audience = Layers {
             media_fit,
@@ -14842,10 +14849,13 @@ mod tests {
     }
 
     #[test]
-    fn while_the_words_are_hidden_the_frame_has_the_songs_theme_and_no_words() {
-        let mut song = parse_song_text("Song", "One\n--\nUno\n\nTwo\n");
-        song.theme = Some(Uuid::new_v4());
-        let mut show = Show::new(vec![Arc::new(song)]);
+    fn while_the_words_are_hidden_the_audience_draws_the_same_slide_in_its_songs_theme_without_them() {
+        let mut show = Show::new(vec![Arc::new(parse_song_text("Song", "One\n--\nUno\n\nTwo\n"))]);
+        // The songs theme, and the song's own (`App::theme_of` gives it by the song's place).
+        let songs = Arc::new(Theme::builtin());
+        let own = Arc::new(Theme { name: "The song's own".to_owned(), ..Theme::builtin() });
+        let theme_of = |at: usize| if at == 0 { &own } else { &songs };
+        assert!(Arc::ptr_eq(frame_theme(&show, &songs, theme_of), &songs), "nothing up: the songs theme");
         show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
         let live = show.live_slide().expect("on screen").1.clone();
         let drawn = audience(&show).expect("on screen");
@@ -14856,9 +14866,8 @@ mod tests {
         assert!(drawn.words_hidden, "the audience screens draw it without its words");
         // The same slide, its words kept for laying it out (they aren't drawn).
         assert_eq!((drawn.id, words_of(&drawn)), (live.id, "One/Uno".to_owned()));
-        // Both frame builders draw with the theme of the presentation on screen
-        // (`show.live()`), the song's, not the songs theme they fall back on with nothing up.
-        assert_eq!(show.live().map(|at| at.presentation), Some(0));
+        // Both frame builders draw it in the song's theme still, as the slide is still up.
+        assert!(Arc::ptr_eq(frame_theme(&show, &songs, theme_of), &own), "the song's theme");
 
         show.apply(Command::ShowAgain);
         assert!(!audience(&show).expect("on screen").words_hidden, "Show Again brings them back");
@@ -14901,7 +14910,7 @@ mod tests {
     }
 
     #[test]
-    fn the_copyright_line_goes_with_the_words() {
+    fn hide_the_words_leaves_the_copyright_line_as_it_is() {
         let mut song = parse_song_text("River Song", "One\n\nTwo\n");
         song.copyright.author = "A. Writer".to_owned();
         let mut show = Show::new(vec![Arc::new(song)]);
@@ -14911,10 +14920,13 @@ mod tests {
         assert!(shown.contains("A. Writer"), "{shown}");
         assert_eq!(copyright_line(&show, |_| true, service::CopyrightShow::EverySlide, ""), None, "app-made");
 
+        // What `sync_overlay` sends over the slides stays as it is, so it sends nothing and
+        // tells the screens nothing again: the audience screens leave the line out with the
+        // words themselves (`output::copyright_shown`), and the stage keeps it.
         show.apply(Command::HideWords);
-        assert_eq!(line(&show), None, "Hide the Words takes the copyright line off with the words");
+        assert_eq!(line(&show).as_ref(), Some(&shown), "Hide the Words");
         show.apply(Command::ShowAgain);
-        assert_eq!(line(&show), Some(shown), "Show Again puts it back");
+        assert_eq!(line(&show), Some(shown), "Show Again");
     }
 
     #[test]
