@@ -800,6 +800,8 @@ pub fn only_reads(args: &[String]) -> bool {
         }
         "remote" | "mirror" | "update" => alone || (args.len() == 2 && word(1) == "status"),
         "notices" => alone,
+        // A start turned away asking (`one_copy`) is said in the log by `ctl_front`, as a start.
+        "front" => args.len() == 2 && word(1) == "--start",
         "reports" => alone || (args.len() == 2 && word(1) == "show"),
         // `bible text REFERENCE` and `bible search WORDS` leave the Bible page as it is.
         "bible" => matches!(word(1).as_str(), "text" | "search"),
@@ -910,6 +912,25 @@ pub(crate) fn send_as(
     args: &[String],
     mcp: Option<&McpCall>,
 ) -> Result<Reply, String> {
+    send_within(at, args, mcp, None)
+}
+
+/// Asks the app running to bring its window to the front, as a start turned away by it does
+/// (`one_copy`): `front --start`, waiting at most `within` for the answer, which a copy still
+/// starting may be slow to give. True when it answered that it did.
+pub(crate) fn ask_front(within: Duration) -> bool {
+    let args = ["front".to_owned(), "--start".to_owned()];
+    send_within(socket_path, &args, None, Some(within)).is_ok_and(|reply| reply.ok)
+}
+
+/// `send_as`, waiting for the reply at most `most` when it is given (else 20 seconds, and the
+/// time a wait for a change asks for).
+fn send_within(
+    at: impl FnOnce() -> Option<PathBuf>,
+    args: &[String],
+    mcp: Option<&McpCall>,
+    most: Option<Duration>,
+) -> Result<Reply, String> {
     let request = Request { v: PROTOCOL, args: args.to_vec(), mcp: mcp.cloned() };
     let probe = serde_json::to_string(&request).map_err(|e| e.to_string())?;
     if probe.len() as u64 >= MAX_REQUEST {
@@ -925,7 +946,11 @@ pub(crate) fn send_as(
     })?;
     // A wait for a change is answered when it is up at the latest.
     let waiting = wait_for(args).and_then(Result::ok).map_or(Duration::ZERO, |(wait, _)| wait);
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(20) + waiting));
+    let within = most.map_or(Duration::from_secs(20) + waiting, |most| most.max(Duration::from_millis(100)));
+    let _ = stream.set_read_timeout(Some(within));
+    if most.is_some() {
+        let _ = stream.set_write_timeout(Some(within));
+    }
     let mut request = probe;
     request.push('\n');
     stream.write_all(request.as_bytes()).map_err(|e| e.to_string())?;
@@ -995,6 +1020,7 @@ const COMMANDS: &[&str] = &[
     "theme",
     "version",
     "menu",
+    "front",
     "remote",
     "mirror",
     "notices",
@@ -1297,6 +1323,11 @@ Undo
 Everything on the menu bar
   menu                         list the menu items
   menu ITEM                    choose one, as a click on it does
+
+The window
+  front [--start]              bring it to the front, restored if it was minimised (a quiet copy's
+                               stays behind); --start, as starting SoftPresenter again while it
+                               runs sends, says in the log that another start asked
 
 Updates (asked only when told to; closed to remote pages and AI assistants)
   update [status]              what the last check found, and when
@@ -1604,6 +1635,7 @@ impl crate::App {
             "undo" => self.ctl_undo(el, false),
             "redo" => self.ctl_undo(el, true),
             "menu" => self.ctl_menu(el, args),
+            "front" => self.ctl_front(args),
             "remote" => self.ctl_remote(args),
             "mirror" => self.ctl_mirror(args),
             "notices" => self.ctl_notices(args),
@@ -3797,6 +3829,44 @@ impl crate::App {
             .ok_or_else(|| format!("No menu item called \u{201c}{typed}\u{201d}. sp menu lists them."))?;
         self.menu_action(el, action);
         Ok(Reply::done(format!("Chose {} from the menu.", crate::menubar::id_of(action))))
+    }
+
+    /// `front [--start]`: the operator's window brought to the front, restored first if it was
+    /// minimised, as a start of the app turned away by this copy asks (`one_copy`), saying
+    /// `--start` so the log says it was that. A quiet copy (a test's) leaves its window behind
+    /// everything, and says so.
+    fn ctl_front(&mut self, args: &[String]) -> Result<Reply, String> {
+        let start = match args.get(1) {
+            None => false,
+            Some(word) if word == "--start" && args.len() == 2 => true,
+            _ => return Err("front [--start]".to_owned()),
+        };
+        let quiet = self.quiet();
+        let Some(running) = self.running.as_ref() else {
+            return Err("The window isn't open yet.".to_owned());
+        };
+        if !quiet {
+            // Windows brings a minimised window to the front only once it is restored.
+            if running.home_window.is_minimized() == Some(true) {
+                running.home_window.set_minimized(false);
+            }
+            running.home_window.focus_window();
+        }
+        if start {
+            crate::applog::event(
+                "start",
+                if quiet {
+                    "another start of SoftPresenter asked for this window to come to the front (a quiet copy's stays behind)"
+                } else {
+                    "another start of SoftPresenter brought this window to the front"
+                },
+            );
+        }
+        Ok(Reply::done(if quiet {
+            "A quiet copy's window stays behind everything."
+        } else {
+            "The window is in front."
+        }))
     }
 }
 

@@ -102,9 +102,10 @@ pub const OPEN: &[&str] = &[
 /// devices on the network show their screens, `mcp` (adding SoftPresenter to assistant apps
 /// changes their settings on this computer; `sp` answers it itself, so the app never sees it,
 /// and it is closed here too), `update` (checking for a newer version asks the internet from
-/// the computer, and is the operator's to ask for), and `reports` (whether this computer sends
-/// anonymous reports is its owner's choice, made at the computer).
-pub const CLOSED: &[&str] = &["remote", "timelychurch", "mirror", "mcp", "update", "reports"];
+/// the computer, and is the operator's to ask for), `reports` (whether this computer sends
+/// anonymous reports is its owner's choice, made at the computer), and `front` (bringing the
+/// operator's window to the front would take the keyboard from whatever the operator is doing).
+pub const CLOSED: &[&str] = &["remote", "timelychurch", "mirror", "mcp", "update", "reports", "front"];
 
 /// For the open commands made of sub-commands, the sub-commands open to Control (`""` for the
 /// command alone); any other is closed, so a sub-command added later, or one taking a key, a

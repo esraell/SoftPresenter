@@ -61,6 +61,7 @@ mod mirror;
 mod ndi_download;
 mod ndi_in;
 mod notices;
+mod one_copy;
 mod output;
 mod outside;
 mod pack;
@@ -12688,6 +12689,19 @@ fn main() -> ExitCode {
     // Folders kept under the project's old name are renamed to the new one, once, before the
     // log opens in its new place.
     let moved = renamed::move_old_folders();
+    // One copy per data folder (`one_copy`): a start that finds another copy running on this
+    // folder asks that one to come to the front and ends here, having opened nothing and touched
+    // nothing in the library. Taken after the renaming above, which making the hold's folder
+    // first would stop, and before anything else; kept until the program ends, when the system
+    // lets it go however it ends. A list of the displays only prints it and quits.
+    let (_one_copy, one_copy_said) = if options.list_displays {
+        (None, None)
+    } else {
+        match one_copy::at_start(options.capture_home.is_some(), !options.paths.is_empty()) {
+            one_copy::Start::Go(held, said) => (held, said),
+            one_copy::Start::End(code) => return code,
+        }
+    };
     // On a Mac the library moves to Documents, once.
     let to_documents = library_folder::move_to_documents();
     // Songs named by path or title in files from before songs were found by id are named by
@@ -12695,9 +12709,13 @@ fn main() -> ExitCode {
     let settled = bible_store::data_dir().map(|dir| song_ids::settle(&dir, true)).unwrap_or_default();
     applog::start();
     // Says in the log how the last run ended if it didn't quit, and notes this one until the app
-    // has quit (any return from here on).
-    let _last_run = applog::last_run::begin();
+    // has quit (any return from here on). A list of the displays, which may run beside the copy
+    // running on this folder, leaves that copy's note alone.
+    let _last_run = (!options.list_displays).then(applog::last_run::begin);
     start_steps::mark("log opened");
+    if let Some(said) = &one_copy_said {
+        applog::event("start", said);
+    }
     reports::start(options.capture_home.is_some());
     // Whether this copy keeps the videos' FFmpeg in a folder of its own (Windows), worked out
     // before anything looks for FFmpeg.
@@ -12881,8 +12899,8 @@ fn main() -> ExitCode {
     start_steps::mark("files noted");
     let remote = remote::Remote::open();
     start_steps::mark("remote control read");
-    // Commands from `softpresenter ctl` come in on the control socket. Without it (another copy
-    // has it, say) the app runs as usual. It is set up on a thread of its own, so the window never
+    // Commands from `softpresenter ctl` come in on the control socket. Without it (a copy on
+    // another data folder named the same socket, say) the app runs as usual. It is set up on a thread of its own, so the window never
     // waits for it (keeping its folder private once ran Windows' own tools, which took up to a
     // minute on a busy PC); commands are answered a moment after it opens.
     let control: std::sync::Arc<std::sync::Mutex<Option<control::Listening>>> = std::sync::Arc::default();

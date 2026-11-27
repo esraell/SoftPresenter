@@ -8,7 +8,9 @@ license.workspace = true
 # The few Windows calls the app can't make safely: finding a parent console to print to, asking
 # a monitor for the part of it the taskbar leaves free, asking Windows the names the monitors give
 # themselves, putting a folder on the user's PATH, reading and setting who may open the
-# control socket's folder, keeping keys in the user's Credential Manager, and, for the app's file
+# control socket's folder, keeping keys in the user's Credential Manager, holding the named mutex
+# that keeps the app to one copy per data folder and letting the copy running come to the front
+# when another start asks, and, for the app's file
 # windows, setting up OLE on their thread, bringing one back in front and giving the operator's
 # window the front again when one closes. windows-sys is already in the build (winit and others
 # use it); this adds no crate.

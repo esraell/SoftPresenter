@@ -195,7 +195,8 @@ a minute on a Mac. One test alone:
   asking Windows the names the monitors give themselves and the country the user's location is set to, reading how much processor time and
   memory the app, the programs it started and the computer use (its `stats` part, for the
   anonymous reports), putting a folder on the user's PATH and
-  taking it off again, for the app's file windows, setting up OLE on the thread that shows one, bringing it back to the front and giving the operator's window the front back when it closes, in its `security` part, reading and setting who owns and may open the
+  taking it off again, holding a named mutex that keeps the app to one copy per data folder and
+  letting the copy running come to the front when another start asks, for the app's file windows, setting up OLE on the thread that shows one, bringing it back to the front and giving the operator's window the front back when it closes, in its `security` part, reading and setting who owns and may open the
   control socket's folder and finding the user the app runs as, and, in its `credentials` part,
   reading, writing and removing the user's entries in Credential Manager, where keys are kept) and
   `sp-decklink`'s `ffi`

@@ -11,6 +11,14 @@ feature changes, this page changes in the same commit.
 On a Mac it runs on macOS 11 (Big Sur) and later, on Apple silicon and on Intel: one app, built
 for both (`scripts/macos-app.sh --universal`).
 
+One copy runs per library. Starting SoftPresenter again while it runs (a second click on its
+icon, or several while an update installs) opens no second copy: the copy running comes to the
+front, restored if it was minimised, and the new start ends, having opened no window, screen or
+NDI source and touched nothing in the library. It holds even for starts made within a moment of
+each other, and a copy that crashed or was ended from Task Manager holds nothing. Files named to
+open on such a start aren't opened (`sp song import`, `sp media add` add them). Copies with data
+folders of their own (`SOFTPRESENTER_DATA`) run side by side.
+
 No list, page or menu in the app shows a scroll bar: everything scrolls by the trackpad, the
 mouse wheel (with Shift for sideways) or the keys, and the whole width is the content's.
 

@@ -111,7 +111,8 @@ struct Run {
     socket: PathBuf,
     /// Copies started so far in this run (a test may start a second on the same data).
     started: AtomicUsize,
-    _turn: MutexGuard<'static, ()>,
+    /// None for a folder beside another run's, which has the turn.
+    _turn: Option<MutexGuard<'static, ()>>,
 }
 
 impl Run {
@@ -145,7 +146,17 @@ impl Run {
             "the socket's path is too long for the app: {}",
             socket.display()
         );
-        Some(Run { name, data: root.join("data"), root, socket, started: AtomicUsize::new(0), _turn: turn })
+        Some(Run { name, data: root.join("data"), root, socket, started: AtomicUsize::new(0), _turn: Some(turn) })
+    }
+
+    /// Another folder, inside this run's and in its turn: a data folder and socket of its own,
+    /// for a copy that runs beside this run's.
+    fn beside(&self) -> Run {
+        let root = self.root.join("b");
+        std::fs::create_dir_all(root.join("files")).expect("the other folder");
+        let socket = root.join("s").join("ctl.sock");
+        assert!(socket.as_os_str().len() <= SOCKET_PATH_MOST, "the socket's path is too long: {}", socket.display());
+        Run { name: self.name, data: root.join("data"), root, socket, started: AtomicUsize::new(0), _turn: None }
     }
 
     /// A file of the test's own, outside the copy's data folder.
@@ -173,6 +184,22 @@ impl Run {
 
     /// Starts a copy, with any more variables given, and waits until it answers.
     fn start(&self, more: &[(&str, &str)]) -> Copy<'_> {
+        let (child, err) = self.spawn(more);
+        let mut copy = Copy { run: self, child, exit: None, err };
+        copy.wait_until_it_answers();
+        copy
+    }
+
+    /// Starts the app as `start` does, without waiting for it to answer: a later start on a
+    /// folder a copy already has, which is to end by itself.
+    fn launch(&self, more: &[(&str, &str)]) -> Started {
+        let (child, err) = self.spawn(more);
+        Started { child, exit: None, err }
+    }
+
+    /// The program started, with its standard output and error going to files of their own, and
+    /// the error's.
+    fn spawn(&self, more: &[(&str, &str)]) -> (Child, PathBuf) {
         let number = self.started.fetch_add(1, Ordering::Relaxed);
         let out = self.root.join(format!("app-{number}.out"));
         let err = self.root.join(format!("app-{number}.err"));
@@ -184,9 +211,7 @@ impl Run {
             .stdout(std::fs::File::create(&out).expect("the copy's output file"))
             .stderr(std::fs::File::create(&err).expect("the copy's error file"));
         let child = command.spawn().unwrap_or_else(|e| panic!("could not start {}: {e}", *APP));
-        let mut copy = Copy { run: self, child, exit: None, err };
-        copy.wait_until_it_answers();
-        copy
+        (child, err)
     }
 
     /// The copy's log, as far as it has been written.
@@ -400,6 +425,55 @@ impl Drop for Copy<'_> {
         if self.wait_exit(QUIT_WITHIN).is_none() {
             let _ = writeln!(std::io::stderr(), "e2e: {}: the copy didn't quit; killed it", self.run.name);
             self.kill();
+        }
+    }
+}
+
+/// A start of the app that is neither waited for nor quit through the socket, which, on a folder
+/// another copy has, reaches that copy: a later start, which is to end by itself. Killed if it is
+/// still running when it is dropped.
+struct Started {
+    child: Child,
+    exit: Option<ExitStatus>,
+    err: PathBuf,
+}
+
+impl Started {
+    /// How it ended, if it has.
+    fn ended(&mut self) -> Option<ExitStatus> {
+        if self.exit.is_none()
+            && let Ok(Some(status)) = self.child.try_wait()
+        {
+            self.exit = Some(status);
+        }
+        self.exit
+    }
+
+    /// Waits for it to end by itself, for at most `within`.
+    fn ended_within(&mut self, within: Duration) -> Option<ExitStatus> {
+        let began = Instant::now();
+        loop {
+            if let Some(status) = self.ended() {
+                return Some(status);
+            }
+            if began.elapsed() >= within {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// What it wrote to its standard error.
+    fn stderr(&self) -> String {
+        std::fs::read_to_string(&self.err).unwrap_or_default()
+    }
+}
+
+impl Drop for Started {
+    fn drop(&mut self) {
+        if self.ended().is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
         }
     }
 }
@@ -674,6 +748,185 @@ fn a_run_that_was_closed_from_outside_is_said_once_at_the_next_start() {
         "{}",
         said[0]
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// One copy per data folder
+
+/// What a start turned away by a copy already running on its folder says on its standard error.
+const TURNED_AWAY: &str = "SoftPresenter is already open with this data folder";
+/// What the copy running says in its log when a start turned away asks for it.
+const ASKED_FORWARD: &str = "[start] another start of SoftPresenter";
+/// How long a start turned away may take to end: it asks the copy running to come to the front,
+/// for ten seconds at most if that one doesn't answer; the rest is for a slow, busy computer.
+const TURNED_AWAY_WITHIN: Duration = Duration::from_secs(40);
+
+/// How many starts opened the log (and so went on to open anything at all).
+fn starts_logged(log: &str) -> usize {
+    log.lines().filter(|line| line.contains("[start] SoftPresenter ")).count()
+}
+
+/// Waits for a start on a folder a copy already has to end by itself, and says how long it took.
+fn turned_away(run: &Run, start: &mut Started, what: &str) -> ExitStatus {
+    let began = Instant::now();
+    let status = start.ended_within(TURNED_AWAY_WITHIN).unwrap_or_else(|| {
+        panic!("{what} was still running {TURNED_AWAY_WITHIN:?} later: a second copy opened{}", run.context())
+    });
+    say(&format!("{}: {what} ended after {:.1} s", run.name, began.elapsed().as_secs_f64()));
+    status
+}
+
+#[test]
+fn a_second_start_on_the_same_folder_brings_the_first_to_the_front_and_opens_nothing() {
+    let Some(run) = Run::new("a_second_start_on_the_same_folder_brings_the_first_to_the_front_and_opens_nothing")
+    else {
+        return;
+    };
+    let first = run.start(&[]);
+    let mut second = run.launch(&[]);
+    let status = turned_away(&run, &mut second, "the second start");
+    assert!(status.success(), "the second start ended with {status}{}", run.context());
+    assert!(second.stderr().contains(TURNED_AWAY), "it said why: {:?}{}", second.stderr(), run.context());
+    // The first was asked to come to the front (a quiet copy stays behind, and says so), and
+    // still answers.
+    first.status();
+    let log = run.log();
+    assert_eq!(log.matches(ASKED_FORWARD).count(), 1, "the first was asked once{}", run.context());
+    // The second never opened the log, which comes before anything else it would open.
+    assert_eq!(starts_logged(&log), 1, "only the first start opened the log{}", run.context());
+    // Nothing of the second's was left behind: the first's quit leaves no socket and no note.
+    first.quit().assert_clean(&run);
+}
+
+#[test]
+fn three_starts_at_once_on_one_folder_leave_exactly_one_copy_running() {
+    let Some(run) = Run::new("three_starts_at_once_on_one_folder_leave_exactly_one_copy_running") else { return };
+    let mut starts: Vec<Started> = (0..3).map(|_| run.launch(&[])).collect();
+    // Two end by themselves, with success; one goes on.
+    let began = Instant::now();
+    loop {
+        let ended = starts.iter_mut().filter_map(Started::ended).count();
+        if ended >= 2 {
+            break;
+        }
+        assert!(
+            began.elapsed() < Duration::from_secs(60),
+            "only {ended} of the three starts had ended after a minute{}",
+            run.context()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    say(&format!("{}: two starts ended after {:.1} s", run.name, began.elapsed().as_secs_f64()));
+    let mut ended: Vec<ExitStatus> = Vec::new();
+    let mut going: Vec<&mut Started> = Vec::new();
+    for start in &mut starts {
+        match start.ended() {
+            Some(status) => ended.push(status),
+            None => going.push(start),
+        }
+    }
+    assert_eq!(ended.len(), 2, "two ended: {ended:?}{}", run.context());
+    assert!(ended.iter().all(ExitStatus::success), "both with success: {ended:?}{}", run.context());
+    assert_eq!(going.len(), 1, "one copy is running{}", run.context());
+    let copy = going.pop().expect("the copy running");
+    // It answers, and is the only one: quitting it ends the last of the three.
+    let answers = Instant::now();
+    while !run.sp(&["status"]).ok {
+        assert!(answers.elapsed() < START_WITHIN, "the copy running didn't answer{}", run.context());
+        assert!(copy.ended().is_none(), "the copy running stopped{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(starts_logged(&run.log()), 1, "only one start opened the log{}", run.context());
+    assert!(run.sp(&["menu", "Quit"]).ok, "menu Quit{}", run.context());
+    let status = copy.ended_within(QUIT_WITHIN).unwrap_or_else(|| panic!("it didn't quit{}", run.context()));
+    let quitted = Quitted { status, log: run.log(), stderr: copy.stderr() };
+    quitted.assert_clean(&run);
+}
+
+#[test]
+fn starts_on_two_data_folders_both_run() {
+    let Some(run) = Run::new("starts_on_two_data_folders_both_run") else { return };
+    let other = run.beside();
+    let first = run.start(&[]);
+    let second = other.start(&[]);
+    // Each answers on its own socket, and neither was asked to come to the front.
+    first.status();
+    second.status();
+    assert!(!run.log().contains(ASKED_FORWARD) && !other.log().contains(ASKED_FORWARD), "{}", run.context());
+    second.quit().assert_clean(&other);
+    first.quit().assert_clean(&run);
+}
+
+#[test]
+fn the_command_line_works_as_before_while_a_copy_runs() {
+    let Some(run) = Run::new("the_command_line_works_as_before_while_a_copy_runs") else { return };
+    let copy = run.start(&[]);
+    // sp's commands, with ctl and without, and the help sp prints itself.
+    assert!(run.sp(&["ctl", "status"]).ok, "ctl status{}", run.context());
+    assert!(run.sp(&["status"]).ok, "status{}", run.context());
+    assert!(run.sp(&["help"]).text.contains("sp COMMAND"), "sp help{}", run.context());
+    // The app's own help, and a list of the displays, run and end as before.
+    let mut help = run.program();
+    help.arg("--help");
+    let (status, stdout, _, _) = run_to_end(help, None, COMMAND_WITHIN);
+    assert!(status.is_some_and(|status| status.success()), "--help ended with {status:?}");
+    assert!(stdout.contains("Usage: softpresenter"), "--help printed the help: {stdout:?}");
+    let mut displays = run.program();
+    displays.arg("--list-displays");
+    let (status, _, stderr, _) = run_to_end(displays, None, COMMAND_WITHIN);
+    assert!(status.is_some_and(|status| status.success()), "--list-displays ended with {status:?}: {stderr}");
+    assert!(!stderr.contains(TURNED_AWAY), "--list-displays wasn't turned away: {stderr}");
+    let log = run.log();
+    assert_eq!(starts_logged(&log), 2, "the list of the displays opened the log, as before{}", run.context());
+    assert!(!log.contains(ASKED_FORWARD), "nothing asked the copy to come to the front{}", run.context());
+    // It leaves the copy's note that it is running alone: on Windows, where the note isn't
+    // locked, it took it for one a crash left behind, said so, and removed it as it ended.
+    for said in ["[start] the last run", "another SoftPresenter is running with this folder"] {
+        assert!(!log.contains(said), "the list of the displays left the running note alone{}", run.context());
+    }
+    // `sp front` itself: a quiet copy's window stays behind, and says so; a word it doesn't take is
+    // refused with how it goes.
+    assert_eq!(copy.ok(&["front"]).text, "A quiet copy's window stays behind everything.");
+    copy.refused(&["front", "now"], "front [--start]");
+    copy.quit().assert_clean(&run);
+}
+
+/// A run that only saves a picture leaves the copy running alone: it asks nothing of it, and ends
+/// with a failure, having saved no picture.
+#[test]
+fn a_capture_on_a_folder_in_use_saves_no_picture_and_leaves_the_copy_alone() {
+    let Some(run) = Run::new("a_capture_on_a_folder_in_use_saves_no_picture_and_leaves_the_copy_alone") else {
+        return;
+    };
+    let copy = run.start(&[]);
+    let picture = run.file("home.png");
+    let mut capture = run.program();
+    capture.arg("--capture-home").arg(&picture);
+    let (status, _, stderr, _) = run_to_end(capture, None, TURNED_AWAY_WITHIN);
+    assert_eq!(status.and_then(|status| status.code()), Some(1), "ended with {status:?}: {stderr}{}", run.context());
+    assert!(stderr.contains(TURNED_AWAY), "it said why: {stderr:?}");
+    assert!(!picture.exists(), "no picture was saved");
+    let log = run.log();
+    assert!(!log.contains(ASKED_FORWARD), "the copy running wasn't asked to come forward{}", run.context());
+    assert_eq!(starts_logged(&log), 1, "the capture never opened the log{}", run.context());
+    copy.quit().assert_clean(&run);
+}
+
+/// The system lets the hold go when the copy holding it ends without quitting (killed, as Task
+/// Manager or a crash ends it), so the next start opens the app.
+#[test]
+fn once_the_copy_running_is_killed_the_next_start_opens_the_app() {
+    let Some(run) = Run::new("once_the_copy_running_is_killed_the_next_start_opens_the_app") else { return };
+    let mut first = run.start(&[]);
+    let mut turned = run.launch(&[]);
+    let status = turned_away(&run, &mut turned, "a start while the first runs");
+    assert!(status.success(), "it ended with {status}{}", run.context());
+    first.kill();
+    let second = run.start(&[]);
+    second.status();
+    let quitted = second.quit();
+    quitted.assert_clean(&run);
+    assert_eq!(starts_logged(&quitted.log), 2, "the first and the last start opened the log{}", run.context());
 }
 
 #[test]

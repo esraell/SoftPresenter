@@ -13,8 +13,9 @@ use windows_sys::Win32::Devices::Display::{
     GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
 };
 use windows_sys::Win32::Foundation::{
-    ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER, ERROR_MORE_DATA, ERROR_SUCCESS, GENERIC_READ, GENERIC_WRITE,
-    HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, LUID, POINT, RECT,
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER,
+    ERROR_MORE_DATA, ERROR_SUCCESS, GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE, HWND, INVALID_HANDLE_VALUE,
+    LPARAM, LUID, POINT, RECT,
 };
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
 use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
@@ -26,11 +27,11 @@ use windows_sys::Win32::System::Ole::{OleInitialize, OleUninitialize};
 use windows_sys::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_EXPAND_SZ, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW, RegSetKeyValueW,
 };
-use windows_sys::Win32::System::Threading::{GetCurrentProcessId, GetCurrentThreadId};
+use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId, GetCurrentThreadId};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumThreadWindows, GW_OWNER, GetForegroundWindow, GetWindow, GetWindowThreadProcessId, HWND_BROADCAST, IsIconic,
-    IsWindowVisible, SMTO_ABORTIFHUNG, SW_RESTORE, SendMessageTimeoutW, SetForegroundWindow, ShowWindow,
-    WM_SETTINGCHANGE,
+    ASFW_ANY, AllowSetForegroundWindow, EnumThreadWindows, GW_OWNER, GetForegroundWindow, GetWindow,
+    GetWindowThreadProcessId, HWND_BROADCAST, IsIconic, IsWindowVisible, SMTO_ABORTIFHUNG, SW_RESTORE,
+    SendMessageTimeoutW, SetForegroundWindow, ShowWindow, WM_SETTINGCHANGE,
 };
 
 fn usable(handle: HANDLE) -> bool {
@@ -377,4 +378,48 @@ pub fn front_back_to(window: isize) -> bool {
     // the thread that made it; the window in front is this program's, or none, so Windows lets
     // the program choose which of its windows is in front. A bad handle makes it fail harmlessly.
     unsafe { SetForegroundWindow(window) != 0 }
+}
+
+/// A named mutex this program has open. Its name is held while any handle to it is open: this
+/// one is closed when the value is dropped, or by Windows when the program ends, however it ends.
+pub struct HeldName(HANDLE);
+
+impl Drop for HeldName {
+    fn drop(&mut self) {
+        // SAFETY: the handle was opened by CreateMutexW in `hold_name`, belongs to this value
+        // alone and is closed only here, once.
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
+pub fn hold_name(name: &str) -> Result<Option<HeldName>, String> {
+    let wide_name = wide(name);
+    // SAFETY: `wide_name` is NUL-terminated and outlives the call. Null security attributes give
+    // the mutex the default security and a handle no program this one starts inherits (FFmpeg,
+    // the updater); FALSE: nobody owns the mutex, only its name is held.
+    let handle = unsafe { CreateMutexW(null(), 0, wide_name.as_ptr()) };
+    // Read at once, before any other call can change it: CreateMutexW opens the mutex another
+    // program made with that name, and says so only here.
+    // SAFETY: GetLastError takes nothing and reads the calling thread's last error.
+    let error = unsafe { GetLastError() };
+    // A mutex of that name that this program may not open with full access, as CreateMutexW
+    // asks for one that exists (one a copy started as administrator made, say), is held too.
+    if handle.is_null() && error == ERROR_ACCESS_DENIED {
+        return Ok(None);
+    }
+    if handle.is_null() {
+        return Err(format!("Windows couldn't make the mutex {name} (error {error})"));
+    }
+    if error == ERROR_ALREADY_EXISTS {
+        // SAFETY: the handle was opened just now by CreateMutexW and is not used again.
+        unsafe { CloseHandle(handle) };
+        return Ok(None);
+    }
+    Ok(Some(HeldName(handle)))
+}
+
+pub fn let_others_come_forward() {
+    // SAFETY: AllowSetForegroundWindow takes a process number by value (ASFW_ANY: any process)
+    // and fails harmlessly when this program may not bring a window to the front itself.
+    unsafe { AllowSetForegroundWindow(ASFW_ANY) };
 }

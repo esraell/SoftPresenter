@@ -5,6 +5,8 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+- Starting SoftPresenter again while it runs (another click on its icon, say, while an update installs) opened a second copy on the same library, with its own audience window and NDI source, and either could save over the other's changes. Now it brings the window already open to the front instead.
+
 ## 0.9.0-dev.25 — 26 November 2026 (development build)
 
 - The operator's window (and Screens and Settings) could stop being drawn at its own size after its size changed while the screens were busy drawing, until it was resized again; the log then filled with graphics errors. It now catches up with its size by itself.

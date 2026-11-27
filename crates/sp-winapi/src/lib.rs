@@ -154,6 +154,23 @@ pub use windows::{OleOnThisThread, ole_on_this_thread};
 #[cfg(windows)]
 pub use windows::front_back_to;
 
+/// A name this program holds in the signed-in user's session (a named mutex, `Local\...`), for as
+/// long as the value is kept: Windows lets it go when the program ends, however it ends (a crash,
+/// Task Manager). `hold_name` gives `Ok(None)` when another program holds that name already,
+/// one this program may not open included (a copy started as administrator). What keeps the app
+/// to one copy per data folder.
+#[cfg(windows)]
+pub use windows::{HeldName, hold_name};
+
+/// Lets the program that asks next bring its window to the front, as this one may: Windows lets
+/// only the program in front, or one the person has just started, do that. A start of the app
+/// turned away by the copy running calls it before asking that copy to come to the front. It
+/// does nothing on other systems.
+pub fn let_others_come_forward() {
+    #[cfg(windows)]
+    windows::let_others_come_forward();
+}
+
 /// Who owns a file or folder and who may open it, read and set with Windows' own security
 /// calls, and the user this program runs as: what keeps the control socket's folder to one
 /// user. Access lists go in and out written down as Windows writes them (SDDL); what they mean
@@ -226,5 +243,15 @@ mod tests {
         let before = r"%USERPROFILE%\AppData\Local\Microsoft\WindowsApps";
         assert_eq!(path_without(&path_with(before, bin).expect("added"), bin).as_deref(), Some(before));
         assert_eq!(path_without(r"C:\Tools", bin), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_name_is_held_by_one_holder_at_a_time_and_is_free_again_once_let_go() {
+        let name = format!(r"Local\SoftPresenter-test-{}", std::process::id());
+        let first = super::hold_name(&name).expect("asked").expect("held");
+        assert!(super::hold_name(&name).expect("asked").is_none(), "held already");
+        drop(first);
+        assert!(super::hold_name(&name).expect("asked").is_some(), "free again");
     }
 }
