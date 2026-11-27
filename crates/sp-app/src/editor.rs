@@ -367,7 +367,7 @@ pub fn role_label(role: &sp_model::Role) -> String {
 }
 
 /// What an object is called where its name is shown as it is (the Theme Editor's and stage
-/// layouts' Objects lists, a name being retyped, the Shape tab's Name): a box still named after
+/// layouts' Objects lists, a name being retyped, the Box tab's name): a box still named after
 /// its role, as a template's boxes are ([`sp_model::ThemeTemplate::as_slide`]), is called what
 /// its role is called in the language set.
 pub fn object_name(object: &sp_model::Object) -> String {

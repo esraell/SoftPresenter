@@ -11506,7 +11506,7 @@ impl App {
                 && let Ok(what) = std::env::var("SOFTPRESENTER_CAPTURE_THEMES")
             {
                 running.home_state.theme_request = Some(home::ThemeRequest::Edit(0));
-                running.home_state.inspector.tab = inspector::InspectorTab::Text;
+                running.home_state.inspector.tab = inspector::InspectorTab::Own;
                 self.capture_selects_box = what == "box";
             }
             if running.frames == GO_LIVE_AT + 4
@@ -11602,7 +11602,7 @@ impl App {
                         Err(problem) => eprintln!("{problem}"),
                     }
                 }
-                // Testing aid: give the selected object builds, to see the Build tab filled in.
+                // Testing aid: give the selected object builds, to see the Animation tab filled in.
                 if std::env::var_os("SOFTPRESENTER_CAPTURE_BUILD").is_some()
                     && let Some(object) = running.home_state.editing.as_mut().and_then(|d| d.selected_object_mut())
                 {
@@ -11612,7 +11612,7 @@ impl App {
                 }
                 // Testing aid: SOFTPRESENTER_CAPTURE_NDI=1 puts an NDI source box on the slide,
                 // selected, as NDI Source in the tools does, for a picture of the inspector's NDI
-                // Source section (with SOFTPRESENTER_INSPECTOR_TAB=shape).
+                // Source section (its own tab, which opens).
                 if std::env::var_os("SOFTPRESENTER_CAPTURE_NDI").is_some()
                     && let Some(draft) = running.home_state.editing.as_mut()
                 {
@@ -11632,9 +11632,9 @@ impl App {
                 }
                 // Testing aid: which tab of the inspector to show.
                 running.home_state.inspector.tab = match std::env::var("SOFTPRESENTER_INSPECTOR_TAB").as_deref() {
-                    Ok("shape") => inspector::InspectorTab::Shape,
-                    Ok("build") => inspector::InspectorTab::Build,
-                    _ => inspector::InspectorTab::Text,
+                    Ok("box") => inspector::InspectorTab::Box,
+                    Ok("animation") => inspector::InspectorTab::Animation,
+                    _ => inspector::InspectorTab::Own,
                 };
             }
             // Testing aid: SOFTPRESENTER_RENAME=WHAT starts retyping a name where it is shown, as

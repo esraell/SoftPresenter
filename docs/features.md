@@ -1526,8 +1526,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - An editor for a song's slides: move, resize and restyle text boxes, with alignment guides
   and a safe-area edge, multi-select (Shift or Command, or drag a box around them), copy and
   paste, undo, renaming by clicking a name, font search, and typing straight on the slide.
-- Character spacing, line height, paragraph spacing, baseline and margins for a text box, under
-  the gear beside B I U S.
+- Character spacing, line height, paragraph spacing, baseline and margins for a text box, in
+  the Text tab's Spacing and Margins rows.
 - **Styled words inside a text box.** A text box keeps a list of spans beside its words: a range
   of characters and the look that differs there (font, size, weight, italic, underline, strike,
   colour). Offsets count characters (Unicode scalar values), not bytes or UTF-16 units. A span
@@ -1650,7 +1650,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   line: `sp mirror` ([cli.md](cli.md#airplay)). A song with such a box is written as
   version 5 of the song format, which earlier builds decline to open rather than lose the box.
   Interface words are in English, Spanish, Russian and Ukrainian. On a Mac for now.
-- **Builds** (the inspector's Build tab): an object can come on with a Dissolve, Fly In from
+- **Builds** (the inspector's Animation tab): an object can come on with a Dissolve, Fly In from
   any side, or Zoom, with the slide (after its transition and a delay) or on a click of Next,
   and leave with a Dissolve, Fly Out or Zoom on a click. Next sets a slide's click builds going
   in order before it moves on; Previous takes them back. Text can be delivered By Paragraph:
@@ -1659,6 +1659,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - Text can have a background colour behind its lines (under each line's words, or across the
   box), bullets or numbers before its lines, and can scroll through its box like a ticker
   (left, right, up or down), from the Text tab.
+- **The inspector follows what is picked.** Its first tab is the object's own, named for what
+  it is (Text, Shape, Picture, Web Page, NDI Source, AirPlay, Screen); then Box, the same
+  for every kind (place, size, lining up, rotation, opacity, fill, outline, shadow, flip, order,
+  name, Delete); then Animation, on slides and props. Box and Animation stay open when another
+  object is picked. Every row has its name in small capitals at the left; colours are a row of
+  swatches with a well for any other colour at its end; and a row that belongs to a switch
+  (Shadow, Outline, a gradient, a build) stays in place, greyed, while the switch is off, so
+  nothing moves when a key is clicked. Copy style, Paste style and Back to theme are at the
+  foot of the Text tab.
 - **Linked Text**: a text box can show the clock, the date, a timer, the song's title, the
   slide's group, label or notes, the next slide's words, the stage message or the copyright line
   instead of its own words; the screens keep the time and timers up to date.

@@ -4161,9 +4161,9 @@ fn edit_view(
             && let Some(draft) = state.editing.as_mut()
         {
             draft.add_web();
-            // The inspector's Shape tab, where the address field is, and it takes the keyboard,
+            // The box's own tab in the inspector, where the address field is, and it takes the keyboard,
             // ready for the address.
-            state.inspector.tab = crate::inspector::InspectorTab::Shape;
+            state.inspector.tab = crate::inspector::InspectorTab::Own;
             ui.data_mut(|data| data.insert_temp(egui::Id::unique("web address focus"), true));
         }
         // A live NDI source, in a box, set up the same way.
@@ -4180,9 +4180,9 @@ fn edit_view(
             && let Some(draft) = state.editing.as_mut()
         {
             draft.add_ndi();
-            // The inspector's Shape tab, where the Source field is, and it takes the keyboard,
+            // The box's own tab in the inspector, where the Source field is, and it takes the keyboard,
             // ready for a choice.
-            state.inspector.tab = crate::inspector::InspectorTab::Shape;
+            state.inspector.tab = crate::inspector::InspectorTab::Own;
             ui.data_mut(|data| data.insert_temp(egui::Id::unique("ndi source focus"), true));
         }
         // AirPlay: the screen of an iPhone, iPad or Mac that is showing it to this computer, in a box.
@@ -4199,7 +4199,7 @@ fn edit_view(
             && let Some(draft) = state.editing.as_mut()
         {
             draft.add_mirror();
-            state.inspector.tab = crate::inspector::InspectorTab::Shape;
+            state.inspector.tab = crate::inspector::InspectorTab::Own;
         }
         let shapes_bar = tools[1];
         let shapes = ui.interact(shapes_bar, ui.scope_id().with("add shape"), Sense::click());
@@ -11878,12 +11878,19 @@ mod tests {
         let output = drawn(&mut state);
         assert!(crate::studio::tests::place_of(&output, "Clear All").is_some());
         output.drop_without_applying_deltas();
-        // A song's slides: the inspector's tabs.
+        // A song's slides, nothing picked: the slide's heading.
         let editing = EditDraft::of(&show, SlideRef { presentation: 0, slide: 0 });
         let mut state = HomeState { editing, ..HomeState::default() };
         let output = drawn(&mut state);
         assert_eq!(state.edit_kind(), Some(EditKind::Slides));
-        at_the_top(&output, "Build");
+        at_the_top(&output, t("inspector.heading.slide", "SLIDE"));
+        output.drop_without_applying_deltas();
+        // A box picked: the inspector's tabs, the box's own first.
+        if let Some(draft) = state.editing.as_mut() {
+            draft.selected = draft.slide.objects.first().map(|object| object.id);
+        }
+        let output = drawn(&mut state);
+        at_the_top(&output, t("inspector.tab.animation", "Animation"));
         output.drop_without_applying_deltas();
         // A theme, nothing picked: its own heading.
         let theme = Theme::builtin();
@@ -11893,13 +11900,13 @@ mod tests {
         assert_eq!(state.edit_kind(), Some(EditKind::Themes));
         at_the_top(&output, t("inspector.heading.theme_slide", "THEME SLIDE"));
         output.drop_without_applying_deltas();
-        // A prop.
+        // A prop, nothing picked: PROP.
         let mut state = HomeState::default();
         state.props.push(crate::props::Prop::new("Logo".to_owned()));
         state.edit_kind_request = Some(EditKind::Props);
         let output = drawn(&mut state);
         assert_eq!(state.edit_kind(), Some(EditKind::Props));
-        at_the_top(&output, "Build");
+        at_the_top(&output, t("inspector.heading.prop", "PROP"));
         output.drop_without_applying_deltas();
         // A stage layout, nothing picked: LAYOUT.
         let mut state = HomeState { edit_kind_request: Some(EditKind::Stage), ..HomeState::default() };

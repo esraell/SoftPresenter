@@ -583,7 +583,7 @@ pub fn item_settings(ui: &mut egui::Ui, object: &mut Object, timers: &[(sp_model
     ui.add_space(4.0);
 }
 
-/// A screen picture's settings, at the head of the inspector's Shape tab: which screen it shows
+/// A screen picture's settings, on the inspector's Screen tab: which screen it shows
 /// (the main audience screen, or one by name, kept by its id), its corners and its label.
 pub fn screen_settings(ui: &mut egui::Ui, object: &mut Object, screens: &[crate::screens::Screen]) {
     let listed: Vec<(sp_model::Uuid, String)> = screens

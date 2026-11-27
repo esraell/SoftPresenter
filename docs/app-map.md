@@ -182,15 +182,27 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   layouts' 204: the design's slides view sits 10 in from the column's sides, not 20.
 - **Canvas**: Add Text, Shapes, Media… (the row is centred on the slide, or in the Theme Editor stands at the right beside the name of what is open; each tool is as wide as its words, and when they don't fit across the canvas they take a second row, which the slide goes under: `tool_bars` in `home.rs`) (a picture or a video, which plays in its box when the
   slide is on screen), Web Page (a box showing a live web page; its address is typed in the
-  Shape tab), NDI Source (a box over the whole slide showing a live NDI source, chosen in the Shape tab's NDI Source section: Source menu, Look again, a line saying what is so, Fits, Quality, Sound; `ndi_in.rs`, `inspector::ndi_source`; the picture is received on a thread of its own and put where every drawing thread finds it, `sp_render::show_ndi`, and the screens only look for news in `Output::take_video_picture`); pictures and videos can be dropped on it from the Finder. Double-click a
+  inspector's Web Page tab), NDI Source (a box over the whole slide showing a live NDI source, chosen in the inspector's NDI Source tab: Source menu, Look again, a line saying what is so, Fits, Quality, Sound; `ndi_in.rs`, `inspector::ndi_source`; the picture is received on a thread of its own and put where every drawing thread finds it, `sp_render::show_ndi`, and the screens only look for news in `Output::take_video_picture`); pictures and videos can be dropped on it from the Finder. Double-click a
   text box to type in it. The letter keys add objects (T for a text box, one key per shape).
-- **Inspector** (the whole right column): Shape (place, fill, outline, shadow, flip), Text (words, font, size, colour,
-  alignment, spacing, outline, shadow, gradient, linked text such as a clock or a timer; its head says
-  THE WHOLE BOX, or SELECTED WORDS and the words quoted while words are selected in a box being typed
-  in, and font, size, B I U S and colour then change only those words, a half-lit key or "Mixed"
-  showing where they differ; Clear word styles, beside Copy and Paste Style, takes every word's own
-  look off), Build
-  (how an object comes on and goes off).
+- **Inspector** (the whole right column; `inspector.rs`): its tabs follow what is picked. The
+  object's own tab is first, named for what it is: Text (font, weight, size, B I U S, colour and
+  gradient, alignment, outline, shadow, margins, spacing, capitals, fitting, lines, the colour
+  behind them, and Shows: its own words or linked text such as a clock or a timer; its head says
+  THE WHOLE BOX, or SELECTED WORDS and the words quoted while words are selected in a box being
+  typed in, and font, size, B I U S and colour then change only those words, a half-lit key or
+  "Mixed" showing where they differ; Copy style, Paste style, Back to theme, Reset spacing and
+  Clear word styles are keys at its foot), Shape (fill, gradient, outline), Picture (how it
+  fits), Web Page, NDI Source, AirPlay, Screen. Then Box, the same for every kind (place
+  and size, lining up, rotation, opacity, fill and outline for all but shapes, shadow and flip,
+  order, name, Delete, Undo, Redo, Reset to theme), and Animation (how an object comes on and
+  goes off; not on a theme's template or a stage layout). Several objects of different kinds
+  have Box and Animation only, under a line saying how many and what. With nothing picked the
+  column has a plain heading (SLIDE, PROP, THEME SLIDE, LAYOUT). Every row is a caption in small
+  capitals in a column at the left (`row`), then its controls: separate keys (`square_key`,
+  `word_key`), numbers, menus, and colours as a row of swatches that always fits one line, ending
+  in a well for any colour (`swatch_row`). A row that belongs to a switch on the same tab
+  (Shadow, Outline, a gradient's To, Covers, a build's rows) stays while the switch is off,
+  greyed, so no row moves on a click.
 - **Footer** (at the foot of the inspector): Slide Notes, Live Edit (changes reach the screens
   as they are made), Done.
 - **Stage** (Edit › Stage; Screens › Edit Stage Layouts… and the Stage tab's Edit Layouts… open
@@ -203,7 +215,7 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   the audience screens), Undo and Redo; under it two lines saying the keyboard edits here. The
   inspector, with nothing picked, is LAYOUT (its name, the stage screens using it); for an item
   the Text tab starts with what it shows and its own settings (which timer, the clock's form,
-  lines of notes); for a screen picture the Shape tab starts with its screen, corners and
+  lines of notes); a screen picture's Screen tab has its screen, corners and
   label. The arrows move an object 10, Shift one pixel (on a slide 1, and Shift 10). While it
   is open the keyboard does not run the show, as in the rest of Edit: only the keys that clear
   reach it (see Keys in the Edit view).
