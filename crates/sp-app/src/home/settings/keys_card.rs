@@ -1142,6 +1142,35 @@ mod tests {
     }
 
     #[test]
+    fn the_key_layout_caption_fits_its_column_in_every_language() {
+        // At every interface size: letters are set on whole pixels, so their widths differ a little.
+        for (language, scale) in Language::ALL.into_iter().flat_map(|l| [1.0, 1.25, 1.5, 1.75, 2.0].map(|s| (l, s))) {
+            crate::i18n::with_language(language, || {
+                let ctx = crate::studio::tests::styled();
+                ctx.set_pixels_per_point(scale);
+                let mut measured = None;
+                for _ in 0..2 {
+                    let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| {
+                        let (key, english) = tk("settings.keys.style.caption", "Key layout");
+                        let font = fixed_semibold(CAPS);
+                        let caption =
+                            crate::studio::within(ui, key, english, font.clone(), CAPS_SPACING, KEY_COLUMN, true);
+                        let wide = spaced(ui, &caption, font, TEXT_DIM, CAPS_SPACING).size().x;
+                        measured = Some((caption, wide, ui.ctx().pixels_per_point()));
+                    });
+                    drawn.drop_without_applying_deltas();
+                }
+                let (caption, wide, at) = measured.expect("drawn");
+                assert_eq!(at, scale, "drawn at the size asked for");
+                assert!(
+                    wide <= KEY_COLUMN,
+                    "{language:?} at {scale}: {caption} is {wide} wide, the column {KEY_COLUMN}"
+                );
+            });
+        }
+    }
+
+    #[test]
     fn the_sentences_line_is_beside_the_headings_at_1100_and_says_what_add_a_key_does() {
         for language in Language::ALL {
             crate::i18n::with_language(language, || {

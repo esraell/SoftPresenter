@@ -355,7 +355,7 @@
   "settings.keys.added.group": "Añadida · ya no salta a {group}",
   "settings.keys.added.types": "Añadida · en Biblia sigue escribiendo",
   "settings.keys.remove": "Quitar {key} de la lista",
-  "settings.keys.none": "Ahora ninguna tecla tiene asignado: {actions}.",
+  "settings.keys.none": "Ahora ninguna tecla hace: {actions}.",
   "settings.keys.esc_first": "Haga lo que haga Esc aquí, primero cierra un menú, una ventana o la búsqueda que estén abiertos.",
   "settings.keys.mac_f_keys": "Las teclas F son del Mac (brillo, sonido): con Añadir una tecla puedes incluir una.",
   "settings.keys.fixed.title": "Siempre igual",
