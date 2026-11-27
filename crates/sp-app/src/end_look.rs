@@ -652,6 +652,46 @@ mod tests {
     }
 
     #[test]
+    fn a_themes_saved_end_look_is_the_windows_from_the_start_and_one_click_changes_only_what_it_says() {
+        // A theme read from its file with a look of its own, and the window's state as the app
+        // makes it at the start (`HomeState::listing_themes`): no change to the themes has
+        // listed them again yet.
+        let yellow = COLOURS[4];
+        let saved = EndLook { mark: EndMark::Square, size: 120, colour: Some(yellow), place: EndPlace::Bottom };
+        let file = Theme { end_look: saved, ..Theme::builtin() }.to_json();
+        let themes = [Theme::from_json(&file).expect("the theme's file is read")];
+        let mut state = HomeState {
+            preferences_open: true,
+            preferences_pane: Pane::Slides,
+            end_mark: true,
+            ..HomeState::listing_themes(&themes)
+        };
+        assert_eq!((state.theme_ids.as_slice(), state.theme_names.len()), ([themes[0].id].as_slice(), 1));
+        assert_eq!(look_of(&state, 0), saved, "the theme's own look, not the usual one");
+        // The window shows it, and the small slide draws its mark.
+        open(&mut state, 0, Door::Settings);
+        let ctx = crate::studio::tests::styled();
+        let (words, _) = drawn(&ctx, &mut state, USUAL);
+        assert!(words.iter().any(|(have, _)| have == "120%"), "{words:?}");
+        assert!(words.iter().any(|(have, _)| *have == EndMark::Square.text()), "the small slide draws the squares");
+        // One step smaller asks for that and nothing else: the mark, colour and place are kept.
+        click(&ctx, &mut state, "A\u{2212}");
+        let asked = match state.theme_request.take() {
+            Some(ThemeRequest::EndLook(id, look)) if id == themes[0].id => look,
+            other => panic!("asked {other:?}"),
+        };
+        assert_eq!(asked, EndLook { size: 110, ..saved });
+        // The app gives it to the theme, whose file keeps the rest.
+        let mut themes = themes;
+        assert_eq!(give(&mut themes, None, state.theme_ids[0], asked), Some(0));
+        let read = Theme::from_json(&themes[0].to_json()).expect("read again");
+        assert_eq!(read.end_look, EndLook { size: 110, ..saved });
+        // And the lists follow every later change the same way.
+        state.list_themes(&themes);
+        assert_eq!(look_of(&state, 0), EndLook { size: 110, ..saved });
+    }
+
+    #[test]
     fn end_look_window_closes_with_done_escape_a_click_outside_or_when_its_theme_or_page_goes() {
         let ctx = crate::studio::tests::styled();
         let mut state = opened();

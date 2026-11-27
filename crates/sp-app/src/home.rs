@@ -2391,6 +2391,25 @@ impl HomeState {
         crate::end_look::editor_left(self);
     }
 
+    /// Lists the themes as the window knows them, each by its place: their names, which are the
+    /// app's own and so kept, their ids, and each one's look for the end of a song's mark. The
+    /// one place they are listed, at the start and after every change to the themes, so that a
+    /// list added here is never left empty at the start (as the end marks' once was: the window
+    /// then showed the usual look, and its first click saved over the theme's own).
+    pub fn list_themes(&mut self, themes: &[Theme]) {
+        self.theme_names = themes.iter().map(|theme| theme.name.clone()).collect();
+        self.themes_kept = themes.iter().enumerate().filter(|(_, theme)| theme.id.is_nil()).map(|(at, _)| at).collect();
+        self.theme_ids = themes.iter().map(|theme| theme.id).collect();
+        self.theme_end_looks = themes.iter().map(|theme| theme.end_look).collect();
+    }
+
+    /// A window's state as it starts, with the themes listed ([`HomeState::list_themes`]).
+    pub fn listing_themes(themes: &[Theme]) -> HomeState {
+        let mut state = HomeState::default();
+        state.list_themes(themes);
+        state
+    }
+
     /// Whether the find box is being typed in: its search is open and it has the keyboard, or
     /// is about to (not given back after a drop: [`HomeState::search_resting`]). Then every key
     /// is the box's.

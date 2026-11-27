@@ -3077,15 +3077,6 @@ impl App {
             stage_preview_at: Instant::now(),
             home_state: HomeState {
                 fonts: Arc::new(sp_render::Fonts::new().family_names()),
-                theme_names: self.themes.iter().map(|theme| theme.name.clone()).collect(),
-                themes_kept: self
-                    .themes
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, theme)| theme.id.is_nil())
-                    .map(|(at, _)| at)
-                    .collect(),
-                theme_ids: self.themes.iter().map(|theme| theme.id).collect(),
                 theme_for_songs: self.songs_theme,
                 theme_layouts: self.theme_layouts(),
                 template_names: self.themes.iter().map(template_names).collect(),
@@ -3125,7 +3116,8 @@ impl App {
                     template: self.bible_template(),
                     ..home::BiblePage::default()
                 },
-                ..HomeState::default()
+                // The themes' names, ids and end marks, as every later change to them lists them.
+                ..HomeState::listing_themes(&self.themes)
             },
             next_repaint: None,
             canvas: None,
@@ -9333,11 +9325,7 @@ impl App {
             running.thumbs.clear_except(&mut running.egui_renderer, |_| false);
             running.canvas_for = None;
             let state = &mut running.home_state;
-            state.theme_names = self.themes.iter().map(|theme| theme.name.clone()).collect();
-            state.themes_kept =
-                self.themes.iter().enumerate().filter(|(_, theme)| theme.id.is_nil()).map(|(at, _)| at).collect();
-            state.theme_ids = self.themes.iter().map(|theme| theme.id).collect();
-            state.theme_end_looks = self.themes.iter().map(|theme| theme.end_look).collect();
+            state.list_themes(&self.themes);
             state.theme_for_songs = self.songs_theme;
             state.theme_for_bible = self.bible_theme;
             state.theme_layouts = layouts;
