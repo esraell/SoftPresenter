@@ -1315,21 +1315,24 @@ fn typed_key(state: &mut home::HomeState, ctx: &egui::Context, action: KeyAction
     }
 }
 
-/// What a key set to one of the window's own actions does (Settings › Keys), each as the control
-/// it stands for: Add to Playlist as `add_key` says; Remove from Playlist takes the items picked
-/// out of the playlist listed, as its menu's Remove does, which Undo puts back, changing nothing on
-/// the screens. Unlike Delete it never takes the open item when none is picked, and with none
-/// picked, or the playlist not listed (the Bible view, a library or the chooser in its place), a
-/// refusal's cue says why. Go to Bible and Go to Service as Command-2 (Scripture Lookup ready
-/// for a reference) and Command-1. Show Selected is Enter's (`App::enter_key`), and the show's
-/// own actions are the show's (`action_command`).
+/// What a key set to one of the window's own actions does (Settings › Keys): Add to Playlist as
+/// `add_key` says. Remove from Playlist takes out of the playlist listed only what can be seen
+/// picked there: several items picked, which are lit, or a single pick when it is the open item
+/// (a single pick isn't lit, and stays where it was when the open item moves on: Next going on
+/// into the next item, a click on another item's slide). Undo puts them back, and nothing on the
+/// screens changes. Anything else (a single pick left behind, none, the playlist not listed: the
+/// Bible view, a library or the chooser in its place) takes nothing out, and a refusal's cue says
+/// why. Go to Bible and Go to Service as Command-2 (Scripture Lookup ready for a reference) and
+/// Command-1. Show Selected is Enter's (`App::enter_key`), and the show's own actions are the
+/// show's (`action_command`).
 fn window_key_action(show: &Show, state: &mut home::HomeState, action: KeyAction) {
     match action {
         KeyAction::AddToPlaylist => add_key(show, state),
         KeyAction::RemoveFromPlaylist => {
             state.item_picks.check(&state.services);
             let places = state.item_picks.places.clone();
-            if places.is_empty() || !crate::studio::playlist_in_sight(state, state.services.front_at()) {
+            let seen = state.item_picks.several() || (places.len() == 1 && state.services.chosen == Some(places[0]));
+            if !seen || !crate::studio::playlist_in_sight(state, state.services.front_at()) {
                 state
                     .notices
                     .refuse(crate::i18n::t("keys.remove.none", "Pick an item in the playlist to take it out."));
@@ -15318,6 +15321,20 @@ mod tests {
         fn live(&self) -> Option<(usize, usize)> {
             self.show.live().map(|at| (at.presentation, at.slide))
         }
+
+        /// A click of the mouse at `at`, as the window gets it: over it, down, then up, a frame each.
+        fn click(&mut self, at: egui::Pos2) {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            for event in [egui::Event::PointerMoved(at), button(true), button(false)] {
+                self.waiting.push(event);
+                self.draw();
+            }
+        }
     }
 
     /// The find box open with these words typed, and drawn with the keyboard.
@@ -15559,6 +15576,24 @@ mod tests {
     /// The place of the Bible view's passage now shown among the presentations.
     fn bible_place(keyboard: &Keyboard) -> Option<usize> {
         keyboard.state.bible.slots.map(|slots| slots[keyboard.state.bible.showing])
+    }
+
+    /// Alpha and Beta in the playlist in front, listed.
+    fn alpha_and_beta_listed() -> home::HomeState {
+        let mut state = home::HomeState { playlist_open: true, ..home::HomeState::default() };
+        for title in ["Alpha", "Beta"] {
+            state.services.add(crate::service::Item::song(format!("title:{title}"), title.to_owned()));
+        }
+        state
+    }
+
+    /// The playlist's item opened and picked, as a click on its row leaves them: it alone picked.
+    fn open_and_pick(state: &mut home::HomeState, item: usize) {
+        state.services.chosen = Some(item);
+        state.item_picks.places = vec![item];
+        state.item_picks.anchor = Some(item);
+        state.item_picks.made_in(&state.services);
+        state.picking = home::Picking::Items;
     }
 
     const NOTHING_TO_ADD: &str = "Open a song in a library, or a passage in Bible, to add it to the playlist.";
@@ -15805,18 +15840,14 @@ mod tests {
 
     #[test]
     fn f3_takes_the_picked_playlist_item_out_and_undo_puts_it_back() {
-        let mut state = home::HomeState { playlist_open: true, ..home::HomeState::default() };
-        for title in ["Alpha", "Beta"] {
-            state.services.add(crate::service::Item::song(format!("title:{title}"), title.to_owned()));
-        }
-        state.services.chosen = Some(0);
-        state.item_picks.places = vec![1];
-        state.item_picks.made_in(&state.services);
-        let mut keyboard = in_softprojector_style(state);
+        // Beta's item clicked, so open and picked (after the first drawing, which opens Alpha's,
+        // on screen): F3 takes Beta out.
+        let mut keyboard = in_softprojector_style(alpha_and_beta_listed());
+        open_and_pick(&mut keyboard.state, 1);
         keyboard.draw();
         keyboard.press(Key::Named(NamedKey::F3));
         keyboard.draw();
-        assert_eq!(playlist_items(&keyboard), ["Alpha"], "Beta, picked, taken out");
+        assert_eq!(playlist_items(&keyboard), ["Alpha"], "Beta, picked and open, taken out");
         assert_eq!(keyboard.live(), Some((0, 0)), "the screens untouched");
         let removed = keyboard.state.removed.pop().expect("kept for Undo");
         assert!(removed.redo(&mut keyboard.state, true), "Undo");
@@ -15830,31 +15861,60 @@ mod tests {
         assert_eq!(keyboard.state.notices.refused(), Some(NOTHING_PICKED));
         assert_eq!(playlist_items(&keyboard), ["Alpha", "Beta"], "the open item, Alpha, stays");
         assert!(keyboard.state.removed.is_empty(), "nothing for Undo");
+        // Both picked, which lights them: both go.
+        keyboard.state.notices.take_refused();
+        keyboard.state.item_picks.places = vec![0, 1];
+        keyboard.state.item_picks.made_in(&keyboard.state.services);
+        assert!(keyboard.state.item_picks.several());
+        keyboard.press(Key::Named(NamedKey::F3));
+        keyboard.draw();
+        assert!(playlist_items(&keyboard).is_empty(), "both lit, both taken out");
+        assert_eq!(keyboard.state.notices.refused(), None);
+    }
+
+    #[test]
+    fn f3_takes_nothing_when_the_open_item_has_moved_on_from_the_one_picked() {
+        // Alpha's item clicked, so open and picked; then Beta's item becomes the open one while
+        // the pick stays on Alpha, unlit. F3 takes nothing out: Alpha is neither open nor lit.
+        for how in ["a click on Beta's slide", "Next carrying on into Beta"] {
+            let mut keyboard = in_softprojector_style(alpha_and_beta_listed());
+            open_and_pick(&mut keyboard.state, 0);
+            keyboard.draw();
+            keyboard.draw();
+            if how.starts_with("Next") {
+                // What Next going on into the next item puts on screen; the slides follow it.
+                keyboard.show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 1, slide: 0 }));
+                keyboard.draw();
+            } else {
+                let beta = sp_engine::SlideRef { presentation: 1, slide: 1 };
+                let at = keyboard.state.slide_rects.iter().find(|(at, _)| *at == beta).map(|(_, rect)| rect.center());
+                keyboard.click(at.expect("Beta's second slide drawn"));
+                assert_eq!(keyboard.live(), Some((1, 1)), "{how}: Beta's second slide on screen");
+            }
+            let (open, picked) = (keyboard.state.services.chosen, keyboard.state.item_picks.places.clone());
+            assert_eq!((open, picked.as_slice()), (Some(1), &[0][..]), "{how}: Beta open, the pick left on Alpha");
+            keyboard.press(Key::Named(NamedKey::F3));
+            keyboard.draw();
+            assert_eq!(keyboard.state.notices.refused(), Some(NOTHING_PICKED), "{how}");
+            assert_eq!(playlist_items(&keyboard), ["Alpha", "Beta"], "{how}: nothing taken out");
+            assert!(keyboard.state.removed.is_empty(), "{how}");
+        }
     }
 
     #[test]
     fn f3_takes_nothing_out_of_a_playlist_not_listed() {
         // Beta picked in the playlist, then the playlist put away: in the Bible view, with a
         // library listed, or with the chooser open, F3 takes nothing out and says why.
-        let picked = || {
-            let mut state = home::HomeState { playlist_open: true, ..home::HomeState::default() };
-            for title in ["Alpha", "Beta"] {
-                state.services.add(crate::service::Item::song(format!("title:{title}"), title.to_owned()));
-            }
-            state.services.chosen = Some(1);
-            state.item_picks.places = vec![1];
-            state.item_picks.made_in(&state.services);
-            state
-        };
         for view in ["the Bible view", "a library listed", "the chooser open"] {
-            let mut state = picked();
+            let mut state = alpha_and_beta_listed();
             match view {
                 "the Bible view" => state.bible_open = true,
                 "a library listed" => state.playlist_open = false,
                 _ => state.chooser_open = true,
             }
             let mut keyboard = in_softprojector_style(state);
-            assert_eq!(keyboard.state.item_picks.places, [1], "{view}: Beta still picked, so the listing refuses");
+            // Beta open and picked, so only the listing refuses.
+            open_and_pick(&mut keyboard.state, 1);
             keyboard.press(Key::Named(NamedKey::F3));
             keyboard.draw();
             assert_eq!(keyboard.state.notices.refused(), Some(NOTHING_PICKED), "{view}");
@@ -15865,15 +15925,9 @@ mod tests {
 
     #[test]
     fn holding_f2_or_f3_adds_or_takes_out_nothing_more() {
-        // Alpha's item open, Beta's picked: F3 takes Beta out; held, its repeats take nothing.
-        let mut state = home::HomeState { playlist_open: true, ..home::HomeState::default() };
-        for title in ["Alpha", "Beta"] {
-            state.services.add(crate::service::Item::song(format!("title:{title}"), title.to_owned()));
-        }
-        state.services.chosen = Some(0);
-        state.item_picks.places = vec![1];
-        state.item_picks.made_in(&state.services);
-        let mut keyboard = in_softprojector_style(state);
+        // Beta's item open and picked: F3 takes Beta out; held, its repeats take nothing.
+        let mut keyboard = in_softprojector_style(alpha_and_beta_listed());
+        open_and_pick(&mut keyboard.state, 1);
         let (f2, f3) = (Key::Named(NamedKey::F2), Key::Named(NamedKey::F3));
         let held = |keyboard: &Keyboard, key: &Key| {
             home_key_goes(&keyboard.state, &keyboard.ctx, &keyboard.show, key, true, Default::default(), true)
@@ -15884,7 +15938,7 @@ mod tests {
         keyboard.press_as(f3.clone(), true);
         keyboard.press_as(f3.clone(), true);
         keyboard.draw();
-        assert_eq!(playlist_items(&keyboard), ["Alpha"], "Beta out, Alpha's item left");
+        assert_eq!(playlist_items(&keyboard), ["Alpha"], "Beta out, Alpha left");
         // F2 held in the find box: the song found goes in once, and nothing else after it.
         let mut keyboard = found_in_softprojector_style("beta");
         assert_eq!(held(&keyboard, &f2), KeyGoes::Typed(KeyAction::Nothing));
