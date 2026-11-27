@@ -200,41 +200,48 @@ fn file() -> Option<std::path::PathBuf> {
     crate::bible_store::data_dir().map(|dir| dir.join("messages.json"))
 }
 
-pub fn load() -> Vec<Message> {
-    let mut messages: Vec<Message> = file()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default();
+/// The messages as last saved, with the message for words shown once among them; and a file
+/// there that couldn't be read, kept aside (`whole_file`).
+pub fn load() -> (Vec<Message>, Option<crate::whole_file::Unread>) {
+    let (mut messages, unread) = file().map_or((Vec::new(), None), |path| load_from(&path));
     adopt_quick_message(&mut messages);
-    messages
+    (messages, unread)
 }
 
-pub fn save(messages: &[Message]) -> Result<(), String> {
+fn load_from(path: &std::path::Path) -> (Vec<Message>, Option<crate::whole_file::Unread>) {
+    crate::whole_file::read_or_default(path, crate::whole_file::What::Messages, |text| {
+        serde_json::from_str(text).map_err(|e| e.to_string())
+    })
+}
+
+/// The messages' file and what goes in it, for the library's writer to write (`writer`), paced (`writer::Paced`). The
+/// error is a plain sentence.
+pub fn to_save(messages: &[Message]) -> Result<crate::writer::Save, String> {
     let path = file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            tf(
-                "media.no_folder",
-                "Could not make the app's folder: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })?;
-    }
-    crate::whole_file::write(&path, serde_json::to_string_pretty(messages).unwrap_or_default().as_bytes()).map_err(
-        |e| {
-            tf(
-                "tools.messages.not_saved",
-                "Could not save the messages: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        },
-    )
+    Ok(to_save_at(path, messages))
+}
+
+fn to_save_at(path: std::path::PathBuf, messages: &[Message]) -> crate::writer::Save {
+    let text = serde_json::to_string_pretty(messages).unwrap_or_default();
+    crate::whole_file::settings_save(path, crate::whole_file::What::Messages, text.into_bytes())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_messages_file_that_cant_be_read_is_kept_aside_and_never_saved_over() {
+        let good = serde_json::to_string_pretty(&vec![Message::new("Parking".to_owned())]).unwrap();
+        crate::whole_file::tests::check_loader(
+            "messages.json",
+            crate::whole_file::What::Messages,
+            good.as_bytes(),
+            |path| load_from(path).1,
+            |path| crate::whole_file::tests::written(to_save_at(path.to_owned(), &[])),
+        );
+    }
 
     #[test]
     fn the_message_for_words_shown_once_is_found_by_its_mark_not_its_name() {

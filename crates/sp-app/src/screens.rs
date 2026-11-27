@@ -946,25 +946,16 @@ fn load_from(path: &std::path::Path) -> (Option<Vec<Screen>>, Option<crate::whol
     }
 }
 
-pub fn save(screens: &[Screen]) -> Result<(), String> {
+/// The screens' file and what goes in it, for the library's writer to write (`writer`), paced (`writer::Paced`). The
+/// error is a plain sentence.
+pub fn to_save(screens: &[Screen]) -> Result<crate::writer::Save, String> {
     let path = file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
-    save_to(&path, screens)
+    Ok(to_save_at(path, screens))
 }
 
-fn save_to(path: &std::path::Path, screens: &[Screen]) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            tf(
-                "media.no_folder",
-                "Could not make the app's folder: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })?;
-    }
-    crate::whole_file::write(path, to_json(screens).as_bytes()).map_err(|e| {
-        tf("screens.not_saved", "Could not save the screens: {error}", &[("error", &crate::notices::write_problem(&e))])
-    })
+fn to_save_at(path: std::path::PathBuf, screens: &[Screen]) -> crate::writer::Save {
+    crate::whole_file::settings_save(path, crate::whole_file::What::Screens, to_json(screens).into_bytes())
 }
 
 #[cfg(test)]
@@ -982,7 +973,7 @@ mod tests {
                 assert_eq!(screens.is_some(), unread.is_none(), "a good file's screens, or none");
                 unread
             },
-            |path| save_to(path, &starting(None)).unwrap(),
+            |path| crate::whole_file::tests::written(to_save_at(path.to_owned(), &starting(None))),
         );
         // A file listing no screens is no damage: the screens are made anew, as with no file.
         let dir = crate::whole_file::tests::TestDir::new("no-screens");

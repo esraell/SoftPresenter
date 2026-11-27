@@ -281,29 +281,20 @@ fn load_from(path: &std::path::Path) -> (Vec<Macro>, Option<crate::whole_file::U
     })
 }
 
-pub fn save(macros: &[Macro]) -> Result<(), String> {
+/// The macros' file and what goes in it, for the library's writer to write (`writer`), paced (`writer::Paced`). The
+/// error is a plain sentence.
+pub fn to_save(macros: &[Macro]) -> Result<crate::writer::Save, String> {
     let path = file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
-    save_to(&path, macros)
+    Ok(to_save_at(path, macros))
 }
 
-fn save_to(path: &std::path::Path, macros: &[Macro]) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            tf(
-                "media.no_folder",
-                "Could not make the app's folder: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })?;
-    }
-    crate::whole_file::write(path, serde_json::to_string_pretty(macros).unwrap_or_default().as_bytes()).map_err(|e| {
-        tf(
-            "tools.macros.not_saved",
-            "Could not save the macros: {error}",
-            &[("error", &crate::notices::write_problem(&e))],
-        )
-    })
+fn to_save_at(path: std::path::PathBuf, macros: &[Macro]) -> crate::writer::Save {
+    crate::whole_file::settings_save(
+        path,
+        crate::whole_file::What::Macros,
+        serde_json::to_string_pretty(macros).unwrap_or_default().into_bytes(),
+    )
 }
 
 #[cfg(test)]
@@ -321,7 +312,7 @@ mod tests {
             crate::whole_file::What::Macros,
             good.as_bytes(),
             |path| load_from(path).1,
-            |path| save_to(path, &[]).unwrap(),
+            |path| crate::whole_file::tests::written(to_save_at(path.to_owned(), &[])),
         );
     }
 

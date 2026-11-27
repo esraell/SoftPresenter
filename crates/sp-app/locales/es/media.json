@@ -57,7 +57,6 @@
   "media.announce.play": "Reproducir en la capa de anuncios",
   "media.nothing_to_play": "Esa lista multimedia no tiene nada que reproducir",
   "media.no_place": "No se encontró dónde guardar los ajustes en este ordenador.",
-  "media.no_folder": "No se pudo crear la carpeta de la aplicación: {error}",
   "media.not_saved": "No se pudo guardar la lista multimedia: {error}",
   "media.ffmpeg.mac": "Los vídeos MP4 y MOV se reproducen sin él.",
   "media.ffmpeg.windows": "Pon ffmpeg.exe en la misma carpeta que el programa.",

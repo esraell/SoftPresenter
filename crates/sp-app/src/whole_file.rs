@@ -6,10 +6,11 @@
 //!   never over a copy kept before), and the app starts from the usual settings. So what was in
 //!   it is never saved over. The operator is told once, in the notices ([`tell`]), and the log
 //!   says why. A file that isn't there is the usual settings, and nothing is said.
-//! - **A file is written whole** ([`write`]): under a name of its own beside it, flushed to the
-//!   disk, then renamed into place, and its folder flushed after (where the system can: not
-//!   Windows), so a power cut leaves the old file or the new one, never an empty or half-written
-//!   one. A save that fails takes its half-written file away.
+//! - **A file is written whole** ([`replace`]): under a name of its own beside it, flushed to the
+//!   disk, then renamed into place (on Windows by a rename written through to the disk,
+//!   `sp_winapi::move_written_through`), and its folder flushed after (on a Mac and Linux:
+//!   Windows can't open a folder to flush it), so a power cut leaves the old file or the new one,
+//!   never an empty or half-written one. A save that fails takes its half-written file away.
 //!
 //! A file the app isn't allowed to open (macOS kept it out of Documents) that can't be moved
 //! either is left where it is, and only the log says so: no save can go over it while its folder
@@ -18,17 +19,18 @@
 //! can't be opened for another reason, or can't be read, and can't be moved is told, saying the
 //! old file couldn't be kept.
 //!
-//! These files are small, but flushing one to the disk waits for the disk: on an Apple silicon
-//! Mac about 5.4 ms a file through the library's writer, 10.8 ms for a settings file with its
-//! folder. None is written on the screens' thread; the library's files are written on the
-//! library's writer's thread (`writer.rs`), which flushes a folder once after a run of files
-//! into it, and the small settings files on the window's.
+//! These files are small, but flushing one waits for the disk: on an Apple silicon Mac about
+//! 5.4 ms a file, 10.8 ms with its folder. So none is written on the window's thread or the
+//! screens': every one goes to the library's writer (`writer.rs`), which flushes a folder once
+//! after a run of files into it, and the small settings files are paced (`writer::Paced`), so a
+//! slider dragged doesn't write one at every step.
 
 use std::path::{Path, PathBuf};
 
 use crate::i18n::{t, tf};
 
-/// Which settings file couldn't be read, which says what the operator is told.
+/// Which settings file it is, which says what the operator is told when it can't be read or
+/// saved.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum What {
     Screens,
@@ -39,6 +41,37 @@ pub enum What {
     Timers,
     Playlists,
     Libraries,
+    Messages,
+    Props,
+    StageLayouts,
+    BiblePage,
+    BibleHistory,
+}
+
+impl What {
+    /// What the window says when the file couldn't be written: a plain sentence with the
+    /// system's reason.
+    pub fn not_saved(self, error: &std::io::Error) -> String {
+        let error = crate::notices::write_problem(error);
+        let error = [("error", error.as_str())];
+        match self {
+            What::Screens => tf("screens.not_saved", "Could not save the screens: {error}", &error),
+            What::Settings => tf("notices.save.settings", "Could not save the settings: {error}", &error),
+            What::MediaList => tf("media.not_saved", "Could not save the media list: {error}", &error),
+            What::Audio => tf("tools.audio.not_saved", "Could not save the audio list: {error}", &error),
+            What::Macros => tf("tools.macros.not_saved", "Could not save the macros: {error}", &error),
+            What::Timers => tf("tools.timers.not_saved", "Could not save the timers: {error}", &error),
+            What::Playlists => tf("notices.save.services", "Could not save the playlists: {error}", &error),
+            What::Libraries => tf("notices.save.libraries", "Could not save the libraries: {error}", &error),
+            What::Messages => tf("tools.messages.not_saved", "Could not save the messages: {error}", &error),
+            What::Props => tf("tools.props.not_saved", "Could not save the props: {error}", &error),
+            What::StageLayouts => tf("tools.stage.not_saved", "Could not save the stage layouts: {error}", &error),
+            What::BiblePage => {
+                tf("notices.save.bible_page", "Could not save the Bible page's settings: {error}", &error)
+            }
+            What::BibleHistory => tf("notices.save.bible_history", "Could not save the Bible history: {error}", &error),
+        }
+    }
 }
 
 /// A settings file that was there but couldn't be read, and where it was kept.
@@ -81,6 +114,22 @@ impl Unread {
             What::Libraries => {
                 t("notices.unread.libraries", "SoftPresenter couldn't read its libraries, so it started with none.")
             }
+            What::Messages => {
+                t("notices.unread.messages", "SoftPresenter couldn't read its messages, so it started with none.")
+            }
+            What::Props => t("notices.unread.props", "SoftPresenter couldn't read its props, so it started with none."),
+            What::StageLayouts => t(
+                "notices.unread.stage_layouts",
+                "SoftPresenter couldn't read its stage layouts, so it started with the usual ones.",
+            ),
+            What::BiblePage => t(
+                "notices.unread.bible_page",
+                "SoftPresenter couldn't read how the Bible page was set up, so it opens as usual.",
+            ),
+            What::BibleHistory => t(
+                "notices.unread.bible_history",
+                "SoftPresenter couldn't read the Bible passages looked up before, so the history starts empty.",
+            ),
         };
         let then = match &self.kept {
             Ok(kept) => tf(
@@ -92,6 +141,15 @@ impl Unread {
         };
         format!("{first} {then}")
     }
+}
+
+/// A settings file's save, for the library's writer to write (`writer`), paced
+/// (`writer::Paced`): over whatever is there, its folder made if it isn't.
+pub fn settings_save(path: PathBuf, what: What, bytes: Vec<u8>) -> crate::writer::Save {
+    let mut save =
+        crate::writer::Save::new(path, crate::writer::Kind::Settings(what), crate::writer::Guard::Any, || bytes);
+    save.make_folder = true;
+    save
 }
 
 /// Tells the operator of each settings file kept aside: trouble in the notices, once each (and
@@ -195,17 +253,6 @@ fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     written
 }
 
-/// Writes `bytes` to the file at `path` whole, under `<name>.part` first (see the module's notes),
-/// and flushes its folder after.
-pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let name = path.file_name().map_or_else(|| "file".into(), |name| name.to_string_lossy().into_owned());
-    replace(path, &path.with_file_name(format!("{name}.part")), bytes)?;
-    if let Some(folder) = path.parent() {
-        flush_folder(folder);
-    }
-    Ok(())
-}
-
 /// Writes `bytes` into `temporary`, flushes it to the disk and renames it to `path`. The folder
 /// is left for the caller to flush ([`flush_folder`]): the library's writer flushes it once after
 /// a run of files into it. A failure takes `temporary` away.
@@ -215,12 +262,23 @@ pub fn replace(path: &Path, temporary: &Path, bytes: &[u8]) -> std::io::Result<(
         std::io::Write::write_all(&mut file, bytes)?;
         flush(&file)?;
         drop(file);
-        std::fs::rename(temporary, path)
+        rename_into_place(temporary, path)
     })();
     if written.is_err() {
         let _ = std::fs::remove_file(temporary);
     }
     written
+}
+
+/// Renames a file just written into place. On Windows the rename itself is written through to
+/// the disk, as its folder can't be flushed; one it doesn't take (a path longer than Windows' old
+/// limit) is renamed as before.
+fn rename_into_place(temporary: &Path, path: &Path) -> std::io::Result<()> {
+    if cfg!(windows) {
+        sp_winapi::move_written_through(temporary, path).or_else(|_| std::fs::rename(temporary, path))
+    } else {
+        std::fs::rename(temporary, path)
+    }
 }
 
 /// Flushes a file's bytes to the disk (on a Mac, past the disk's own cache too). A disk that
@@ -248,6 +306,15 @@ pub fn flush_folder(folder: &Path) {
 pub mod tests {
     use super::*;
     use crate::notices::{Kind, Notices};
+
+    /// Writes a save as the library's writer does, and waits for it to be written.
+    pub fn written(save: crate::writer::Save) {
+        let writer = crate::writer::Writer::start(|| {});
+        writer.write(save);
+        writer.drain();
+        let done = writer.finished();
+        assert!(done.iter().all(|done| matches!(done, crate::writer::Done::Written { .. })), "{done:?}");
+    }
 
     /// A folder of a test's own, removed after.
     pub struct TestDir(pub PathBuf);
@@ -323,7 +390,7 @@ pub mod tests {
                 let said: Vec<_> = notices.entries().collect();
                 assert_eq!(said.len(), 1, "{file} {how}");
                 assert_eq!(said[0].kind, Kind::Trouble, "{file} {how}");
-                assert!(said[0].text.starts_with("SoftPresenter couldn't read its "), "{}", said[0].text);
+                assert!(said[0].text.starts_with("SoftPresenter couldn't read "), "{}", said[0].text);
                 assert!(
                     said[0].text.ends_with(&format!(" The old file is kept as {}.", kept.display())),
                     "{}",
@@ -402,7 +469,7 @@ pub mod tests {
         // Run as the system's administrator, which every file lets in, there is nothing to check.
         let checked = std::fs::read(&path).is_err().then(|| {
             let timers = read(&path, What::Timers, |_| -> Result<u32, String> { Ok(1) });
-            let saved = write(&path, b"[1]");
+            let saved = replace(&path, &folder.join("timers.json.part"), b"[1]");
             let other = read(&other, What::Macros, |_| -> Result<u32, String> { Ok(1) });
             (
                 matches!(timers, Ok(None)),
@@ -457,25 +524,67 @@ pub mod tests {
         });
     }
 
+    /// Not a check: how long one settings file's save takes on this computer, flushed as the
+    /// writer flushes it, and 300 songs through the library's writer. In the system's temporary
+    /// folder (`TEMP` on Windows, `TMPDIR` elsewhere):
+    /// `cargo test -p sp-app whole_file::tests::how_long_flushed_saves_take -- --ignored --nocapture`
+    #[test]
+    #[ignore = "a timing, not a check"]
+    fn how_long_flushed_saves_take() {
+        let dir = TestDir::new("timing");
+        let body = vec![b' '; 3000];
+        let (path, part) = (dir.0.join("preferences.json"), dir.0.join("preferences.json.part"));
+        const RUNS: u32 = 50;
+        let began = std::time::Instant::now();
+        for _ in 0..RUNS {
+            replace(&path, &part, &body).unwrap();
+            flush_folder(&dir.0);
+        }
+        let one = began.elapsed() / RUNS;
+        let songs = dir.0.join("Songs");
+        std::fs::create_dir_all(&songs).unwrap();
+        let writer = crate::writer::Writer::start(|| {});
+        let began = std::time::Instant::now();
+        for n in 0..300 {
+            let body = body.clone();
+            let song = songs.join(format!("{n}.sppres"));
+            writer.write(crate::writer::Save::new(
+                song,
+                crate::writer::Kind::Song,
+                crate::writer::Guard::Any,
+                move || body,
+            ));
+        }
+        writer.drain();
+        let all = began.elapsed();
+        eprintln!(
+            "TIMING one settings save: {:.1} ms; 300 songs through the writer: {:.2} s ({:.1} ms a song)",
+            one.as_secs_f64() * 1000.0,
+            all.as_secs_f64(),
+            all.as_secs_f64() * 1000.0 / 300.0
+        );
+    }
+
     #[test]
     fn a_file_is_written_whole_and_a_failed_save_leaves_nothing_half_written() {
         let dir = TestDir::new("write");
         let path = dir.0.join("macros.json");
-        write(&path, b"[1]").unwrap();
-        write(&path, b"[1, 2]").unwrap();
+        let part = |path: &Path| path.with_file_name(format!("{}.part", path.file_name().unwrap().to_string_lossy()));
+        replace(&path, &part(&path), b"[1]").unwrap();
+        replace(&path, &part(&path), b"[1, 2]").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"[1, 2]");
         assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 1, "only the file");
         // A save that can't be renamed into place (a folder is in the way) takes its half-written
         // file away.
         let blocked = dir.0.join("timers.json");
         std::fs::create_dir_all(blocked.join("inside")).unwrap();
-        assert!(write(&blocked, b"[3]").is_err());
+        assert!(replace(&blocked, &part(&blocked), b"[3]").is_err());
         assert!(!dir.0.join("timers.json.part").exists(), "no half-written file is left");
-        // So does one whose half-written file can't be finished, through `replace`.
-        let part = dir.0.join(".song.sppres.saving");
+        // So does a song's.
+        let saving = dir.0.join(".song.sppres.saving");
         std::fs::create_dir_all(dir.0.join("Songs")).unwrap();
-        assert!(replace(&dir.0.join("Songs"), &part, b"{}").is_err());
-        assert!(!part.exists(), "no half-written file is left");
+        assert!(replace(&dir.0.join("Songs"), &saving, b"{}").is_err());
+        assert!(!saving.exists(), "no half-written file is left");
         flush_folder(&dir.0);
     }
 }

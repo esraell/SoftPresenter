@@ -54,7 +54,6 @@
   "media.new_playlist": "Новий медіасписок…",
   "media.new_playlist.hint": "Додавайте до нього медіа з контекстного меню кожного пункту",
   "media.new_playlist.name": "Новий медіасписок",
-  "media.no_folder": "Не вдалося створити папку програми: {error}",
   "media.no_place": "Не вдалося знайти, де зберігати налаштування на цьому компʼютері.",
   "media.not_media": "{name}: це не зображення і не відео, яке SoftPresenter може відкрити (як-от PNG, JPEG, HEIC, TIFF, MP4 чи MOV).",
   "media.not_opened": "{name}: не вдалося відкрити ({error}).",

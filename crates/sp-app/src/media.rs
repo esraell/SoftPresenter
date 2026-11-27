@@ -408,7 +408,7 @@ fn list_to_save_at(path: PathBuf, list: &List) -> crate::writer::Save {
 
 /// What the window says when the media bin couldn't be written.
 pub fn list_not_saved(error: &std::io::Error) -> String {
-    tf("media.not_saved", "Could not save the media list: {error}", &[("error", &crate::notices::write_problem(error))])
+    crate::whole_file::What::MediaList.not_saved(error)
 }
 
 /// Videos by their names. macOS's own player plays MP4 and MOV; FFmpeg plays the rest (and any

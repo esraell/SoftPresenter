@@ -22,11 +22,17 @@
 //!
 //! What happened comes back as [`Done`]s, which the main thread takes with
 //! [`Writer::finished`]; the thread wakes it when a save fails or the queue empties.
+//!
+//! The small settings files (the preferences, the screens, the audio list, macros, timers…) are
+//! written here too, so the window never waits for the disk: flushing one takes about 11 ms on an
+//! Apple silicon Mac, and a slider dragged changes the settings at every step. [`Paced`] hands
+//! each one over at most every [`PACE`]: the first change at once, the last always, and those
+//! between them not at all.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::outside::{self, Stamp};
 
@@ -38,6 +44,8 @@ pub enum Kind {
     Playlists,
     Libraries,
     MediaList,
+    /// One of the small settings files.
+    Settings(crate::whole_file::What),
 }
 
 impl Kind {
@@ -46,7 +54,9 @@ impl Kind {
         let name = path.file_name().map_or_else(|| "file".into(), |name| name.to_string_lossy().into_owned());
         match self {
             Kind::Song => path.with_file_name(format!(".{name}.saving")),
-            Kind::Playlists | Kind::Libraries | Kind::MediaList => path.with_file_name(format!("{name}.part")),
+            Kind::Playlists | Kind::Libraries | Kind::MediaList | Kind::Settings(_) => {
+                path.with_file_name(format!("{name}.part"))
+            }
         }
     }
 
@@ -61,6 +71,7 @@ impl Kind {
             Kind::Playlists => crate::service::not_saved(error),
             Kind::Libraries => crate::libraries::not_saved(error),
             Kind::MediaList => crate::media::list_not_saved(error),
+            Kind::Settings(what) => what.not_saved(error),
         }
     }
 }
@@ -277,6 +288,58 @@ impl Writer {
     }
 }
 
+/// How far apart [`Paced`] hands over saves of one settings file at most.
+pub const PACE: Duration = Duration::from_millis(300);
+
+/// Saves of the small settings files, each handed to the [`Writer`] at most once every [`PACE`].
+/// The first change of a file goes at once; a change within [`PACE`] of the last save handed over
+/// waits, taking the place of any waiting before it, and goes when its time comes
+/// ([`Paced::tick`], which says when that is). At quit, [`Paced::flush`] hands over everything
+/// waiting.
+#[derive(Default)]
+pub struct Paced {
+    /// When each file's last save was handed over.
+    last: HashMap<PathBuf, Instant>,
+    /// The newest save of each file waiting for its time.
+    waiting: HashMap<PathBuf, Save>,
+}
+
+impl Paced {
+    /// A settings file changed: its save is handed over now, or waits.
+    pub fn save(&mut self, writer: &Writer, save: Save, now: Instant) {
+        if self.last.get(&save.path).is_some_and(|last| now < *last + PACE) {
+            self.waiting.insert(save.path.clone(), save);
+            return;
+        }
+        self.waiting.remove(&save.path);
+        self.last.insert(save.path.clone(), now);
+        writer.write(save);
+    }
+
+    /// Hands over the saves whose time has come, and says when the next one waiting is due.
+    pub fn tick(&mut self, writer: &Writer, now: Instant) -> Option<Instant> {
+        let due = |last: Option<&Instant>| last.map(|last| *last + PACE);
+        let ready: Vec<PathBuf> =
+            self.waiting.keys().filter(|path| due(self.last.get(*path)).is_none_or(|at| at <= now)).cloned().collect();
+        for path in ready {
+            if let Some(save) = self.waiting.remove(&path) {
+                self.last.insert(path, now);
+                writer.write(save);
+            }
+        }
+        self.waiting.keys().filter_map(|path| due(self.last.get(path))).min()
+    }
+
+    /// Hands over every save waiting, whatever the time: at quit, before the writer is waited for.
+    pub fn flush(&mut self, writer: &Writer) {
+        let now = Instant::now();
+        for (path, save) in std::mem::take(&mut self.waiting) {
+            self.last.insert(path, now);
+            writer.write(save);
+        }
+    }
+}
+
 impl Drop for Writer {
     /// What is still waiting is written before the thread ends, and the app with it.
     fn drop(&mut self) {
@@ -438,6 +501,51 @@ mod tests {
 
     fn quiet() -> Writer {
         Writer::spawn(Box::new(|| {}), None)
+    }
+
+    #[test]
+    fn a_burst_of_settings_changes_is_written_a_few_times_and_the_last_always() {
+        use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+        let dir = TempDir::new("paced");
+        let path = dir.0.join("preferences.json");
+        let writer = quiet();
+        let written = Arc::new(AtomicUsize::new(0));
+        let save = |n: u64| {
+            let written = written.clone();
+            Save::new(path.clone(), Kind::Settings(crate::whole_file::What::Settings), Guard::Any, move || {
+                written.fetch_add(1, SeqCst);
+                n.to_string().into_bytes()
+            })
+        };
+        let on_disk = || std::fs::read_to_string(&path).unwrap_or_default();
+        let mut paced = Paced::default();
+        // Thirty changes in a second, as a slider dragged makes them, the loop looking at the
+        // clock after each, and the writer keeping up (so each save handed over is a file
+        // written, not one the writer's queue let a later one take the place of).
+        let t0 = Instant::now();
+        for n in 0..30 {
+            let now = t0 + Duration::from_millis(n * 1000 / 30);
+            paced.save(&writer, save(n), now);
+            assert!(paced.tick(&writer, now).is_none_or(|due| due > now), "nothing due is left waiting");
+            writer.drain();
+        }
+        // The last change goes once its time comes, and then nothing waits.
+        let end = t0 + Duration::from_secs(1);
+        let due = paced.tick(&writer, end).expect("the last change waits for its time");
+        assert!(due <= end + PACE);
+        assert_eq!(paced.tick(&writer, due), None);
+        writer.drain();
+        assert_eq!(on_disk(), "29", "the last change is on disk");
+        let times = written.load(SeqCst);
+        let most = 1 + (1000 / PACE.as_millis()) as usize + 1;
+        assert!((2..=most).contains(&times), "written {times} times, not at most {most}");
+        // At quit, a change waiting for its time is handed over at once.
+        paced.save(&writer, save(30), due + Duration::from_millis(1));
+        assert_eq!(on_disk(), "29", "it waits");
+        paced.flush(&writer);
+        writer.drain();
+        assert_eq!(on_disk(), "30", "on disk at quit");
+        assert_eq!(paced.tick(&writer, Instant::now()), None);
     }
 
     fn save(path: &Path, text: &str, guard: Guard) -> Save {

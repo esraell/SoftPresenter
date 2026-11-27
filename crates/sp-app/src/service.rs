@@ -1017,29 +1017,17 @@ pub fn peek_prefs() -> Prefs {
 }
 
 /// Remembers the choices for the next start.
-pub fn save_prefs(prefs: &Prefs) -> Result<(), String> {
+/// The choices' file and what goes in it, for the library's writer to write (`writer`), paced
+/// (`writer::Paced`), so they are as they were at the next start. The error is a plain sentence.
+pub fn prefs_to_save(prefs: &Prefs) -> Result<crate::writer::Save, String> {
     let path = prefs_file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
-    save_prefs_to(&path, prefs)
+    Ok(prefs_to_save_at(path, prefs))
 }
 
-fn save_prefs_to(path: &std::path::Path, prefs: &Prefs) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            tf(
-                "media.no_folder",
-                "Could not make the app's folder: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })?;
-    }
-    crate::whole_file::write(path, serde_json::to_string_pretty(prefs).unwrap_or_default().as_bytes()).map_err(|e| {
-        tf(
-            "notices.save.settings",
-            "Could not save the settings: {error}",
-            &[("error", &crate::notices::write_problem(&e))],
-        )
-    })
+fn prefs_to_save_at(path: std::path::PathBuf, prefs: &Prefs) -> crate::writer::Save {
+    let text = serde_json::to_string_pretty(prefs).unwrap_or_default();
+    crate::whole_file::settings_save(path, crate::whole_file::What::Settings, text.into_bytes())
 }
 
 fn bible_page_file() -> Option<std::path::PathBuf> {
@@ -1062,69 +1050,57 @@ fn bible_history_file() -> Option<std::path::PathBuf> {
     crate::bible_store::data_dir().map(|dir| dir.join("bible-history.json"))
 }
 
-/// The passages that were on screen, newest first. Nothing if there is no file yet.
-pub fn load_bible_history() -> Vec<HistoryEntry> {
-    bible_history_file().map(|path| load_history_from(&path)).unwrap_or_default()
+/// The passages that were on screen, newest first, nothing if there is no file yet; and a file
+/// there that couldn't be read, kept aside (`whole_file`).
+pub fn load_bible_history() -> (Vec<HistoryEntry>, Option<crate::whole_file::Unread>) {
+    bible_history_file().map_or((Vec::new(), None), |path| load_history_from(&path))
 }
 
-fn load_history_from(path: &std::path::Path) -> Vec<HistoryEntry> {
-    std::fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+fn load_history_from(path: &std::path::Path) -> (Vec<HistoryEntry>, Option<crate::whole_file::Unread>) {
+    crate::whole_file::read_or_default(path, crate::whole_file::What::BibleHistory, |text| {
+        serde_json::from_str(text).map_err(|e| e.to_string())
+    })
 }
 
-/// Keeps the passages that were on screen, for the next start.
-pub fn save_bible_history(history: &[HistoryEntry]) -> Result<(), String> {
+/// The passages that were on screen, for the library's writer to keep for the next start
+/// (`writer`), paced (`writer::Paced`). The error is a plain sentence.
+pub fn bible_history_to_save(history: &[HistoryEntry]) -> Result<crate::writer::Save, String> {
     let path = bible_history_file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
-    save_history_in(&path, history)
+    Ok(history_to_save_at(path, history))
 }
 
-fn save_history_in(path: &std::path::Path, history: &[HistoryEntry]) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            tf(
-                "media.no_folder",
-                "Could not make the app's folder: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })?;
-    }
+fn history_to_save_at(path: std::path::PathBuf, history: &[HistoryEntry]) -> crate::writer::Save {
     let text = serde_json::to_string_pretty(history).unwrap_or_default();
-    crate::whole_file::write(path, text.as_bytes()).map_err(|e| {
-        tf(
-            "notices.save.bible_history",
-            "Could not save the Bible history: {error}",
-            &[("error", &crate::notices::write_problem(&e))],
-        )
-    })
+    crate::whole_file::settings_save(path, crate::whole_file::What::BibleHistory, text.into_bytes())
 }
 
-/// How the Bible page was last set up: its translations, boxes and slide options.
-pub fn load_bible_page() -> Option<SavedPassage> {
-    let text = std::fs::read_to_string(bible_page_file()?).ok()?;
-    serde_json::from_str(&text).ok()
+/// How the Bible page was last set up (its translations, boxes and slide options), if it was;
+/// and a file there that couldn't be read, kept aside (`whole_file`).
+pub fn load_bible_page() -> (Option<SavedPassage>, Option<crate::whole_file::Unread>) {
+    bible_page_file().map_or((None, None), |path| load_bible_page_from(&path))
 }
 
-/// Remembers how the Bible page is set up, for the next start.
-pub fn save_bible_page(page: &SavedPassage) -> Result<(), String> {
+fn load_bible_page_from(path: &std::path::Path) -> (Option<SavedPassage>, Option<crate::whole_file::Unread>) {
+    match crate::whole_file::read(path, crate::whole_file::What::BiblePage, |text| {
+        serde_json::from_str(text).map_err(|e| e.to_string())
+    }) {
+        Ok(page) => (page, None),
+        Err(unread) => (None, Some(unread)),
+    }
+}
+
+/// How the Bible page is set up, for the library's writer to keep for the next start (`writer`),
+/// paced (`writer::Paced`). The error is a plain sentence.
+pub fn bible_page_to_save(page: &SavedPassage) -> Result<crate::writer::Save, String> {
     let path = bible_page_file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            tf(
-                "media.no_folder",
-                "Could not make the app's folder: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })?;
-    }
+    Ok(bible_page_to_save_at(path, page))
+}
+
+fn bible_page_to_save_at(path: std::path::PathBuf, page: &SavedPassage) -> crate::writer::Save {
     let text = serde_json::to_string_pretty(page).unwrap_or_default();
-    crate::whole_file::write(&path, text.as_bytes()).map_err(|e| {
-        tf(
-            "notices.save.bible_page",
-            "Could not save the Bible page's settings: {error}",
-            &[("error", &crate::notices::write_problem(&e))],
-        )
-    })
+    crate::whole_file::settings_save(path, crate::whole_file::What::BiblePage, text.into_bytes())
 }
 
 fn file() -> Option<std::path::PathBuf> {
@@ -1145,11 +1121,7 @@ fn load_from(path: &std::path::Path) -> (Services, Option<crate::whole_file::Unr
 /// What the window says when the playlists couldn't be written: a plain sentence with the
 /// system's reason.
 pub fn not_saved(error: &std::io::Error) -> String {
-    tf(
-        "notices.save.services",
-        "Could not save the playlists: {error}",
-        &[("error", &crate::notices::write_problem(error))],
-    )
+    crate::whole_file::What::Playlists.not_saved(error)
 }
 
 /// The services' file and what goes in it, for the library's writer to write (`writer`). The
@@ -1175,14 +1147,6 @@ fn to_save_at(path: std::path::PathBuf, services: &Services) -> crate::writer::S
 mod tests {
     use super::*;
 
-    /// Writes a save as the library's writer does, and waits for it.
-    fn written(save: crate::writer::Save) {
-        let writer = crate::writer::Writer::start(|| {});
-        writer.write(save);
-        writer.drain();
-        assert!(writer.finished().iter().all(|done| matches!(done, crate::writer::Done::Written { .. })));
-    }
-
     #[test]
     fn a_settings_file_that_cant_be_read_is_kept_aside_and_never_saved_over() {
         let mut prefs = Prefs { ccli_licence: "12345".to_owned(), ..Prefs::default() };
@@ -1201,7 +1165,50 @@ mod tests {
                 }
                 unread
             },
-            |path| save_prefs_to(path, &Prefs::default()).unwrap(),
+            |path| crate::whole_file::tests::written(prefs_to_save_at(path.to_owned(), &Prefs::default())),
+        );
+    }
+
+    #[test]
+    fn a_bible_page_file_that_cant_be_read_is_kept_aside_and_never_saved_over() {
+        let page = SavedPassage {
+            lookup: String::new(),
+            numbering: None,
+            rows: Vec::new(),
+            show_verse_numbers: true,
+            break_on_new_verse: false,
+            display_translation: true,
+            reference_style: "passage_last".to_owned(),
+            show_with: None,
+        };
+        let good = serde_json::to_string_pretty(&page).unwrap();
+        crate::whole_file::tests::check_loader(
+            "bible-page.json",
+            crate::whole_file::What::BiblePage,
+            good.as_bytes(),
+            |path| {
+                let (read, unread) = load_bible_page_from(path);
+                assert_eq!(read.is_some(), unread.is_none(), "the page as it was, or as usual");
+                unread
+            },
+            |path| crate::whole_file::tests::written(bible_page_to_save_at(path.to_owned(), &page)),
+        );
+    }
+
+    #[test]
+    fn a_bible_history_file_that_cant_be_read_is_kept_aside_and_never_saved_over() {
+        let history = vec![HistoryEntry {
+            passage: "John 3:16".to_owned(),
+            at: "2026-11-19T10:42:05".to_owned(),
+            numbering: None,
+        }];
+        let good = serde_json::to_string_pretty(&history).unwrap();
+        crate::whole_file::tests::check_loader(
+            "bible-history.json",
+            crate::whole_file::What::BibleHistory,
+            good.as_bytes(),
+            |path| load_history_from(path).1,
+            |path| crate::whole_file::tests::written(history_to_save_at(path.to_owned(), &[])),
         );
     }
 
@@ -1215,7 +1222,7 @@ mod tests {
             crate::whole_file::What::Playlists,
             good.as_bytes(),
             |path| load_from(path).1,
-            |path| written(to_save_at(path.to_owned(), &Services::default())),
+            |path| crate::whole_file::tests::written(to_save_at(path.to_owned(), &Services::default())),
         );
     }
 
@@ -1314,7 +1321,7 @@ mod tests {
     fn the_bible_history_comes_back_as_it_was_saved() {
         let path =
             std::env::temp_dir().join(format!("softpresenter-history-{}/bible-history.json", std::process::id()));
-        assert!(load_history_from(&path).is_empty(), "no file yet is no history");
+        assert!(load_history_from(&path).0.is_empty(), "no file yet is no history");
         let history = vec![
             HistoryEntry { passage: "John 3:16".to_owned(), at: "2026-11-19T10:42:05".to_owned(), numbering: None },
             HistoryEntry {
@@ -1323,8 +1330,8 @@ mod tests {
                 numbering: Some("english".to_owned()),
             },
         ];
-        save_history_in(&path, &history).unwrap();
-        assert_eq!(load_history_from(&path), history);
+        crate::whole_file::tests::written(history_to_save_at(path.clone(), &history));
+        assert_eq!(load_history_from(&path).0, history);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

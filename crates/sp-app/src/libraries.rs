@@ -2,7 +2,7 @@
 //! can be in any number of them; a library only lists songs, by their keys (a library song's
 //! id). Kept in `libraries.json`, which before version 2 was a bare list naming songs by path.
 
-use crate::i18n::{t, tf};
+use crate::i18n::t;
 use serde::{Deserialize, Serialize};
 use sp_model::Uuid;
 
@@ -114,11 +114,7 @@ fn to_save_at(path: std::path::PathBuf, libraries: &[Library]) -> crate::writer:
 
 /// What the window says when the libraries couldn't be written.
 pub fn not_saved(error: &std::io::Error) -> String {
-    tf(
-        "notices.save.libraries",
-        "Could not save the libraries: {error}",
-        &[("error", &crate::notices::write_problem(error))],
-    )
+    crate::whole_file::What::Libraries.not_saved(error)
 }
 
 #[cfg(test)]

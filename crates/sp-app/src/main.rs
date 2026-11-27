@@ -2353,6 +2353,9 @@ struct App {
     /// The settings files the start couldn't read, kept aside (`whole_file`): told in the notices
     /// once the window's state is made.
     unread: Vec<whole_file::Unread>,
+    /// The small settings files' saves, handed to the library's writer at most every
+    /// `writer::PACE` each, so the window never waits for the disk.
+    paced: writer::Paced,
     unsaved_since: Option<Instant>,
     /// Whether the Edit view was open at the last drawing (leaving it writes what was changed).
     was_editing: bool,
@@ -4063,10 +4066,8 @@ impl App {
             }
             None => {}
         }
-        if std::mem::take(&mut state.audio_changed)
-            && let Err(problem) = audio::save(&state.audio)
-        {
-            state.notices.trouble(problem);
+        if std::mem::take(&mut state.audio_changed) {
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, audio::to_save(&state.audio));
         }
         self.tick_audio();
     }
@@ -8922,11 +8923,9 @@ impl App {
         if differs {
             running.home_window.request_redraw();
         }
-        if std::mem::take(&mut running.home_state.screens_changed)
-            && !quiet
-            && let Err(problem) = screens::save(&running.home_state.screens)
-        {
-            running.home_state.notices.trouble(problem);
+        if std::mem::take(&mut running.home_state.screens_changed) && !quiet {
+            let save = screens::to_save(&running.home_state.screens);
+            save_setting(&mut self.paced, &self.writer, &mut running.home_state.notices, save);
         }
         let list = running.home_state.screens.clone();
         let mut placed = screens::place_all(&list, &displays, &operator);
@@ -9572,6 +9571,7 @@ impl App {
             eprintln!("resize aid done");
             // What the library's writer holds is written first: the exit skips its own wait (and
             // the end of `main`, where the run is noted as quit).
+            self.paced.flush(&self.writer);
             self.writer.drain();
             applog::last_run::ended();
             finish_replies();
@@ -10908,30 +10908,25 @@ impl App {
             return;
         };
         let state = &mut running.home_state;
-        if std::mem::take(&mut state.timers_changed)
-            && let Err(problem) = timers::save(&state.timers)
-        {
-            state.notices.trouble(problem);
+        if std::mem::take(&mut state.timers_changed) {
+            let save = timers::to_save(&state.timers);
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
         }
-        if std::mem::take(&mut state.messages_changed)
-            && let Err(problem) = messages::save(&state.messages)
-        {
-            state.notices.trouble(problem);
+        if std::mem::take(&mut state.messages_changed) {
+            let save = messages::to_save(&state.messages);
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
         }
-        if std::mem::take(&mut state.props_changed)
-            && let Err(problem) = props::save(&state.props)
-        {
-            state.notices.trouble(problem);
+        if std::mem::take(&mut state.props_changed) {
+            let save = props::to_save(&state.props);
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
         }
-        if std::mem::take(&mut state.macros_changed)
-            && let Err(problem) = macros::save(&state.macros)
-        {
-            state.notices.trouble(problem);
+        if std::mem::take(&mut state.macros_changed) {
+            let save = macros::to_save(&state.macros);
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
         }
-        if std::mem::take(&mut state.stage_layouts_changed)
-            && let Err(problem) = stage::save_layouts(&state.stage_layouts)
-        {
-            state.notices.trouble(problem);
+        if std::mem::take(&mut state.stage_layouts_changed) {
+            let save = stage::layouts_to_save(&state.stage_layouts);
+            save_setting(&mut self.paced, &self.writer, &mut state.notices, save);
         }
         // Handed to the library's writer, after the songs a library has just been given.
         if std::mem::take(&mut state.libraries_changed) {
@@ -11428,6 +11423,7 @@ impl App {
     /// the screens close (their NDI sources stopped, see `NdiOutput::stop`).
     fn begin_quit(&mut self) {
         self.save_unsaved();
+        self.paced.flush(&self.writer);
         self.keep_held_aside();
         // A sync under way is stopped, and the screens close first: nothing waits in front of
         // the audience.
@@ -11462,6 +11458,8 @@ impl App {
         if self.quitting.is_none() {
             self.begin_quit();
         }
+        // A settings change since the quit began is handed over too.
+        self.paced.flush(&self.writer);
         self.finish_saves();
         self.writer.drain();
         self.finish_saves();
@@ -11490,7 +11488,8 @@ impl App {
         }
         // Every file handed to the library's writer is written before the app goes (a big import
         // on a slow disk can take minutes), here in the event loop, so the window still answers.
-        // Said once, after a moment.
+        // Said once, after a moment. A settings change since the quit began is handed over too.
+        self.paced.flush(&self.writer);
         self.finish_saves();
         if !self.writer.is_idle() {
             static SAVING_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -11560,10 +11559,14 @@ impl ApplicationHandler<AppEvent> for App {
         match self.start(el) {
             Ok(Some(mut running)) => {
                 // The Bible page and the small choices are as they were left.
-                if let Some(page) = service::load_bible_page() {
+                let (page, unread) = service::load_bible_page();
+                self.unread.extend(unread);
+                if let Some(page) = page {
                     running.home_state.bible.apply_settings(&page);
                 }
-                running.home_state.bible.history = service::load_bible_history();
+                let (history, unread) = service::load_bible_history();
+                self.unread.extend(unread);
+                running.home_state.bible.history = history;
                 // The language a session of the Bible view starts in, read once on a thread.
                 running.home_state.bible.system_language.start();
                 // The Bibles in use, read on a thread of their own, not as the Bible view opens.
@@ -11593,8 +11596,8 @@ impl ApplicationHandler<AppEvent> for App {
                 running.home_state.screens = screens.unwrap_or_else(|| {
                     let ndi = (prefs.ndi_on && running.home_state.ndi_available).then_some(prefs.ndi_name.as_str());
                     let made = screens::starting(ndi);
-                    if !quiet {
-                        let _ = screens::save(&made);
+                    if !quiet && let Ok(save) = screens::to_save(&made) {
+                        self.paced.save(&self.writer, save, Instant::now());
                     }
                     made
                 });
@@ -11610,8 +11613,12 @@ impl ApplicationHandler<AppEvent> for App {
                 let (timers, unread) = timers::load();
                 self.unread.extend(unread);
                 running.home_state.timers = timers;
-                running.home_state.messages = messages::load();
-                running.home_state.props = props::load();
+                let (messages, unread) = messages::load();
+                self.unread.extend(unread);
+                running.home_state.messages = messages;
+                let (props, unread) = props::load();
+                self.unread.extend(unread);
+                running.home_state.props = props;
                 let (macros, unread) = macros::load();
                 self.unread.extend(unread);
                 running.home_state.macros = macros;
@@ -11619,7 +11626,9 @@ impl ApplicationHandler<AppEvent> for App {
                 self.unread.extend(unread);
                 running.home_state.libraries = libraries;
                 running.home_state.media_playlists = std::mem::take(&mut self.media_playlists);
-                running.home_state.stage_layouts = stage::load_layouts();
+                let (stage_layouts, unread) = stage::load_layouts();
+                self.unread.extend(unread);
+                running.home_state.stage_layouts = stage_layouts;
                 let (audio, unread) = audio::load();
                 self.unread.extend(unread);
                 running.home_state.audio = audio;
@@ -11634,7 +11643,8 @@ impl ApplicationHandler<AppEvent> for App {
                 };
                 let made = macros::from_opening_choice(&mut running.home_state.macros, &opening);
                 if let Some((step, id)) = &made {
-                    let saved = macros::save(&running.home_state.macros);
+                    let save = macros::to_save(&running.home_state.macros);
+                    save_setting(&mut self.paced, &self.writer, &mut running.home_state.notices, save);
                     let what = describe_opening(&self.show, &running.home_state, step);
                     let mut said = crate::i18n::tf(
                         "notices.opening.macro",
@@ -11651,9 +11661,6 @@ impl ApplicationHandler<AppEvent> for App {
                             " (The media playlist used to play behind the slides.)",
                         ));
                     }
-                    if let Err(problem) = saved {
-                        said.push_str(&format!(" {problem}"));
-                    }
                     applog::event("macros", &said);
                     running.home_state.notices.info(said);
                 }
@@ -11661,14 +11668,13 @@ impl ApplicationHandler<AppEvent> for App {
                 if let Some(id) =
                     macros::from_audience_off(&mut running.home_state.macros, audience_off_before, opening_macro)
                 {
-                    let mut said = crate::i18n::tf(
+                    let said = crate::i18n::tf(
                         "notices.opening.audience_off",
                         "Starting with the audience screens off is now the step Audience Screens Off in the macro {macro} in the Macros tab, run when SoftPresenter opens.",
                         &[("macro", &macro_name(&running.home_state.macros, id))],
                     );
-                    if let Err(problem) = macros::save(&running.home_state.macros) {
-                        said.push_str(&format!(" {problem}"));
-                    }
+                    let save = macros::to_save(&running.home_state.macros);
+                    save_setting(&mut self.paced, &self.writer, &mut running.home_state.notices, save);
                     applog::event("macros", &said);
                     running.home_state.notices.info(said);
                 }
@@ -12364,26 +12370,24 @@ impl ApplicationHandler<AppEvent> for App {
                     if now != self.bible_page_saved {
                         let page =
                             service::SavedPassage { lookup: String::new(), ..running.home_state.bible.settings() };
-                        if let Err(problem) = service::save_bible_page(&page) {
-                            running.home_state.notices.trouble(problem);
-                        }
+                        let save = service::bible_page_to_save(&page);
+                        save_setting(&mut self.paced, &self.writer, &mut running.home_state.notices, save);
                         self.bible_page_saved = now;
                     }
                 }
                 // And the passages that were on screen.
                 if let Some(running) = self.running.as_mut()
                     && std::mem::take(&mut running.home_state.bible.history_changed)
-                    && let Err(problem) = service::save_bible_history(&running.home_state.bible.history)
                 {
-                    running.home_state.notices.trouble(problem);
+                    let save = service::bible_history_to_save(&running.home_state.bible.history);
+                    save_setting(&mut self.paced, &self.writer, &mut running.home_state.notices, save);
                 }
                 // So are the small choices: transition, view, slide size.
                 if let Some(running) = self.running.as_mut() {
                     let now = running.home_state.prefs();
                     if self.prefs_saved.as_ref() != Some(&now) && self.frames_since_start > 10 {
-                        if let Err(problem) = service::save_prefs(&now) {
-                            running.home_state.notices.trouble(problem);
-                        }
+                        let save = service::prefs_to_save(&now);
+                        save_setting(&mut self.paced, &self.writer, &mut running.home_state.notices, save);
                         self.prefs_saved = Some(now);
                     }
                     self.frames_since_start = self.frames_since_start.saturating_add(1);
@@ -12536,6 +12540,8 @@ impl ApplicationHandler<AppEvent> for App {
             self.save_unsaved();
         }
         let save_at = self.unsaved_since.map(|since| since + SAVE_AFTER);
+        // Settings files whose saves wait for their time (`writer::Paced`) are handed over.
+        let settings_at = self.paced.tick(&self.writer, Instant::now());
         // `status --wait`s held: answered now if anything changed, or their time is up.
         let waiting_at = self.answer_waiting();
         // Remote Control: what Settings asked, the state for pages (when something has happened,
@@ -12574,6 +12580,7 @@ impl ApplicationHandler<AppEvent> for App {
             (panel_at, "a panel window's next drawing"),
             (thumbs_rest_at, "the thumbnails' painter resting"),
             (save_at, "saving"),
+            (settings_at, "settings to save"),
             (followed_at, "followed folders"),
             (video_at, "the video"),
             (box_video_at, "videos in boxes"),
@@ -12693,6 +12700,20 @@ mod start_steps {
             .map(|pair| format!("{} {} ms", pair[1].0, pair[1].1.duration_since(pair[0].1).as_millis()))
             .collect::<Vec<_>>()
             .join(", ")
+    }
+}
+
+/// Hands a settings file's save to the library's writer, paced (`writer::Paced`), so the window
+/// never waits for the disk; one that can't even be made (no place to keep it) is said.
+fn save_setting(
+    paced: &mut writer::Paced,
+    writer: &writer::Writer,
+    notices: &mut notices::Notices,
+    save: Result<writer::Save, String>,
+) {
+    match save {
+        Ok(save) => paced.save(writer, save, Instant::now()),
+        Err(problem) => notices.trouble(problem),
     }
 }
 
@@ -13145,6 +13166,7 @@ fn main() -> ExitCode {
         voxlive_preview: None,
         media_playlists: Vec::new(),
         unread: Vec::new(),
+        paced: writer::Paced::default(),
         announcing: None,
         stamps,
         writer: {

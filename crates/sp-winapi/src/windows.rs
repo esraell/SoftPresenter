@@ -18,7 +18,10 @@ use windows_sys::Win32::Foundation::{
     LPARAM, LUID, POINT, RECT,
 };
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
-use windows_sys::Win32::Storage::FileSystem::{CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    OPEN_EXISTING,
+};
 use windows_sys::Win32::System::Console::{
     ATTACH_PARENT_PROCESS, AttachConsole, GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
     SetStdHandle,
@@ -416,6 +419,23 @@ pub fn hold_name(name: &str) -> Result<Option<HeldName>, String> {
         return Ok(None);
     }
     Ok(Some(HeldName(handle)))
+}
+
+pub fn move_written_through(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    let wide_path = |path: &std::path::Path| path.as_os_str().encode_wide().collect::<Vec<u16>>();
+    let (mut from, mut to) = (wide_path(from), wide_path(to));
+    // A NUL inside a name would end it early, so another file would be moved: refused instead.
+    if from.contains(&0) || to.contains(&0) {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    }
+    from.push(0);
+    to.push(0);
+    // SAFETY: `from` and `to` are NUL-terminated, hold no other NUL and outlive the call, which
+    // only reads them; the flags are plain values (replace a file there, and return only once
+    // the move is written to the disk).
+    let moved = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
+    if moved == 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
 }
 
 pub fn let_others_come_forward() {

@@ -186,29 +186,20 @@ fn load_from(path: &std::path::Path) -> (Vec<Timer>, Option<crate::whole_file::U
     })
 }
 
-pub fn save(timers: &[Timer]) -> Result<(), String> {
+/// The timers' file and what goes in it, for the library's writer to write (`writer`), paced (`writer::Paced`). The
+/// error is a plain sentence.
+pub fn to_save(timers: &[Timer]) -> Result<crate::writer::Save, String> {
     let path = file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
-    save_to(&path, timers)
+    Ok(to_save_at(path, timers))
 }
 
-fn save_to(path: &std::path::Path, timers: &[Timer]) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            tf(
-                "media.no_folder",
-                "Could not make the app's folder: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })?;
-    }
-    crate::whole_file::write(path, serde_json::to_string_pretty(timers).unwrap_or_default().as_bytes()).map_err(|e| {
-        tf(
-            "tools.timers.not_saved",
-            "Could not save the timers: {error}",
-            &[("error", &crate::notices::write_problem(&e))],
-        )
-    })
+fn to_save_at(path: std::path::PathBuf, timers: &[Timer]) -> crate::writer::Save {
+    crate::whole_file::settings_save(
+        path,
+        crate::whole_file::What::Timers,
+        serde_json::to_string_pretty(timers).unwrap_or_default().into_bytes(),
+    )
 }
 
 #[cfg(test)]
@@ -223,7 +214,7 @@ mod tests {
             crate::whole_file::What::Timers,
             good.as_bytes(),
             |path| load_from(path).1,
-            |path| save_to(path, &[]).unwrap(),
+            |path| crate::whole_file::tests::written(to_save_at(path.to_owned(), &[])),
         );
     }
 

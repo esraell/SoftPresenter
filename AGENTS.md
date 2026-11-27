@@ -197,6 +197,7 @@ process, and nextest gives each test a process of its own). One test alone:
   Metal interface and its `cover` part that puts a screen's window on its display and listens for
   the displays changing, `web_mac` for web pages), `sp-ndi`'s `runtime` module, `sp-winapi`'s `windows` module (the few Windows calls the
   app needs: joining the console a command was typed in, asking a monitor for its work area,
+  renaming a file into place written through to the disk,
   asking Windows the names the monitors give themselves and the country the user's location is set to, reading how much processor time and
   memory the app, the programs it started and the computer use (its `stats` part, for the
   anonymous reports), putting a folder on the user's PATH and

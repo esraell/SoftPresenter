@@ -801,29 +801,20 @@ fn load_from(path: &Path) -> (Library, Option<crate::whole_file::Unread>) {
     crate::whole_file::read_or_default(path, crate::whole_file::What::Audio, Library::from_json)
 }
 
-pub fn save(library: &Library) -> Result<(), String> {
+/// The audio list's file and what goes in it, for the library's writer to write (`writer`), paced (`writer::Paced`). The
+/// error is a plain sentence.
+pub fn to_save(library: &Library) -> Result<crate::writer::Save, String> {
     let path = file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
-    save_to(&path, library)
+    Ok(to_save_at(path, library))
 }
 
-fn save_to(path: &Path, library: &Library) -> Result<(), String> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            tf(
-                "media.no_folder",
-                "Could not make the app's folder: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })?;
-    }
-    crate::whole_file::write(path, serde_json::to_string_pretty(library).unwrap_or_default().as_bytes()).map_err(|e| {
-        tf(
-            "tools.audio.not_saved",
-            "Could not save the audio list: {error}",
-            &[("error", &crate::notices::write_problem(&e))],
-        )
-    })
+fn to_save_at(path: std::path::PathBuf, library: &Library) -> crate::writer::Save {
+    crate::whole_file::settings_save(
+        path,
+        crate::whole_file::What::Audio,
+        serde_json::to_string_pretty(library).unwrap_or_default().into_bytes(),
+    )
 }
 
 #[cfg(test)]
@@ -841,7 +832,7 @@ mod tests {
             crate::whole_file::What::Audio,
             good.as_bytes(),
             |path| load_from(path).1,
-            |path| save_to(path, &Library::default()).unwrap(),
+            |path| crate::whole_file::tests::written(to_save_at(path.to_owned(), &Library::default())),
         );
     }
 

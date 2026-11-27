@@ -461,5 +461,10 @@
   "notices.unread.playlists": "SoftPresenter не зміг прочитати списки, тож почав з одного порожнього.",
   "notices.unread.libraries": "SoftPresenter не зміг прочитати бібліотеки, тож почав без них.",
   "notices.unread.kept": "Старий файл збережено як {file}.",
-  "notices.unread.not_kept": "Зберегти старий файл не вдалося: {error}"
+  "notices.unread.not_kept": "Зберегти старий файл не вдалося: {error}",
+  "notices.unread.messages": "SoftPresenter не зміг прочитати повідомлення, тож почав без них.",
+  "notices.unread.props": "SoftPresenter не зміг прочитати накладки, тож почав без них.",
+  "notices.unread.stage_layouts": "SoftPresenter не зміг прочитати макети сцени, тож почав зі звичайних.",
+  "notices.unread.bible_page": "SoftPresenter не зміг прочитати, як була налаштована сторінка Біблії, тож вона відкривається як зазвичай.",
+  "notices.unread.bible_history": "SoftPresenter не зміг прочитати знайдені раніше місця Біблії, тож історія порожня."
 }

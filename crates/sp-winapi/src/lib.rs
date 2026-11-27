@@ -15,6 +15,21 @@ pub fn attach_parent_console() {
     windows::attach_parent_console();
 }
 
+/// Renames the file `from` to `to`, over a file there, and on Windows returns only once the
+/// rename is written to the disk (MoveFileExW, written through), so a power cut just after leaves
+/// the new file in place: Windows can't flush a folder as a Mac and Linux do. Elsewhere, a plain
+/// rename.
+pub fn move_written_through(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        windows::move_written_through(from, to)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(from, to)
+    }
+}
+
 /// The part of the monitor under this point that the taskbar leaves free, as `(x, y, width,
 /// height)` in pixels, or `None` where it can't be asked.
 pub fn work_area_at(x: i32, y: i32) -> Option<(i32, i32, u32, u32)> {

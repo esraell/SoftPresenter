@@ -461,5 +461,10 @@
   "notices.unread.playlists": "SoftPresenter no ha podido leer las listas, así que ha empezado con una vacía.",
   "notices.unread.libraries": "SoftPresenter no ha podido leer las bibliotecas, así que ha empezado sin ninguna.",
   "notices.unread.kept": "El archivo anterior se conserva como {file}.",
-  "notices.unread.not_kept": "No se ha podido conservar el archivo anterior: {error}"
+  "notices.unread.not_kept": "No se ha podido conservar el archivo anterior: {error}",
+  "notices.unread.messages": "SoftPresenter no ha podido leer los mensajes, así que ha empezado sin ninguno.",
+  "notices.unread.props": "SoftPresenter no ha podido leer los gráficos, así que ha empezado sin ninguno.",
+  "notices.unread.stage_layouts": "SoftPresenter no ha podido leer los diseños del escenario, así que ha empezado con los habituales.",
+  "notices.unread.bible_page": "SoftPresenter no ha podido leer cómo estaba la página de la Biblia, así que se abre como de costumbre.",
+  "notices.unread.bible_history": "SoftPresenter no ha podido leer los pasajes de la Biblia buscados antes, así que el historial empieza vacío."
 }

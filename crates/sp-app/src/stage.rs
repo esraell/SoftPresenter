@@ -457,40 +457,35 @@ fn file() -> Option<std::path::PathBuf> {
     crate::bible_store::data_dir().map(|dir| dir.join("stage-layouts.json"))
 }
 
-/// The stage layouts: the ones saved, or the built-in ones if none are.
-pub fn load_layouts() -> Vec<ThemeTemplate> {
-    file()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| read_layouts(&text))
-        .unwrap_or_else(builtin_layouts)
+/// The stage layouts: the ones saved, or the built-in ones if none are; and a file there that
+/// couldn't be read, kept aside (`whole_file`).
+pub fn load_layouts() -> (Vec<ThemeTemplate>, Option<crate::whole_file::Unread>) {
+    let (layouts, unread) = file().map_or((Vec::new(), None), |path| load_layouts_from(&path));
+    (if layouts.is_empty() { builtin_layouts() } else { layouts }, unread)
 }
 
-/// Layouts from a file's words, each with an object for every item; `None` when there are none
-/// or they cannot be read.
-fn read_layouts(text: &str) -> Option<Vec<ThemeTemplate>> {
-    let layouts = serde_json::from_str::<Vec<ThemeTemplate>>(text).ok()?;
-    (!layouts.is_empty()).then(|| layouts.iter().map(normalized).collect())
+fn load_layouts_from(path: &std::path::Path) -> (Vec<ThemeTemplate>, Option<crate::whole_file::Unread>) {
+    crate::whole_file::read_or_default(path, crate::whole_file::What::StageLayouts, read_layouts)
 }
 
-pub fn save_layouts(layouts: &[ThemeTemplate]) -> Result<(), String> {
+/// Layouts from a file's words, each with an object for every item (none when it lists none).
+/// The error, for the log, says why they can't be read.
+fn read_layouts(text: &str) -> Result<Vec<ThemeTemplate>, String> {
+    let layouts = serde_json::from_str::<Vec<ThemeTemplate>>(text).map_err(|e| e.to_string())?;
+    Ok(layouts.iter().map(normalized).collect())
+}
+
+/// The stage layouts' file and what goes in it, for the library's writer to write (`writer`),
+/// paced (`writer::Paced`). The error is a plain sentence.
+pub fn layouts_to_save(layouts: &[ThemeTemplate]) -> Result<crate::writer::Save, String> {
     let path = file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| {
-            tf(
-                "media.no_folder",
-                "Could not make the app's folder: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })?;
-    }
-    crate::whole_file::write(&path, serde_json::to_string_pretty(layouts).unwrap_or_default().as_bytes()).map_err(|e| {
-        tf(
-            "tools.stage.not_saved",
-            "Could not save the stage layouts: {error}",
-            &[("error", &crate::notices::write_problem(&e))],
-        )
-    })
+    Ok(layouts_to_save_at(path, layouts))
+}
+
+fn layouts_to_save_at(path: std::path::PathBuf, layouts: &[ThemeTemplate]) -> crate::writer::Save {
+    let text = serde_json::to_string_pretty(layouts).unwrap_or_default();
+    crate::whole_file::settings_save(path, crate::whole_file::What::StageLayouts, text.into_bytes())
 }
 
 /// What the stage screens are told about the song on screen besides its slides.
@@ -667,6 +662,18 @@ pub fn slide(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stage_layouts_file_that_cant_be_read_is_kept_aside_and_never_saved_over() {
+        let good = serde_json::to_string_pretty(&builtin_layouts()).unwrap();
+        crate::whole_file::tests::check_loader(
+            "stage-layouts.json",
+            crate::whole_file::What::StageLayouts,
+            good.as_bytes(),
+            |path| load_layouts_from(path).1,
+            |path| crate::whole_file::tests::written(layouts_to_save_at(path.to_owned(), &[])),
+        );
+    }
 
     /// Draws a stage screen and saves it where `STAGE_PNG` says, to look at. Run by hand:
     /// `STAGE_PNG=/tmp/stage.png cargo test -p sp-app stage_picture -- --ignored`.
