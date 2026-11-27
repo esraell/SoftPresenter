@@ -3,9 +3,9 @@
 //! NDI® is a registered trademark of Vizrt NDI AB. The NDI runtime is not part of SoftPresenter
 //! and is not needed to build it or to start it: it is looked for on the computer when the first
 //! NDI source starts, on that source's own thread. Without it, the source says NDI isn't
-//! installed and where to get it, and everything else carries on. On Linux, where NDI Tools
-//! doesn't exist, the app can download NDI's runtime into a folder of its own
-//! ([`set_own_folder`]), which is looked in too, and found without a restart. See
+//! installed and where to get it, and everything else carries on. The app can download NDI's
+//! runtime into a folder of its own ([`set_own_folder`]), which is looked in too, on every
+//! system, and found without a restart. See
 //! `docs/licences/ndi.md`.
 //!
 //! The work happens on each source's own thread, so handing over a picture never waits on NDI
@@ -88,7 +88,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-pub use runtime::{NOT_INSTALLED, opened_from, set_own_folder};
+pub use runtime::{NOT_INSTALLED, RUNTIME_NAME, ask_version, locate, opened_from, set_own_folder, version};
 
 /// NDI's website, linked wherever NDI is chosen (where NDI Tools is downloaded on a Mac or on
 /// Windows).

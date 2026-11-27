@@ -26,25 +26,25 @@ use std::sync::{Mutex, OnceLock};
 
 use libloading::Library;
 
-/// What the operator is told when the runtime can't be found. NDI Tools, which installs the
-/// runtime on a Mac or on Windows, doesn't exist for Linux: there the app downloads NDI itself.
-pub const NOT_INSTALLED: &str = not_installed(cfg!(target_os = "linux"));
+/// What the operator is told when the runtime can't be found: the app downloads NDI itself,
+/// from NDI's own server, on every system.
+pub const NOT_INSTALLED: &str =
+    "NDI isn't installed on this computer. Install NDI in Settings \u{203a} Integrations gets it (free, from NDI).";
 
-/// The words of [`NOT_INSTALLED`], on Linux or elsewhere.
-const fn not_installed(linux: bool) -> &'static str {
-    if linux {
-        "NDI isn't installed on this computer. Download NDI\u{2026} in the Screens window gets it (free, from NDI)."
-    } else {
-        "NDI isn't installed on this computer. Install NDI Tools (free, from https://ndi.video/), then turn this screen on again."
-    }
-}
-
-/// The folder of the app's own where it keeps the runtime it downloaded (Linux only).
+/// The folder of the app's own where it keeps the runtime it downloaded.
 static OWN_FOLDER: OnceLock<PathBuf> = OnceLock::new();
 
-/// Says where the app keeps the runtime it downloads itself on Linux, where NDI Tools doesn't
-/// exist. It is looked in right after the folder `NDI_RUNTIME_DIR_V6` names. Only the first
-/// call counts.
+/// The name NDI's runtime has on this system, which it is kept under in the app's own folder.
+pub const RUNTIME_NAME: &str = if cfg!(target_os = "macos") {
+    "libndi.dylib"
+} else if cfg!(windows) {
+    "Processing.NDI.Lib.x64.dll"
+} else {
+    "libndi.so.6"
+};
+
+/// Says where the app keeps the runtime it downloads itself. It is looked in right after the
+/// folder `NDI_RUNTIME_DIR_V6` names, on every system. Only the first call counts.
 pub fn set_own_folder(folder: PathBuf) {
     let _ = OWN_FOLDER.set(folder);
 }
@@ -52,6 +52,37 @@ pub fn set_own_folder(folder: PathBuf) {
 /// The file the runtime was opened from, once it has been. It stays open until the app quits.
 pub fn opened_from() -> Option<&'static Path> {
     RUNTIME.get().map(|runtime| runtime.path.as_path())
+}
+
+/// The version the open runtime says it is ("6.1.1"), once it has been opened and if it says.
+pub fn version() -> Option<&'static str> {
+    RUNTIME.get().and_then(|runtime| runtime.version.as_deref())
+}
+
+/// The version of the runtime on this computer, opening it to ask if it isn't open yet (which
+/// may take a moment, and keeps it open until the app quits: never call this on the window's
+/// thread or the screens'). None without a runtime, or from one that doesn't say.
+pub fn ask_version() -> Option<String> {
+    get().ok().and_then(|runtime| runtime.version.clone())
+}
+
+/// The version in what `NDIlib_version` answers. NDI's runtimes answer a line that ends with
+/// it, after the system and when it was built: "NDI SDK APPLE 09:16:25 Dec 20 2024 6.1.1",
+/// "NDI SDK APPLE 12:49:17 Apr 13 2026 6.3.2.0" (both read from NDI's own runtimes). A fourth
+/// number that is 0 is left off, as NDI leaves it off wherever it names a version. None for
+/// anything whose last word isn't two to four numbers with dots between them.
+fn version_of(answer: &str) -> Option<String> {
+    let last = answer.split_whitespace().next_back()?;
+    let mut parts: Vec<&str> = last.split('.').collect();
+    let numbers =
+        parts.iter().all(|part| !part.is_empty() && part.len() <= 5 && part.bytes().all(|b| b.is_ascii_digit()));
+    if !numbers || !(2..=4).contains(&parts.len()) {
+        return None;
+    }
+    if parts.len() == 4 && parts[3] == "0" {
+        parts.pop();
+    }
+    Some(parts.join("."))
 }
 
 /// `NDIlib_send_create_t`.
@@ -164,6 +195,7 @@ struct Receiving {
 }
 
 type Initialize = unsafe extern "C" fn() -> bool;
+type Version = unsafe extern "C" fn() -> *const c_char;
 type SendCreateFn = unsafe extern "C" fn(*const SendCreate) -> *mut c_void;
 type SendDestroy = unsafe extern "C" fn(*mut c_void);
 type SendVideo = unsafe extern "C" fn(*mut c_void, *const VideoFrame);
@@ -176,6 +208,8 @@ pub struct Runtime {
     _library: Library,
     /// Where the library was opened from.
     path: PathBuf,
+    /// The version it says it is, if it says.
+    version: Option<String>,
     send_create: SendCreateFn,
     send_destroy: SendDestroy,
     send_video: SendVideo,
@@ -232,18 +266,12 @@ pub fn locate() -> Option<PathBuf> {
     places().into_iter().find(|path| path.is_file())
 }
 
-/// Where the runtime may be, in the order to try: the folder NDI's own variable names, on Linux
-/// the copy the app downloaded, a copy inside the app, where NDI's runtime installer puts it,
+/// Where the runtime may be, in the order to try: the folder NDI's own variable names, the copy
+/// the app downloaded into its own folder, a copy inside the app, where NDI's runtime installer puts it,
 /// the SDK's copy, and on a Mac with NDI Tools but not the runtime installer, the copy inside
 /// one of NDI's own apps.
 fn places() -> Vec<PathBuf> {
-    let name = if cfg!(target_os = "macos") {
-        "libndi.dylib"
-    } else if cfg!(windows) {
-        "Processing.NDI.Lib.x64.dll"
-    } else {
-        "libndi.so.6"
-    };
+    let name = RUNTIME_NAME;
     // NDI 5's runtime has the same functions this app uses (create, send, destroy, the
     // connection count) and the same frame layouts, so it works as well as NDI 6's.
     let name_v5 = if cfg!(target_os = "linux") { "libndi.so.5" } else { name };
@@ -255,9 +283,7 @@ fn places() -> Vec<PathBuf> {
     if let Some(folder) = std::env::var_os("NDI_RUNTIME_DIR_V6") {
         places.push(PathBuf::from(folder).join(name));
     }
-    if cfg!(target_os = "linux")
-        && let Some(folder) = OWN_FOLDER.get()
-    {
+    if let Some(folder) = OWN_FOLDER.get() {
         places.push(folder.join(name));
     }
     if let Some(folder) = std::env::var_os("NDI_RUNTIME_DIR_V5") {
@@ -357,8 +383,8 @@ fn open(places: &[PathBuf]) -> Result<Runtime, String> {
         return Err(NOT_INSTALLED.to_owned());
     };
     // SAFETY: the file is NDI's runtime, found where NDI installs it, where the operator's
-    // NDI_RUNTIME_DIR_V6 points, or on Linux where the app put it, taken unchanged from NDI's
-    // own SDK download once the operator accepted NDI's licence; opening it runs only its own
+    // NDI_RUNTIME_DIR_V6 points, or in the app's own folder where the app put it, taken unchanged
+    // from NDI's own download once the operator accepted NDI's licence; opening it runs only its own
     // set-up, which NDI documents as safe to do on any thread.
     let library = unsafe { Library::new(path) }
         .map_err(|e| format!("The NDI runtime at {} could not be opened: {e}", path.display()))?;
@@ -406,9 +432,23 @@ fn open(places: &[PathBuf]) -> Result<Runtime, String> {
     if !unsafe { initialize() } {
         return Err("NDI can't run on this computer's processor.".to_owned());
     }
+    // SAFETY: as above: a function the runtime exports, read as its signature in
+    // `Processing.NDI.Lib.h` (`const char* NDIlib_version(void)`). It takes nothing and answers
+    // a text ending in a zero byte that lives as long as the library, which stays open; the
+    // text is copied before anything else is asked of the library. A runtime without the
+    // function, or one that answers nothing, has no version to show.
+    let version = unsafe {
+        library.get::<Version>(b"NDIlib_version\0").ok().and_then(|function| {
+            let answer = (*function)();
+            (!answer.is_null()).then(|| std::ffi::CStr::from_ptr(answer).to_string_lossy().into_owned())
+        })
+    }
+    .as_deref()
+    .and_then(version_of);
     Ok(Runtime {
         _library: library,
         path: path.clone(),
+        version,
         send_create,
         send_destroy,
         send_video,
@@ -763,13 +803,30 @@ mod tests {
         let nowhere = vec![PathBuf::from("/nonexistent/libndi.dylib")];
         let problem = open(&nowhere).err().unwrap();
         assert_eq!(problem, NOT_INSTALLED);
-        // NDI Tools on a Mac and on Windows; on Linux, where NDI Tools doesn't exist, the app's
-        // own download.
-        let elsewhere = not_installed(false);
-        assert!(elsewhere.contains("isn't installed") && elsewhere.contains("https://ndi.video/"));
-        let linux = not_installed(true);
-        assert!(linux.contains("isn't installed") && linux.contains("Download NDI\u{2026}"));
-        assert!(!linux.contains("NDI Tools"));
+        // The app's own download, on every system.
+        assert!(NOT_INSTALLED.contains("isn't installed") && NOT_INSTALLED.contains("Install NDI in Settings"));
+        assert!(!NOT_INSTALLED.contains("NDI Tools"));
+    }
+
+    #[test]
+    fn the_version_is_the_last_word_of_what_the_runtime_answers() {
+        // Both lines were read from NDI's own runtimes for the Mac.
+        assert_eq!(version_of("NDI SDK APPLE 09:16:25 Dec 20 2024 6.1.1").as_deref(), Some("6.1.1"));
+        assert_eq!(version_of("NDI SDK APPLE 12:49:17 Apr 13 2026 6.3.2.0").as_deref(), Some("6.3.2"));
+        assert_eq!(version_of("NDI SDK LINUX 6.2.0.3").as_deref(), Some("6.2.0.3"));
+        assert_eq!(version_of("5.6").as_deref(), Some("5.6"));
+        for other in ["", "NDI SDK", "6", "6.1.x", "1.2.3.4.5", "6..1", "NDI 6.1.1 beta", "123456.1"] {
+            assert_eq!(version_of(other), None, "{other:?}");
+        }
+    }
+
+    #[test]
+    fn the_apps_own_folder_is_looked_in_on_every_system() {
+        // Only the first call counts, and no other test sets it.
+        set_own_folder(PathBuf::from("/softpresenter-test/NDI"));
+        if std::env::var_os("SOFTPRESENTER_HIDE_NDI").is_none() {
+            assert!(places().contains(&PathBuf::from("/softpresenter-test/NDI").join(RUNTIME_NAME)));
+        }
     }
 
     #[test]
