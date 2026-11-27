@@ -1230,6 +1230,17 @@ fn show_key_press(key: &Key, table: &KeyTable, show: &Show, f_keys: bool) -> Opt
     }
 }
 
+/// A key that runs the show held down (`repeat`, its repeats): each does what the key does, but
+/// for Show Selected, whose repeats do nothing, as a held Enter's do. Its first press put the
+/// slide picked on screen, and a repeat would find the pick gone and put the open item up from
+/// its first slide.
+fn held_down(press: KeyPress, repeat: bool) -> KeyPress {
+    match press {
+        KeyPress::Action(KeyAction::ShowSelected) if repeat => KeyPress::Action(KeyAction::Nothing),
+        press => press,
+    }
+}
+
 /// Whether `key` is one of the F rows (Settings › Keys).
 fn f_row(key: &Key) -> bool {
     ShowKey::of(key).is_some_and(ShowKey::is_f_key)
@@ -1294,9 +1305,10 @@ fn window_key_action(show: &Show, state: &mut home::HomeState, action: KeyAction
 }
 
 /// Add to Playlist's key, into the playlist in front: in the Bible view the passage looked up,
-/// as Bible's Add puts it; in the Service view the song open from a library (no item of the
-/// playlist open, and not a song the app makes), at the end, as its menu's Add to Playlist puts
-/// it. Otherwise a refusal's cue says what to open.
+/// as Bible's Add puts it; in the Service view the song open from a library (a click on its row,
+/// or the find box), as its menu's Add to Playlist puts it: at the end, or with an item of the
+/// playlist open, just after it. Not the open item's own song, nor a song the app makes: then,
+/// and with nothing looked up in the Bible view, a refusal's cue says what to open.
 fn add_key(show: &Show, state: &mut home::HomeState) {
     if state.bible_open {
         if let Some(saved) = state.bible.saved() {
@@ -1306,7 +1318,13 @@ fn add_key(show: &Show, state: &mut home::HomeState) {
         }
     } else {
         let open = show.selected();
-        if state.services.chosen.is_none() && !state.app_made(open) && state.song_keys.get(open).is_some() {
+        let key = state.song_keys.get(open);
+        let items_own = state
+            .services
+            .chosen
+            .and_then(|at| state.services.front().items.get(at))
+            .is_some_and(|item| matches!(item, crate::service::Item::Song { key: its, .. } if Some(its) == key));
+        if key.is_some() && !items_own && !state.app_made(open) {
             crate::studio::SongAsks { add: vec![open], ..Default::default() }.carry_out(show, state);
             return;
         }
@@ -1368,7 +1386,7 @@ fn home_key_command(
     {
         return None;
     }
-    let press = show_key_press(key, &state.keys, show, f_keys)?;
+    let press = held_down(show_key_press(key, &state.keys, show, f_keys)?, repeat);
     let escape = matches!(key, Key::Named(NamedKey::Escape));
     if escape && escape_closes_something(state, ctx) {
         return None;
@@ -1466,7 +1484,7 @@ fn home_key_goes(
         && let Some(asked) = home_key_command(state, ctx, key, repeat, show, f_keys)
     {
         return match asked {
-            KeyPress::Action(action) if typing_with_f_rows(state, ctx) => KeyGoes::Typed(action),
+            KeyPress::Action(action) if f_row(key) && typing_with_f_rows(state, ctx) => KeyGoes::Typed(action),
             asked => KeyGoes::Show(asked),
         };
     }
@@ -12917,7 +12935,7 @@ impl ApplicationHandler<AppEvent> for App {
                             show_key_press(&event.logical_key, &running.home_state.keys, &self.show, keys::f_keys())
                     {
                         let logical = event.logical_key.clone();
-                        self.key_press(&logical, press);
+                        self.key_press(&logical, held_down(press, event.repeat));
                     }
                 }
                 // The pointer over a window that fills a display shows its X (see
@@ -15777,6 +15795,68 @@ mod tests {
         assert_eq!(keyboard.state.notices.refused(), Some("Pick an item in the playlist to take it out"));
         assert_eq!(playlist_items(&keyboard), ["Beta"]);
         assert!(keyboard.state.removed.is_empty(), "nothing for Undo");
+    }
+
+    #[test]
+    fn holding_f5_puts_nothing_more_up_as_a_held_enter_doesnt() {
+        // Beta's chorus picked: F5 puts it up; its repeats would find the pick gone and put Beta
+        // up from its first slide, so they do nothing, as Enter's do.
+        let mut keyboard = in_softprojector_style(home::HomeState::default());
+        keyboard.show.apply(Command::Select(1));
+        keyboard.state.set_pick(&keyboard.show, sp_engine::SlideRef { presentation: 1, slide: 2 }, false);
+        keyboard.draw();
+        let f5 = Key::Named(NamedKey::F5);
+        keyboard.press(f5.clone());
+        assert_eq!(keyboard.live(), Some((1, 2)));
+        let held = |keyboard: &Keyboard| {
+            home_key_goes(&keyboard.state, &keyboard.ctx, &keyboard.show, &f5, true, Default::default(), true)
+        };
+        assert_eq!(held(&keyboard), KeyGoes::Show(KeyPress::Action(KeyAction::Nothing)));
+        // In the find box too, before and after it has carried the first press out.
+        let mut keyboard = found_in_softprojector_style("third lines");
+        assert_eq!(held(&keyboard), KeyGoes::Typed(KeyAction::Nothing));
+        keyboard.press(f5.clone());
+        keyboard.draw();
+        assert_eq!(keyboard.live(), Some((0, 2)), "the first found by its words: Alpha's chorus");
+        assert_eq!(held(&keyboard), KeyGoes::Show(KeyPress::Action(KeyAction::Nothing)));
+        // The screens' windows: the same rule (`held_down`); other keys go on as they are held.
+        assert_eq!(held_down(KeyPress::Action(KeyAction::ShowSelected), true), KeyPress::Action(KeyAction::Nothing));
+        assert_eq!(
+            held_down(KeyPress::Action(KeyAction::ShowSelected), false),
+            KeyPress::Action(KeyAction::ShowSelected)
+        );
+        assert_eq!(held_down(KeyPress::Action(KeyAction::Next), true), KeyPress::Action(KeyAction::Next));
+    }
+
+    #[test]
+    fn f2_adds_a_song_the_find_box_opened_with_a_playlist_item_open() {
+        // Alpha, the playlist's item, open; the find box opens Beta, the playlist's item staying
+        // the open one: F2 adds Beta, as the song's menu would, after the open item.
+        let mut state = home::HomeState { playlist_open: true, ..home::HomeState::default() };
+        state.services.add(crate::service::Item::song("title:Alpha".to_owned(), "Alpha".to_owned()));
+        state.services.add(crate::service::Item::Header { name: "Sermon".to_owned() });
+        state.services.chosen = Some(0);
+        state.library_search = Some(("beta".to_owned(), 0));
+        let mut keyboard = in_softprojector_style(state);
+        keyboard.draw();
+        keyboard.press(Key::Named(NamedKey::Enter));
+        keyboard.draw();
+        assert_eq!(
+            (keyboard.show.selected(), keyboard.state.services.chosen),
+            (1, Some(0)),
+            "Beta open, Alpha's item too"
+        );
+        keyboard.press(Key::Named(NamedKey::F2));
+        keyboard.draw();
+        assert_eq!(keyboard.state.notices.refused(), None);
+        assert_eq!(playlist_items(&keyboard), ["Alpha", "Beta", "Sermon"], "after the open item");
+        // Alpha opened again from its item: it is the playlist's own, so there is nothing to add.
+        keyboard.show.apply(Command::Select(0));
+        keyboard.state.services.chosen = Some(0);
+        keyboard.press(Key::Named(NamedKey::F2));
+        keyboard.draw();
+        assert_eq!(keyboard.state.notices.refused(), Some(NOTHING_TO_ADD));
+        assert_eq!(playlist_items(&keyboard), ["Alpha", "Beta", "Sermon"]);
     }
 
     #[test]
