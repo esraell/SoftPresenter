@@ -196,8 +196,10 @@ pub enum ShowKey {
 
 /// The places other than the rows' that a key can be added at, each with its name in the
 /// preferences file: a letter or a digit by itself, any other key by its place's name in lower
-/// case. Not the modifiers and lock keys, nor the keys the app keeps (`Kept`), nor the few the
-/// app doesn't read (a system's power, sleep and sound keys, a browser's, an input method's).
+/// case. Not the modifiers and lock keys, nor the places of the keys the app keeps (`Kept`: Enter,
+/// Tab, ↑, ↓, Delete, Backspace; / and ? are kept by the character, wherever they are), nor the
+/// number pad's /, nor the few the app doesn't read (a system's power, sleep and sound keys, a
+/// browser's, an input method's).
 const PLACES: &[(KeyCode, &str)] = &[
     (KeyCode::KeyA, "a"),
     (KeyCode::KeyB, "b"),
@@ -247,6 +249,9 @@ const PLACES: &[(KeyCode, &str)] = &[
     (KeyCode::Minus, "minus"),
     (KeyCode::Quote, "quote"),
     (KeyCode::Semicolon, "semicolon"),
+    // The key at / on a US keyboard: it types "." on a Russian layout, "-" on a German one. The
+    // character / (the find box), wherever it is, is refused and never a row.
+    (KeyCode::Slash, "slash"),
     (KeyCode::Insert, "insert"),
     (KeyCode::Numpad0, "numpad0"),
     (KeyCode::Numpad1, "numpad1"),
@@ -543,6 +548,7 @@ fn other_cap(code: KeyCode, name: &str) -> String {
         KeyCode::Minus => "-",
         KeyCode::Quote => "'",
         KeyCode::Semicolon => ";",
+        KeyCode::Slash => "/",
         KeyCode::Insert => t("keys.cap.insert", "Insert"),
         KeyCode::PrintScreen => t("keys.cap.print_screen", "Print Screen"),
         KeyCode::ScrollLock => t("keys.cap.scroll_lock", "Scroll Lock"),
@@ -604,8 +610,8 @@ pub enum Kept {
 
 impl Kept {
     /// The key the app keeps that `pressed` is: by what it does or types (? and / wherever the
-    /// layout puts them), else by its place (the number pad's Enter, a place typing another
-    /// character than / on this layout).
+    /// layout puts them, and only there: the key at / on a US keyboard types "." on a Russian
+    /// layout), else by its place (the number pad's Enter).
     fn of(pressed: &Pressed) -> Option<Kept> {
         use winit::keyboard::NamedKey as N;
         let kept = match &pressed.logical {
@@ -624,7 +630,6 @@ impl Kept {
             PhysicalKey::Code(KeyCode::Tab) => Some(Kept::Tab),
             PhysicalKey::Code(KeyCode::ArrowUp) => Some(Kept::Up),
             PhysicalKey::Code(KeyCode::ArrowDown) => Some(Kept::Down),
-            PhysicalKey::Code(KeyCode::Slash | KeyCode::NumpadDivide) => Some(Kept::Slash),
             PhysicalKey::Code(KeyCode::Delete) => Some(Kept::Delete),
             PhysicalKey::Code(KeyCode::Backspace | KeyCode::NumpadBackspace) => Some(Kept::Backspace),
             _ => None,
@@ -931,11 +936,17 @@ impl KeyTable {
     /// The row a key pressed is in, if it has one (`is_listed`): by its place on the keyboard,
     /// or, for a key whose place has no row, by the named key the window says it is (the number
     /// pad's 6 with Num Lock off is →). A key typing / or ? never has one (the find box and the
-    /// list of keys are theirs, wherever the layout puts them), nor a character typed with ⌥ (Alt
-    /// off a Mac), which is the window's: ⌥1 to ⌥7 number a tool tab's things.
+    /// list of keys are theirs, wherever the layout puts them), nor a key held with ⌥ (Alt off a
+    /// Mac) that isn't a named key (a character, a dead key), which is the window's: ⌥1 to ⌥7
+    /// number a tool tab's things, and ⌥E on a Mac starts an accent.
     pub fn row_of(&self, pressed: &Pressed, f_keys: bool) -> Option<ShowKey> {
+        // Held with ⌥: a character, a dead key (⌥E on a Mac, the acute to come) or a key the
+        // system doesn't name.
+        if pressed.held.alt_key() && !matches!(pressed.logical, Key::Named(_)) {
+            return None;
+        }
         if let Key::Character(typed) = &pressed.logical
-            && (typed == "/" || typed == "?" || pressed.held.alt_key())
+            && (typed == "/" || typed == "?")
         {
             return None;
         }
@@ -1205,8 +1216,13 @@ mod tests {
         assert_eq!(ShowKey::of(&PhysicalKey::Code(KeyCode::Digit7)).map(ShowKey::name), Some("7"));
         assert_eq!(ShowKey::of(&PhysicalKey::Code(KeyCode::Comma)).map(ShowKey::name), Some("comma"));
         assert_eq!(ShowKey::of(&PhysicalKey::Code(KeyCode::BracketLeft)).map(ShowKey::name), Some("bracketleft"));
+        // The key at / on a US keyboard is a place like any other: only the character / is kept.
+        assert_eq!(ShowKey::of(&PhysicalKey::Code(KeyCode::Slash)), Some(ShowKey::Other(KeyCode::Slash)));
+        assert_eq!(ShowKey::Other(KeyCode::Slash).name(), "slash");
+        assert_eq!(ShowKey::Other(KeyCode::Slash).cap(), "/");
         // Modifiers, the keys the app keeps and a place the system doesn't say have none.
-        for none in [KeyCode::ShiftLeft, KeyCode::SuperRight, KeyCode::CapsLock, KeyCode::Enter, KeyCode::Slash] {
+        for none in [KeyCode::ShiftLeft, KeyCode::SuperRight, KeyCode::CapsLock, KeyCode::Enter, KeyCode::NumpadDivide]
+        {
             assert_eq!(ShowKey::of(&PhysicalKey::Code(none)), None, "{none:?}");
         }
         assert_eq!(ShowKey::of(&PhysicalKey::Unidentified(winit::keyboard::NativeKeyCode::Unidentified)), None);
@@ -1426,6 +1442,52 @@ mod tests {
         assert_eq!(serde_json::to_value(&table).unwrap()["added"], serde_json::json!(["b", "something_newer", "f20"]));
         let not_a_list: KeyTable = serde_json::from_value(serde_json::json!({"added": "b"})).unwrap();
         assert_eq!(not_a_list, KeyTable::default());
+    }
+
+    #[test]
+    fn the_key_at_slash_is_refused_only_where_it_types_slash() {
+        let mut table = KeyTable::default();
+        let slash = ShowKey::Other(KeyCode::Slash);
+        // On a US keyboard it opens the find box, and is refused with that reason.
+        assert_eq!(table.add(&typing("/", KeyCode::Slash), true), Err(Refusal::Kept(Kept::Slash)));
+        // On a Russian layout it types "." and on a German one "-": nothing the app keeps.
+        assert_eq!(table.add(&typing(".", KeyCode::Slash), true), Ok(slash));
+        assert_eq!(table.add(&typing("-", KeyCode::Slash), true), Err(Refusal::Listed(slash)));
+        assert_eq!(table.row_of(&typing(".", KeyCode::Slash), true), Some(slash));
+        // Added, it still never takes the character / (the find box) nor ? (the list of keys).
+        assert_eq!(table.row_of(&typing("/", KeyCode::Slash), true), None);
+        assert_eq!(table.row_of(&held(typing("?", KeyCode::Slash), ModifiersState::SHIFT), true), None);
+        // The number pad's / types /, and is refused by it.
+        assert_eq!(table.add(&typing("/", KeyCode::NumpadDivide), true), Err(Refusal::Kept(Kept::Slash)));
+    }
+
+    #[test]
+    fn a_key_held_with_option_is_never_a_row_whatever_it_types() {
+        let mut table = KeyTable::default();
+        let e = ShowKey::Other(KeyCode::KeyE);
+        table.add(&typing("e", KeyCode::KeyE), true).unwrap();
+        assert_eq!(table.row_of(&typing("e", KeyCode::KeyE), true), Some(e));
+        // ⌥E on a US Mac is a dead key (the acute accent to come): the window's, not E's row.
+        let option_e = Pressed {
+            logical: Key::Dead(Some('\u{b4}')),
+            physical: PhysicalKey::Code(KeyCode::KeyE),
+            held: ModifiersState::ALT,
+        };
+        assert_eq!(table.row_of(&option_e, true), None);
+        let option_unknown =
+            Pressed { logical: Key::Unidentified(winit::keyboard::NativeKey::Unidentified), ..option_e };
+        assert_eq!(table.row_of(&option_unknown, true), None);
+        assert_eq!(table.row_of(&held(typing("\u{e9}", KeyCode::KeyE), ModifiersState::ALT), true), None);
+        // A named key held with ⌥ is its row as before (⌥→).
+        assert_eq!(
+            table.row_of(&held(named(NamedKey::ArrowRight, KeyCode::ArrowRight), ModifiersState::ALT), true),
+            Some(ShowKey::Right)
+        );
+        // A dead key by itself (^ on a German keyboard, at the backquote's place) goes by its place.
+        let caret = Pressed::at(Key::Dead(Some('^')), KeyCode::Backquote);
+        assert_eq!(table.row_of(&caret, true), None, "not added");
+        table.add(&typing("`", KeyCode::Backquote), true).unwrap();
+        assert_eq!(table.row_of(&caret, true), Some(ShowKey::Other(KeyCode::Backquote)));
     }
 
     #[test]

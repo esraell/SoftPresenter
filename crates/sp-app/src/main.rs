@@ -1250,7 +1250,8 @@ fn held_down(press: KeyPress, repeat: bool) -> KeyPress {
 /// screens' alike (`show_key_press`), with the rules every window keeps: nothing while a question
 /// or the new-song sheet is open; a key held down as `held_down` says; and in the Edit view only
 /// Escape, the F rows (an F key added on a Mac too) and "." reach the show, and only when they
-/// clear or hide the words (`ActionGroup::Clear`): Escape only when it has nothing to do in the editor
+/// clear or hide the words (`ActionGroup::Clear`), "." only while nothing is being typed or
+/// renamed (`HomeState::typing_or_renaming`): Escape only when it has nothing to do in the editor
 /// (`HomeState::escape_edits`: no words being typed, no name being retyped, nothing picked on the
 /// canvas, no drag, nothing open over the window), and never when it is held down (`repeat`): the
 /// press that let go of the picked box, or put back the words typed, must not go on to clear the
@@ -1276,7 +1277,14 @@ fn show_key_command(
             .keys
             .row_of(key, f_keys)
             .is_some_and(|key| key == ShowKey::Escape || key == ShowKey::Period || key.is_f_key());
-        if !clears || !escape_f_or_period || (escape && (repeat || state.escape_edits(ctx))) {
+        // A key that types a character ("."), while words or a name are being typed, is the
+        // typist's next key, whether or not their field still has the keyboard.
+        let types = matches!(key.logical, Key::Character(_));
+        if !clears
+            || !escape_f_or_period
+            || (escape && (repeat || state.escape_edits(ctx)))
+            || (types && state.typing_or_renaming(ctx))
+        {
             return None;
         }
     }
@@ -1628,7 +1636,13 @@ fn key_waits_for_drawing(
                         | K::PageDown
                 )
         }
-        egui::Event::PointerButton { .. } | egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_) => true,
+        // A character typed may start what takes the keyboard (a reference in the Bible view):
+        // "1." typed quickly there must type its "." as well, never clear the screen.
+        egui::Event::Text(_)
+        | egui::Event::PointerButton { .. }
+        | egui::Event::Copy
+        | egui::Event::Cut
+        | egui::Event::Paste(_) => true,
         _ => false,
     };
     let kept = matches!(key.logical, Key::Named(NamedKey::Enter))
@@ -16605,5 +16619,69 @@ mod tests {
         let mut service = Keyboard::new(home::HomeState { keys, ..home::HomeState::default() });
         service.press(one);
         assert_eq!(service.live(), None, "1 set to Clear All cleared");
+    }
+
+    #[test]
+    fn in_the_edit_view_period_waits_while_words_or_a_name_are_being_typed() {
+        use KeyAction as A;
+        let song = parse_song_text("Song", "[Verse 1]\nOne\n\n[Chorus]\nTwo\n");
+        let show = Show::new(vec![Arc::new(song)]);
+        let ctx = egui::Context::default();
+        let editing = EditDraft::of(&show, sp_engine::SlideRef { presentation: 0, slide: 0 });
+        let mut state = home::HomeState { editing, ..home::HomeState::default() };
+        let first = state.editing.as_ref().and_then(|draft| draft.slide.objects.first().map(|object| object.id));
+        assert!(first.is_some());
+        let period = us(&Key::Character(".".into()));
+        let f2 = us(&Key::Named(NamedKey::F2));
+        let home = |state: &home::HomeState, key: &Pressed| home_key_command(state, &ctx, key, false, &show, true);
+        let screen = |state: &home::HomeState, key: &Pressed| show_key_command(state, &ctx, key, false, &show, true);
+        let does = |action| Some(KeyPress::Action(action));
+        assert_eq!((home(&state, &period), screen(&state, &period)), (does(A::ClearAll), does(A::ClearAll)));
+        // A box's words being typed, the field having lost the keyboard to a click on the
+        // inspector (Bold, a colour): "." is the typist's next key, never a clear of the room's
+        // screen, from the home window or a screen's.
+        assert!(!ctx.text_edit_focused());
+        if let Some(draft) = state.editing.as_mut() {
+            draft.typing = first;
+        }
+        assert_eq!(home(&state, &period), None, "typing: the home window");
+        assert_eq!(screen(&state, &period), None, "typing: a screen's window");
+        // The F rows type nothing, and still clear, as before.
+        assert_eq!(screen(&state, &f2), does(A::ClearSlide));
+        // An object's name being retyped, or a song's, a theme's, a stage layout's.
+        if let Some(draft) = state.editing.as_mut() {
+            draft.typing = None;
+            draft.renaming = Some((sp_model::Uuid::nil(), "Main".to_owned()));
+        }
+        assert_eq!((home(&state, &period), screen(&state, &period)), (None, None), "an object's name");
+        if let Some(draft) = state.editing.as_mut() {
+            draft.renaming = None;
+        }
+        state.stage_rename = Some((0, "Words".to_owned()));
+        assert_eq!((home(&state, &period), screen(&state, &period)), (None, None), "a stage layout's name");
+        state.stage_rename = None;
+        state.renaming_song = Some("Song".to_owned());
+        assert_eq!(screen(&state, &period), None, "a song's name");
+        state.renaming_song = None;
+        // Nothing typed: it clears again.
+        assert_eq!(screen(&state, &period), does(A::ClearAll));
+    }
+
+    #[test]
+    fn a_letter_and_a_period_in_one_frame_in_the_bible_view_type_the_reference() {
+        // German "1. Mose": the letters wait for the window to draw, so Scripture Lookup has the
+        // keyboard before "." comes, which then types instead of clearing the screen.
+        let mut bible = Keyboard::new(home::HomeState { bible_open: true, ..home::HomeState::default() });
+        bible.press(Key::Character("x".into()));
+        bible.press(Key::Character(".".into()));
+        bible.draw();
+        assert_eq!(bible.state.bible.lookup, "x.", "both typed");
+        assert_eq!(bible.live(), Some((0, 0)), "the screen was not cleared");
+        // A character waiting to be drawn holds back a key that may run the show.
+        let show = Show::new(vec![Arc::new(parse_song_text("Song", "One\n"))]);
+        let text = [egui::Event::Text("x".to_owned())];
+        let period = us(&Key::Character(".".into()));
+        assert!(key_waits_for_drawing(&text, false, &period, false, &KeyTable::default(), &show, true));
+        assert!(!key_waits_for_drawing(&[], false, &period, false, &KeyTable::default(), &show, true));
     }
 }

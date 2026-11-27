@@ -2441,26 +2441,30 @@ impl HomeState {
     /// Escape that clears the screens never reaches the editor.
     pub fn escape_edits(&self, ctx: &egui::Context) -> bool {
         let draft = self.editing.as_ref().is_some_and(|draft| {
-            draft.selected.is_some()
-                || !draft.also.is_empty()
-                || draft.typing.is_some()
-                || draft.renaming.is_some()
-                || draft.drag.is_some()
-                || draft.marquee.is_some()
+            draft.selected.is_some() || !draft.also.is_empty() || draft.drag.is_some() || draft.marquee.is_some()
         });
+        draft
+            || self.typing_or_renaming(ctx)
+            || self.escape_taken_above(ctx)
+            || ctx.dragged_id().is_some()
+            || ctx.input(|input| input.pointer.any_down())
+    }
+
+    /// Whether words or a name are being typed in the Edit view (`escape_edits`' typing half): a
+    /// box's words, though their field may have lost the keyboard to a click on the inspector
+    /// (Bold, a colour); a name being retyped (an object's, a song's, a group's, a theme's, a
+    /// template's, a prop's, a stage layout's); the sheet that adds a theme version; a field with
+    /// the keyboard. A key that types a character then never reaches the show (`show_key_command`
+    /// in `main.rs`): it is the typist's next key, not a clear of the room's screen.
+    pub fn typing_or_renaming(&self, ctx: &egui::Context) -> bool {
+        let draft = self.editing.as_ref().is_some_and(|draft| draft.typing.is_some() || draft.renaming.is_some());
         let renaming = self.renaming_song.is_some()
             || self.renaming_group.is_some()
             || self.renaming_theme.is_some()
             || self.renaming_template.is_some()
             || self.prop_rename.is_some()
             || self.stage_rename.is_some();
-        draft
-            || renaming
-            || self.version_sheet.is_some()
-            || self.escape_taken_above(ctx)
-            || ctx.text_edit_focused()
-            || ctx.dragged_id().is_some()
-            || ctx.input(|input| input.pointer.any_down())
+        draft || renaming || self.version_sheet.is_some() || ctx.text_edit_focused()
     }
 
     /// Whether the playlist chooser or the Reflow editor is open in the Service view, where
