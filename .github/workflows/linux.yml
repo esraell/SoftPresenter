@@ -28,7 +28,8 @@ jobs:
       # (fontconfig), and the window system's libraries (Wayland, X11 and its keyboard). DejaVu
       # Sans is the interface face the app looks for on Linux, so the tests that measure words
       # measure them in it. FFmpeg lets the screen-receiving tests decode their pictures, as
-      # they do on a computer that has it; without it they say so and pass. The end-to-end
+      # they do on a computer that has it; without it they fail here (on a computer without
+      # GitHub's setting they say so and pass). The end-to-end
       # tests start the app itself, which needs a display and a graphics device: a virtual X
       # display (Xvfb, started by xvfb-run, which needs xauth), the X keyboard library winit
       # loads as it starts, and Mesa's Vulkan and OpenGL drivers, which draw on the processor.
@@ -46,8 +47,8 @@ jobs:
       - name: Build
         run: cargo build --workspace
       # On a virtual display, for the end-to-end tests (crates/sp-app/tests/e2e.rs), which start
-      # the app; the other tests don't notice it. Without a display those tests skip themselves,
-      # saying so.
+      # the app; the other tests don't notice it. Without a display those tests fail here, as a
+      # skip nobody chose is a failure on GitHub (on a computer they skip, saying so).
       - name: Tests (on a virtual display, for the end-to-end tests)
         run: >-
           xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24"

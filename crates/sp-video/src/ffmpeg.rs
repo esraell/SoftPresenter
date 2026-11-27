@@ -1094,7 +1094,7 @@ mod tests {
     #[test]
     fn a_run_whose_hardware_decoder_fails_is_asked_for_again_without_it() {
         let Some(ffmpeg) = tool("ffmpeg") else {
-            eprintln!("FFmpeg isn't on this computer: the fallback wasn't checked");
+            crate::skipped("FFmpeg isn't on this computer: the fallback wasn't checked");
             return;
         };
         let dir = std::env::temp_dir().join(format!("softpresenter-hwfallback-{}", std::process::id()));
@@ -1200,7 +1200,7 @@ mod tests {
     #[test]
     fn a_sound_file_is_decoded_to_stereo_at_the_rate_asked() {
         let Some(ffmpeg) = tool("ffmpeg") else {
-            eprintln!("FFmpeg isn't on this computer: decoding sound wasn't checked");
+            crate::skipped("FFmpeg isn't on this computer: decoding sound wasn't checked");
             return;
         };
         let dir = std::env::temp_dir().join(format!("softpresenter-sound-{}", std::process::id()));
@@ -1213,7 +1213,7 @@ mod tests {
             .arg(&path)
             .status();
         if !made.is_ok_and(|status| status.success()) {
-            eprintln!("This FFmpeg can't make a test tone: decoding sound wasn't checked");
+            crate::skipped("This FFmpeg can't make a test tone: decoding sound wasn't checked");
             let _ = std::fs::remove_dir_all(&dir);
             return;
         }
@@ -1240,7 +1240,10 @@ mod tests {
     #[test]
     #[ignore = "needs the computer's sound output"]
     fn a_video_with_sound_moves_on_by_its_sound() {
-        let Some(ffmpeg) = tool("ffmpeg") else { return };
+        let Some(ffmpeg) = tool("ffmpeg") else {
+            crate::skipped("FFmpeg isn't on this computer: the video with sound wasn't checked");
+            return;
+        };
         let dir = std::env::temp_dir().join(format!("softpresenter-video-sound-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("tone.mkv");

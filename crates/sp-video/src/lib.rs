@@ -829,6 +829,25 @@ fn smaller_than_wide(width: f64, height: f64, most: f64) -> Option<(u32, u32)> {
     Some((((width / by).round() as u32).max(1), ((height / by).round() as u32).max(1)))
 }
 
+/// A test that can't check something here (no FFmpeg, say) says so where it is seen, and on a
+/// Linux GitHub run, which installs FFmpeg, it fails instead: a job that lost its FFmpeg must
+/// not pass green having tested nothing. The line is written straight to the process's standard
+/// error, which the harness doesn't hold back as it holds back `eprintln!` from a passing test;
+/// on GitHub it is also a notice on the run.
+#[cfg(test)]
+pub(crate) fn skipped(what: &str) {
+    use std::io::Write;
+    let on_github = std::env::var_os("GITHUB_ACTIONS").is_some();
+    assert!(
+        !(on_github && cfg!(target_os = "linux")),
+        "{what}: the Linux job installs FFmpeg, so a test is not skipped there"
+    );
+    let _ = writeln!(std::io::stderr(), "sp-video: skipped: {what}");
+    if on_github {
+        let _ = writeln!(std::io::stdout(), "::notice title=Video test skipped::{what}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -866,7 +885,7 @@ mod tests {
     #[test]
     fn a_file_lined_up_takes_over_at_the_end_of_the_pass_with_no_black_picture() {
         let Some(ffmpeg) = ffmpeg::tool("ffmpeg") else {
-            eprintln!("FFmpeg isn't on this computer: the hand-over wasn't checked");
+            crate::skipped("FFmpeg isn't on this computer: the hand-over wasn't checked");
             return;
         };
         let dir = std::env::temp_dir().join(format!("softpresenter-handover-{}", std::process::id()));
@@ -998,7 +1017,7 @@ mod tests {
     #[test]
     fn ffmpegs_planes_make_the_colours_ffmpeg_made_as_rgba() {
         let Some(ffmpeg) = ffmpeg::tool("ffmpeg") else {
-            eprintln!("FFmpeg isn't on this computer: the colours weren't checked");
+            crate::skipped("FFmpeg isn't on this computer: the colours weren't checked");
             return;
         };
         let dir = std::env::temp_dir().join(format!("softpresenter-planes-{}", std::process::id()));
@@ -1037,7 +1056,7 @@ mod tests {
                 .status()
                 .expect("FFmpeg runs");
             if name == "h264" && !made.success() {
-                eprintln!("this FFmpeg has no H.264 encoder: the H.264 video wasn't checked");
+                crate::skipped("this FFmpeg has no H.264 encoder: the H.264 video wasn't checked");
                 continue;
             }
             assert!(made.success(), "the {name} video is made");

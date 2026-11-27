@@ -168,6 +168,9 @@ a minute on a Mac. One test alone:
 - **Skipped, out loud:** `SOFTPRESENTER_E2E=off` (or `off (why)`) skips them all, as does a Linux computer with
   no display; a part a computer can't do (sound, with no sound output) is skipped with the
   reason printed, and as a notice on a GitHub run.
+  On GitHub (`GITHUB_ACTIONS`) only a chosen skip passes (`SOFTPRESENTER_E2E=off (why)`): a
+  Linux job that lost its display fails, and so does a missing FFmpeg in sp-video's tests on
+  the Linux job, which installs it.
 - **Switches it uses:** `SOFTPRESENTER_SLOW_WRITES` (the import), `SOFTPRESENTER_SLOW_REPLIES` (each
   reply to `sp` written late, to see `menu Quit` still answered), `SOFTPRESENTER_RELEASES_URL`
   (the updates stand-in), `SOFTPRESENTER_LANGUAGE=en`.

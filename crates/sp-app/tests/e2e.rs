@@ -49,20 +49,49 @@ const SOCKET_PATH_MOST: usize = 100;
 // ---------------------------------------------------------------------------------------------
 // Skipping, said out loud
 
+/// Why every end-to-end test is skipped on this computer, if they are, and whether somebody
+/// chose that (`SOFTPRESENTER_E2E=off`) or the computer simply can't (no display).
+struct Skip {
+    why: String,
+    chosen: bool,
+}
+
+/// The skip, if there is one: `said` is `SOFTPRESENTER_E2E`, `no_display` that a Linux computer
+/// has none.
+fn skip_for(said: Option<&str>, no_display: bool) -> Option<Skip> {
+    if let Some(said) = said
+        && switched_off(said)
+    {
+        return Some(Skip { why: format!("SOFTPRESENTER_E2E={said}"), chosen: true });
+    }
+    no_display.then(|| Skip {
+        why: "no display here (DISPLAY and WAYLAND_DISPLAY are unset); run them under xvfb-run".to_owned(),
+        chosen: false,
+    })
+}
+
 /// Why every end-to-end test is skipped on this computer, if they are.
-fn skipped_here() -> Option<String> {
-    if let Ok(said) = std::env::var("SOFTPRESENTER_E2E")
-        && switched_off(&said)
-    {
-        return Some(format!("SOFTPRESENTER_E2E={said}"));
-    }
-    if cfg!(all(unix, not(target_os = "macos")))
+fn skipped_here() -> Option<Skip> {
+    let no_display = cfg!(all(unix, not(target_os = "macos")))
         && std::env::var_os("DISPLAY").is_none()
-        && std::env::var_os("WAYLAND_DISPLAY").is_none()
-    {
-        return Some("no display here (DISPLAY and WAYLAND_DISPLAY are unset); run them under xvfb-run".to_owned());
-    }
-    None
+        && std::env::var_os("WAYLAND_DISPLAY").is_none();
+    skip_for(std::env::var("SOFTPRESENTER_E2E").ok().as_deref(), no_display)
+}
+
+/// Whether a skip is a failure: on a GitHub run (`GITHUB_ACTIONS`) only a skip somebody chose, in
+/// the job's own settings with its reason, is allowed. A job that lost its display would
+/// otherwise pass having tested nothing.
+fn skip_fails(skip: &Skip, on_github: bool) -> bool {
+    on_github && !skip.chosen
+}
+
+#[test]
+fn on_github_only_a_skip_the_job_chose_passes() {
+    let off = skip_for(Some("off (the end-to-end jobs run them)"), true).expect("chosen");
+    assert!(off.chosen && !skip_fails(&off, true) && !skip_fails(&off, false));
+    let lost = skip_for(None, true).expect("no display");
+    assert!(!lost.chosen && skip_fails(&lost, true) && !skip_fails(&lost, false));
+    assert!(skip_for(None, false).is_none() && skip_for(Some("on"), false).is_none());
 }
 
 /// Whether `SOFTPRESENTER_E2E` says the tests are off: `off`, `0`, `no` or `false`, with the
@@ -118,9 +147,15 @@ struct Run {
 impl Run {
     /// A run for the test `name`, or `None` (said) when the tests are skipped here.
     fn new(name: &'static str) -> Option<Run> {
-        if let Some(why) = skipped_here() {
+        if let Some(skip) = skipped_here() {
+            let why = &skip.why;
+            assert!(
+                !skip_fails(&skip, std::env::var_os("GITHUB_ACTIONS").is_some()),
+                "{name}: end-to-end tests can't run here, and on GitHub a skip is a failure unless the job \
+                 sets SOFTPRESENTER_E2E=off (why): {why}"
+            );
             static SAID: Once = Once::new();
-            SAID.call_once(|| say_skipped("every end-to-end test", &why));
+            SAID.call_once(|| say_skipped("every end-to-end test", why));
             let _ = writeln!(std::io::stderr(), "e2e: skipped {name} (see above)");
             return None;
         }
@@ -2332,6 +2367,26 @@ fn capture_home_saves_a_picture_of_the_window_and_quits() {
     assert!(image.width() >= 800 && image.height() >= 500, "a picture of the whole window: {:?}", image.dimensions());
     let colours: std::collections::HashSet<[u8; 4]> = image.pixels().step_by(7).map(|p| p.0).collect();
     assert!(colours.len() > 50, "the window, drawn ({} colours), not a blank picture", colours.len());
+    // What the home window must hold, whatever its size: the accent orange of the live slide's
+    // outline and of the Clear All button (about 1.7% of the picture), the slides' black
+    // pictures (about 20%) and the white of their words (about 0.4%). A window showing an error
+    // dialog, or a picture of the wrong thing, has many colours and none of these.
+    let total = (image.width() * image.height()) as usize;
+    let share = |count: usize| count as f64 / total as f64;
+    let (mut orange, mut black, mut white) = (0, 0, 0);
+    for p in image.pixels() {
+        let [r, g, b, _] = p.0;
+        orange += usize::from(r > 200 && (40..120).contains(&g) && b < 70);
+        black += usize::from(r < 6 && g < 6 && b < 6);
+        white += usize::from(r > 235 && g > 235 && b > 235);
+    }
+    assert!(
+        share(orange) > 0.005,
+        "the accent orange (Clear All, the live slide) is in the picture: {:.3}",
+        share(orange)
+    );
+    assert!(share(black) > 0.05, "the slides' black pictures are in it: {:.3}", share(black));
+    assert!(share(white) > 0.001, "and the white of their words: {:.4}", share(white));
     let log = run.log();
     for bad in ["[crash]", "panicked", "Graphics error"] {
         assert!(!log.contains(bad) && !stderr.contains(bad), "the capture run said {bad:?}{}", run.context());
