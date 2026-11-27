@@ -1088,7 +1088,23 @@ mod tests {
     const UKRAINIAN_DONE: &[&str] = SPANISH_DONE;
     // German joins an area at a time, as its tables are written; from then on a string wrapped
     // without its German fails here as well.
-    const GERMAN_DONE: &[&str] = &["topbar", "left", "right", "slides", "dock", "keys", "media", "screens", "remote"];
+    const GERMAN_DONE: &[&str] = &[
+        "topbar",
+        "left",
+        "right",
+        "slides",
+        "dock",
+        "keys",
+        "media",
+        "screens",
+        "remote",
+        "settings",
+        "mcp",
+        "reports",
+        "setup",
+        "integrations",
+        "mirror",
+    ];
 
     /// What `language` lacks in the areas `done` lists, as "key (English)".
     fn lacking_in(language: Language, done: &[&str]) -> Vec<String> {
