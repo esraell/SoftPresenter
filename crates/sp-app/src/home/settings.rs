@@ -105,6 +105,8 @@ impl Pane {
             "remote control" | "remote" => Some(Pane::PhoneRemote),
             // Phone remote with Port and certificate folded out (`remote::pane`).
             "remote more" => Some(Pane::PhoneRemote),
+            // Keys scrolled on to Always the same (`keys_page`).
+            "keys fixed" => Some(Pane::Keys),
             // AirPlay was called Phone Screens until 26 November.
             "mirror" | "phone" | "phone screens" => Some(Pane::PhoneScreens),
             "mcp" | "ai" => Some(Pane::AiAssistants),
@@ -849,9 +851,9 @@ fn language_page(ui: &mut egui::Ui) {
 }
 
 /// Settings › Keys, top to bottom: the switch for the keys on the buttons; Running the show,
-/// what each key that runs the show does (`keys_card`); and Always the same, the keys that
-/// can't be changed, from the list the list of keys (`?`) is made from, with the menus'
-/// shortcuts after them.
+/// what each key that runs the show does (`keys_card`); and Always the same, a line for each
+/// key that can't be changed, from the list the list of keys (`?`) is made from, and for each
+/// of the menus' shortcuts after them.
 fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
     card(
         ui,
@@ -870,16 +872,19 @@ fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
         },
     );
     keys_card::keys_card(ui, state);
-    // A key's own words never break (Space, then 1 … 9); a line breaks only between keys.
-    let keys_words = |keys: &[String]| keys.iter().map(|key| key.replace(' ', "\u{a0}")).collect::<Vec<_>>().join("  ");
-    let mut rows: Vec<(&str, String, String)> = Vec::new();
-    for (group, keys) in crate::keys::fixed_keys() {
-        for (keys, what) in keys {
-            rows.push((crate::keys::group_title(group), what, keys_words(&keys)));
-        }
+    // What each line says, and its keys: the fixed keys as the list of keys has them, then the
+    // menus' shortcuts.
+    let mut lines: Vec<(String, Vec<String>)> = Vec::new();
+    for (_, rows) in crate::keys::fixed_keys() {
+        lines.extend(rows.into_iter().map(|(keys, what)| (what, keys)));
     }
-    for (menu, command, key) in crate::menubar::shortcuts() {
-        rows.push((menu, command.trim_end_matches('…').to_owned(), keys_words(&[key])));
+    for (_, command, key) in crate::menubar::shortcuts() {
+        lines.push((command.trim_end_matches('…').to_owned(), vec![key]));
+    }
+    // Testing aid: SOFTPRESENTER_CAPTURE_PREFERENCES=keys-fixed opens Keys scrolled on to Always
+    // the same, which is under the table of keys, to see it in a capture.
+    if std::env::var("SOFTPRESENTER_CAPTURE_PREFERENCES").as_deref() == Ok("keys-fixed") {
+        ui.scroll_to_cursor(Some(egui::Align::TOP));
     }
     // Every key opens the list of keys (`?`), in the operator's window.
     let every = t("settings.keys.fixed.every", "Every key");
@@ -889,11 +894,59 @@ fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
         t("settings.keys.fixed.about", "Fixed keys \u{b7} press ? anywhere for the whole list"),
         Some(every),
         |ui| {
-            keys_table(ui, &rows);
-            ui.add_space(8.0);
+            for (what, keys) in &lines {
+                fixed_line(ui, what, keys);
+            }
+            ui.add_space(6.0);
         },
     ) {
         state.key_sheet = true;
+    }
+}
+
+/// A line of Always the same, as the design draws it: a line across its top, what the keys do
+/// at the left, and each key as a cap of its own at the right, the last ending at the card's
+/// edge. Keys that would take more than their share of the width go on to another line of
+/// caps, and what they do wraps in the room they leave; a cap's own words never break.
+fn fixed_line(ui: &mut egui::Ui, what: &str, keys: &[String]) {
+    const CAP: f32 = 24.0;
+    const BETWEEN: f32 = 6.0;
+    let width = ui.available_width();
+    let caps: Vec<std::sync::Arc<egui::Galley>> =
+        keys.iter().map(|key| ui.painter().layout_no_wrap(key.clone(), fixed_semibold(11.0), TEXT)).collect();
+    let wide = |cap: &egui::Galley| (cap.size().x + 14.0).max(26.0);
+    // The caps in lines of at most their share of the width, a line taking as many as fit.
+    let share = (width * 0.45).max(150.0);
+    let mut cap_lines: Vec<(Vec<usize>, f32)> = Vec::new();
+    for (at, cap) in caps.iter().enumerate() {
+        let cap_wide = wide(cap);
+        match cap_lines.last_mut() {
+            Some((line, taken)) if *taken + BETWEEN + cap_wide <= share => {
+                line.push(at);
+                *taken += BETWEEN + cap_wide;
+            }
+            _ => cap_lines.push((vec![at], cap_wide)),
+        }
+    }
+    let caps_wide = cap_lines.iter().map(|(_, taken)| *taken).fold(0.0, f32::max);
+    let caps_tall = cap_lines.len() as f32 * CAP + cap_lines.len().saturating_sub(1) as f32 * 4.0;
+    let label = parts::lines(ui, what, semibold(13.0), TEXT, (width - caps_wide - 16.0).max(80.0), 18.0);
+    let inner = label.size().y.max(caps_tall);
+    let (place, _) = ui.allocate_exact_size(vec2(width, inner + 24.0), Sense::hover());
+    let painter = ui.painter();
+    painter.hline(place.x_range(), place.min.y + 0.5, Stroke::new(1.0, crate::studio::LINE));
+    painter.galley(pos2(place.min.x, place.center().y - label.size().y / 2.0), label, TEXT);
+    let mut top = place.center().y - caps_tall / 2.0;
+    for (line, taken) in &cap_lines {
+        let mut left = place.max.x - taken;
+        for at in line {
+            let cap = &caps[*at];
+            let block = Rect::from_min_size(pos2(left, top), vec2(wide(cap), CAP));
+            painter.rect_filled(block, 6.0, crate::studio::SELECTED);
+            painter.galley(block.center() - cap.size() / 2.0, cap.clone(), TEXT);
+            left = block.max.x + BETWEEN;
+        }
+        top += CAP + 4.0;
     }
 }
 
@@ -906,49 +959,6 @@ pub(super) fn group_shown(names: &[&str]) -> String {
         first.make_ascii_uppercase();
     }
     shown
-}
-
-/// The Keys page's table, every other row striped: each row's group, what it does, and its keys,
-/// in three columns that share the page's width. The group and the keys take what their longest
-/// needs, up to a share of the width; what a key does takes the rest, and anything longer than its
-/// column wraps within it, so every row's keys stay on the page however narrow it is.
-fn keys_table(ui: &mut egui::Ui, rows: &[(&str, String, String)]) {
-    const BETWEEN: f32 = 16.0;
-    const PAD: f32 = 6.0;
-    // The room inside a row's stripe at either end, so the words never touch its edge.
-    const INSET: f32 = 8.0;
-    let whole = ui.available_width();
-    let width = whole - 2.0 * INSET;
-    let body = egui::TextStyle::Body.resolve(ui.style());
-    let mono = egui::TextStyle::Monospace.resolve(ui.style());
-    let widest = |font: &FontId, texts: &mut dyn Iterator<Item = &str>| {
-        texts.map(|text| ui.painter().layout_no_wrap(text.to_owned(), font.clone(), TEXT).size().x).fold(0.0, f32::max)
-    };
-    let group_width = widest(&body, &mut rows.iter().map(|row| row.0)).min((width * 0.24).max(60.0)).ceil();
-    let keys_width = widest(&mono, &mut rows.iter().map(|row| row.2.as_str())).min((width * 0.3).max(60.0)).ceil();
-    let what_width = (width - group_width - keys_width - 2.0 * BETWEEN).max(40.0);
-    let stripe = ui.visuals().faint_bg_color;
-    let (body_height, mono_height) = (ui.fonts_mut(|f| f.row_height(&body)), ui.fonts_mut(|f| f.row_height(&mono)));
-    // The rows touch: each carries its own room above and below.
-    let spacing = std::mem::replace(&mut ui.spacing_mut().item_spacing.y, 0.0);
-    for (at, (group, what, keys)) in rows.iter().enumerate() {
-        let group = parts::words(ui, group, body.clone(), TEXT_DIM, 0.0, group_width);
-        let what = parts::words(ui, what, body.clone(), TEXT, 0.0, what_width);
-        let keys = parts::words(ui, keys, mono.clone(), TEXT, 0.0, keys_width);
-        let inner = group.size().y.max(what.size().y).max(keys.size().y);
-        let (stripe_place, _) = ui.allocate_exact_size(vec2(whole, inner + 2.0 * PAD), Sense::hover());
-        if at % 2 == 1 {
-            ui.painter().rect_filled(stripe_place, 2.0, stripe);
-        }
-        let place = stripe_place.shrink2(vec2(INSET, 0.0));
-        let top = place.min.y + PAD;
-        ui.painter().galley(pos2(place.min.x, top), group, TEXT_DIM);
-        ui.painter().galley(pos2(place.min.x + group_width + BETWEEN, top), what, TEXT);
-        // The keys' first line level with the words' first line.
-        let keys_top = top + ((body_height - mono_height) / 2.0).max(0.0);
-        ui.painter().galley(pos2(place.max.x - keys_width, keys_top), keys, TEXT);
-    }
-    ui.spacing_mut().item_spacing.y = spacing;
 }
 
 /// Settings › Command line: the `sp` command, which controls the running app from a terminal or a
@@ -1510,30 +1520,67 @@ mod tests {
     }
 
     #[test]
-    fn every_keys_row_shows_its_keys_inside_the_page_at_the_least_width() {
+    fn always_the_same_is_plain_lines_each_with_its_keys_as_caps_at_the_right() {
         use crate::i18n::Language;
-        for language in [Language::English, Language::Spanish] {
+        for language in Language::ALL {
             crate::i18n::with_language(language, || {
-                // The least width the window takes: the page's words end 28 inside its panel,
-                // which ends a gap inside the window.
-                let width = 820.0;
-                let right = width - GAP - 28.0;
-                let drawn = settings_at(width, Pane::Keys);
-                for (words, rect) in &drawn {
-                    assert!(rect.max.x <= right + 0.5, "{language:?}: \u{201c}{words}\u{201d} ends at {}", rect.max.x);
-                }
-                // Each fixed key's row is drawn (its keys as one piece of words; a long one wraps
-                // within it).
-                let keys = |keys: &[String]| keys.iter().map(|key| key.replace(' ', "\u{a0}")).collect::<Vec<_>>();
-                for (_, rows) in crate::keys::fixed_keys() {
-                    for (row, what) in rows {
-                        let wanted = keys(&row).join("  ");
-                        assert!(drawn.iter().any(|(words, _)| *words == wanted), "{language:?}: the keys for {what}");
+                for width in [820.0, 1100.0, 1440.0] {
+                    let said = format!("{language:?} at {width}");
+                    // The page's words end 28 inside its panel, which ends a gap inside the window.
+                    let right = width - GAP - 28.0;
+                    let drawn = settings_at(width, Pane::Keys);
+                    for (words, rect) in &drawn {
+                        assert!(rect.max.x <= right + 0.5, "{said}: \u{201c}{words}\u{201d} ends at {}", rect.max.x);
                     }
-                }
-                for (_, command, key) in crate::menubar::shortcuts() {
-                    let wanted = key.replace(' ', "\u{a0}");
-                    assert!(drawn.iter().any(|(words, _)| *words == wanted), "{language:?}: the keys for {command}");
+                    // Every fixed key and every menu shortcut has a line: what it does at the
+                    // left, and each of its keys as a cap of its own at the right.
+                    let mut lines: Vec<(String, Vec<String>)> = Vec::new();
+                    for (_, rows) in crate::keys::fixed_keys() {
+                        lines.extend(rows.into_iter().map(|(keys, what)| (what, keys)));
+                    }
+                    for (_, command, key) in crate::menubar::shortcuts() {
+                        lines.push((command.trim_end_matches('\u{2026}').to_owned(), vec![key]));
+                    }
+                    // The lines are under the card's title, in the list's order.
+                    let title = t("settings.keys.fixed.title", "Always the same");
+                    let under = drawn.iter().find(|(words, _)| words == title).expect("the card").1.max.y;
+                    let mut above = under;
+                    let mut ends: Vec<f32> = Vec::new();
+                    for (what, keys) in &lines {
+                        let label = drawn
+                            .iter()
+                            .find(|(words, rect)| words == what && rect.min.y > above - 1.0)
+                            .unwrap_or_else(|| panic!("{said}: the line of {what}"))
+                            .1;
+                        // Its caps: the pieces of words that are its keys, beside it.
+                        let mut last_end = f32::MIN;
+                        for key in keys {
+                            let cap = drawn
+                                .iter()
+                                .filter(|(words, rect)| words == key && rect.min.y > above - 1.0)
+                                .map(|(_, rect)| *rect)
+                                .find(|rect| {
+                                    rect.center().y > label.min.y - 30.0 && rect.center().y < label.max.y + 30.0
+                                })
+                                .unwrap_or_else(|| panic!("{said}: the cap {key} of {what}"));
+                            assert!(cap.min.x > label.max.x, "{said}: {key} is at the right of \u{201c}{what}\u{201d}");
+                            last_end = last_end.max(cap.max.x);
+                        }
+                        ends.push(last_end);
+                        above = label.min.y;
+                    }
+                    // Every line's caps end at one place, the right edge of the card's inside
+                    // (which is 18 inside the card, and the card never passes the page): the last
+                    // cap's words end inside its block, which is 26 wide at least with the words
+                    // in its middle.
+                    let most = ends.iter().copied().fold(f32::MIN, f32::max);
+                    assert!(most <= right - 18.0 + 0.5, "{said}: the caps end at {most}");
+                    for ((what, _), end) in lines.iter().zip(&ends) {
+                        assert!(
+                            most - *end <= 13.5,
+                            "{said}: the caps of \u{201c}{what}\u{201d} end at {end}, not {most}"
+                        );
+                    }
                 }
             });
         }

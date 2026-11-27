@@ -16799,7 +16799,9 @@ mod tests {
         for (group, rows) in crate::keys::fixed_keys() {
             for (keys, what) in rows {
                 assert!(drawn.contains(&what), "{group}: {what}");
-                assert!(drawn.contains(&keys.join("  ")), "{group}: {keys:?}");
+                for key in &keys {
+                    assert!(drawn.contains(key), "{group}: the cap {key}");
+                }
             }
         }
         // And over them a row for each key that can be changed: F5 off a Mac only.
