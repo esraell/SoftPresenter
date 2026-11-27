@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 
 use crate::i18n::{t, tf};
-use crate::notices::{Notices, Outage};
+use crate::notices::{Heard, Notices, Outage};
 
 /// VoxLive's church API.
 pub const LIVE_API: &str = "https://voxlive.app/api/v1";
@@ -335,7 +335,33 @@ pub enum Saving {
     /// The screen changed in VoxLive since its look was opened: nothing was written; this is
     /// the screen as it is now.
     Changed(Box<Screen>),
+    /// VoxLive couldn't be reached: nothing was written, and it can be tried again once VoxLive
+    /// answers (why it couldn't is in the log).
+    Unreachable,
     Failed(String),
+}
+
+impl Saving {
+    /// Why, in words, for the look's page.
+    pub fn words(&self) -> String {
+        match self {
+            Saving::Changed(_) => {
+                t("integrations.voxlive.changed_there", "The screen changed in VoxLive since it was opened.").to_owned()
+            }
+            Saving::Unreachable => crate::notices::unreachable_try_again("VoxLive"),
+            Saving::Failed(why) => why.clone(),
+        }
+    }
+}
+
+/// How the last save went, in words for `sp voxlive`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Said {
+    /// The screen whose look it was.
+    pub screen: String,
+    pub words: String,
+    /// VoxLive couldn't be reached: so no longer once it answers.
+    out_of_reach: bool,
 }
 
 /// The order look settings are offered in; any VoxLive adds later come after, by name.
@@ -372,9 +398,11 @@ pub struct Client {
     /// When the screens were last found.
     pub found_at: Option<Instant>,
     /// When the last request for the screens failed (it counts while the status is trouble),
-    /// and what the notices have said of it (`tell`).
-    pub failed_at: Option<Instant>,
-    pub outage: Outage,
+    /// and what the notices have said of it (`tell`): of VoxLive out of reach, and of a key
+    /// refused while it stays refused.
+    failed_at: Option<Instant>,
+    outage: Outage,
+    refusal_told: bool,
     /// When to ask again.
     next: Option<Instant>,
     busy: bool,
@@ -392,6 +420,9 @@ pub struct Client {
     pub saving: Option<String>,
     /// The last look saved or refused: its screen, and how it went.
     pub saved: Option<(String, Result<Screen, Saving>)>,
+    /// How the last save went, for `sp voxlive`: until the key is given or forgotten, or that
+    /// screen's look is closed, or (for a save VoxLive couldn't be reached for) VoxLive answers.
+    pub said: Option<Said>,
     tx: Sender<Answer>,
     rx: Receiver<Answer>,
 }
@@ -399,24 +430,34 @@ pub struct Client {
 impl Client {
     /// The connection as it was left: with the key kept, if there is one, being checked.
     pub fn new() -> Client {
-        let (tx, rx) = channel();
+        let mut client = Client::unread();
         // The key is read from the system's store on a thread of its own: macOS may first ask
         // the operator whether the app may have it (it asks again for each new build until the
         // app is signed) and a keyring on Linux may ask to be unlocked, and the window must not
         // wait for that answer.
-        let reader = tx.clone();
+        let reader = client.tx.clone();
         let started = std::thread::Builder::new().name("voxlive key".to_owned()).spawn(move || {
             let _ = reader.send(Answer::KeyRead(0, store::load()));
         });
-        let key_reading = started.is_ok();
+        if started.is_ok() {
+            client.key_reading = true;
+            client.status = Status::Checking;
+        }
+        client
+    }
+
+    /// The connection with no key, and none being read.
+    fn unread() -> Client {
+        let (tx, rx) = channel();
         Client {
             key: None,
-            status: if key_reading { Status::Checking } else { Status::NoKey },
-            key_reading,
+            status: Status::NoKey,
+            key_reading: false,
             screens: Vec::new(),
             found_at: None,
             failed_at: None,
-            outage: Outage::default(),
+            outage: Outage::asked_every(POLL_EVERY),
+            refusal_told: false,
             next: None,
             busy: false,
             schema: Vec::new(),
@@ -425,8 +466,37 @@ impl Client {
             generation: 0,
             saving: None,
             saved: None,
+            said: None,
             tx,
             rx,
+        }
+    }
+
+    /// What the notices say of the connection, each time the app wakes. A key refused is said
+    /// at once, once while it stays refused. Trouble (VoxLive out of reach, or answering with a
+    /// problem) is said once an outage, in the card's words (`notices::Outage`): after a while,
+    /// or at once while a VoxLive screen is `on_screen`; a new key tried meanwhile goes on with
+    /// the same outage, and it ends, its entry taken away, when VoxLive answers or refuses the
+    /// key, or the key is forgotten (nothing is asked then). True when the notices changed.
+    pub fn tell(&mut self, on_screen: bool, notices: &mut Notices) -> bool {
+        let refused = matches!(self.status, Status::Refused(_));
+        let tell_refusal = refused && !self.refusal_told;
+        self.refusal_told = refused;
+        if tell_refusal {
+            notices.trouble(self.status.words());
+        }
+        let heard = match self.status {
+            Status::Trouble(_) => self.failed_at.map_or(Heard::Nothing, Heard::Failed),
+            Status::Connected | Status::Refused(_) | Status::NoKey => Heard::Ended,
+            Status::Checking => Heard::Nothing,
+        };
+        self.outage.follow(heard, on_screen, || self.status.words(), notices) || tell_refusal
+    }
+
+    /// The look of this screen was closed: how its last save went no longer applies.
+    pub fn look_closed(&mut self, screen: &str) {
+        if self.said.as_ref().is_some_and(|said| said.screen == screen) {
+            self.said = None;
         }
     }
 
@@ -485,6 +555,8 @@ impl Client {
         self.busy = false;
         self.schema_asking = false;
         self.schema_next = self.schema.is_empty().then(Instant::now);
+        // How a save went with the key before no longer applies.
+        self.said = None;
     }
 
     /// Asks for the screens now (unless a key was refused, or a request is under way).
@@ -558,6 +630,11 @@ impl Client {
                 }
                 Answer::Saved(screen, outcome) => {
                     self.saving = None;
+                    self.said = Some(Said {
+                        screen: screen.clone(),
+                        words: saved_words(&outcome),
+                        out_of_reach: matches!(outcome, Err(Saving::Unreachable)),
+                    });
                     match &outcome {
                         Ok(saved) => {
                             crate::applog::event("voxlive", &format!("saved the look of {}", saved.label()));
@@ -574,6 +651,8 @@ impl Client {
                             }
                         }
                         Err(Saving::Failed(why)) => crate::applog::problem("voxlive", why),
+                        // Why is in the log already (`unsaved`).
+                        Err(Saving::Unreachable) => {}
                     }
                     self.saved = Some((screen, outcome));
                     continue;
@@ -584,6 +663,10 @@ impl Client {
             }
             match answer {
                 Answer::Screens(_, Ok(screens)) => {
+                    // VoxLive answers again: a save it couldn't be reached for can be tried.
+                    if self.said.as_ref().is_some_and(|said| said.out_of_reach) {
+                        self.said = None;
+                    }
                     self.screens = screens;
                     self.found_at = Some(Instant::now());
                     self.status = Status::Connected;
@@ -657,25 +740,22 @@ fn after_failure(problem: Problem) -> (Status, Option<Duration>) {
     }
 }
 
-/// What the notices say of the connection, each time the app wakes: `status` as it is now, `was`
-/// as the window last had it. A key refused is said at once, once. Trouble (VoxLive out of reach,
-/// or answering with a problem) is said once an outage, in the card's words (`notices::Outage`):
-/// after a while, or at once while a VoxLive screen is on screen; and taken away when VoxLive
-/// answers again. True when the notices changed.
-pub fn tell(
-    was: &Status,
-    status: &Status,
-    failed_at: Option<Instant>,
-    on_screen: bool,
-    outage: &mut Outage,
-    notices: &mut Notices,
-) -> bool {
-    let refused = was != status && matches!(status, Status::Refused(_));
-    if refused {
-        notices.trouble(status.words());
+/// How a save went, in words for `sp voxlive`.
+fn saved_words(outcome: &Result<Screen, Saving>) -> String {
+    match outcome {
+        Ok(saved) => format!("Saved the look of {} to VoxLive.", saved.label()),
+        Err(Saving::Changed(now)) => {
+            format!("The look of {} wasn't saved: it changed in VoxLive since it was opened.", now.label())
+        }
+        Err(why @ (Saving::Unreachable | Saving::Failed(_))) => format!("The look wasn't saved: {}", why.words()),
     }
-    let failing = failed_at.filter(|_| matches!(status, Status::Trouble(_)));
-    outage.follow(failing, on_screen, || status.words(), notices) || refused
+}
+
+/// A look not saved because VoxLive couldn't be reached: why (a lookup that failed, a timeout)
+/// in the log, plain words for the window and `sp`.
+fn unsaved(why: String) -> Saving {
+    crate::applog::problem("voxlive", &why);
+    Saving::Unreachable
 }
 
 /// True for something shaped like a VoxLive API key: `vxk_`, then letters, digits, `_` or `-`.
@@ -732,6 +812,16 @@ fn call(
 /// The church's screens, as `GET /screens` gives them.
 fn get_screens(base: &str, key: &str) -> Result<Vec<Screen>, Problem> {
     let (status, reply, wait) = call(base, key, "GET", "/screens", None, None).map_err(Problem::Unreachable)?;
+    screens_from(base, status, &reply, wait)
+}
+
+/// The screens in VoxLive's answer to `GET /screens`, or what went wrong.
+fn screens_from(
+    base: &str,
+    status: u16,
+    reply: &serde_json::Value,
+    wait: Option<Duration>,
+) -> Result<Vec<Screen>, Problem> {
     let error = reply.get("error").and_then(serde_json::Value::as_str).unwrap_or("");
     match status {
         200 => {
@@ -796,7 +886,7 @@ fn patch_look(
 ) -> Result<Screen, Saving> {
     let body = serde_json::json!({ "style": changes });
     let (status, reply, _) =
-        call(base, key, "PATCH", &format!("/screens/{screen}"), Some(body), version).map_err(Saving::Failed)?;
+        call(base, key, "PATCH", &format!("/screens/{screen}"), Some(body), version).map_err(unsaved)?;
     let screen_in = |reply: &serde_json::Value| {
         reply
             .get("screen")
@@ -1008,12 +1098,31 @@ mod tests {
         assert!(script.contains(r#""x'});alert(1);({'""#) && script.contains(r#""lang":"es\"""#));
     }
 
-    /// What the app does with each failed request: the connection takes the answer in (at `at`),
-    /// then the notices are told as the app wakes. The status after it.
-    fn failed(problem: Problem, at: Instant, was: &Status, on_screen: bool, told: &mut (Outage, Notices)) -> Status {
-        let (status, _) = after_failure(problem);
-        tell(was, &status, Some(at), on_screen, &mut told.0, &mut told.1);
-        status
+    /// A connection with no key, as if connected (nothing here reads the system's store for
+    /// secrets or asks the network), and an empty list of notices.
+    fn connected() -> (Client, Notices) {
+        let mut client = Client::unread();
+        client.status = Status::Connected;
+        (client, Notices::default())
+    }
+
+    /// A request for the screens comes back so, as the connection's thread sends it; the
+    /// connection takes it in as if at `at`, then the app wakes and tells the notices.
+    fn answer(
+        client: &mut Client,
+        outcome: Result<Vec<Screen>, Problem>,
+        at: Instant,
+        on_screen: bool,
+        notices: &mut Notices,
+    ) {
+        client.busy = true;
+        client.failed_at = None;
+        client.tx.send(Answer::Screens(client.generation, outcome)).expect("sent");
+        client.tick();
+        if let (Status::Trouble(_), Some(_)) = (&client.status, client.failed_at) {
+            client.failed_at = Some(at);
+        }
+        client.tell(on_screen, notices);
     }
 
     /// VoxLive out of reach, as `call` says it: the reasons the owner's log had.
@@ -1035,109 +1144,212 @@ mod tests {
             .collect()
     }
 
+    /// Plain words: no system's reason (in brackets, those read "io: …", "timeout: global").
+    fn assert_plain(words: &str) {
+        for technical in ["io:", "os error", "timeout", "lookup", "nodename", "route"] {
+            assert!(!words.contains(technical), "{words}");
+        }
+        for bracketed in words.split('(').skip(1) {
+            assert!(!bracketed.split(')').next().unwrap_or("").contains(':'), "{words}");
+        }
+    }
+
     #[test]
     fn a_network_that_drops_for_a_moment_says_nothing_and_a_long_outage_is_said_once() {
-        let mut told = (Outage::default(), Notices::default());
+        let (mut client, mut notices) = connected();
         let start = Instant::now();
         let at = |seconds: u64| start + Duration::from_secs(seconds);
         // Timeout, then lookup, then no route, over 90 seconds: the wording changes, nothing said.
-        let mut was = Status::Connected;
         for (reason, seconds) in [(TIMEOUT, 0), (LOOKUP, 45), (NO_ROUTE, 90)] {
-            was = failed(unreachable(reason), at(seconds), &was, false, &mut told);
-            assert!(matches!(was, Status::Trouble(_)), "the card says so at once");
+            answer(&mut client, Err(unreachable(reason)), at(seconds), false, &mut notices);
+            assert!(matches!(client.status, Status::Trouble(_)), "the card says so at once");
+            assert_plain(&client.status.words());
         }
-        assert!(troubles(&told.1).is_empty(), "a short outage says nothing: {:?}", troubles(&told.1));
+        assert!(troubles(&notices).is_empty(), "a short outage says nothing: {:?}", troubles(&notices));
         // Still out of reach two minutes after the first failure: one entry, and no more after.
-        was = failed(unreachable(TIMEOUT), at(120), &was, false, &mut told);
-        assert_eq!(troubles(&told.1).len(), 1);
-        for (reason, seconds) in [(LOOKUP, 150), (NO_ROUTE, 180), (TIMEOUT, 600)] {
-            was = failed(unreachable(reason), at(seconds), &was, false, &mut told);
+        answer(&mut client, Err(unreachable(TIMEOUT)), at(120), false, &mut notices);
+        assert_eq!(troubles(&notices).len(), 1);
+        for (reason, seconds) in [(LOOKUP, 150), (NO_ROUTE, 180), (TIMEOUT, 400)] {
+            answer(&mut client, Err(unreachable(reason)), at(seconds), false, &mut notices);
         }
-        assert_eq!(troubles(&told.1).len(), 1, "once an outage: {:?}", troubles(&told.1));
-        // In plain words, the card's own; the reason is the log's.
-        let said = &troubles(&told.1)[0];
-        assert_eq!(*said, was.words());
-        for technical in ["io:", "os error", "timeout:", "lookup", "("] {
-            assert!(!said.contains(technical), "{said}");
-        }
+        assert_eq!(troubles(&notices), [client.status.words()], "once an outage, in the card's words");
+        assert_plain(&troubles(&notices)[0]);
         // Connected again: the entry goes by itself, and nothing is said of it.
-        assert!(tell(&was, &Status::Connected, Some(at(600)), false, &mut told.0, &mut told.1));
-        assert!(told.1.to_vec().is_empty(), "{:?}", told.1.to_vec());
+        answer(&mut client, Ok(Vec::new()), at(430), false, &mut notices);
+        assert_eq!(client.status, Status::Connected);
+        assert!(notices.to_vec().is_empty(), "{:?}", notices.to_vec());
         // Out of reach again for two minutes: one new entry.
-        was = Status::Connected;
-        for (reason, seconds) in [(TIMEOUT, 700), (LOOKUP, 760)] {
-            was = failed(unreachable(reason), at(seconds), &was, false, &mut told);
+        for (reason, seconds) in [(TIMEOUT, 500), (LOOKUP, 560)] {
+            answer(&mut client, Err(unreachable(reason)), at(seconds), false, &mut notices);
         }
-        assert!(troubles(&told.1).is_empty());
-        failed(unreachable(NO_ROUTE), at(820), &was, false, &mut told);
-        assert_eq!(troubles(&told.1).len(), 1);
+        assert!(troubles(&notices).is_empty());
+        answer(&mut client, Err(unreachable(NO_ROUTE)), at(620), false, &mut notices);
+        assert_eq!(troubles(&notices).len(), 1);
     }
 
     #[test]
     fn out_of_reach_with_a_voxlive_screen_on_screen_is_said_at_once_and_once() {
-        let mut told = (Outage::default(), Notices::default());
+        let (mut client, mut notices) = connected();
         let start = Instant::now();
-        let was = failed(unreachable(LOOKUP), start, &Status::Connected, true, &mut told);
-        assert_eq!(troubles(&told.1), [was.words()], "said at once");
-        let again = failed(unreachable(NO_ROUTE), start + Duration::from_secs(30), &was, true, &mut told);
-        failed(unreachable(TIMEOUT), start + Duration::from_secs(150), &again, true, &mut told);
-        assert_eq!(troubles(&told.1).len(), 1, "once an outage: {:?}", troubles(&told.1));
-        assert!(!troubles(&told.1)[0].contains("io:"));
+        answer(&mut client, Err(unreachable(LOOKUP)), start, true, &mut notices);
+        assert_eq!(troubles(&notices), [client.status.words()], "said at once");
+        answer(&mut client, Err(unreachable(NO_ROUTE)), start + Duration::from_secs(30), true, &mut notices);
+        answer(&mut client, Err(unreachable(TIMEOUT)), start + Duration::from_secs(150), true, &mut notices);
+        assert_eq!(troubles(&notices).len(), 1, "once an outage: {:?}", troubles(&notices));
+        assert_plain(&troubles(&notices)[0]);
+    }
+
+    #[test]
+    fn a_new_key_while_out_of_reach_goes_on_with_the_same_outage() {
+        let (mut client, mut notices) = connected();
+        let start = Instant::now();
+        answer(&mut client, Err(unreachable(LOOKUP)), start, true, &mut notices);
+        assert_eq!(troubles(&notices).len(), 1);
+        // A new key given, as `connect` leaves it (not through it: it writes to the system's
+        // store for secrets).
+        client.new_connection();
+        client.status = Status::Checking;
+        assert!(!client.tell(true, &mut notices));
+        assert_eq!(troubles(&notices).len(), 1, "the entry stays");
+        // Still out of reach with the new key: the same outage, nothing said again.
+        answer(&mut client, Err(unreachable(NO_ROUTE)), start + Duration::from_secs(10), true, &mut notices);
+        assert_eq!(troubles(&notices).len(), 1, "{:?}", troubles(&notices));
+        // A refusal ends it: the outage's entry goes, the refusal is said.
+        answer(
+            &mut client,
+            Err(Problem::Refused(refused_words("key_revoked"))),
+            start + Duration::from_secs(40),
+            true,
+            &mut notices,
+        );
+        assert_eq!(troubles(&notices), [client.status.words()]);
+    }
+
+    #[test]
+    fn a_disconnect_while_out_of_reach_ends_the_outage() {
+        let (mut client, mut notices) = connected();
+        let start = Instant::now();
+        let at = |seconds: u64| start + Duration::from_secs(seconds);
+        for seconds in [0, 30, 60, 90, 120] {
+            answer(&mut client, Err(unreachable(LOOKUP)), at(seconds), false, &mut notices);
+        }
+        assert_eq!(troubles(&notices).len(), 1);
+        // Disconnect, as `disconnect` leaves it (not through it: it writes to the system's
+        // store for secrets). Nothing is asked any more: the entry goes, the button is quiet.
+        client.new_connection();
+        client.status = Status::NoKey;
+        assert!(client.tell(false, &mut notices));
+        assert!(notices.to_vec().is_empty(), "{:?}", notices.to_vec());
+        assert_eq!(notices.look(), crate::notices::Look::Quiet);
+        // A key again, into a new outage: told again, two minutes after its own first failure.
+        client.status = Status::Checking;
+        assert!(!client.tell(false, &mut notices));
+        for seconds in [200, 230, 260, 290] {
+            answer(&mut client, Err(unreachable(NO_ROUTE)), at(seconds), false, &mut notices);
+        }
+        assert!(troubles(&notices).is_empty(), "a new outage waits its own two minutes");
+        answer(&mut client, Err(unreachable(TIMEOUT)), at(320), false, &mut notices);
+        assert_eq!(troubles(&notices).len(), 1);
+        // Cleared by the operator, then disconnected and connected into another outage: told.
+        notices.clear_all();
+        client.status = Status::NoKey;
+        client.tell(false, &mut notices);
+        client.status = Status::Checking;
+        for seconds in [400, 430, 460, 490, 520] {
+            answer(&mut client, Err(unreachable(LOOKUP)), at(seconds), false, &mut notices);
+        }
+        assert_eq!(troubles(&notices).len(), 1, "the new outage is told: {:?}", troubles(&notices));
     }
 
     #[test]
     fn a_refused_key_is_said_at_once_and_once() {
-        let mut told = (Outage::default(), Notices::default());
+        let (mut client, mut notices) = connected();
         let start = Instant::now();
-        let refused =
-            failed(Problem::Refused(refused_words("key_revoked")), start, &Status::Connected, false, &mut told);
-        assert!(matches!(refused, Status::Refused(_)));
-        assert_eq!(troubles(&told.1), [refused.words()], "said at once, in the card's words");
-        // Nothing more is asked, and the window keeps the status: nothing more said.
-        assert!(!tell(&refused, &refused, None, false, &mut told.0, &mut told.1));
-        assert_eq!(troubles(&told.1).len(), 1);
+        answer(&mut client, Err(Problem::Refused(refused_words("key_revoked"))), start, false, &mut notices);
+        assert!(matches!(client.status, Status::Refused(_)));
+        assert_eq!(troubles(&notices), [client.status.words()], "said at once, in the card's words");
+        // Nothing more is asked, and the status stays: nothing more said.
+        for _ in 0..3 {
+            assert!(!client.tell(false, &mut notices));
+        }
+        assert_eq!(troubles(&notices).len(), 1);
     }
 
     #[test]
-    fn the_connection_keeps_when_it_failed_for_the_notices() {
-        // A connection with no key and no thread reading one: nothing here reads the system's
-        // store for secrets or asks the network.
-        let (tx, rx) = channel();
-        let mut client = Client {
-            key: None,
-            status: Status::Connected,
-            screens: Vec::new(),
-            found_at: None,
-            failed_at: None,
-            outage: Outage::default(),
-            next: None,
-            busy: true,
-            schema: Vec::new(),
-            schema_asking: false,
-            schema_next: None,
-            generation: 0,
-            key_reading: false,
-            saving: None,
-            saved: None,
-            tx,
-            rx,
+    fn every_kind_of_failure_is_said_in_plain_words() {
+        let reply = |error: &str| serde_json::json!({ "error": error });
+        let mut problems: Vec<Problem> = [TIMEOUT, LOOKUP, NO_ROUTE].into_iter().map(unreachable).collect();
+        for (status, error) in [
+            (401, "key_revoked"),
+            (401, "key_expired"),
+            (403, "insufficient_scope"),
+            (401, ""),
+            (429, "too_many_attempts"),
+            (429, ""),
+            (503, ""),
+            (500, ""),
+            (502, ""),
+            (404, ""),
+            (200, ""),
+        ] {
+            problems.push(screens_from(LIVE_API, status, &reply(error), None).expect_err("a failure"));
+        }
+        for problem in problems {
+            let (status, _) = after_failure(problem);
+            assert!(!matches!(status, Status::Connected | Status::Checking | Status::NoKey));
+            assert_plain(&status.words());
+        }
+    }
+
+    #[test]
+    fn a_problem_answer_that_lasts_is_said_in_its_own_words() {
+        let (mut client, mut notices) = connected();
+        let start = Instant::now();
+        let problem = || screens_from(LIVE_API, 502, &serde_json::json!({}), None).expect_err("a failure");
+        for seconds in [0, 45, 90] {
+            answer(&mut client, Err(problem()), start + Duration::from_secs(seconds), false, &mut notices);
+        }
+        assert!(troubles(&notices).is_empty());
+        answer(&mut client, Err(problem()), start + Duration::from_secs(135), false, &mut notices);
+        assert_eq!(troubles(&notices), ["VoxLive answered with a problem (502)."]);
+    }
+
+    #[test]
+    fn a_look_not_saved_is_said_plainly_until_it_no_longer_applies() {
+        let (mut client, mut notices) = connected();
+        let not_saved = |client: &mut Client, screen: &str, outcome: Saving| {
+            client.saving = Some(screen.to_owned());
+            client.tx.send(Answer::Saved(screen.to_owned(), Err(outcome))).expect("sent");
+            client.tick();
         };
-        let mut notices = Notices::default();
-        // A request that couldn't reach VoxLive, while a VoxLive screen is on screen.
-        client.tx.send(Answer::Screens(0, Err(unreachable(NO_ROUTE)))).expect("sent");
-        client.tick();
-        assert_eq!(client.status, Status::Trouble(crate::notices::unreachable("VoxLive")), "plain in the card");
-        assert!(client.failed_at.is_some(), "when it failed, kept for the notices");
-        assert!(tell(&Status::Connected, &client.status, client.failed_at, true, &mut client.outage, &mut notices));
-        assert_eq!(troubles(&notices), [client.status.words()]);
-        // VoxLive answers again: Connected, and the entry goes.
-        let was = client.status.clone();
-        client.busy = true;
-        client.tx.send(Answer::Screens(0, Ok(Vec::new()))).expect("sent");
-        client.tick();
-        assert_eq!(client.status, Status::Connected);
-        assert!(tell(&was, &client.status, client.failed_at, true, &mut client.outage, &mut notices));
-        assert!(notices.to_vec().is_empty());
+        let out_of_reach = || unsaved(format!("VoxLive couldn't be reached ({NO_ROUTE})."));
+        not_saved(&mut client, "abc2345", out_of_reach());
+        let Some((_, Err(why))) = &client.saved else { panic!("not saved: {:?}", client.saved) };
+        assert_eq!(*why, Saving::Unreachable);
+        assert_plain(&why.words());
+        let said = client.said.clone().expect("said for sp voxlive");
+        assert_eq!(said.screen, "abc2345");
+        assert!(said.words.starts_with("The look wasn't saved: VoxLive"), "{}", said.words);
+        assert_plain(&said.words);
+        // Another screen's look closed: still said. Its own look closed: no longer.
+        client.look_closed("other00");
+        assert!(client.said.is_some());
+        client.look_closed("abc2345");
+        assert_eq!(client.said, None);
+        // A key given or forgotten: no longer either.
+        not_saved(&mut client, "abc2345", out_of_reach());
+        client.new_connection();
+        assert_eq!(client.said, None);
+        // Saved from sp, with no look open: no longer once VoxLive answers again.
+        not_saved(&mut client, "abc2345", out_of_reach());
+        answer(&mut client, Err(unreachable(TIMEOUT)), Instant::now(), false, &mut notices);
+        assert!(client.said.is_some(), "still out of reach: still so");
+        answer(&mut client, Ok(Vec::new()), Instant::now(), false, &mut notices);
+        assert_eq!(client.said, None);
+        // A save VoxLive refused stays said when it answers: it would be refused again.
+        not_saved(&mut client, "abc2345", Saving::Failed("VoxLive didn't take size (out_of_range).".to_owned()));
+        answer(&mut client, Ok(Vec::new()), Instant::now(), false, &mut notices);
+        assert!(client.said.is_some_and(|said| said.words.contains("didn't take size")));
     }
 
     #[test]

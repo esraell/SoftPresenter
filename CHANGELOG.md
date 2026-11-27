@@ -30,7 +30,7 @@ A What's new window, a search that stays after a drag, AirPlay by name, a tidier
 
 - **Reasons in your language.** When a songbook or song file can't be read, Song files and the import's notice now say why in your language. Details and page numbers are in your language too. Before, they said it in English in the middle of a Spanish, Russian or Ukrainian line ("Не удалось прочитать: the file is cut short or damaged…").
 - **Drag files in on Linux.** On Linux, files dragged from the file manager onto SoftPresenter now come in on Wayland desktops too (Ubuntu's default), not only on X11. Before, nothing happened when photos, videos or songs were dragged onto the window there; they had to be added with the + button. They also land where the pointer is, as on a Mac: on the playlist, the library or the media strip you drop them on.
-- **Fewer VoxLive notices.** VoxLive notices kept coming, in technical words, whenever the internet dropped; now one plain notice comes only after two minutes out of reach. It comes at once if a VoxLive screen is on screen, and goes by itself when VoxLive answers again.
+- **Fewer VoxLive notices.** When VoxLive can't be reached, one plain notice now comes after two minutes, or at once while VoxLive captions are on screen. It goes by itself when VoxLive answers again, and a look that can't be saved says why plainly too. Before, every drop in the internet brought a stream of notices in technical words.
 
 ## 0.9.0-dev.26 — 26 November 2026 (development build)
 

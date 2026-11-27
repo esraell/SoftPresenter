@@ -2195,8 +2195,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   be reached. SoftPresenter keeps trying. Check this computer's internet connection."), and why
   (a lookup that failed, a timeout) goes in the log only. The notices say it only once VoxLive
   has been out of reach for two minutes, or at once while a VoxLive screen is on screen; once
-  until VoxLive answers again, when the entry goes by itself, so a Wi-Fi change says nothing.
-  Disconnect forgets the key on this computer, after asking ("Disconnect VoxLive? … This can't
+  until VoxLive answers again or refuses the key, when the entry goes by itself, so a Wi-Fi
+  change says nothing. A new key given meanwhile goes on with the same outage; Disconnect ends
+  it, and its entry goes (nothing is asked then). Two failed answers more than five minutes
+  apart (the computer slept) start its two minutes again. Disconnect forgets the key on this computer, after asking ("Disconnect VoxLive? … This can't
   be undone.").
 - **Where keys and sign-ins are kept:** one store for every key and token the app holds
   (VoxLive's key, Canva Sync's secret and sign-in), on every system, never a plain file or the
@@ -2287,7 +2289,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   disconnected from TimelyChurch" and stops asking. A check that can't reach it is said in the
   card at once ("TimelyChurch can't be reached. …", why in the log only), and in the notices,
   as VoxLive's is, only when a check two minutes or more after the first still can't (so the
-  next check, five minutes later), once until a check reaches it, when the entry goes. [timelychurch.md](timelychurch.md) has the
+  next check, five minutes later), once until a check reaches it or the computer is
+  disconnected (here or there), when the entry goes. Connecting when TimelyChurch can't be reached says
+  so plainly too ("… Check this computer's internet connection and try again."). [timelychurch.md](timelychurch.md) has the
   design.
 - **A VoxLive screen's look**, changed from Settings › Integrations › VoxLive: Change Look › on a
   screen's row opens its look, with a control for each setting VoxLive describes (a menu, a colour, a tick or
@@ -2296,7 +2300,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   starts a translation while adjusting. **Save to VoxLive** sends only the settings changed, and
   the screen changes at once wherever it is showing. If the screen was changed in VoxLive since
   its look was opened, nothing is written: the page says so and offers VoxLive's look or saving
-  over it. Revert lets the changes go; leaving the page or closing Settings closes the preview.
+  over it. If VoxLive can't be reached, it says so plainly ("The look wasn't saved: VoxLive can't
+  be reached. Check this computer's internet connection and try again."), why in the log only;
+  `sp voxlive` says how the last save went until that look is closed or the key changes (one
+  VoxLive couldn't be reached for, until VoxLive answers again). Revert
+  lets the changes go; leaving the page or closing Settings closes the preview.
 - **The VoxLive item**: once VoxLive is connected and has screens, the church's VoxLive screens
   are slides, one a screen, named after it; the item follows VoxLive's list as screens are
   made, renamed or deleted there, and is never edited, saved, deleted or put in a song pack.

@@ -450,5 +450,6 @@
   "notices.import.damage.value_list": "la lista de valores de una fila es incorrecta",
   "notices.import.damage.unknown_kind": "un valor es de un tipo que no guarda ningún archivo de base de datos",
   "notices.import.damage.table_outside_file": "una tabla empieza en una página que el archivo no tiene",
-  "notices.unreachable": "No se puede conectar con {service}. SoftPresenter sigue intentándolo. Comprueba la conexión a internet de este ordenador."
+  "notices.unreachable": "No se puede conectar con {service}. SoftPresenter sigue intentándolo. Comprueba la conexión a internet de este ordenador.",
+  "notices.unreachable_try_again": "No se puede conectar con {service}. Comprueba la conexión a internet de este ordenador y vuelve a intentarlo."
 }

@@ -1283,7 +1283,7 @@ VoxLive screens.
 
 | Command | Does |
 |---|---|
-| `voxlive` | Whether VoxLive is connected (the key's first characters, VoxLive's handle for it) and how many screens it has |
+| `voxlive` | Whether VoxLive is connected (the key's first characters, VoxLive's handle for it) and how many screens it has, or in plain words why not; and how the last look save went, until that look is closed or the key changes (a save VoxLive couldn't be reached for, until VoxLive answers again) |
 | `voxlive screens` | The church's VoxLive screens: name, language, captions or Scripture (JSON: `id`, `name`, `language`, `mode`) |
 | `voxlive connect` | Connects with a key read from the standard input, never from an argument (an argument would stay in the shell's history): pipe it in or paste it. The key is checked in the background; `voxlive` then says how it went |
 | `voxlive show N\|NAME` | Puts that VoxLive screen's captions on the screens, in place of what is there, as a click in the VoxLive tab does (`go` and `next` then move on as usual) |

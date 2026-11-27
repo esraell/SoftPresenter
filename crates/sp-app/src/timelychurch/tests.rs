@@ -834,7 +834,8 @@ mod with_the_demo_church {
 
     #[test]
     fn a_check_that_cant_reach_timelychurch_is_said_plainly_and_once_an_outage() {
-        // Connected, with no token and no files: nothing here asks the network.
+        // Connected, with no token and no files: nothing here asks the network or the system's
+        // store for secrets.
         let mut connection = Connection::new(Some("http://127.0.0.1:9".to_owned()), None);
         connection.status = Status::Connected;
         let mut notices = crate::notices::Notices::default();
@@ -844,19 +845,63 @@ mod with_the_demo_church {
         let out_of_reach = |reason: &str| Problem::Unreachable(format!("TimelyChurch couldn't be reached ({reason})."));
         connection.trouble_with(out_of_reach("io: No route to host (os error 65)"), true);
         let card = connection.trouble.clone().expect("the card says so at once");
-        assert!(!card.contains("io:") && !card.contains("os error"), "plain words: {card}");
+        assert!(!card.contains("io:") && !card.contains("os error") && !card.contains('('), "plain words: {card}");
         assert!(connection.said.is_empty(), "nothing said for the notices as it comes: {:?}", connection.said);
         connection.tell_outage(&mut notices);
         assert!(texts(&notices).is_empty(), "one check that failed says nothing: {:?}", texts(&notices));
-        // The next check, five minutes on, can't reach it either: said once, in the card's words.
+        // The next check, five minutes and a timeout on, can't reach it either: said once, in
+        // the card's words (checks five minutes apart are no sleep).
         connection.trouble_with(out_of_reach("timeout: global"), true);
-        connection.failed_at = connection.failed_at.map(|at| at + Duration::from_secs(300));
+        connection.failed_at = connection.failed_at.map(|at| at + Duration::from_secs(320));
         assert!(connection.tell_outage(&mut notices));
         assert!(!connection.tell_outage(&mut notices));
+        assert_eq!(texts(&notices), std::slice::from_ref(&card));
+        // A pairing code given meanwhile: the same outage, the entry stays.
+        connection.status = Status::Pairing;
+        assert!(!connection.tell_outage(&mut notices));
         assert_eq!(texts(&notices), [card]);
-        // A check that reaches it: the entry goes by itself.
+        // Connected again, and a check that reaches it (it clears the trouble): the entry goes.
+        connection.status = Status::Connected;
         connection.trouble = None;
         assert!(connection.tell_outage(&mut notices));
         assert!(texts(&notices).is_empty());
+    }
+
+    #[test]
+    fn a_disconnect_while_timelychurch_is_out_of_reach_ends_the_outage() {
+        // Connected, with no token and no files: nothing here asks the network or the system's
+        // store for secrets.
+        let mut connection = Connection::new(Some("http://127.0.0.1:9".to_owned()), None);
+        connection.status = Status::Connected;
+        let mut notices = crate::notices::Notices::default();
+        let out_of_reach = || Problem::Unreachable("TimelyChurch couldn't be reached (timeout: global).".to_owned());
+        // Two checks five minutes apart that can't reach it: told.
+        let fail_twice = |connection: &mut Connection, notices: &mut crate::notices::Notices| {
+            connection.trouble_with(out_of_reach(), true);
+            assert!(!connection.tell_outage(notices));
+            connection.trouble_with(out_of_reach(), true);
+            connection.failed_at = connection.failed_at.map(|at| at + Duration::from_secs(320));
+            connection.tell_outage(notices);
+        };
+        fail_twice(&mut connection, &mut notices);
+        assert_eq!(notices.to_vec().len(), 1);
+        // Disconnected here: nothing is asked any more, so the entry goes and the button is quiet.
+        connection.disconnect();
+        assert!(connection.tell_outage(&mut notices));
+        assert!(notices.to_vec().is_empty(), "{:?}", notices.to_vec());
+        assert_eq!(notices.look(), crate::notices::Look::Quiet);
+        // Connected again into a new outage: told again, at its own second failed check.
+        connection.status = Status::Connected;
+        fail_twice(&mut connection, &mut notices);
+        assert_eq!(notices.to_vec().len(), 1, "the new outage is told: {:?}", notices.to_vec());
+    }
+
+    #[test]
+    fn connecting_when_timelychurch_cant_be_reached_says_so_plainly() {
+        let words = super::super::sync::problem_words(&Problem::Unreachable(
+            "TimelyChurch couldn't be reached (io: failed to lookup address information: nodename nor servname provided, or not known).".to_owned(),
+        ));
+        assert!(words.starts_with("TimelyChurch"), "{words}");
+        assert!(!words.contains("io:") && !words.contains("lookup") && !words.contains('('), "{words}");
     }
 }

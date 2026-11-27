@@ -148,7 +148,9 @@ nothing more is asked until it is connected again. A 429 (or 503 with Retry-Afte
 out. No network: the playlists and songs already made work as they are (they are ordinary
 songs and playlists, saved as every other is), the card says TimelyChurch can't be reached, and
 it asks again five minutes later. The notices say so only if that check can't reach it either,
-once until a check does, and the entry then goes by itself; why goes in the log only.
+once until a check reaches it or the computer is disconnected (here or there; a pairing code
+given meanwhile goes on with the same outage), and the entry then goes by itself; why goes in
+the log only.
 
 ## Song use
 

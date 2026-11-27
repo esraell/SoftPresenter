@@ -2329,8 +2329,6 @@ struct App {
     timelychurch: timelychurch::Connection,
     /// The preview of a VoxLive screen's look being changed, while its page is open.
     voxlive_preview: Option<LookPreview>,
-    /// How the last save of a VoxLive look went, for `sp voxlive`.
-    voxlive_said: Option<String>,
     /// What plays on the Announcements layer: a song, a picture, a video or a media playlist
     /// (see `announcements`).
     announcing: Option<announcements::Announcing>,
@@ -3717,7 +3715,9 @@ impl App {
                     }
                 }
                 integrations::Request::CloseLook => {
-                    running.home_state.voxlive.look = None;
+                    if let Some(look) = running.home_state.voxlive.look.take() {
+                        self.voxlive.look_closed(&look.screen);
+                    }
                     self.voxlive_preview = None;
                 }
             }
@@ -3726,37 +3726,30 @@ impl App {
         if let Some(running) = self.running.as_mut() {
             let state = &mut running.home_state;
             let showing = state.preferences_open && state.preferences_pane == home::Pane::Integrations;
-            if !showing && state.voxlive.look.is_some() {
-                state.voxlive.look = None;
+            if !showing && let Some(look) = state.voxlive.look.take() {
+                self.voxlive.look_closed(&look.screen);
             }
             if state.voxlive.look.is_none() {
                 self.voxlive_preview = None;
             }
         }
         let mut at = self.voxlive.tick();
-        // How a save went: in the look, if it is open, and for `sp voxlive`.
-        if let Some((screen, outcome)) = self.voxlive.saved.take() {
-            let said = match &outcome {
-                Ok(saved) => format!("Saved the look of {} to VoxLive.", saved.label()),
-                Err(voxlive::Saving::Changed(now)) => {
-                    format!("The look of {} wasn't saved: it changed in VoxLive since it was opened.", now.label())
-                }
-                Err(voxlive::Saving::Failed(why)) => format!("The look wasn't saved: {why}"),
-            };
-            if let Some(look) =
+        // How a save went, in the look if it is open (`sp voxlive` has it from the connection).
+        if let Some((screen, outcome)) = self.voxlive.saved.take()
+            && let Some(look) =
                 self.running.as_mut().and_then(|r| r.home_state.voxlive.look.as_mut()).filter(|l| l.screen == screen)
-            {
-                look.saving = false;
-                match outcome {
-                    Ok(saved) => {
-                        look.take(&saved);
-                        look.outcome = Some(crate::i18n::t("notices.voxlive.saved", "Saved to VoxLive.").to_owned());
-                    }
-                    Err(voxlive::Saving::Changed(now)) => look.changed_there = Some(*now),
-                    Err(voxlive::Saving::Failed(why)) => look.outcome = Some(why),
+        {
+            look.saving = false;
+            match outcome {
+                Ok(saved) => {
+                    look.take(&saved);
+                    look.outcome = Some(crate::i18n::t("notices.voxlive.saved", "Saved to VoxLive.").to_owned());
+                }
+                Err(voxlive::Saving::Changed(now)) => look.changed_there = Some(*now),
+                Err(why @ (voxlive::Saving::Unreachable | voxlive::Saving::Failed(_))) => {
+                    look.outcome = Some(why.words())
                 }
             }
-            self.voxlive_said = Some(said);
         }
         // The preview paints the look as it is changed (and again each second, in case the page
         // wasn't ready), and its pictures go to the look's page, about ten a second.
@@ -3823,16 +3816,8 @@ impl App {
         let on_screen = self.show.live().is_some_and(|at| at.presentation == self.voxlive_slot);
         if let Some(running) = self.running.as_mut() {
             // A key refused, or VoxLive out of reach for a while, is trouble in the notices too
-            // (`voxlive::tell`); the card says so at once.
-            let told = voxlive::tell(
-                &running.home_state.voxlive.status,
-                &self.voxlive.status,
-                self.voxlive.failed_at,
-                on_screen,
-                &mut self.voxlive.outage,
-                &mut running.home_state.notices,
-            );
-            if told {
+            // (`voxlive::Client::tell`); the card says so at once.
+            if self.voxlive.tell(on_screen, &mut running.home_state.notices) {
                 running.home_window.request_redraw();
             }
             let view = &mut running.home_state.voxlive;
@@ -13114,7 +13099,6 @@ fn main() -> ExitCode {
         finding: find_songs_cli::Finding::default(),
         timelychurch: timelychurch::Connection::new(timelychurch::gate(), timelychurch::Files::in_data_dir()),
         voxlive_preview: None,
-        voxlive_said: None,
         media_playlists: Vec::new(),
         announcing: None,
         stamps,

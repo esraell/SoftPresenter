@@ -399,39 +399,75 @@ impl Notices {
 /// move between networks) is nothing to tell the operator about.
 pub const OUTAGE_GRACE: Duration = Duration::from_secs(120);
 
+/// A gap between two failed answers longer than this (and than twice the time between asks)
+/// starts an outage's clock again from the later one: the computer slept between them, and the
+/// one before says nothing of how long the service has been out of reach.
+pub const OUTAGE_GAP: Duration = Duration::from_secs(5 * 60);
+
+/// What was last heard from a service the app keeps asking, for [`Outage::follow`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Heard {
+    /// It couldn't be reached, or answered with a problem: its last failed answer came then.
+    Failed(Instant),
+    /// It answered, or refused what it was given, or it isn't asked any more (disconnected): an
+    /// outage is over.
+    Ended,
+    /// Nothing to go by yet (a new key or code being tried): an outage stands as it is.
+    Nothing,
+}
+
 /// What the notices say of a service the app keeps asking while it can't be reached. Its card in
 /// Settings says so at once; the notices say it once an outage (from its first failed answer
-/// until it answers again): when a failed answer comes [`OUTAGE_GRACE`] or more after the first,
-/// or at once while what the service does is on screen. When it answers again, the entry goes.
-#[derive(Debug, Default)]
+/// until it answers or refuses, or is disconnected): when a failed answer comes
+/// [`OUTAGE_GRACE`] or more after the first, or at once while what the service does is on screen.
+/// When the outage ends, the entry goes.
+#[derive(Debug)]
 pub struct Outage {
-    /// When this outage's first failed answer came.
+    /// When this outage's clock started: its first failed answer, or the first after a gap.
     since: Option<Instant>,
+    /// When its last failed answer came.
+    last: Option<Instant>,
+    /// A longer gap between failed answers starts the clock again.
+    gap: Duration,
     /// The entry said for this outage, once it has been: its words, to take it away by.
     said: Option<String>,
 }
 
 impl Outage {
-    /// Follows the service, each time the app wakes. `failing` is when its last failed answer
-    /// came, while it hasn't answered since (`None` once it answers, or isn't asked any more);
+    /// For a service asked every `every` while it fails.
+    pub fn asked_every(every: Duration) -> Outage {
+        Outage { since: None, last: None, gap: OUTAGE_GAP.max(every * 2), said: None }
+    }
+
+    /// Follows the service, each time the app wakes: `heard` is what was last heard from it;
     /// `in_use` is true while what it does is on screen; `words` are the entry's. True when the
     /// list changed.
     pub fn follow(
         &mut self,
-        failing: Option<Instant>,
+        heard: Heard,
         in_use: bool,
         words: impl FnOnce() -> String,
         notices: &mut Notices,
     ) -> bool {
-        let Some(at) = failing else {
-            self.since = None;
-            let said = self.said.take();
-            if let Some(said) = &said {
-                notices.withdraw(said);
+        let at = match heard {
+            Heard::Failed(at) => at,
+            Heard::Nothing => return false,
+            Heard::Ended => {
+                self.since = None;
+                self.last = None;
+                let said = self.said.take();
+                if let Some(said) = &said {
+                    notices.withdraw(said);
+                }
+                return said.is_some();
             }
-            return said.is_some();
         };
-        let since = *self.since.get_or_insert(at);
+        let slept = self.last.is_some_and(|last| at.saturating_duration_since(last) > self.gap);
+        if self.since.is_none() || slept {
+            self.since = Some(at);
+        }
+        self.last = Some(at);
+        let since = self.since.unwrap_or(at);
         if self.said.is_some() || !(in_use || at.saturating_duration_since(since) >= OUTAGE_GRACE) {
             return false;
         }
@@ -442,12 +478,22 @@ impl Outage {
     }
 }
 
-/// What a service's card and the notices say when the app can't reach it. Why (a lookup that
-/// failed, a timeout) goes in the log only.
+/// What a service's card and the notices say while the app can't reach it and keeps asking. Why
+/// (a lookup that failed, a timeout) goes in the log only.
 pub fn unreachable(service: &str) -> String {
     crate::i18n::tf(
         "notices.unreachable",
         "{service} can't be reached. SoftPresenter keeps trying. Check this computer's internet connection.",
+        &[("service", service)],
+    )
+}
+
+/// What the window says when something the operator asked of a service (saving, connecting)
+/// couldn't reach it. Why goes in the log only.
+pub fn unreachable_try_again(service: &str) -> String {
+    crate::i18n::tf(
+        "notices.unreachable_try_again",
+        "{service} can't be reached. Check this computer's internet connection and try again.",
         &[("service", service)],
     )
 }
@@ -1114,11 +1160,16 @@ mod tests {
         notices.to_vec().into_iter().filter(|notice| notice.kind == Kind::Trouble).map(|notice| notice.text).collect()
     }
 
+    /// A service asked every 30 seconds while it fails, as VoxLive is.
+    fn outage() -> Outage {
+        Outage::asked_every(Duration::from_secs(30))
+    }
+
     #[test]
     fn a_service_out_of_reach_is_said_once_an_outage_after_two_minutes() {
-        let (mut notices, mut outage) = (Notices::default(), Outage::default());
+        let (mut notices, mut outage) = (Notices::default(), outage());
         let start = Instant::now();
-        let at = |seconds: u64| Some(start + Duration::from_secs(seconds));
+        let at = |seconds: u64| Heard::Failed(start + Duration::from_secs(seconds));
         let words = || "Choir Hub can't be reached.".to_owned();
         // Failed answers over 90 seconds, each with other words: nothing.
         for (seconds, said) in [(0, "timed out"), (45, "no address"), (90, "no route")] {
@@ -1127,34 +1178,75 @@ mod tests {
         assert!(troubles(&notices).is_empty(), "a short outage says nothing");
         // Still failing two minutes after the first: said, once, whatever comes after.
         assert!(outage.follow(at(120), false, words, &mut notices));
-        for seconds in [120, 150, 600] {
+        for seconds in [120, 150, 400] {
             assert!(!outage.follow(at(seconds), true, || "other words".to_owned(), &mut notices));
         }
         assert_eq!(troubles(&notices), [words()]);
         // It answers: the entry goes by itself, with nothing said.
-        assert!(outage.follow(None, false, words, &mut notices));
+        assert!(outage.follow(Heard::Ended, false, words, &mut notices));
         assert!(notices.to_vec().is_empty());
-        assert!(!outage.follow(None, false, words, &mut notices));
+        assert!(!outage.follow(Heard::Ended, false, words, &mut notices));
         // Out of reach again: a new outage, said after its own two minutes.
-        assert!(!outage.follow(at(700), false, words, &mut notices));
-        assert!(!outage.follow(at(760), false, words, &mut notices));
-        assert!(outage.follow(at(820), false, words, &mut notices));
+        assert!(!outage.follow(at(500), false, words, &mut notices));
+        assert!(!outage.follow(at(560), false, words, &mut notices));
+        assert!(outage.follow(at(620), false, words, &mut notices));
         assert_eq!(troubles(&notices), [words()]);
     }
 
     #[test]
-    fn a_service_on_screen_is_said_out_of_reach_at_once_and_once() {
-        let (mut notices, mut outage) = (Notices::default(), Outage::default());
+    fn nothing_new_heard_leaves_an_outage_as_it_stands() {
+        let (mut notices, mut outage) = (Notices::default(), outage());
         let start = Instant::now();
+        let at = |seconds: u64| Heard::Failed(start + Duration::from_secs(seconds));
         let words = || "Choir Hub can't be reached.".to_owned();
-        assert!(!outage.follow(Some(start), false, words, &mut notices), "not on screen: it waits");
+        // Said at once while on screen; then a new key is tried, and none is given for a while.
+        assert!(outage.follow(at(0), true, words, &mut notices));
+        for _ in 0..3 {
+            assert!(!outage.follow(Heard::Nothing, true, words, &mut notices));
+        }
+        assert_eq!(troubles(&notices), [words()], "the entry stays");
+        // Still out of reach with the new key: the same outage, nothing said again.
+        assert!(!outage.follow(at(10), true, words, &mut notices));
+        assert_eq!(troubles(&notices).len(), 1);
+        // A clock that counted on across a key: not on screen, said two minutes after the first.
+        let (mut notices, mut outage) = (Notices::default(), self::outage());
+        assert!(!outage.follow(at(0), false, words, &mut notices));
+        assert!(!outage.follow(Heard::Nothing, false, words, &mut notices));
+        assert!(outage.follow(at(120), false, words, &mut notices));
+    }
+
+    #[test]
+    fn a_long_gap_between_failures_starts_the_clock_again() {
+        let (mut notices, mut outage) = (Notices::default(), outage());
+        let start = Instant::now();
+        let at = |seconds: u64| Heard::Failed(start + Duration::from_secs(seconds));
+        let words = || "Choir Hub can't be reached.".to_owned();
+        // One failure, then the computer sleeps for six minutes: waking fails again, said nothing.
+        assert!(!outage.follow(at(0), false, words, &mut notices));
+        assert!(!outage.follow(at(360), false, words, &mut notices));
+        assert!(!outage.follow(at(420), false, words, &mut notices));
+        assert!(troubles(&notices).is_empty(), "the clock started again at 6:00");
+        assert!(outage.follow(at(480), false, words, &mut notices), "two minutes after waking");
+        // A service asked every five minutes: a gap of five and a half is no sleep.
+        let (mut notices, mut outage) = (Notices::default(), Outage::asked_every(Duration::from_secs(300)));
+        assert!(!outage.follow(at(0), false, words, &mut notices));
+        assert!(outage.follow(at(330), false, words, &mut notices));
+    }
+
+    #[test]
+    fn a_service_on_screen_is_said_out_of_reach_at_once_and_once() {
+        let (mut notices, mut outage) = (Notices::default(), outage());
+        let start = Instant::now();
+        let at = |seconds: u64| Heard::Failed(start + Duration::from_secs(seconds));
+        let words = || "Choir Hub can't be reached.".to_owned();
+        assert!(!outage.follow(at(0), false, words, &mut notices), "not on screen: it waits");
         // What it does goes on screen while the outage lasts: said then.
-        assert!(outage.follow(Some(start + Duration::from_secs(30)), true, words, &mut notices));
-        assert!(!outage.follow(Some(start + Duration::from_secs(60)), true, words, &mut notices));
+        assert!(outage.follow(at(30), true, words, &mut notices));
+        assert!(!outage.follow(at(60), true, words, &mut notices));
         assert_eq!(troubles(&notices).len(), 1);
         // Cleared by the operator meanwhile: not said again in the same outage.
         notices.clear_all();
-        assert!(!outage.follow(Some(start + Duration::from_secs(200)), true, words, &mut notices));
+        assert!(!outage.follow(at(200), true, words, &mut notices));
         assert!(troubles(&notices).is_empty());
     }
 
@@ -1170,6 +1262,10 @@ mod tests {
             with_language(Language::English, || unreachable("VoxLive")),
             "VoxLive can't be reached. SoftPresenter keeps trying. Check this computer's internet connection."
         );
+        for language in [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian] {
+            let words = with_language(language, || unreachable_try_again("TimelyChurch"));
+            assert!(words.contains("TimelyChurch") && !words.contains('{'), "{words}");
+        }
     }
 
     #[test]

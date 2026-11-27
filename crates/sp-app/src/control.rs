@@ -2900,8 +2900,8 @@ impl crate::App {
                     text.push_str(&format!(", {count} screen{}", if count == 1 { "" } else { "s" }));
                 }
                 // How the last look saved went, once one has been.
-                if let Some(said) = &self.voxlive_said {
-                    text.push_str(&format!(". {}", said.trim_end_matches('.')));
+                if let Some(said) = &self.voxlive.said {
+                    text.push_str(&format!(". {}", said.words.trim_end_matches('.')));
                 }
                 Ok(Reply::with(
                     format!("{text}."),

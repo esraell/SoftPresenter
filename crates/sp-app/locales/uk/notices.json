@@ -450,5 +450,6 @@
   "notices.import.damage.value_list": "в одного із записів неправильний список значень",
   "notices.import.damage.unknown_kind": "одне зі значень такого типу, якого не буває в жодному файлі бази даних",
   "notices.import.damage.table_outside_file": "одна з таблиць починається на сторінці, якої немає у файлі",
-  "notices.unreachable": "Немає звʼязку з {service}. SoftPresenter продовжує спроби. Перевірте підключення цього компʼютера до інтернету."
+  "notices.unreachable": "Немає звʼязку з {service}. SoftPresenter продовжує спроби. Перевірте підключення цього компʼютера до інтернету.",
+  "notices.unreachable_try_again": "Немає звʼязку з {service}. Перевірте підключення цього компʼютера до інтернету й спробуйте ще раз."
 }

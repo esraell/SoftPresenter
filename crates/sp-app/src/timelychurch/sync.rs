@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use super::client::{self, Paired, Problem, Sent};
 use super::store::{Cached, Files, Settings, UseBook};
 use super::wire::{Id, PairRequest, ServicesReply, Song};
-use crate::notices::{Notices, Outage};
+use crate::notices::{Heard, Notices, Outage};
 
 /// How long after the app starts the first check is made.
 const FIRST_CHECK_AFTER: Duration = Duration::from_secs(10);
@@ -152,7 +152,7 @@ impl Connection {
             status: Status::Off,
             trouble: None,
             failed_at: None,
-            outage: Outage::default(),
+            outage: Outage::asked_every(CHECK_EVERY),
             next_check: None,
             checking: false,
             check_again: false,
@@ -219,11 +219,17 @@ impl Connection {
     }
 
     /// What the notices say of checks that can't reach TimelyChurch (`notices::Outage`): once an
-    /// outage, after a while (nothing of TimelyChurch's on screen needs it, so never at once),
-    /// and taken away when a check reaches it again. True when the notices changed.
+    /// outage, after a while (nothing of TimelyChurch's on screen needs it, so never at once).
+    /// A pairing code given meanwhile goes on with the same outage; it ends, its entry taken
+    /// away, when TimelyChurch answers, or the computer is disconnected (here or there, nothing
+    /// is asked then). True when the notices changed.
     pub fn tell_outage(&mut self, notices: &mut Notices) -> bool {
-        let failing = self.failed_at.filter(|_| self.status == Status::Connected && self.trouble.is_some());
-        self.outage.follow(failing, false, || self.trouble.clone().unwrap_or_default(), notices)
+        let heard = match self.status {
+            Status::Connected if self.trouble.is_some() => self.failed_at.map_or(Heard::Nothing, Heard::Failed),
+            Status::Connected | Status::Disconnected | Status::NotConnected | Status::Off => Heard::Ended,
+            Status::Reading | Status::Pairing => Heard::Nothing,
+        };
+        self.outage.follow(heard, false, || self.trouble.clone().unwrap_or_default(), notices)
     }
 
     /// A song as TimelyChurch last sent it, kept on this computer.
@@ -589,15 +595,20 @@ fn off_words() -> String {
     crate::i18n::t("integrations.timelychurch.off", "TimelyChurch isn't offered in this build yet.").to_owned()
 }
 
-/// A problem in a sentence.
-fn problem_words(problem: &Problem) -> String {
+/// A problem in a sentence, for the card after connecting failed.
+pub(super) fn problem_words(problem: &Problem) -> String {
     match problem {
         Problem::Disconnected => disconnected_words(),
         Problem::Wait(_) => {
             crate::i18n::t("integrations.timelychurch.wait", "TimelyChurch asked to wait a moment; try again shortly.")
                 .to_owned()
         }
-        Problem::Unreachable(why) | Problem::Other(why) => why.clone(),
+        // Why it couldn't be reached (a lookup that failed, a timeout) is the log's only.
+        Problem::Unreachable(why) => {
+            crate::applog::event("timelychurch", why);
+            crate::notices::unreachable_try_again("TimelyChurch")
+        }
+        Problem::Other(why) => why.clone(),
     }
 }
 
