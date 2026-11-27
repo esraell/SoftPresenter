@@ -495,4 +495,45 @@ mod tests {
             let _ = std::fs::remove_dir_all(folder);
         }
     }
+
+    /// With macOS's own tools and NDI's own package: `SOFTPRESENTER_NDI_MAC_PACKAGE=<the
+    /// package> cargo test -p sp-app ndis_real_package -- --ignored --nocapture`, on a Mac.
+    /// Installs nothing outside a folder of its own in the temporary folder.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "needs NDI's own package, downloaded from NDI by whoever runs it"]
+    fn ndis_real_package_is_checked_laid_out_and_its_library_taken() {
+        let package = PathBuf::from(std::env::var_os("SOFTPRESENTER_NDI_MAC_PACKAGE").expect("the package's path"));
+        let folder = std::env::temp_dir().join(format!("softpresenter-ndi-mac-real-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("scratch")).unwrap();
+        let none = AtomicBool::new(false);
+        let contents =
+            read(&Tools::system(), &package, &folder.join("scratch"), std::env::consts::ARCH, &none).unwrap();
+        println!(
+            "version {}; library {} bytes; notices: {}",
+            contents.version,
+            contents.runtime_size,
+            contents.notices.is_some()
+        );
+        assert_eq!(contents.licence, None);
+        let into = folder.join("NDI");
+        install(&contents, &into).unwrap();
+        let mut names: Vec<String> =
+            std::fs::read_dir(&into).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        println!("installed: {names:?}");
+        assert_eq!(names, [RUNTIME_FILE, NOTICES_FILE]);
+        // A package that is not NDI's (this one with a byte changed) is refused.
+        let mut bytes = std::fs::read(&package).unwrap();
+        let middle = bytes.len() / 2;
+        bytes[middle] ^= 0xff;
+        let changed = folder.join("changed.pkg");
+        std::fs::write(&changed, bytes).unwrap();
+        std::fs::create_dir_all(folder.join("scratch2")).unwrap();
+        let refused = read(&Tools::system(), &changed, &folder.join("scratch2"), std::env::consts::ARCH, &none);
+        println!("a changed package: {refused:?}");
+        assert!(refused.is_err());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
 }

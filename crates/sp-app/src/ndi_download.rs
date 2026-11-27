@@ -386,6 +386,9 @@ pub struct NdiDownload {
     /// The last check for a newer NDI, read from the data folder the first time.
     checked: Option<Option<Checked>>,
     checking: bool,
+    /// When the card last asked by itself, whether or not NDI's server answered, so a check
+    /// that failed is not made again at once.
+    asked_at: Option<i64>,
     /// When an update was put in this run, as the row says it ("2:07").
     updated_at: Option<String>,
     /// The version the runtime on this computer says it is, once a thread has asked it.
@@ -416,6 +419,7 @@ impl Default for NdiDownload {
             waiting: None,
             checked: None,
             checking: false,
+            asked_at: None,
             updated_at: None,
             asked_version: None,
             note: None,
@@ -827,7 +831,9 @@ impl NdiDownload {
         if !ndi_found || cfg!(test) || (test_copy() && !source().2) {
             return;
         }
-        if Checked::due(self.checked(), now()) {
+        let (now, asked_at) = (now(), self.asked_at);
+        if auto_check_due(self.checked(), asked_at, now) {
+            self.asked_at = Some(now);
             self.check(wake);
         }
     }
@@ -965,6 +971,13 @@ impl NdiDownload {
             }
         }
     }
+}
+
+/// True when the card may ask NDI's server by itself: no check is noted or the last is a day
+/// old, and it has not asked by itself within the day either, answered or not. So with no
+/// internet the card asks once, not again and again while it is open.
+fn auto_check_due(last: Option<&Checked>, asked_at: Option<i64>, now: i64) -> bool {
+    Checked::due(last, now) && asked_at.is_none_or(|asked| now - asked >= check::DAY || now < asked)
 }
 
 /// Downloads NDI into the download folder and reads it through. Whatever goes wrong, the
@@ -1486,6 +1499,25 @@ mod tests {
         for other in ["http://127.0.0.1.example.com/x", "http://example.com/x", "https://127.0.0.1/x"] {
             assert!(!on_this_computer(other), "{other}");
         }
+    }
+
+    #[test]
+    fn the_card_asks_by_itself_once_a_day_even_when_the_server_didnt_answer() {
+        let now = 1_795_000_000;
+        // Never checked, never asked: it asks.
+        assert!(auto_check_due(None, None, now));
+        // It asked a moment ago and got no answer (nothing is noted): it does not ask again.
+        assert!(!auto_check_due(None, Some(now - 1), now));
+        assert!(!auto_check_due(None, Some(now - check::DAY + 1), now));
+        // A day later it may.
+        assert!(auto_check_due(None, Some(now - check::DAY), now));
+        // Answered within the day: nothing to ask, whenever it last asked.
+        let answered = Checked { at: now - 60, newer: false, marks: Marks::default() };
+        assert!(!auto_check_due(Some(&answered), None, now));
+        // An answer a day old, and not asked since: it asks.
+        let old = Checked { at: now - check::DAY, newer: false, marks: Marks::default() };
+        assert!(auto_check_due(Some(&old), None, now));
+        assert!(!auto_check_due(Some(&old), Some(now - 5), now));
     }
 
     #[test]
