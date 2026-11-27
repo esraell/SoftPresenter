@@ -843,6 +843,27 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&nowhere).unwrap(), "made");
     }
 
+    /// What a quit leans on (`App::quit`): once the writer says it is idle, everything it did is
+    /// there to take, a save that failed as the last one ended included, never handed over a
+    /// moment after.
+    #[test]
+    fn once_the_writer_is_idle_a_save_that_failed_last_is_there_to_take() {
+        let dir = TempDir::new("idle");
+        let writer = quiet();
+        for n in 0..200 {
+            writer.write(save(&dir.0.join(format!("{n}.sppres")), "fine", Guard::Any));
+            writer.write(save(&dir.0.join("gone").join(format!("{n}.sppres")), "x", Guard::Any));
+            while !writer.is_idle() {
+                std::thread::yield_now();
+            }
+            let done = writer.finished();
+            assert!(
+                matches!(done.as_slice(), [.., Done::Failed { .. }]),
+                "try {n}: the failure is there once the writer is idle: {done:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_save_kept_from_a_file_changed_outside_waits_on_the_operator() {
         let dir = TempDir::new("outside");

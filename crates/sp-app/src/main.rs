@@ -12631,8 +12631,13 @@ impl App {
         // on a slow disk can take minutes), here in the event loop, so the window still answers.
         // Said once, after a moment. A settings change since the quit began is handed over too.
         self.paced.flush(&self.writer);
+        // Whether the writer is idle is looked at before what it did is taken in: it hands over
+        // what it did and goes idle at once (`writer::work`), so once it is idle all it did is
+        // there to take, a save that failed as the last one ended included (kept in Not saved),
+        // never missed between the two.
+        let idle = self.writer.is_idle();
         self.finish_saves();
-        if !self.writer.is_idle() {
+        if !idle {
             static SAVING_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
             let waited = self.quitting.map_or(Duration::ZERO, |since| since.elapsed());
             if waited >= Duration::from_secs(1)
@@ -13633,6 +13638,9 @@ impl ApplicationHandler<AppEvent> for App {
             self.hand_over_lists(true);
             self.paced.flush(&self.writer);
             self.writer.drain();
+            // What the writer did meanwhile: a song or theme whose save failed is kept in Not
+            // saved (after the app's Quit), never left unread.
+            self.finish_saves();
         } else {
             self.leave_at_once();
         }
