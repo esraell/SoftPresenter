@@ -1,7 +1,7 @@
 //! The end of a song's mark: three stars under the words of a song's last slide as it is sung,
 //! on the audience screens, as SoftProjector draws them. Here is when the mark is due and how
 //! far down the slide it may reach; the painter puts it under the words as each screen's theme
-//! lays them out (`sp_model::Slide::with_end_mark`).
+//! lays them out (`sp_model::Slide::end_mark`).
 
 use sp_model::Presentation;
 
@@ -10,11 +10,21 @@ const FOOT: f32 = 0.03;
 
 /// Whether the slide on screen gets the mark: Settings has it `on`, the slide is a song's (not
 /// one the app made: a Bible passage, the VoxLive captions, a song of the song catalog), its
-/// words aren't hidden, the song doesn't go round, and the slide is the last one sung: `step` is
-/// its place in the song's play order, so a chorus written once and sung after each verse is
-/// marked only when it is sung last.
+/// words aren't hidden, the song doesn't go round, and the slide is the last one sung
+/// ([`last_sung`]): `step` is its place in the song's play order, so a chorus written once and
+/// sung after each verse is marked only when it is sung last.
 pub fn due(on: bool, app_made: bool, words_hidden: bool, song: &Presentation, step: Option<usize>) -> bool {
-    on && !app_made && !words_hidden && !song.loops && step.is_some_and(|step| step + 1 == song.order().len())
+    on && !app_made && !words_hidden && !song.loops && step.is_some() && step == last_sung(song)
+}
+
+/// The place in a song's play order of the last slide with words: the blank slides many songs
+/// end on (those brought in from other programs, often) are passed over, so the mark goes under
+/// the song's real last words. `None` for a song with no words at all.
+pub fn last_sung(song: &Presentation) -> Option<usize> {
+    let worded = |slide: &usize| {
+        song.slide(*slide).is_some_and(|(_, slide)| slide.texts().iter().any(|(_, words)| !words.trim().is_empty()))
+    };
+    song.order().iter().rposition(worded)
 }
 
 /// How far down the slide the mark may reach, in slide units: 3% above the slide's bottom, or
@@ -87,6 +97,7 @@ mod tests {
         assert!(due_on(&show));
         // Settings' switch off: never.
         let last = Some(song.order().len() - 1);
+        assert_eq!(last_sung(&song), last);
         assert!(due(true, false, false, &song, last));
         assert!(!due(false, false, false, &song, last));
         // A slide whose place in the order isn't known is not taken for the last.
@@ -99,6 +110,38 @@ mod tests {
         assert!(!due_on(&show));
         show.apply(at(2));
         assert!(due_on(&show));
+
+        // A song that ends on a blank slide, or two (as songs brought in from other programs
+        // often do): its last slide with words is the one, and the blank ones never are.
+        for blanks in [1, 2] {
+            let mut ended = parse_song_text("Song", "[Verse 1]\nOne\n\n[Verse 2]\nTwo\n");
+            let last = ended.groups.last_mut().expect("a group");
+            // A slide with nothing on it, then one whose box has no words in it.
+            last.slides.push(sp_model::Slide::new(Vec::new()));
+            if blanks == 2 {
+                last.slides.push(last.slides[0].empty_copy());
+            }
+            assert_eq!(ended.slide_count(), 2 + blanks);
+            assert_eq!(last_sung(&ended), Some(1), "{blanks} blank at the end");
+            let mut show = Show::new(vec![Arc::new(ended)]);
+            let marked: Vec<bool> = (0..2 + blanks)
+                .map(|slide| {
+                    show.apply(at(slide));
+                    due_on(&show)
+                })
+                .collect();
+            let mut want = vec![false; 2 + blanks];
+            want[1] = true;
+            assert_eq!(marked, want, "{blanks} blank at the end");
+        }
+        // A blank slide in the middle is no end, and a song with no words has none.
+        let mut gap = parse_song_text("Song", "One\n\nTwo\n");
+        gap.groups[0].slides.insert(1, sp_model::Slide::new(Vec::new()));
+        assert_eq!(last_sung(&gap), Some(2));
+        let mut wordless = parse_song_text("Pictures", "One\n");
+        wordless.groups[0].slides = vec![sp_model::Slide::new(Vec::new()); 2];
+        assert_eq!(last_sung(&wordless), None);
+        assert!(!due(true, false, false, &wordless, Some(1)));
 
         // A song of one slide: that slide.
         let mut show = Show::new(vec![Arc::new(parse_song_text("Short", "Only\n"))]);

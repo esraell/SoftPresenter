@@ -2057,7 +2057,7 @@ mod tests {
     /// A song's last slide as an audience screen draws it with the end of a song marked, the
     /// mark free to reach `floor`; what drawing it came to.
     fn drawn_with_mark(slide: &Slide, theme: &Theme, floor: Option<f32>) -> Painted {
-        let slide = floor.map_or_else(|| slide.clone(), |floor| slide.with_end_mark(floor));
+        let slide = Slide { end_mark: floor, ..slide.clone() };
         draw_objects(&mut Scene::new(), &mut Fonts::new(), Affine::IDENTITY, &slide, theme, 0.0)
     }
 
@@ -2134,7 +2134,7 @@ mod tests {
         let song = slide("One\nTwo", None);
         assert!(drawn_with_mark(&song, &theme, Some(FLOOR)).end_mark.is_some());
         // Hide the Words: the mark goes with them.
-        assert!(drawn_with_mark(&song.without_words(), &theme, Some(FLOOR)).end_mark.is_none());
+        assert!(drawn_with_mark(&Slide { words_hidden: true, ..song.clone() }, &theme, Some(FLOOR)).end_mark.is_none());
         // A picture slide, or a box with no words in it.
         assert!(
             drawn_with_mark(&Slide::new(vec![Object::shape(Shape::Rectangle)]), &theme, Some(FLOOR)).end_mark.is_none()
@@ -2157,7 +2157,8 @@ mod tests {
         assert!(part.top < whole.top, "{part:?} above {whole:?}");
         // The scene with the mark has more in it than the scene without, and builds whole.
         let plain = build_scene(&mut Fonts::new(), Some(&song), &theme, 1920, 1080);
-        let marked = build_scene(&mut Fonts::new(), Some(&song.with_end_mark(FLOOR)), &theme, 1920, 1080);
+        let marked =
+            build_scene(&mut Fonts::new(), Some(&Slide { end_mark: Some(FLOOR), ..song.clone() }), &theme, 1920, 1080);
         let runs = |built: &Built| built.scene.encoding().resources.patches.len();
         assert!(runs(&marked) > runs(&plain), "{} and {}", runs(&marked), runs(&plain));
     }

@@ -735,7 +735,7 @@ fn a_slide_without_its_words_keeps_the_themes_background_and_picture() {
     let with_words = render_with(Some(&song), &theme, w, h);
     assert!(count_lit(&with_words) > 100, "with its words, they are drawn: {}", count_lit(&with_words));
 
-    let hidden = song.without_words();
+    let hidden = Slide { words_hidden: true, ..song.clone() };
     let drawn = render_with(Some(&hidden), &theme, w, h);
     assert_eq!(count_lit(&drawn), 0, "no words");
     assert!(is_about(pixel(&drawn, w, 300, 60), [20, 40, 160]), "the theme's colour: {:?}", pixel(&drawn, w, 300, 60));
@@ -774,7 +774,7 @@ fn a_box_fitted_to_its_words_keeps_its_size_while_they_are_hidden() {
     let (top, bottom) = green_rows(&with_words).expect("the box's fill");
     assert!(bottom - top < 150, "fitted to three lines, not its whole place: {top}..{bottom}");
     assert!(count_lit(&with_words) > 100, "its words");
-    let hidden = render_with(Some(&song.without_words()), &Theme::builtin(), w, h);
+    let hidden = render_with(Some(&Slide { words_hidden: true, ..song.clone() }), &Theme::builtin(), w, h);
     assert_eq!(green_rows(&hidden), Some((top, bottom)), "the same size without its words");
     assert_eq!(count_lit(&hidden), 0, "and no words");
 }

@@ -1171,7 +1171,7 @@ mod tests {
     }
 
     #[test]
-    fn the_sentences_line_is_beside_the_headings_at_1100_and_says_what_add_a_key_does() {
+    fn the_sentences_line_says_what_add_a_key_does_and_leaves_no_band_beside_the_headings() {
         for language in Language::ALL {
             crate::i18n::with_language(language, || {
                 for (width, f_keys) in [(1100.0, true), (1100.0, false), (1040.0, true), (1280.0, false), (820.0, true)]
@@ -1187,7 +1187,9 @@ mod tests {
                         "Any key on the keyboard, or a clicker\u{2019}s button, can be given something to do",
                     );
                     assert!(shown(&words, hint), "{said}: the line says what Add a Key does");
-                    // From 1040 up the first row follows the headings at once: no band between.
+                    // Where the line has room beside the headings (which each system's letters
+                    // decide), the first row follows the headings at once: no band between.
+                    // Where it hasn't, it is under them, above the first row.
                     let heading = place(&words, &t("settings.keys.col.key", "Key").to_uppercase());
                     let names: Vec<String> = KeyAction::ALL.iter().map(|action| action.words()).collect();
                     let first = words
@@ -1195,9 +1197,11 @@ mod tests {
                         .filter(|(have, _)| names.contains(have))
                         .map(|(_, rect)| rect.center().y)
                         .fold(f32::MAX, f32::min);
-                    if width >= 1040.0 {
+                    let hint_at = place(&words, hint).center().y;
+                    if (hint_at - heading.center().y).abs() < 2.0 {
                         assert!(first - heading.center().y < 45.0, "{said}: a band of {}", first - heading.center().y);
-                        assert!((place(&words, hint).center().y - heading.center().y).abs() < 2.0, "{said}");
+                    } else {
+                        assert!(heading.center().y < hint_at && hint_at < first, "{said}: {hint_at}");
                     }
                     // A sentence takes the hint's place.
                     state.keys_card.listening = true;
@@ -1234,16 +1238,18 @@ mod tests {
     }
 
     #[test]
-    fn an_added_keys_note_takes_two_lines_in_the_narrowest_window() {
+    fn an_added_keys_note_stays_inside_its_row_in_the_narrowest_window() {
         let ctx = crate::studio::tests::styled();
         let mut state = state_on(true);
         state.keys.add(&typed("b"), true).expect("added");
         let note = "Added \u{b7} no longer jumps to Bridge 1";
+        // How many lines it takes is for each system's letters to decide: never more with more
+        // room, and two at most, inside its row.
         let (wide, _) = page(&ctx, &mut state, 1280.0);
-        assert!(place(&wide, note).height() < 20.0, "one line where there is room");
         let (narrow, _) = page(&ctx, &mut state, 820.0);
         let at = place(&narrow, note);
-        assert!(at.height() > 20.0 && at.height() <= 40.0, "two lines inside its row: {}", at.height());
+        assert!(place(&wide, note).height() <= at.height(), "no more lines where there is more room");
+        assert!(at.height() <= 40.0, "two lines at most, inside its row: {}", at.height());
         // In the middle of its row, beside its key's cap.
         assert!((at.center().y - place(&narrow, "B").center().y).abs() < 3.0);
     }

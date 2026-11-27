@@ -744,14 +744,18 @@ pub struct Slide {
     /// Kept with the slide, so it survives a restart, until the person marks it as checked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check: Option<String>,
-    /// Its words are hidden (Hide the Words): every text box is laid out and placed as ever,
-    /// its own fill, outline and shadow drawn, but its words are not drawn. Set on the copy the
-    /// audience screens draw (see [`Slide::without_words`]), never saved.
+    /// Its words are hidden (Hide the Words): the same slide, its words and all, marked so that
+    /// they are not drawn. Everything that is worked out from the words stays as it is: its
+    /// click builds and their steps, the size of a box fitted to its text, the template the
+    /// theme picks for it. Pictures, shapes, videos and web pages, and each box's own fill,
+    /// outline and shadow, are drawn as ever. Set on the copy the audience screens draw, never
+    /// saved: the song itself is never changed.
     #[serde(skip)]
     pub words_hidden: bool,
-    /// The end of a song's mark is drawn under its words (see [`Slide::with_end_mark`]): how
-    /// far down the slide the mark may reach, in slide units. Set on the copy the audience
-    /// screens draw, never saved.
+    /// The end of a song's mark is drawn under its words, on a layer of its own, wherever the
+    /// screen's theme puts and fits them: this is how far down the slide the mark may reach, in
+    /// slide units, and with no room above it the mark is left out. The words are laid out as
+    /// ever. Set on the copy the audience screens draw, never saved.
     #[serde(skip)]
     pub end_mark: Option<f32>,
 }
@@ -820,25 +824,6 @@ impl Slide {
             })
             .collect();
         Slide { template: self.template, ..Slide::new(objects) }
-    }
-
-    /// The slide as the audience screens show it while its words are hidden (Hide the Words):
-    /// the same slide, its words and all, marked so that its words are not drawn
-    /// ([`Slide::words_hidden`]). Everything that is worked out from the words stays as it is:
-    /// its click builds and their steps, the size of a box fitted to its text, the template the
-    /// theme picks for it. Pictures, shapes, videos and web pages, and each box's own fill,
-    /// outline and shadow, are drawn as ever. The song itself is never changed.
-    pub fn without_words(&self) -> Slide {
-        Slide { words_hidden: true, ..self.clone() }
-    }
-
-    /// The slide as the audience screens show a song's last slide when the end of a song is
-    /// marked: the same slide, marked so that the painter draws the mark under its words, on a
-    /// layer of its own, wherever the screen's theme puts and fits them. `floor` is how far
-    /// down the slide the mark may reach, in slide units: with no room above it, the mark is
-    /// left out. The words are laid out as ever, and the song itself is never changed.
-    pub fn with_end_mark(&self, floor: f32) -> Slide {
-        Slide { end_mark: Some(floor), ..self.clone() }
     }
 
     /// The text of the first text object with this role.
@@ -1711,7 +1696,7 @@ mod tests {
     }
 
     #[test]
-    fn without_words_marks_the_words_not_drawn_and_keeps_the_rest() {
+    fn hidden_words_are_marked_not_drawn_and_the_rest_is_kept() {
         let mut main = Object::text(Role::primary(), "Light rises\nover the quiet hills\nand sings");
         main.frame = Some(SlideRect { x: 100.0, y: 600.0, w: 1720.0, h: 300.0 });
         main.fill = Some(Rgba::rgb(10, 20, 30));
@@ -1738,7 +1723,7 @@ mod tests {
         slide.actions = vec![crate::ShowAction::Clear { what: crate::ClearWhat::Media }];
         let before = slide.clone();
 
-        let shown = slide.without_words();
+        let shown = Slide { words_hidden: true, ..slide.clone() };
         assert!(shown.words_hidden && !slide.words_hidden);
         // Nothing else changes: the words, the boxes, the pictures and shapes, the slide's id,
         // template, transition and actions are all as they were...

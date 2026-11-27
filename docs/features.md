@@ -2243,7 +2243,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   of its own, drawn by the painter after each screen's own theme has laid the words out
   (`sp-render`'s `end_mark_place`), so the words keep their size and place with it on or off,
   and it goes on and off with the slide's own transition (`Frame::end_mark`). The last slide is
-  the last one sung: with an arrangement, the slide the order ends on, each time it is sung last
+  the last one sung that has words (blank slides at a song's end are passed over, so a song
+  brought in with a blank last slide is still marked under its last words): with an arrangement, the slide the order ends on, each time it is sung last
   and not when the same slide is sung earlier; a slide clicked takes its next place in the
   order, as Next does. No mark: on a song that loops, on what the app makes (a Bible passage,
   VoxLive's captions, a song of the song catalog), on a slide with no words, on words that

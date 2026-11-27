@@ -709,7 +709,7 @@ fn end_of_a_song(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
 }
 
 /// The small slide the end of a song is shown on: the last two lines of the first song's last
-/// slide as sung, and under them the mark as the screens draw it (80% of the words' size, half a
+/// slide with words as sung, and under them the mark as the screens draw it (80% of the words' size, half a
 /// line under them) while it is on. The words keep their place either way.
 fn end_sample(ui: &mut egui::Ui, state: &HomeState, show: &Show, size: egui::Vec2) {
     const WORDS: f32 = 15.0;
@@ -719,7 +719,7 @@ fn end_sample(ui: &mut egui::Ui, state: &HomeState, show: &Show, size: egui::Vec
     let words: Vec<String> = show
         .presentations()
         .first()
-        .and_then(|song| song.slide(*song.order().last()?))
+        .and_then(|song| song.slide(*song.order().get(crate::end_mark::last_sung(song)?)?))
         .and_then(|(_, slide)| slide.texts().into_iter().next())
         .map(|(_, words)| {
             let lines: Vec<&str> = words.lines().filter(|line| !line.trim().is_empty()).collect();

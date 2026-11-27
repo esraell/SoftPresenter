@@ -126,9 +126,9 @@ fn going_on(was: &Frame, now: &Frame) -> GoingOn {
 /// The slide as an audience screen draws it, and the Program preview's picture of one: as far
 /// as its builds have got (`clock`), in the theme version that is on (`version`) when `theme`
 /// has one for it, with its linked text filled in, and while its words are hidden
-/// (`words_hidden`), without them ([`Slide::without_words`]: laid out as ever, not drawn); with
+/// (`words_hidden`), without them ([`Slide::words_hidden`]: laid out as ever, not drawn); with
 /// the end of a song's mark under its words when that is due (`end_mark`: how far down it may
-/// reach, see [`Slide::with_end_mark`]), which goes with the words while they are hidden. A
+/// reach, see [`Slide::end_mark`]), which goes with the words while they are hidden. A
 /// stage screen's picture is made from the slide as it is, words and all.
 pub(crate) fn drawn_slide(
     slide: &Slide,
