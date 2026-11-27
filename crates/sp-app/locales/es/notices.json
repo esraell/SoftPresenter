@@ -268,6 +268,7 @@
   "notices.media.needs_ffmpeg": "Este vídeo necesita FFmpeg para reproducirse y FFmpeg no está en este ordenador. {advice}",
   "notices.media.already_in_bin": "Ese archivo ya está en la mediateca.",
   "notices.media.video_not_started": ["este vídeo no ha empezado en {n} segundo, así que las pantallas han seguido sin él. Aparecerá en cuanto empiece.", "este vídeo no ha empezado en {n} segundos, así que las pantallas han seguido sin él. Aparecerá en cuanto empiece."],
+  "notices.media.next_not_started": ["este vídeo no ha empezado en {n} segundo, así que {playing} sigue reproduciéndose. Lo sustituirá en cuanto empiece.", "este vídeo no ha empezado en {n} segundos, así que {playing} sigue reproduciéndose. Lo sustituirá en cuanto empiece."],
   "notices.dialog.theme_picture": "Elige una imagen para el tema",
   "notices.dialog.filter.pictures": "Imágenes",
   "notices.dialog.picture_or_video": "Elige una imagen o un vídeo",

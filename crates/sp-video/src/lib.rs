@@ -61,7 +61,7 @@ pub use pdf_windows::{pdf_draw, pdf_sizes, powershell};
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Videos the system's player is asked to play first; anything else goes to FFmpeg.
 const SYSTEM_VIDEOS: [&str; 4] = ["mp4", "mov", "m4v", "3gp"];
@@ -517,6 +517,16 @@ pub struct Player {
     source: Arc<Mutex<Source>>,
     /// The file lined up to follow, opened and waiting at its start.
     next: Option<(Engine, PathBuf)>,
+    /// When the file lined up was lined up.
+    next_since: Option<Instant>,
+    /// The wait for the file lined up's first picture is over: until it comes, this one goes
+    /// round again at its end rather than staying on its last picture (see
+    /// [`Player::go_round_until_next`]).
+    round_meanwhile: bool,
+    /// How many times it has gone round again while the file lined up still waits.
+    rounds_meanwhile: u32,
+    /// Something to say in the log once (see [`Player::take_note`]).
+    note: Option<String>,
     /// How its pictures are lent, the next file's too.
     lend: Lend,
     looping: bool,
@@ -562,6 +572,10 @@ impl Player {
             engine,
             path: path.to_owned(),
             next: None,
+            next_since: None,
+            round_meanwhile: false,
+            rounds_meanwhile: 0,
+            note: None,
             lend,
             looping: false,
             volume: 1.0,
@@ -624,6 +638,9 @@ impl Player {
     /// Something to say in the log once, if there is something new: that FFmpeg couldn't decode
     /// on the graphics chip, say.
     pub fn take_note(&mut self) -> Option<String> {
+        if let Some(note) = self.note.take() {
+            return Some(note);
+        }
         match &mut self.engine {
             #[cfg(target_os = "macos")]
             Engine::System(_) => None,
@@ -720,6 +737,9 @@ impl Player {
         // when the file takes over.
         next.seek(0.0);
         self.next = Some((next, path.to_owned()));
+        self.next_since = Some(Instant::now());
+        self.round_meanwhile = false;
+        self.rounds_meanwhile = 0;
         self.last_position = self.engine.position();
         Ok(())
     }
@@ -727,6 +747,51 @@ impl Player {
     /// The file lined up to follow, if one is.
     pub fn next_file(&self) -> Option<&Path> {
         self.next.as_ref().map(|(_, path)| path.as_path())
+    }
+
+    /// How long the file lined up has waited for its first picture, while it still hasn't
+    /// given one (`None` with nothing lined up, or once it has, or once it is known it can't
+    /// play).
+    pub fn next_waiting(&self) -> Option<Duration> {
+        let (next, _) = self.next.as_ref()?;
+        if next.ready() {
+            return None;
+        }
+        self.next_since.map(|since| since.elapsed())
+    }
+
+    /// The wait for the file lined up's first picture is over: until that picture comes, this
+    /// one goes round again at its end (from its start, if it doesn't loop) instead of staying
+    /// on its last picture, so the screens are never left on a still picture waiting for it.
+    /// Once the file lined up has given its first picture it takes over at the end of the pass
+    /// under way, as usual.
+    pub fn go_round_until_next(&mut self) {
+        self.round_meanwhile = true;
+        self.round_again_if_ended();
+    }
+
+    /// While a file lined up is still to give its first picture and the wait for it is over: a
+    /// video that has played to its end starts again from its start.
+    fn round_again_if_ended(&mut self) {
+        if self.round_meanwhile && self.engine.ended() {
+            self.engine.seek(0.0);
+            self.engine.play();
+            self.last_position = 0.0;
+            self.pace.break_run();
+            self.rounds_meanwhile += 1;
+            let named =
+                |path: &Path| path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+            let next = self.next.as_ref().map(|(_, path)| named(path)).unwrap_or_default();
+            self.note = Some(format!(
+                "{} started again from its start, as {next}, lined up to follow it, still hasn't given a picture \
+                 ({} so far)",
+                named(&self.path),
+                match self.rounds_meanwhile {
+                    1 => "once".to_owned(),
+                    n => format!("{n} times"),
+                }
+            ));
+        }
     }
 
     /// A file lined up that has taken over since this was last asked (its path), or why it
@@ -759,9 +824,11 @@ impl Player {
         let left = self.engine.duration().map(|length| length - position);
         let playing = self.engine.playing();
         // A file FFmpeg hasn't given a picture of yet isn't handed over to: this one goes round
-        // again (or stays on its last picture) rather than the screens waiting on it.
+        // again (or stays on its last picture, until the wait for the other is over) rather than
+        // the screens waiting on it.
         if !self.next.as_ref().is_some_and(|(next, _)| next.ready()) {
-            return playing.then_some(Duration::from_millis(20));
+            self.round_again_if_ended();
+            return (playing || self.round_meanwhile).then_some(Duration::from_millis(20));
         }
         if self.engine.ended() || (playing && (went_round || left.is_some_and(|left| left <= END_OF_PASS))) {
             self.hand_over();
@@ -778,6 +845,8 @@ impl Player {
     /// this one plays on.
     fn hand_over(&mut self) {
         let Some((mut next, path)) = self.next.take() else { return };
+        self.next_since = None;
+        self.round_meanwhile = false;
         if let Some(problem) = next.problem() {
             match Engine::open_with_ffmpeg(&path, self.lend, &self.pace) {
                 Ok(mut ffmpeg) if !matches!(next, Engine::Ffmpeg(_)) => {
@@ -1020,6 +1089,83 @@ mod tests {
             seen.len()
         );
         assert!(gap < Duration::from_millis(120), "the last red picture held only a moment: {gap:?}");
+    }
+
+    /// A file lined up that never gives a picture (FFmpeg held back ten minutes) never takes
+    /// over, and never leaves the screens on a still picture once its wait is over: the video
+    /// playing, which doesn't loop, stays on its last picture while the other might still come,
+    /// then, once told the wait is over, goes round again from its start, again and again, with
+    /// the other still lined up and said to be waiting.
+    #[test]
+    fn a_file_lined_up_that_never_gives_a_picture_leaves_the_video_playing_going_round() {
+        let Some(ffmpeg) = ffmpeg::tool("ffmpeg") else {
+            crate::skipped("FFmpeg isn't on this computer: a file lined up that never opens wasn't checked");
+            return;
+        };
+        let dir = std::env::temp_dir().join(format!("softpresenter-stuck-next-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (red, blue) = (dir.join("red.mkv"), dir.join("blue.mkv"));
+        marker_video(&ffmpeg, &red, true);
+        marker_video(&ffmpeg, &blue, false);
+        let mut player = Player::open(&red, Lend::Rows).expect("FFmpeg opens the red video");
+        player.set_volume(0.0);
+        let frames = player.frames();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let base = Instant::now();
+        let reader = {
+            let (frames, stop) = (frames.clone(), stop.clone());
+            std::thread::spawn(move || {
+                let mut seen = Vec::new();
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    if let Some(pixel) = frames.next_with(|lending| lending.rows().map(middle)).flatten() {
+                        seen.push((base.elapsed(), pixel));
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                seen
+            })
+        };
+        player.play();
+        // The blue video lined up, held back far longer than the test: it never gives a picture.
+        let stuck = ffmpeg::Player::open_with(&blue, false, player.pace.clone(), None, Duration::from_secs(600))
+            .expect("the blue video is lined up");
+        player.next = Some((Engine::Ffmpeg(Box::new(stuck)), blue.clone()));
+        player.next_since = Some(Instant::now());
+        let run = |player: &mut Player, until: Duration| {
+            while base.elapsed() < until {
+                let wait = player.tick();
+                std::thread::sleep(wait.min(Duration::from_millis(5)));
+            }
+        };
+        // The red video plays its pass (a second), then stays on its last picture.
+        while !player.engine.ended() && base.elapsed() < Duration::from_secs(8) {
+            let wait = player.tick();
+            std::thread::sleep(wait.min(Duration::from_millis(5)));
+        }
+        assert!(player.engine.ended(), "the red video played to its end");
+        let ended_at = base.elapsed();
+        run(&mut player, ended_at + Duration::from_millis(700));
+        assert!(!player.ended(), "with a file lined up, it isn't over");
+        let waited = player.next_waiting().expect("the blue video is still waiting");
+        assert!(waited >= Duration::from_millis(700), "{waited:?}");
+        // The wait is over: the red video goes round again, and again.
+        let over = base.elapsed();
+        player.go_round_until_next();
+        run(&mut player, over + Duration::from_millis(3500));
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let seen = reader.join().unwrap();
+        let next_waiting = player.next_waiting();
+        drop(player);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(next_waiting.is_some(), "the blue video is still lined up, still waiting");
+        let is_red = |[r, _, b]: &[u8; 3]| r > b;
+        assert!(seen.iter().all(|(_, pixel)| is_red(pixel)), "the blue video never took over");
+        let starts = seen.windows(2).filter(|two| u16::from(two[1].1[0]) + 60 < u16::from(two[0].1[0])).count();
+        let held = seen.iter().filter(|(at, _)| *at > ended_at + Duration::from_millis(100) && *at < over).count();
+        let after: Vec<u8> = seen.iter().filter(|(at, _)| *at > over).map(|(_, [r, _, _])| *r).collect();
+        assert!(held <= 2, "it stayed on its last picture while the other might come: {held} pictures then");
+        assert!(starts >= 2, "it went round again at least twice once the wait was over: {starts} times");
+        assert!(after.len() > 60, "pictures kept coming: {}", after.len());
     }
 
     /// The first picture of a video, lent as `lend` asks, in red, green and blue: as FFmpeg

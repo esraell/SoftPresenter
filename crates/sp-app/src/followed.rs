@@ -16,6 +16,10 @@
 //! - With nothing left, the last picture stays up for a few seconds, and the folder is looked
 //!   at every second meanwhile: a new file that comes takes over. Only when none comes does the
 //!   layer stop, and the operator is told why.
+//! - A file lined up that hasn't given its first picture when the most a video's first picture
+//!   is waited for has passed (`video_wait::LinedUp`): the video playing goes round again
+//!   meanwhile, as when the file lined up leaves the folder, so the screens never stay on its
+//!   last picture, and the operator is told, until it starts or isn't lined up any more.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -166,6 +170,11 @@ impl crate::App {
     pub(crate) fn tick_followed(&mut self) -> Option<Instant> {
         let mut wake: Option<Instant> = None;
         for layer in OnLayer::BOTH {
+            if let Some(at) = self.look_at_lined_up(layer) {
+                wake = Some(wake.map_or(at, |soonest| soonest.min(at)));
+            }
+        }
+        for layer in OnLayer::BOTH {
             let Some(from) = self.playing_from_folder(layer) else {
                 self.following[layer as usize] = Following::default();
                 continue;
@@ -233,6 +242,73 @@ impl crate::App {
             }
         }
         wake
+    }
+
+    /// The file lined up to follow the video on the layer, looked at again (see
+    /// `video_wait::LinedUp`): once it has waited the most a video's first picture is waited for,
+    /// the video playing goes round meanwhile and the operator is told, naming it; that notice is
+    /// taken back as soon as it isn't true (the file has given its picture, another is lined up
+    /// in its place, or the layer has gone on to something else). Says when to look again.
+    fn look_at_lined_up(&mut self, layer: OnLayer) -> Option<Instant> {
+        let limit = crate::video_wait::limit();
+        let (next, playing) = self.layer_player(layer).map_or((None, None), |player| {
+            let next = player.next_file().map(|file| (file.to_owned(), player.next_waiting()));
+            (next, Some(file_name(player.path())))
+        });
+        let look = self.lined_up_wait[layer as usize]
+            .look(next.as_ref().map(|(file, waiting)| (file.as_path(), *waiting)), limit);
+        match look {
+            crate::video_wait::LinedUpLook::Quiet(soon) => soon.map(|soon| Instant::now() + soon),
+            crate::video_wait::LinedUpLook::Overdue => {
+                let (file, _) = next?;
+                let name = file_name(&file);
+                let playing = playing.unwrap_or_default();
+                if let Some(player) = self.layer_player(layer) {
+                    player.go_round_until_next();
+                }
+                applog::event(
+                    layer.area(),
+                    &format!(
+                        "no picture of {name}, lined up to follow {playing}, came in {:.1} s, the most a video's \
+                         first picture is waited for: {playing} goes round meanwhile, and {name} takes over at the \
+                         end of a pass once its first picture has come",
+                        limit.as_secs_f64()
+                    ),
+                );
+                let seconds = limit.as_secs_f64().round().max(1.0) as u64;
+                let notice = format!(
+                    "{name}: {}",
+                    crate::i18n::tn(
+                        "notices.media.next_not_started",
+                        seconds,
+                        "this video hasn\u{2019}t started after {n} second, so {playing} goes on playing. It will \
+                         take over once it starts.",
+                        "this video hasn\u{2019}t started after {n} seconds, so {playing} goes on playing. It will \
+                         take over once it starts.",
+                        &[("playing", &playing)],
+                    )
+                );
+                self.lined_up_wait[layer as usize].told(file, notice.clone());
+                if let Some(running) = self.running.as_mut() {
+                    running.home_state.notices.trouble(notice);
+                }
+                None
+            }
+            crate::video_wait::LinedUpLook::TakeBack(notice, started) => {
+                applog::event(
+                    layer.area(),
+                    if started {
+                        "the file lined up has given its first picture after all: the notice about it is taken back"
+                    } else {
+                        "the file the notice said hadn't started isn't lined up any more: the notice is taken back"
+                    },
+                );
+                if let Some(running) = self.running.as_mut() {
+                    running.home_state.notices.withdraw(&notice);
+                }
+                None
+            }
+        }
     }
 
     /// How often the followed folders are looked at: every few seconds, and every second while

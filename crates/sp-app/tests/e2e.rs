@@ -1608,10 +1608,21 @@ fn a_video_that_never_gives_a_picture_leaves_the_screens_free_after_the_limit() 
     // Said once, however long it stays on screen.
     std::thread::sleep(Duration::from_millis(600));
     assert_eq!(not_started_notices(&copy).len(), 1, "{}", run.context());
-    // The screens go on to the next thing at once; the video that never opened is let go.
+    // The screens go on to the next thing at once; the video that never opened is let go, and
+    // the notice with it ("It will show as soon as it starts" is no longer true).
     let next = copy.ok(&["media", "show", "blue"]);
     assert!(next.took < Duration::from_secs(5), "showing a picture took {:?}", next.took);
     assert_eq!(copy.status()["media"], "Blue.png");
+    assert!(not_started_notices(&copy).is_empty(), "the notice outlived the video{}", run.context());
+    // Shown again and never starting, then everything cleared: told again, and taken back again.
+    let again = Instant::now();
+    copy.ok(&["media", "show", "grey"]);
+    while not_started_notices(&copy).is_empty() {
+        assert!(again.elapsed() < Duration::from_secs(30), "nothing was said the second time{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    copy.ok(&["clear", "all"]);
+    assert!(not_started_notices(&copy).is_empty(), "the notice outlived Clear All{}", run.context());
     let quitted = copy.quit();
     quitted.assert_clean(&run);
 }
@@ -1689,6 +1700,81 @@ fn a_video_whose_first_picture_comes_after_the_limit_still_plays_and_the_notice_
         std::thread::sleep(Duration::from_millis(100));
     };
     assert!(shown > 0, "the screens showed none of the late video's pictures{}", run.context());
+    let quitted = copy.quit();
+    quitted.assert_clean(&run);
+}
+
+/// A new file in a followed folder that never gives a picture (FFmpeg held back for it alone)
+/// never leaves the screens on a still picture: the video playing, which now plays to its end
+/// as the playlist has two files, goes round again once the wait for the new one is over; the
+/// operator is told once, naming the new file; and a Clear takes the notice back, as the new
+/// file will no longer take over.
+#[test]
+fn a_followed_folders_new_file_that_never_starts_leaves_the_video_playing_going_round() {
+    let name = "a_followed_folders_new_file_that_never_starts_leaves_the_video_playing_going_round";
+    let Some(run) = Run::new(name) else { return };
+    let Some(made) = video_for_ffmpeg(&run, name) else { return };
+    let folder = run.file("Announcements");
+    std::fs::create_dir_all(&folder).expect("the followed folder");
+    std::fs::copy(&made, folder.join("A.mkv")).expect("the first video");
+    // Testing aids: FFmpeg held back ten minutes for a file whose name says Stuck, and the
+    // most a video's first picture is waited for 1 s, not 10.
+    let copy = run.start(&[("SOFTPRESENTER_VIDEO_OPEN_SLOW", "600000@Stuck"), ("SOFTPRESENTER_VIDEO_WAIT", "1000")]);
+    copy.ok(&["media-playlist", "new", "Announce"]);
+    copy.ok(&["media-playlist", "follow", "Announce", &folder.to_string_lossy()]);
+    // Played once the folder's video has joined the playlist.
+    let began = Instant::now();
+    while !copy.sp(&["media-playlist", "play", "Announce"]).ok {
+        assert!(began.elapsed() < Duration::from_secs(30), "A.mkv never joined the playlist{}", run.context());
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    while !run.log().contains("the first picture of A.mkv came") {
+        assert!(began.elapsed() < Duration::from_secs(40), "A.mkv never played{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    // A new file comes into the folder: it is lined up to follow, and never gives a picture.
+    std::fs::copy(&made, folder.join("B Stuck.mkv")).expect("the new video");
+    let came = Instant::now();
+    let told = loop {
+        let notices = copy.ok(&["notices"]).data;
+        let told: Vec<String> = notices
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|notice| notice["text"].as_str())
+            .filter(|text| text.contains("hasn\u{2019}t started after"))
+            .map(str::to_owned)
+            .collect();
+        if !told.is_empty() {
+            break told;
+        }
+        assert!(came.elapsed() < Duration::from_secs(40), "nothing was said of the new file{}", run.context());
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    assert_eq!(
+        told,
+        ["B Stuck.mkv: this video hasn\u{2019}t started after 1 second, so A.mkv goes on playing. It will take over \
+          once it starts."],
+        "{}",
+        run.context()
+    );
+    // The video playing goes round again, pass after pass, rather than staying on its last
+    // picture.
+    let going = Instant::now();
+    while !run.log().contains("A.mkv started again from its start, as B Stuck.mkv, lined up to follow it, still hasn't given a picture (2 times") {
+        assert!(going.elapsed() < Duration::from_secs(15), "A.mkv didn't go round again{}", run.context());
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    assert_eq!(copy.status()["media"], "A.mkv", "the new file never took over");
+    assert_eq!(not_started_notices(&copy).len(), 1, "said once{}", run.context());
+    // The media layer is cleared: the new file won't take over now, so the notice goes.
+    copy.ok(&["media-playlist", "stop"]);
+    copy.ok(&["clear", "media"]);
+    let cleared = Instant::now();
+    while !not_started_notices(&copy).is_empty() {
+        assert!(cleared.elapsed() < Duration::from_secs(5), "the notice outlived what it said{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    }
     let quitted = copy.quit();
     quitted.assert_clean(&run);
 }

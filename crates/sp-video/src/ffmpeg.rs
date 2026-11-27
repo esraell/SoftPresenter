@@ -1109,10 +1109,24 @@ struct Opening {
 /// Testing aid: SOFTPRESENTER_VIDEO_OPEN_SLOW=<ms> makes every video FFmpeg plays that many
 /// milliseconds slower to open, before FFmpeg is asked what the video is, as on a computer where
 /// starting FFmpeg's programs is slow (a virus scanner reading them, a busy processor): to see
-/// that the window, `sp` and the screens never wait for a video to open.
-fn slow_open() -> Duration {
-    let wait = std::env::var("SOFTPRESENTER_VIDEO_OPEN_SLOW").ok().and_then(|ms| ms.trim().parse::<u64>().ok());
-    Duration::from_millis(wait.unwrap_or(0))
+/// that the window, `sp` and the screens never wait for a video to open. `<ms>@<words>` holds
+/// back only a file whose name holds the words, so one video can be slow while another plays.
+fn slow_open(path: &Path) -> Duration {
+    let Ok(said) = std::env::var("SOFTPRESENTER_VIDEO_OPEN_SLOW") else { return Duration::ZERO };
+    slow_open_for(&said, path)
+}
+
+/// How long [`slow_open`]'s words (`<ms>` or `<ms>@<words>`) hold back opening this file.
+fn slow_open_for(said: &str, path: &Path) -> Duration {
+    let (ms, only) = match said.split_once('@') {
+        Some((ms, words)) => (ms, Some(words)),
+        None => (said, None),
+    };
+    let named = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    match ms.trim().parse::<u64>() {
+        Ok(ms) if only.is_none_or(|words| named.contains(words)) => Duration::from_millis(ms),
+        _ => Duration::ZERO,
+    }
 }
 
 fn tell<R>(told: &Mutex<Told>, change: impl FnOnce(&mut Told) -> R) -> R {
@@ -1254,12 +1268,12 @@ impl Player {
     /// isn't on this computer) is a sentence for the operator; a file FFmpeg can't play says so
     /// later, through [`Player::problem`].
     pub fn open(path: &Path, planes: bool, pace: Arc<crate::pace::Pace>) -> Result<Player, String> {
-        Player::open_with(path, planes, pace, HARDWARE, slow_open())
+        Player::open_with(path, planes, pace, HARDWARE, slow_open(path))
     }
 
     /// [`Player::open`], asking FFmpeg to decode with `hardware`, after waiting `wait` first on
     /// the player's thread.
-    fn open_with(
+    pub(crate) fn open_with(
         path: &Path,
         planes: bool,
         pace: Arc<crate::pace::Pace>,
@@ -1379,8 +1393,12 @@ impl Player {
         self.ask(Ask::Volume(volume));
     }
 
+    /// True once a video that doesn't loop has played to its end; not while it is on its way
+    /// to a time it was asked to go to (the thread starts FFmpeg there a moment later).
     pub fn ended(&self) -> bool {
-        self.told(|told| told.run.as_ref().is_some_and(|run| run.ended.load(Ordering::Relaxed)))
+        self.told(|told| {
+            told.seeks >= self.seeks && told.run.as_ref().is_some_and(|run| run.ended.load(Ordering::Relaxed))
+        })
     }
 
     /// Why the video can't play, once that is known.
@@ -1535,6 +1553,16 @@ mod tests {
         drop(player);
         assert!(letting_go.elapsed() < END_WITHIN + Duration::from_millis(200), "{:?}", letting_go.elapsed());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The testing aid holds back every video, or with `@words` only one whose name holds them.
+    #[test]
+    fn the_slow_open_aid_can_hold_back_one_file() {
+        let (slow, other) = (Path::new("/videos/Slow one.mkv"), Path::new("/videos/Grey.mkv"));
+        assert_eq!(slow_open_for("1500", other), Duration::from_millis(1500));
+        assert_eq!(slow_open_for("1500@Slow", slow), Duration::from_millis(1500));
+        assert_eq!(slow_open_for("1500@Slow", other), Duration::ZERO);
+        assert_eq!(slow_open_for("soon", other), Duration::ZERO);
     }
 
     /// A player let go while FFmpeg is still slow to answer doesn't wait for it.

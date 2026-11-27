@@ -2367,6 +2367,9 @@ struct App {
     /// What the media layer, and the Announcements layer, playing from a followed folder
     /// remember between looks (see `followed`).
     following: [followed::Following; 2],
+    /// For each of those layers, the wait for a file lined up to follow its video to give its
+    /// first picture, and what the operator was told when it didn't (see `video_wait::LinedUp`).
+    lined_up_wait: [video_wait::LinedUp; 2],
     /// The media playlists read at the start, handed to the window's state once it is made.
     media_playlists: Vec<media::Playlist>,
     /// The settings files the start couldn't read, kept aside (`whole_file`): told in the notices
@@ -3260,7 +3263,7 @@ impl App {
                 self.video_leaving = Some(player);
             }
         }
-        self.video_wait = None;
+        self.end_video_wait();
         if live.is_none() {
             self.video_leaving = None;
         }
@@ -3950,16 +3953,32 @@ impl App {
         Some(Instant::now() + wait)
     }
 
+    /// The wait for the video on screen's first picture ends because the layer has gone on to
+    /// something else (another video or picture, a Clear, the video let go): what the operator
+    /// was told when it hadn't started ("It will show as soon as it starts") is taken back, as it
+    /// is no longer true.
+    fn end_video_wait(&mut self) {
+        let Some(wait) = self.video_wait.take() else { return };
+        if let (Some(notice), Some(running)) = (wait.notice, self.running.as_mut()) {
+            applog::event(
+                "video",
+                "the video the notice said hadn't started is no longer on screen: the notice is taken back",
+            );
+            running.home_state.notices.withdraw(&notice);
+        }
+    }
+
     /// Looks again whether the video on screen has given its first picture, and says what that
     /// changed (see `video_wait`). When the limit passes with none, the operator is told once,
     /// naming the file, and the log says why the screens went on without it; a picture that
     /// comes after that (or FFmpeg saying the video can't play) takes the notice back.
     fn look_at_first_picture(&mut self) -> video_wait::Change {
         use video_wait::Change;
-        let Some((_, player)) = self.video.as_ref() else {
-            self.video_wait = None;
+        if self.video.is_none() {
+            self.end_video_wait();
             return Change::Nothing;
-        };
+        }
+        let Some((_, player)) = self.video.as_ref() else { return Change::Nothing };
         let Some(wait) = self.video_wait.as_mut() else { return Change::Nothing };
         let now = Instant::now();
         let change = wait.look(player.ready(), now);
@@ -4086,6 +4105,7 @@ impl App {
                             fallback.set_volume(0.0);
                         }
                         fallback.play();
+                        self.end_video_wait();
                         self.video_wait = (!fallback.ready())
                             .then(|| video_wait::FirstPicture::new(Instant::now(), video_wait::limit()));
                         self.video = Some((id, fallback));
@@ -13690,6 +13710,7 @@ fn main() -> ExitCode {
         look_again: false,
         followed_items: std::collections::HashSet::new(),
         following: Default::default(),
+        lined_up_wait: Default::default(),
         unsaved_since: None,
         was_editing: false,
         theme: Arc::new(themes[songs_theme].clone()),

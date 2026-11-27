@@ -799,7 +799,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   they go to the new one by the media's transition. They keep it for ten seconds at most: a
   video whose first picture hasn't come by then is named in the notices, the screens go on
   without it (to its still, if it has one), and its pictures go on screen if they come later,
-  which takes the notice back. A file FFmpeg can't play says so in the
+  which takes the notice back; so does showing something else on the layer, or clearing it,
+  after which it would no longer show. A file FFmpeg can't play says so in the
   notices a moment after it was shown. A video the Mac's player plays
   behind the words goes to the screens as the decoder's own picture memory, with no copy through
   the processor (a video whose format can carry clear parts, and a video in a box on a slide or
@@ -851,7 +852,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   joins the playlist and plays when its turn comes (a video that was the playlist's only item
   gives way to it at the end of its pass), and when the file on screen leaves the folder the
   next item goes on, at the end of the pass if the video is still playing (through the same
-  pictures, as above), otherwise at once. With nothing left, the last picture stays up for 8
+  pictures, as above), otherwise at once. A file lined up to take over that hasn't given its
+  first picture ten seconds after it was lined up (FFmpeg slow or stuck opening it) is named in
+  the notices, and the video playing goes round again meanwhile (from its start, where it would
+  have ended), so the screens never stay on its last picture; the new file takes over at the
+  end of a pass once it starts, and the notice goes then, or when another file is lined up in
+  its place or the layer goes on to something else. With nothing left, the last picture stays up for 8
   seconds while the folder is looked at every second, and a new file that comes in that time
   takes over; only if none comes does the layer stop, and a notice says why. A file taken out
   just before its turn is passed over without a notice. A file that can't be

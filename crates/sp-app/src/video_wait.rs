@@ -7,8 +7,13 @@
 //! screens stop waiting and show what they would without its pictures (its still, if it has one,
 //! as for a video that can't play), and the operator is told once. The video isn't let go: if
 //! its first picture comes after all, it goes on the screens as it comes, and the notice is taken
-//! back. So the limit costs a slow video only its smooth change, never the video itself.
+//! back. So the limit costs a slow video only its smooth change, never the video itself. The
+//! notice goes too as soon as it is no longer true: the layer has gone on to something else.
+//!
+//! A file lined up to follow the video playing (a followed folder's new file) gets the same
+//! limit, with nothing held for it on the screens ([`LinedUp`]).
 
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// How long the screens keep what they showed for a new video's first picture.
@@ -129,6 +134,62 @@ impl FirstPicture {
     }
 }
 
+/// The wait for a file lined up to follow the video on a layer (a followed folder's new file,
+/// or a file written over in it) to give its first picture. Nothing is held for it on the
+/// screens: the video playing goes on, and the file takes over at the end of a pass once its
+/// first picture has come. But after the same [`LIMIT`] the operator is told, once, naming it,
+/// and the video playing goes round again meanwhile (from its start, if it doesn't loop: as the
+/// followed folder's rules have it go round when the file lined up leaves the folder), so the
+/// screens never stay on its last picture. The notice is taken back as soon as it is no longer
+/// true: the file has given its picture, another has been lined up in its place, or the layer
+/// has gone on to something else.
+#[derive(Debug, Default)]
+pub struct LinedUp {
+    /// The file the operator was told about, and what they were told.
+    told: Option<(PathBuf, String)>,
+}
+
+/// What looking again at a layer's file lined up calls for.
+#[derive(Debug, PartialEq, Eq)]
+pub enum LinedUpLook {
+    /// Nothing; looked at again within this long, if anything is to come.
+    Quiet(Option<Duration>),
+    /// The wait for it is over: the video playing goes round meanwhile, and the operator is
+    /// told ([`LinedUp::told`]).
+    Overdue,
+    /// What the operator was told is no longer true, and is taken back: the file has given its
+    /// first picture (true), or it isn't lined up any more (false).
+    TakeBack(String, bool),
+}
+
+impl LinedUp {
+    /// Looks again: `next` is the file lined up on the layer, if one is, and how long it has
+    /// waited for its first picture (`None` once it has given one).
+    pub fn look(&mut self, next: Option<(&Path, Option<Duration>)>, limit: Duration) -> LinedUpLook {
+        if let Some((file, _)) = &self.told {
+            let lined = next.filter(|(next, _)| next == file);
+            return match lined {
+                Some((_, Some(_))) => LinedUpLook::Quiet(None),
+                _ => {
+                    let started = lined.is_some();
+                    let notice = self.told.take().map(|(_, notice)| notice).unwrap_or_default();
+                    LinedUpLook::TakeBack(notice, started)
+                }
+            };
+        }
+        match next {
+            Some((_, Some(waited))) if waited >= limit => LinedUpLook::Overdue,
+            Some((_, Some(waited))) => LinedUpLook::Quiet(Some(limit - waited)),
+            _ => LinedUpLook::Quiet(None),
+        }
+    }
+
+    /// The operator has been told this about the file lined up.
+    pub fn told(&mut self, file: PathBuf, notice: String) {
+        self.told = Some((file, notice));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,5 +289,52 @@ mod tests {
         if std::env::var_os("SOFTPRESENTER_VIDEO_WAIT").is_none() {
             assert_eq!(limit(), LIMIT);
         }
+    }
+
+    /// A file lined up that gives its first picture within the limit: nothing is said, and the
+    /// layer is looked at again by the limit at the latest.
+    #[test]
+    fn a_file_lined_up_in_time_says_nothing() {
+        let (mut lined, file) = (LinedUp::default(), PathBuf::from("New.mp4"));
+        assert_eq!(
+            lined.look(Some((&file, Some(Duration::from_secs(3)))), LIMIT),
+            LinedUpLook::Quiet(Some(7 * SECOND))
+        );
+        assert_eq!(lined.look(Some((&file, None)), LIMIT), LinedUpLook::Quiet(None), "its picture came");
+        assert_eq!(lined.look(None, LIMIT), LinedUpLook::Quiet(None), "it took over");
+        assert!(lined.told.is_none());
+    }
+
+    /// One that never gives a picture: overdue once at the limit, told once, and nothing more
+    /// however long it waits; when its picture comes after all the notice is taken back, as
+    /// started.
+    #[test]
+    fn a_file_lined_up_late_is_told_once_and_taken_back_when_it_starts() {
+        let (mut lined, file) = (LinedUp::default(), PathBuf::from("New.mp4"));
+        assert_eq!(lined.look(Some((&file, Some(LIMIT))), LIMIT), LinedUpLook::Overdue);
+        lined.told(file.clone(), "New.mp4: not yet".to_owned());
+        for waited in [11, 60, 600] {
+            let look = lined.look(Some((&file, Some(Duration::from_secs(waited)))), LIMIT);
+            assert_eq!(look, LinedUpLook::Quiet(None), "said once, at {waited} s");
+        }
+        assert_eq!(lined.told.as_ref().map(|(_, notice)| notice.as_str()), Some("New.mp4: not yet"));
+        assert_eq!(lined.look(Some((&file, None)), LIMIT), LinedUpLook::TakeBack("New.mp4: not yet".to_owned(), true));
+        assert_eq!(lined.look(Some((&file, None)), LIMIT), LinedUpLook::Quiet(None), "taken back once");
+    }
+
+    /// The notice never outlives what it says: another file lined up in its place, or the layer
+    /// gone on to something else (nothing lined up), takes it back, not as started; the file in
+    /// its place has a wait of its own.
+    #[test]
+    fn a_notice_about_a_file_no_longer_lined_up_is_taken_back() {
+        let (mut lined, old, new) = (LinedUp::default(), PathBuf::from("Old.mp4"), PathBuf::from("New.mp4"));
+        assert_eq!(lined.look(Some((&old, Some(LIMIT))), LIMIT), LinedUpLook::Overdue);
+        lined.told(old.clone(), "about Old".to_owned());
+        let replaced = lined.look(Some((&new, Some(Duration::ZERO))), LIMIT);
+        assert_eq!(replaced, LinedUpLook::TakeBack("about Old".to_owned(), false));
+        assert_eq!(lined.look(Some((&new, Some(Duration::ZERO))), LIMIT), LinedUpLook::Quiet(Some(LIMIT)));
+        assert_eq!(lined.look(Some((&new, Some(LIMIT))), LIMIT), LinedUpLook::Overdue);
+        lined.told(new.clone(), "about New".to_owned());
+        assert_eq!(lined.look(None, LIMIT), LinedUpLook::TakeBack("about New".to_owned(), false), "the layer moved on");
     }
 }
