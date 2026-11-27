@@ -469,6 +469,8 @@ pub struct HomeState {
     /// Where the Updates row's key (or the bar in its place) was drawn last, in Settings › About
     /// (for tests).
     pub updates_key: Option<Rect>,
+    /// Where the Updates row's bar was drawn last, while a version comes down (for tests).
+    pub updates_bar: Option<Rect>,
     /// Where each tile of the media strip was drawn last, in the strip's order (for tests, and to
     /// aim a testing aid's drag).
     pub media_tiles: Vec<Rect>,
@@ -2099,6 +2101,7 @@ impl Default for HomeState {
 
             media_tiles: Vec::new(),
             updates_key: None,
+            updates_bar: None,
             media_playlists: Vec::new(),
             media_playlist_shown: None,
             media_playlists_changed: false,

@@ -3027,14 +3027,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   repository's releases, pre-releases included (the app is 0.x), takes the highest version among
   them (the Bibles' releases, tagged `bibles-N`, are passed over) and compares it with its own,
   sending only "SoftPresenter/<version>" as who asks; it gives up after 10 seconds. A build whose
-  own updater fetches newer versions (a development build's) shows that in the same row, with a
-  thin bar where the key was: "Downloading 0.9.1… 42% · 23 of 54 MB" over "Carry on as usual:
-  nothing changes until it is ready."; then "0.9.1 is ready. It goes in when you quit, or now."
-  with Update and Restart, the one bright key (greyed, with "Something is on screen" under it,
-  while anything is); or why it couldn't ("0.9.1 couldn't be downloaded: there is no internet
-  connection.", the blocked network as above, "0.9.1 was refused: it isn't signed by
-  SoftPresenter." over "Nothing was changed."), with Try Again. A download goes on with Settings
-  closed, and a notice says "Version 0.9.1 is ready." once; the gear carries no mark.
+  own updater fetches newer versions (a development build's) shows that in the same row:
+  "Downloading 0.9.1… 42%" over "23 of 54 MB. Nothing changes until it is ready.", with a thin
+  bar along the foot of the row's words and a Cancel key (after which the row and a notice say
+  "The update was cancelled. What was downloaded has been deleted."); then "0.9.1 is ready. It
+  goes in when you quit, or now." with Update and Restart (greyed, with "Something is on screen"
+  under it, while anything is); or why it couldn't ("0.9.1 couldn't be downloaded: there is no
+  internet connection.", the blocked network as above, "0.9.1 was refused: it isn't signed by
+  SoftPresenter." over "Nothing was changed."), with Try Again. The keys that bring a newer
+  version in, Update and Restart and Open the Download Page, are amber. A download goes on with
+  Settings closed, and a notice says "Version 0.9.1 is ready." once; the gear carries no mark.
 - The version a build shows (the Mac's About panel, Settings › About, the log's first line, a new
   issue's text, `sp update`, the MCP server's name) is a development build's full one,
   0.9.0-dev.15, where it has one; a release shows 0.9.0. The Mac bundle keeps the plain 0.9.0 as

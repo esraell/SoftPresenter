@@ -14,13 +14,14 @@
 //! a newer version itself says how far it is with [`report`] (so much of so much, ready, or why
 //! it failed, as a [`Trouble`], which [`trouble_of`] makes from a network error), from any
 //! thread and at any time, and gives the key that puts a ready version in what it does with
-//! [`set_install`]. The thread, the one-at-a-time rule, the Updates row ([`row`]), what is shown
+//! [`set_install`], and stops when the row's Cancel asks ([`cancel_asked`]). The thread, the one-at-a-time rule, the Updates row ([`row`]), what is shown
 //! ([`view`]) and every sentence are this module's: an updater never writes words.
 //!
 //! Nothing here is the window's: a check and a download go on with Settings closed, and
 //! [`take_notice`] has what the notices are to say once a version is ready.
 
 use std::cmp::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -388,7 +389,7 @@ impl Found {
     /// What it says, in the language set: the Updates row's sentence.
     pub fn words(&self) -> String {
         let status = Status { last: Some((self.clone(), 0)), ..Status::default() };
-        view(&status, &crate::clock::TimeForm::default(), Build { fetches: updater_set(), waits: false }).sentence
+        view(&status, &crate::clock::TimeForm::default(), Build::now()).sentence
     }
 
     /// What the notices say: the same, and for a newer version where its download page is.
@@ -448,6 +449,9 @@ pub enum Fetch {
     Ready { version: String },
     /// Not fetched, or fetched and refused: why, and whether the updater tries again by itself.
     Failed { version: String, why: Trouble, retries: bool },
+    /// The download was cancelled with the row's Cancel ([`cancel_asked`]), and what had come
+    /// down has been deleted.
+    Cancelled { version: String },
 }
 
 /// Bytes as whole megabytes, to the nearest, as a download's size is said.
@@ -493,6 +497,8 @@ pub enum Act {
     Open(String),
     /// Put the version that is ready in now: the updater's own doing ([`set_install`]).
     Install,
+    /// Stop the download and delete what came down: asked of the updater ([`cancel_asked`]).
+    Cancel,
 }
 
 /// The row's key.
@@ -502,12 +508,13 @@ pub struct Key {
     pub act: Act,
     /// Greyed when not.
     pub enabled: bool,
-    /// The one bright key (Update and Restart).
-    pub main: bool,
+    /// The amber key, which brings a newer version in (Update and Restart, Open the Download
+    /// Page).
+    pub amber: bool,
 }
 
-/// What the Updates row shows in one state: its sentence, the line under it, its key (none
-/// while a version comes down, when a bar takes its place), and the line under the key.
+/// What the Updates row shows in one state: its sentence, the line under it, its key, the bar
+/// along the foot of its words while a version comes down, and the line under the key.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct View {
     pub sentence: String,
@@ -530,12 +537,16 @@ fn open_key() -> &'static str {
     t("settings.updates.open", "Open the Download Page")
 }
 
+fn cancel_key() -> &'static str {
+    t("settings.updates.cancel", "Cancel")
+}
+
 fn install_key() -> &'static str {
     t("settings.updates.install", "Update and Restart")
 }
 
 fn key(words: &'static str, act: Act) -> Option<Key> {
-    Some(Key { words, act, enabled: true, main: false })
+    Some(Key { words, act, enabled: true, amber: false })
 }
 
 /// The line under a failure: what else to do about it.
@@ -557,47 +568,73 @@ fn advice(why: &Trouble, retries: bool) -> String {
     }
 }
 
-/// The row while an updater fetches a newer version: coming down, ready, or failed. `waits`:
-/// something is on screen, so nothing that restarts SoftPresenter can be pressed.
-fn fetch_view(fetch: &Fetch, waits: bool) -> View {
+/// The row while an updater fetches a newer version: coming down, ready, failed or cancelled.
+fn fetch_view(fetch: &Fetch, build: Build) -> View {
     match fetch {
         Fetch::Downloading { version, done, total } => {
-            let sentence = match fetch.percent() {
-                Some(percent) => tf(
-                    "settings.updates.downloading",
-                    "Downloading {version}\u{2026} {percent}% \u{b7} {done} of {total} MB",
-                    &[
-                        ("version", version),
-                        ("percent", &percent.to_string()),
-                        ("done", &megabytes(*done).to_string()),
-                        ("total", &megabytes(*total).to_string()),
-                    ],
+            let nothing = t("settings.updates.downloading.under", "Nothing changes until it is ready.");
+            let (sentence, under) = match fetch.percent() {
+                Some(percent) => (
+                    tf(
+                        "settings.updates.downloading",
+                        "Downloading {version}\u{2026} {percent}%",
+                        &[("version", version), ("percent", &percent.to_string())],
+                    ),
+                    tf(
+                        "settings.updates.downloading.of",
+                        "{done} of {total} MB. {nothing}",
+                        &[
+                            ("done", &megabytes(*done).to_string()),
+                            ("total", &megabytes(*total).to_string()),
+                            ("nothing", nothing),
+                        ],
+                    ),
                 ),
-                None if *done > 0 => tf(
-                    "settings.updates.downloading.some",
-                    "Downloading {version}\u{2026} {done} MB",
-                    &[("version", version), ("done", &megabytes(*done).to_string())],
+                None => (
+                    tf("settings.updates.downloading.none", "Downloading {version}\u{2026}", &[("version", version)]),
+                    if *done > 0 {
+                        tf(
+                            "settings.updates.downloading.some",
+                            "{done} MB. {nothing}",
+                            &[("done", &megabytes(*done).to_string()), ("nothing", nothing)],
+                        )
+                    } else {
+                        nothing.to_owned()
+                    },
                 ),
-                None => {
-                    tf("settings.updates.downloading.none", "Downloading {version}\u{2026}", &[("version", version)])
-                }
             };
             View {
                 sentence,
-                under: t("settings.updates.downloading.under", "Carry on as usual: nothing changes until it is ready.")
-                    .to_owned(),
+                under,
+                // Greyed once asked, until the updater has stopped.
+                key: build.keys.then(|| Key {
+                    words: cancel_key(),
+                    act: Act::Cancel,
+                    enabled: !build.cancelling,
+                    amber: false,
+                }),
                 bar: Some(fetch.percent().unwrap_or(0) as f32 / 100.0),
                 ..View::default()
             }
         }
+        // With no key of the updater's to put it in now, it goes in at quit, and the row says
+        // only that.
+        Fetch::Ready { version } if !build.keys => View {
+            sentence: tf(
+                "settings.updates.ready_at_quit",
+                "{version} is ready. It goes in when you quit.",
+                &[("version", version)],
+            ),
+            ..View::default()
+        },
         Fetch::Ready { version } => View {
             sentence: tf(
                 "settings.updates.ready",
                 "{version} is ready. It goes in when you quit, or now.",
                 &[("version", version)],
             ),
-            key: Some(Key { words: install_key(), act: Act::Install, enabled: !waits, main: true }),
-            under_key: if waits { t("settings.updates.waits", "Something is on screen") } else { "" },
+            key: Some(Key { words: install_key(), act: Act::Install, enabled: !build.waits, amber: true }),
+            under_key: if build.waits { t("settings.updates.waits", "Something is on screen") } else { "" },
             ..View::default()
         },
         Fetch::Failed { version, why, retries } => View {
@@ -618,6 +655,12 @@ fn fetch_view(fetch: &Fetch, waits: bool) -> View {
             key: key(again_key(), Act::Check),
             ..View::default()
         },
+        Fetch::Cancelled { .. } => View {
+            sentence: t("settings.updates.cancelled", "The update was cancelled.").to_owned(),
+            under: t("settings.updates.cancelled.under", "What was downloaded has been deleted.").to_owned(),
+            key: key(check_key(), Act::Check),
+            ..View::default()
+        },
     }
 }
 
@@ -629,12 +672,21 @@ pub struct Build {
     pub fetches: bool,
     /// Something is on screen, so nothing that restarts SoftPresenter can be pressed.
     pub waits: bool,
+    /// The updater answers the row's own keys (Cancel, Update and Restart: [`set_install`]).
+    pub keys: bool,
+    /// Cancel was pressed, and the updater hasn't stopped yet.
+    pub cancelling: bool,
 }
 
 impl Build {
     /// This build, now.
     fn now() -> Build {
-        Build { fetches: updater_set(), waits: waits() }
+        Build {
+            fetches: updater_set(),
+            waits: waits(),
+            keys: CHECKS.install.get().is_some() || staged().is_some(),
+            cancelling: cancel_asked(),
+        }
     }
 }
 
@@ -644,12 +696,12 @@ pub fn view(status: &Status, form: &crate::clock::TimeForm, build: Build) -> Vie
     if status.checking {
         return View {
             sentence: t("settings.updates.checking", "Checking\u{2026}").to_owned(),
-            key: Some(Key { words: check_key(), act: Act::Check, enabled: false, main: false }),
+            key: Some(Key { words: check_key(), act: Act::Check, enabled: false, amber: false }),
             ..View::default()
         };
     }
     if let Some(fetch) = status.fetching() {
-        return fetch_view(&fetch, build.waits);
+        return fetch_view(&fetch, build);
     }
     let failed = |why: String, advice: String| View {
         sentence: tf("settings.updates.failed", "Couldn\u{2019}t check: {why}.", &[("why", &why)]),
@@ -681,7 +733,7 @@ pub fn view(status: &Status, form: &crate::clock::TimeForm, build: Build) -> Vie
         Some((Found::Newer { version, page }, _)) => View {
             sentence: tf("settings.updates.out", "SoftPresenter {version} is out.", &[("version", version)]),
             under: t("settings.updates.cant", "This copy can\u{2019}t update itself yet.").to_owned(),
-            key: key(open_key(), Act::Open(page.clone())),
+            key: Some(Key { words: open_key(), act: Act::Open(page.clone()), enabled: true, amber: true }),
             ..View::default()
         },
         // (An updater's answers are shown as what it is fetching, above.)
@@ -739,6 +791,10 @@ struct Checks {
     install: OnceLock<Install>,
     /// What the notices have been told already (each thing once for each version).
     said: Mutex<Vec<String>>,
+    /// Cancel was pressed: the updater is to stop, delete what came down and say so.
+    cancel: AtomicBool,
+    /// A download was cancelled, and the notices haven't said so yet.
+    cancelled: AtomicBool,
 }
 
 impl Checks {
@@ -748,6 +804,8 @@ impl Checks {
             hook: OnceLock::new(),
             install: OnceLock::new(),
             said: Mutex::new(Vec::new()),
+            cancel: AtomicBool::new(false),
+            cancelled: AtomicBool::new(false),
         }
     }
 
@@ -760,7 +818,7 @@ impl Checks {
     fn begin(&self) -> bool {
         let mut status = self.lock();
         let began = !std::mem::replace(&mut status.checking, true);
-        if began && matches!(status.fetch, Some(Fetch::Failed { .. })) {
+        if began && matches!(status.fetch, Some(Fetch::Failed { .. } | Fetch::Cancelled { .. })) {
             status.fetch = None;
         }
         began
@@ -788,6 +846,19 @@ impl Checks {
     /// Keeps where an updater has got to (`None`: it has nothing in hand any more): whether
     /// what the row shows changed with it.
     fn report(&self, fetch: Option<Fetch>) -> bool {
+        // Only a download can be cancelled: once it is anything else, nothing is asked any more,
+        // and the row is drawn again for it.
+        if !matches!(fetch, Some(Fetch::Downloading { .. })) {
+            let asked = self.cancel.swap(false, Relaxed);
+            let cancelled = matches!(fetch, Some(Fetch::Cancelled { .. }));
+            if cancelled {
+                self.cancelled.store(true, Relaxed);
+            }
+            if asked || cancelled {
+                self.lock().fetch = fetch;
+                return true;
+            }
+        }
         let mut status = self.lock();
         let changed = status.fetch.as_ref().map(Fetch::shown) != fetch.as_ref().map(Fetch::shown);
         status.fetch = fetch;
@@ -797,6 +868,10 @@ impl Checks {
     /// What the notices are to be told now, if they haven't been: that a version is ready, or
     /// that one was refused (never that there is no network: only the row carries that).
     fn take_notice(&self) -> Option<Notice> {
+        if self.cancelled.swap(false, Relaxed) {
+            let view = fetch_view(&Fetch::Cancelled { version: String::new() }, Build::default());
+            return Some((format!("{} {}", view.sentence, view.under), false));
+        }
         let fetch = self.lock().fetching()?;
         let (once, notice) = match &fetch {
             Fetch::Ready { version } => (
@@ -804,7 +879,7 @@ impl Checks {
                 (tf("settings.updates.ready_notice", "Version {version} is ready.", &[("version", version)]), false),
             ),
             Fetch::Failed { version, why, .. } if why.refused() => {
-                let view = fetch_view(&fetch, false);
+                let view = fetch_view(&fetch, Build::default());
                 (format!("refused {version} {why:?}"), (format!("{} {}", view.sentence, view.under), true))
             }
             _ => return None,
@@ -830,9 +905,11 @@ pub fn set_hook(hook: Hook) {
     let _ = CHECKS.hook.set(hook);
 }
 
-/// Sets what the row's Update and Restart does (`install`: asked on the window's thread, it
-/// must not block) and whether it must wait just now (`waits`: something is on screen; the key
-/// is then greyed, saying so). An updater that fetches versions sets them; the first set stay.
+/// An updater that fetches versions answers the row's own keys: it sets what Update and Restart
+/// does (`install`: asked on the window's thread, it must not block) and whether it must wait
+/// just now (`waits`: something is on screen; the key is then greyed, saying so), and by setting
+/// them promises to look at [`cancel_asked`] between the pieces of a download. Without this the
+/// row shows neither Cancel nor Update and Restart. The first set stay.
 #[allow(dead_code)] // Set by a development build's updater only.
 pub fn set_install(install: fn(), waits: fn() -> bool) {
     let _ = CHECKS.install.set((install, waits));
@@ -849,6 +926,13 @@ pub fn report(fetch: Fetch) {
     {
         wake();
     }
+}
+
+/// Whether the row's Cancel was pressed while a version comes down. The updater looks between
+/// the pieces of its download; once it is so, it stops, deletes what came down and reports
+/// [`Fetch::Cancelled`] (which lets the asking go, as any report but a download's does).
+pub fn cancel_asked() -> bool {
+    CHECKS.cancel.load(Relaxed)
 }
 
 /// An updater has nothing in hand any more (what it fetched went in, or was dropped): the row
@@ -880,7 +964,8 @@ fn waits() -> bool {
 /// copy (one with `SOFTPRESENTER_DATA`) only, for pictures of states no check on this computer
 /// reaches: `never`, `checking`, `newest`, `found`, `check-failed`, `check-blocked`, and an
 /// updater's `downloading`, `ready`, `ready-live` (something on screen), `failed`, `blocked`,
-/// `refused`. Nothing is asked of the network for it, and the keys do nothing but check.
+/// `refused`, `cancelled`. Nothing is asked of the network for it; Cancel and Update and
+/// Restart do nothing.
 fn staged() -> Option<&'static (Status, bool)> {
     static STAGED: OnceLock<Option<(Status, bool)>> = OnceLock::new();
     STAGED
@@ -911,6 +996,7 @@ fn stage(word: &str) -> Option<(Status, bool)> {
         "check-blocked" => found(Found::Unreached(Trouble::Blocked)),
         "downloading" => fetch(Fetch::Downloading { version: newer.clone(), done: 22_680_000, total: 54_000_000 }),
         "ready" | "ready-live" => fetch(Fetch::Ready { version: newer.clone() }),
+        "cancelled" => fetch(Fetch::Cancelled { version: newer.clone() }),
         "failed" => failed(Trouble::NoNetwork),
         "blocked" => failed(Trouble::Blocked),
         "refused" => failed(Trouble::NotSigned),
@@ -961,14 +1047,15 @@ pub fn start(done: impl FnOnce() + Send + 'static) -> bool {
 // The Updates row of Settings › About
 
 /// The row's sizes: its words' lines, the key, the gap under it and the line under the key, the
-/// bar that takes the key's place, and the room above and below.
+/// bar along the foot of the words (and how far under them), and the room above and below.
 const LABEL_LINE: f32 = 18.0;
 const SENTENCE_LINE: f32 = 19.0;
 const UNDER_LINE: f32 = 18.0;
 const KEY_HIGH: f32 = 30.0;
 const UNDER_KEY_GAP: f32 = 3.0;
 const UNDER_KEY_LINE: f32 = 16.0;
-const BAR_HIGH: f32 = 6.0;
+const BAR_HIGH: f32 = 4.0;
+const BAR_UNDER_WORDS: f32 = 4.0;
 const ROOM: f32 = 12.0;
 
 /// Every state the row can be in for this build, to size it by: a build from the public source
@@ -978,7 +1065,10 @@ fn reachable(now: &Status, build: Build) -> Vec<Status> {
     let version = now
         .fetching()
         .map(|fetch| match fetch {
-            Fetch::Downloading { version, .. } | Fetch::Ready { version } | Fetch::Failed { version, .. } => version,
+            Fetch::Downloading { version, .. }
+            | Fetch::Ready { version }
+            | Fetch::Failed { version, .. }
+            | Fetch::Cancelled { version } => version,
         })
         .or_else(|| now.last.as_ref().and_then(|(found, _)| found.newer().map(str::to_owned)))
         .unwrap_or_else(|| VERSION.to_owned());
@@ -994,6 +1084,7 @@ fn reachable(now: &Status, build: Build) -> Vec<Status> {
         let fetch = |fetch: Fetch| Status { fetch: Some(fetch), ..Status::default() };
         all.push(fetch(Fetch::Downloading { version: version.clone(), done: 999_000_000, total: 999_000_000 }));
         all.push(fetch(Fetch::Ready { version: version.clone() }));
+        all.push(fetch(Fetch::Cancelled { version: version.clone() }));
         for why in [Trouble::NoNetwork, Trouble::Blocked, Trouble::NotSigned, Trouble::Timeout] {
             all.push(fetch(Fetch::Failed { version: version.clone(), why, retries: true }));
         }
@@ -1006,9 +1097,9 @@ fn reachable(now: &Status, build: Build) -> Vec<Status> {
 /// Settings › About's Updates row: one height and one key width in every state, so nothing on
 /// the page moves as a check and a download go on. Its name, then the sentence and the line
 /// under it (as tall as the tallest of the states this build can reach, laid out at the row's
-/// width); at the right the key (as wide as its longest wording; while a version comes down a
-/// thin bar in its place, in the middle of the key's height) and a line under it, which says
-/// why the key is greyed. The same check as the Mac's app menu item, which opens this page; on
+/// width), with a thin bar along their foot while a version comes down, in the room under
+/// them; at the right the key (as wide as its longest wording, amber when it brings a newer
+/// version in) and a line under it, which says why the key is greyed. The same check as the Mac's app menu item, which opens this page; on
 /// Windows and Linux, which have no menu bar, this is its place.
 pub fn row(ui: &mut egui::Ui, state: &mut crate::home::HomeState) {
     draw_row(ui, state, &status(), Build::now());
@@ -1061,17 +1152,21 @@ fn draw_row(ui: &mut egui::Ui, state: &mut crate::home::HomeState, now: &Status,
     let key_place = Rect::from_min_size(key_at, vec2(key_wide, KEY_HIGH));
     state.updates_key = Some(key_place);
     if let Some(filled) = shown.bar {
-        let bar = Rect::from_center_size(key_place.center(), vec2(key_wide, BAR_HIGH));
+        let at = pos2(place.min.x, top + text_high + BAR_UNDER_WORDS);
+        let bar = Rect::from_min_size(at, vec2(room, BAR_HIGH));
         painter.rect_filled(bar, BAR_HIGH / 2.0, BUTTON);
-        let done = Rect::from_min_size(bar.min, vec2(key_wide * filled.clamp(0.0, 1.0), BAR_HIGH));
+        let done = Rect::from_min_size(bar.min, vec2(room * filled.clamp(0.0, 1.0), BAR_HIGH));
         painter.rect_filled(done, BAR_HIGH / 2.0, TEXT);
+        state.updates_bar = Some(bar);
+    } else {
+        state.updates_bar = None;
     }
     if !shown.under_key.is_empty() {
         let at = pos2(key_place.center().x, key_place.max.y + UNDER_KEY_GAP + UNDER_KEY_LINE / 2.0);
         painter.text(at, Align2::CENTER_CENTER, shown.under_key, FontId::proportional(11.5), TEXT_FAINT);
     }
     let Some(key) = shown.key else { return place };
-    let look = if key.main { Flat::Main } else { Flat::Plain };
+    let look = if key.amber { Flat::Amber } else { Flat::Plain };
     let id = ui.scope_id().with("updates key");
     if !flat_button(ui, key_place, id, key.words, key_font, look, key.enabled).clicked() {
         return place;
@@ -1092,6 +1187,7 @@ fn draw_row(ui: &mut egui::Ui, state: &mut crate::home::HomeState, now: &Status,
                 install();
             }
         }
+        Act::Cancel => CHECKS.cancel.store(true, Relaxed),
     }
     place
 }
@@ -1396,8 +1492,9 @@ mod tests {
         chrono::Local.with_ymd_and_hms(2026, 11, 28, 14, 7, 0).single().expect("a time").timestamp()
     }
 
-    const PUBLIC: Build = Build { fetches: false, waits: false };
-    const FETCHES: Build = Build { fetches: true, waits: false };
+    const PUBLIC: Build = Build { fetches: false, waits: false, keys: false, cancelling: false };
+    const FETCHES: Build = Build { fetches: true, waits: false, keys: true, cancelling: false };
+    const LIVE: Build = Build { waits: true, ..FETCHES };
 
     fn found(found: Found) -> Status {
         Status { last: Some((found, at_2_07())), ..Status::default() }
@@ -1412,7 +1509,7 @@ mod tests {
     }
 
     /// Every state of the row with the build it is reached in: its sentence, the line under
-    /// it, its key (none: the bar) and the line under the key.
+    /// it, its key and the line under the key.
     fn states() -> Vec<(Status, Build, [&'static str; 4])> {
         let newest: &'static str = Box::leak(format!("SoftPresenter {VERSION} is the newest.").into_boxed_str());
         let page = format!("{PAGES}tag/v0.9.1");
@@ -1463,17 +1560,12 @@ mod tests {
             (
                 fetching(downloading),
                 FETCHES,
-                [
-                    "Downloading 0.9.1\u{2026} 42% \u{b7} 23 of 54 MB",
-                    "Carry on as usual: nothing changes until it is ready.",
-                    "",
-                    "",
-                ],
+                ["Downloading 0.9.1\u{2026} 42%", "23 of 54 MB. Nothing changes until it is ready.", "Cancel", ""],
             ),
             (
                 found(Found::DevFetching { version: "0.9.1".to_owned() }),
                 FETCHES,
-                ["Downloading 0.9.1\u{2026}", "Carry on as usual: nothing changes until it is ready.", "", ""],
+                ["Downloading 0.9.1\u{2026}", "Nothing changes until it is ready.", "Cancel", ""],
             ),
             (
                 fetching(ready.clone()),
@@ -1487,13 +1579,18 @@ mod tests {
             ),
             (
                 fetching(ready),
-                Build { fetches: true, waits: true },
+                LIVE,
                 [
                     "0.9.1 is ready. It goes in when you quit, or now.",
                     "",
                     "Update and Restart",
                     "Something is on screen",
                 ],
+            ),
+            (
+                fetching(Fetch::Cancelled { version: "0.9.1".to_owned() }),
+                FETCHES,
+                ["The update was cancelled.", "What was downloaded has been deleted.", "Check Now", ""],
             ),
             (
                 failed(Trouble::NoNetwork, true),
@@ -1557,27 +1654,38 @@ mod tests {
             assert_eq!(shown.under.replace("14:07", "2:07"), under, "{status:?}");
             assert_eq!(shown.key.as_ref().map_or("", |key| key.words), key, "{status:?}");
             assert_eq!(shown.under_key, under_key, "{status:?}");
-            // A bar only while a version comes down, in the key's place.
-            assert_eq!(shown.bar.is_some(), key.is_empty(), "{status:?}");
+            // A bar only while a version comes down.
+            assert_eq!(shown.bar.is_some(), sentence.starts_with("Downloading"), "{status:?}");
         }
-        // Checking greys the key; something on screen greys Update and Restart, the one bright key.
+        // Checking greys the key; something on screen greys Update and Restart.
         let key = |status: &Status, build| view(status, &form, build).key.expect("a key");
         assert!(!key(&Status { checking: true, ..Status::default() }, PUBLIC).enabled);
         let ready = fetching(Fetch::Ready { version: "0.9.1".to_owned() });
-        assert_eq!(
-            key(&ready, FETCHES),
-            Key { words: "Update and Restart", act: Act::Install, enabled: true, main: true }
-        );
-        assert!(!key(&ready, Build { fetches: true, waits: true }).enabled);
+        // The keys that bring a newer version in are amber, and no other.
+        let install = Key { words: "Update and Restart", act: Act::Install, enabled: true, amber: true };
+        assert_eq!(key(&ready, FETCHES), install);
+        assert_eq!(key(&ready, LIVE), Key { enabled: false, ..install });
         // A newer version's key opens its release page, and nothing else.
         let page = format!("{PAGES}tag/v0.9.1");
         let newer = found(Found::Newer { version: "0.9.1".to_owned(), page: page.clone() });
-        assert_eq!(key(&newer, PUBLIC).act, Act::Open(page));
-        // Try Again checks, as Check Now does.
-        assert_eq!(key(&failed(Trouble::Blocked, false), FETCHES).act, Act::Check);
+        let open = Key { words: "Open the Download Page", act: Act::Open(page), enabled: true, amber: true };
+        assert_eq!(key(&newer, PUBLIC), open);
+        // Try Again checks, as Check Now does, and neither is amber.
+        let again = key(&failed(Trouble::Blocked, false), FETCHES);
+        assert_eq!((again.act, again.amber), (Act::Check, false));
+        // Cancel asks the updater to stop, and is greyed once it has been pressed.
+        let downloading = fetching(Fetch::Downloading { version: "0.9.1".to_owned(), done: 1, total: 2 });
+        let cancel = Key { words: "Cancel", act: Act::Cancel, enabled: true, amber: false };
+        assert_eq!(key(&downloading, FETCHES), cancel);
+        assert_eq!(key(&downloading, Build { cancelling: true, ..FETCHES }), Key { enabled: false, ..cancel });
         // While a check runs, the row says so whatever was found or fetched before.
-        let again = Status { checking: true, ..ready };
-        assert_eq!(view(&again, &form, FETCHES).sentence, "Checking\u{2026}");
+        let checking = Status { checking: true, ..ready.clone() };
+        assert_eq!(view(&checking, &form, FETCHES).sentence, "Checking\u{2026}");
+        // An updater that hasn't said what its keys do gets none: no key that does nothing.
+        let unset = Build { keys: false, ..FETCHES };
+        let waiting = view(&ready, &form, unset);
+        assert_eq!((waiting.sentence.as_str(), waiting.key), ("0.9.1 is ready. It goes in when you quit.", None));
+        assert_eq!(view(&downloading, &form, unset).key, None);
     }
 
     #[test]
@@ -1603,8 +1711,18 @@ mod tests {
                         "{words:?} is in the row: {status:?}"
                     );
                 }
+                let row = row.expect("drawn");
+                // The bar runs along the foot of the words, in the row, left of the key.
+                let key_place = state.updates_key.expect("the key's place");
+                assert_eq!(state.updates_bar.is_some(), sentence.starts_with("Downloading"), "{status:?}");
+                if let Some(bar) = state.updates_bar {
+                    assert!(row.contains_rect(bar) && bar.max.x < key_place.min.x, "{bar:?} in {row:?}");
+                    assert_eq!(bar.height(), 4.0);
+                    let words = place_of(&output, under.as_str()).expect("the line under");
+                    assert!(bar.min.y > words.y, "under the words");
+                }
                 output.drop_without_applying_deltas();
-                places.push((row.expect("drawn"), state.updates_key.expect("the key's place"), status));
+                places.push((row, key_place, status));
             }
             let (row, key, _) = &places[0];
             for (other_row, other_key, status) in &places {
@@ -1621,20 +1739,58 @@ mod tests {
         let say = |done: u64, total: u64| {
             let shown =
                 view(&fetching(Fetch::Downloading { version: "0.9.1".to_owned(), done, total }), &form, FETCHES);
-            (shown.sentence, shown.bar)
+            (shown.sentence, shown.under, shown.bar)
         };
-        let part = |sentence: &str, bar: f32| (sentence.to_owned(), Some(bar));
-        assert_eq!(say(22_680_000, 54_000_000), part("Downloading 0.9.1\u{2026} 42% \u{b7} 23 of 54 MB", 0.42));
-        assert_eq!(say(0, 54_000_000), part("Downloading 0.9.1\u{2026} 0% \u{b7} 0 of 54 MB", 0.0));
+        let part = |percent: &str, amounts: &str, bar: f32| {
+            (
+                format!("Downloading 0.9.1\u{2026}{percent}"),
+                format!("{amounts}Nothing changes until it is ready."),
+                Some(bar),
+            )
+        };
+        assert_eq!(say(22_680_000, 54_000_000), part(" 42%", "23 of 54 MB. ", 0.42));
+        assert_eq!(say(0, 54_000_000), part(" 0%", "0 of 54 MB. ", 0.0));
         // Never 100% before all of it is there, and never more than all of it.
-        assert_eq!(say(53_999_999, 54_000_000), part("Downloading 0.9.1\u{2026} 99% \u{b7} 54 of 54 MB", 0.99));
-        assert_eq!(say(54_000_000, 54_000_000), part("Downloading 0.9.1\u{2026} 100% \u{b7} 54 of 54 MB", 1.0));
-        assert_eq!(say(60_000_000, 54_000_000), part("Downloading 0.9.1\u{2026} 100% \u{b7} 60 of 54 MB", 1.0));
+        assert_eq!(say(53_999_999, 54_000_000), part(" 99%", "54 of 54 MB. ", 0.99));
+        assert_eq!(say(54_000_000, 54_000_000), part(" 100%", "54 of 54 MB. ", 1.0));
+        assert_eq!(say(60_000_000, 54_000_000), part(" 100%", "60 of 54 MB. ", 1.0));
         // Its size not known (yet): no percent, and an empty bar.
-        assert_eq!(say(0, 0), part("Downloading 0.9.1\u{2026}", 0.0));
-        assert_eq!(say(7_400_000, 0), part("Downloading 0.9.1\u{2026} 7 MB", 0.0));
+        assert_eq!(say(0, 0), part("", "", 0.0));
+        assert_eq!(say(7_400_000, 0), part("", "7 MB. ", 0.0));
         // A very big one doesn't overflow.
-        assert_eq!(say(u64::MAX / 2, u64::MAX).1, Some(0.49));
+        assert_eq!(say(u64::MAX / 2, u64::MAX).2, Some(0.49));
+    }
+
+    #[test]
+    fn cancel_asks_the_updater_to_stop_and_the_notices_say_it_once() {
+        let checks = Checks::new();
+        let downloading = |done| Fetch::Downloading { version: "0.9.1".to_owned(), done, total: 54_000_000 };
+        checks.report(Some(downloading(1_000_000)));
+        assert!(!checks.cancel.load(Relaxed));
+        // The row's Cancel: asked, and still asked while the updater reports more of it.
+        checks.cancel.store(true, Relaxed);
+        checks.report(Some(downloading(2_000_000)));
+        assert!(checks.cancel.load(Relaxed), "the updater hasn't stopped yet");
+        assert_eq!(checks.take_notice(), None);
+        // The updater stopped and deleted what came down: the row and the notices say so, once.
+        assert!(checks.report(Some(Fetch::Cancelled { version: "0.9.1".to_owned() })));
+        assert!(!checks.cancel.load(Relaxed), "nothing is asked any more");
+        let said = "The update was cancelled. What was downloaded has been deleted.";
+        assert_eq!(checks.take_notice(), Some((said.to_owned(), false)));
+        assert_eq!(checks.take_notice(), None);
+        let shown = view(&checks.status(), &crate::clock::TimeForm::default(), FETCHES);
+        assert_eq!(format!("{} {}", shown.sentence, shown.under), said);
+        // Check Now lets it go; a download cancelled again is said again.
+        assert!(checks.begin());
+        assert_eq!(checks.status().fetch, None);
+        checks.finish(Found::Newest, 1);
+        checks.report(Some(Fetch::Cancelled { version: "0.9.1".to_owned() }));
+        assert_eq!(checks.take_notice(), Some((said.to_owned(), false)));
+        // Cancel pressed just as the download ended: it is ready, and nothing is left asked.
+        checks.report(Some(downloading(3_000_000)));
+        checks.cancel.store(true, Relaxed);
+        assert!(checks.report(Some(Fetch::Ready { version: "0.9.1".to_owned() })));
+        assert!(!checks.cancel.load(Relaxed));
     }
 
     #[test]
@@ -1768,6 +1924,7 @@ mod tests {
             "failed",
             "blocked",
             "refused",
+            "cancelled",
         ] {
             assert!(stage(word).is_some(), "{word}");
         }

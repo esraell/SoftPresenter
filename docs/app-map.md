@@ -130,8 +130,9 @@ time rule, GitHub's releases, the version compared, the Updates row (`updates::r
 words (`updates::view`) and the kinds of network trouble (`updates::trouble_of`: a certificate
 nobody vouches for is a network that blocked it) are `updates.rs` (`update check`).
 `updates::set_hook` lets a build answer some other way; an updater that fetches a newer version
-says how far it is with `updates::report` (bytes of bytes, ready, failed and why) and what
-Update and Restart does with `updates::set_install`.
+says how far it is with `updates::report` (bytes of bytes, ready, failed and why, cancelled),
+what Update and Restart does with `updates::set_install`, and stops when the row's Cancel asks
+(`updates::cancel_asked`).
 
 ### Keys in the Edit view
 
