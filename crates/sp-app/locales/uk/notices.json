@@ -471,7 +471,7 @@
   "notices.unread.playlists": "SoftPresenter не зміг прочитати списки, тож запустився з одним порожнім списком.",
   "notices.unread.libraries": "SoftPresenter не зміг прочитати бібліотеки, тож запустився без них.",
   "notices.unread.kept": "Старий файл збережено як {file}.",
-  "notices.unread.not_kept": "Зберегти старий файл не вдалося ({error}), тож SoftPresenter не записуватиме поверх нього до наступного запуску.",
+  "notices.unread.not_kept": "Зберегти старий файл не вдалося ({error}), тож SoftPresenter не записуватиме поверх цього файлу, доки ви знову не запустите SoftPresenter.",
   "notices.unread.messages": "SoftPresenter не зміг прочитати повідомлення, тож запустився без них.",
   "notices.unread.props": "SoftPresenter не зміг прочитати накладки, тож запустився без них.",
   "notices.unread.stage_layouts": "SoftPresenter не зміг прочитати макети сцени, тож запустився зі звичайними макетами.",

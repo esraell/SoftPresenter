@@ -143,7 +143,7 @@ impl Unread {
             ),
             Err(error) => tf(
                 "notices.unread.not_kept",
-                "The old file could not be kept ({error}), so SoftPresenter won't save over it until it is started again.",
+                "The old file could not be kept ({error}), so SoftPresenter won't save over that file until you start SoftPresenter again.",
                 &[("error", error)],
             ),
         };
@@ -585,8 +585,8 @@ pub mod tests {
             assert_eq!(
                 told,
                 "SoftPresenter couldn't read its macros, so it started with none. The old file could not be kept \
-                 (SoftPresenter isn't allowed to write there), so SoftPresenter won't save over it until it is \
-                 started again."
+                 (SoftPresenter isn't allowed to write there), so SoftPresenter won't save over that file until \
+                 you start SoftPresenter again."
             );
         }
     }
@@ -623,7 +623,8 @@ pub mod tests {
             assert_eq!(
                 unread.told(),
                 "SoftPresenter couldn't read its macros, so it started with none. The old file could not be kept \
-                 (999 copies of it are kept already), so SoftPresenter won't save over it until it is started again."
+                 (999 copies of it are kept already), so SoftPresenter won't save over that file until you start \
+                 SoftPresenter again."
             );
             assert!(refuses(&path));
             let done = saved(settings_save(path.clone(), What::Macros, b"[]".to_vec()));
