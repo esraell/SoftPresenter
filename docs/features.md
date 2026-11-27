@@ -1435,8 +1435,13 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   box. The Insert
   menu also adds a text box or any shape.
 - **Web pages** on slides (Web Page above the slide, or `sp slide web SONG N URL`): a box that
-  shows a live web page (added from Web Page, it covers the whole slide, and can then be moved
-  and sized as any box), laid out at the box's size and see-through where the page has no
+  shows a live web page (added, it covers the whole slide and goes just under the slide's first
+  words, over any picture behind them, or on top when there are none, so a click on the words
+  still picks the words; it can then be moved, sized and restacked as any box; until it has
+  something to show, the operator's window draws it as a dark see-through panel, 62% with a
+  faint hatch, so what is behind it shows dimmed and what is in front at full strength; picked,
+  it keeps its place in the layers and only its outline and handles are drawn over everything),
+  laid out at the box's size and see-through where the page has no
   background, so it can sit over the slide's background or under its words. Only addresses
   starting with https:// open. The page of a song open in the window is loaded ahead, so it has
   loaded and drawn by the time its slide goes on screen; nothing shows on the screens until it
@@ -1454,8 +1459,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   content such as a scrolling ticker can look uneven; a smoother engine is planned), and not
   yet on other systems.
 - **NDI sources** on slides (NDI Source, right after Web Page above the slide, in slides,
-  props and stage layouts): a box, over the whole slide when added (it can then be moved and
-  sized as any box), that shows a live NDI source from the network. It is set up as a web page box is: adding one picks it and gives the inspector's
+  props and stage layouts): a box, over the whole slide and under the words when added, and
+  see-through until it has a picture, as a web page box is, that shows a live NDI source from the network. It is set up as a web page box is: adding one picks it and gives the inspector's
   Source menu the keyboard. The menu lists the sources found (as "Camera 1 · STREAM-PC"), with
   Look again beside it; SoftPresenter's own NDI outputs are never offered (a source shown in
   a slide would show itself). One line under it says what is so: how many are found, that it is
@@ -1485,8 +1490,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Songs with an NDI box are saved as version 4 of the song file; older SoftPresenters say to
   update. Not yet: sound, and `sp` has no command to add one (`sp slide SONG N` lists it).
 - **AirPlay** on slides (AirPlay, right after NDI Source above the slide, in slides, props and
-  stage layouts): a box, over the whole slide when added (it can then be moved and sized as any
-  box), that shows the screen of an iPhone, iPad or Mac whose owner chose this computer in Screen Mirroring
+  stage layouts): a box, over the whole slide and under the words when added, and see-through
+  until a device shows its screen, as a web page box is, that shows the screen of an iPhone, iPad or Mac whose owner chose this computer in Screen Mirroring
   (Control Centre on the device). **Unofficial:** it works with Screen Mirroring (AirPlay) from
   an iPhone, iPad or Mac, but isn't made or supported by Apple, and an Apple update may stop it
   working; Settings says so beside the switch. It is off until switched on in **Settings ›

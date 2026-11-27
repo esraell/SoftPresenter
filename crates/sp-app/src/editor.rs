@@ -739,8 +739,8 @@ impl EditDraft {
         self.slide.objects.push(object);
     }
 
-    /// Puts a web page box on the slide, over the whole of it (as [`Object::web`] makes it),
-    /// selected, its address to be typed.
+    /// Puts a web page box on the slide, over the whole of it (as [`Object::web`] makes it) and
+    /// under its words ([`Slide::under_the_words`]), selected, its address to be typed.
     pub fn add_web(&mut self) {
         self.record();
         let same = self.slide.objects.iter().filter(|o| matches!(o.kind, ObjectKind::Web { .. })).count();
@@ -752,11 +752,12 @@ impl EditDraft {
         };
         self.selected = Some(object.id);
         self.also.clear();
-        self.slide.objects.push(object);
+        let at = self.slide.under_the_words();
+        self.slide.objects.insert(at, object);
     }
 
-    /// Puts an NDI source box on the slide, over the whole of it (as [`Object::ndi`] makes it),
-    /// selected, its source to be chosen.
+    /// Puts an NDI source box on the slide, over the whole of it (as [`Object::ndi`] makes it)
+    /// and under its words, selected, its source to be chosen.
     pub fn add_ndi(&mut self) {
         self.record();
         let same = self.slide.objects.iter().filter(|o| matches!(o.kind, ObjectKind::Ndi { .. })).count();
@@ -768,11 +769,13 @@ impl EditDraft {
         };
         self.selected = Some(object.id);
         self.also.clear();
-        self.slide.objects.push(object);
+        let at = self.slide.under_the_words();
+        self.slide.objects.insert(at, object);
     }
 
-    /// Puts an AirPlay box on the slide, over the whole of it (as [`Object::mirror`] makes it),
-    /// selected: whoever is showing their screen to this computer shows in it.
+    /// Puts an AirPlay box on the slide, over the whole of it (as [`Object::mirror`] makes it)
+    /// and under its words, selected: whoever is showing their screen to this computer shows in
+    /// it.
     pub fn add_mirror(&mut self) {
         self.record();
         let same = self.slide.objects.iter().filter(|o| matches!(o.kind, ObjectKind::Mirror { .. })).count();
@@ -784,7 +787,8 @@ impl EditDraft {
         };
         self.selected = Some(object.id);
         self.also.clear();
-        self.slide.objects.push(object);
+        let at = self.slide.under_the_words();
+        self.slide.objects.insert(at, object);
     }
 
     /// Every selected object: the first selected, then the rest.
@@ -1456,17 +1460,19 @@ mod tests {
             d.add_web();
             d.add_ndi();
         });
-        let added: Vec<(String, Option<String>)> = d.slide.objects[before..]
+        let added: Vec<(String, Option<String>)> = d.slide.objects[..2]
             .iter()
+            .chain(&d.slide.objects[before + 2..])
             .map(|object| (object.name.clone(), object.as_text().map(str::to_owned)))
             .collect();
         let number = (before + 1).to_string();
+        // The web page and the NDI source go under the words; the rest in front.
         let expected = [
+            ("Página web".to_owned(), None),
+            ("Fuente NDI".to_owned(), None),
             (format!("Texto {number}"), Some("Texto".to_owned())),
             ("Estrella".to_owned(), None),
             ("Estrella 2".to_owned(), None),
-            ("Página web".to_owned(), None),
-            ("Fuente NDI".to_owned(), None),
         ];
         assert_eq!(added, expected);
         // Kept as given: in English the Spanish box is still the app's, by its name and its words.
@@ -1492,7 +1498,7 @@ mod tests {
     }
 
     #[test]
-    fn an_ndi_source_box_is_added_as_a_web_page_box_is_named_picked_and_in_front() {
+    fn an_ndi_source_box_is_added_as_a_web_page_box_is_named_picked_and_under_the_words() {
         let mut d = draft();
         let before = d.slide.objects.len();
         d.add_ndi();
@@ -1502,7 +1508,7 @@ mod tests {
             if source.is_empty() && *scaling == sp_model::ImageFit::Fit && *quality == sp_model::NdiQuality::Full && !sound));
         assert_eq!(first.frame, Some(sp_model::WHOLE_SLIDE), "over the whole slide");
         assert_eq!(d.slide.objects.len(), before + 1);
-        assert_eq!(d.slide.objects.last().map(|o| o.id), d.selected, "in front, and the one picked");
+        assert_eq!(d.slide.objects.first().map(|o| o.id), d.selected, "under the words, and the one picked");
         d.add_ndi();
         assert_eq!(d.selected_object().unwrap().name, "NDI source 2");
         // A web page box beside them is counted on its own.
@@ -1564,6 +1570,59 @@ mod tests {
         d.add_shape(sp_model::Shape::Star);
         assert_eq!(d.selected_object().unwrap().frame, Object::shape(sp_model::Shape::Star).frame);
         assert_ne!(d.selected_object().unwrap().frame, Some(whole));
+    }
+
+    /// The owner, 27 November ("land behind the words is fine"): a new web page, NDI source or
+    /// AirPlay box goes just under the first box of words, over any picture behind them, so the
+    /// words stay in front and in reach of a click; with no words on the slide it goes on top.
+    /// Text and shapes still go in front.
+    #[test]
+    fn a_web_page_an_ndi_and_an_airplay_box_go_under_the_words_and_over_a_picture() {
+        let ids = |d: &EditDraft| d.slide.objects.iter().map(|o| o.id).collect::<Vec<_>>();
+        let adders: [fn(&mut EditDraft); 3] = [EditDraft::add_web, EditDraft::add_ndi, EditDraft::add_mirror];
+        for add in adders {
+            // A picture behind the words: the new box goes over it and under the first words.
+            let mut d = draft();
+            let words: Vec<Uuid> = d.slide.objects.iter().filter(|o| is_text(o)).map(|o| o.id).collect();
+            assert!(!words.is_empty());
+            let picture = Object::image("behind.png".to_owned(), "Behind".to_owned(), 1920, 1080);
+            let behind = picture.id;
+            d.slide.objects.insert(0, picture);
+            let before = ids(&d);
+            add(&mut d);
+            let new = d.selected.unwrap();
+            let after = ids(&d);
+            assert_eq!(after.len(), before.len() + 1);
+            let at = after.iter().position(|id| *id == new).unwrap();
+            assert_eq!(after[at - 1], behind, "over the picture");
+            assert_eq!(after[at + 1], words[0], "just under the first words");
+            assert_eq!([&after[..at], &after[at + 1..]].concat(), before, "nothing else moves");
+            // A click on the words picks the words, not the box behind them; where there are
+            // no words it picks the box.
+            let theme = Theme::builtin();
+            let frame = object_frame(&d.slide, d.slide.objects.iter().find(|o| o.id == words[0]).unwrap(), &theme);
+            let on_words = (frame.x + frame.w / 2.0, frame.y + frame.h / 2.0);
+            d.select_only(None);
+            d.press(&theme, on_words, 8.0, false);
+            d.release();
+            assert_eq!(d.selected, Some(words[0]), "the words");
+            d.select_only(None);
+            d.press(&theme, (6.0, 6.0), 8.0, false);
+            d.release();
+            assert_eq!(d.selected, Some(new), "the box, where there are no words");
+            // Picked, it keeps its place: what is drawn over it still is.
+            assert_eq!(ids(&d), after, "picking it moves nothing in the layers");
+            // With no words on the slide it goes on top; text and shapes still go in front of it.
+            let mut d = draft();
+            d.slide.objects.retain(|o| !is_text(o));
+            d.slide.objects.push(Object::image("behind.png".to_owned(), "Behind".to_owned(), 1920, 1080));
+            add(&mut d);
+            assert_eq!(d.slide.objects.last().map(|o| o.id), d.selected, "on top with no words");
+            d.add_shape(sp_model::Shape::Star);
+            assert!(matches!(d.slide.objects.last().unwrap().kind, ObjectKind::Shape { .. }), "a shape in front");
+            d.add_text();
+            assert!(is_text(d.slide.objects.last().unwrap()), "text in front");
+        }
     }
 
     #[test]

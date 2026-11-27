@@ -742,6 +742,17 @@ impl Slide {
         }
     }
 
+    /// Where a new box that shows a picture of its own (a web page, an NDI source, AirPlay) goes
+    /// among the objects (the owner, 27 November: "land behind the words is fine"): just under
+    /// the first box of words, over any picture behind them, so the words stay in front and in
+    /// reach of a click; on top when the slide has no words.
+    pub fn under_the_words(&self) -> usize {
+        self.objects
+            .iter()
+            .position(|object| matches!(object.kind, ObjectKind::Text { .. }))
+            .unwrap_or(self.objects.len())
+    }
+
     /// A new slide laid out like this one (the same boxes, in the same places, with the same
     /// look) with no words in them, drawn with the same template. Shapes, pictures and web
     /// pages come as they are.
@@ -1410,6 +1421,17 @@ mod tests {
         assert_eq!(Object::mirror().frame, Some(whole), "an AirPlay box");
         assert_eq!(Object::ndi("PC (Camera 1)".to_owned()).frame, Some(whole), "an NDI source");
         assert_ne!(Object::shape(Shape::Star).frame, Some(whole), "a shape");
+    }
+
+    /// Such a box goes just under the first box of words, and on top with none.
+    #[test]
+    fn a_box_with_a_picture_of_its_own_goes_under_the_first_words() {
+        let picture = || Object::image("a.png".to_owned(), "A".to_owned(), 16, 9);
+        let words = |text: &str| Object::text(Role::primary(), text.to_owned());
+        let slide = Slide::new(vec![picture(), words("One"), Object::shape(Shape::Star), words("Two")]);
+        assert_eq!(slide.under_the_words(), 1);
+        assert_eq!(Slide::new(vec![picture(), Object::shape(Shape::Star)]).under_the_words(), 2);
+        assert_eq!(Slide::new(Vec::new()).under_the_words(), 0);
     }
 
     #[test]

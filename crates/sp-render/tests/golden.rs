@@ -373,6 +373,43 @@ fn a_moved_object_is_drawn_where_it_was_put() {
     assert!(lit(320, 180) > 100, "the letter should be in the bottom-right quarter");
 }
 
+/// The owner, 27 November ("somewhat transparent to see whats behind"): in the operator's
+/// window a web page, NDI source or AirPlay box with nothing to show yet is a dark fill at 62%
+/// (30, 32, 36) with a faint hatch (white at 7%, 45°, 6% stripes every 12%), so what is behind
+/// it shows dimmed; words in front of it are at full strength. On the screens it shows nothing.
+#[test]
+fn an_empty_display_box_shows_what_is_behind_it_dimmed_in_the_operators_window() {
+    let (w, h) = (640, 360);
+    let mut red = Object::shape(sp_model::Shape::Rectangle);
+    red.frame = Some(sp_model::WHOLE_SLIDE);
+    red.fill = Some(sp_model::Rgba::rgb(255, 0, 0));
+    red.stroke = None;
+    for boxed in [Object::web(String::new()), Object::ndi(String::new()), Object::mirror()] {
+        let kind = boxed.name.clone();
+        let mut words = slide("IIIIIIII", None);
+        words.objects.insert(0, boxed);
+        words.objects.insert(0, red.clone());
+        sp_render::show_placeholders(true);
+        let operator = render(Some(&words), w, h);
+        sp_render::show_placeholders(false);
+        let screens = render(Some(&words), w, h);
+        // A row across the top, clear of the outline, the tag and a web page's globe.
+        let row: Vec<[u8; 4]> = (100..540).map(|x| pixel(&operator, w, x, 60)).collect();
+        for p in &row {
+            assert!(
+                (110..=131).contains(&p[0]) && (14..=42).contains(&p[1]) && (16..=44).contains(&p[2]),
+                "{kind}: red behind, dimmed by the dark fill and at most the hatch over it: {p:?}"
+            );
+        }
+        // Dark fill alone: 255 × 0.38 + 30 × 0.62 = 115.5, 32 × 0.62 = 19.8, 36 × 0.62 = 22.3.
+        assert!(row.iter().any(|p| p[1] <= 23), "{kind}: the dimmed red between the stripes");
+        // A stripe: that, with white at 7% over it (125, 36, 39).
+        assert!(row.iter().any(|p| p[1] >= 33), "{kind}: the hatch");
+        assert!(count_lit(&operator) > 200, "{kind}: the words in front at full strength");
+        assert!(is_about(pixel(&screens, w, 320, 60), [255, 0, 0]), "{kind}: on the screens, nothing over the red");
+    }
+}
+
 #[test]
 fn a_faded_object_is_dimmer_and_a_turned_one_moves_its_ink() {
     let upright = slide("IIIIIIII", None);

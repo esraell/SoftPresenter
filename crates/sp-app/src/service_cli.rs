@@ -1080,14 +1080,7 @@ impl crate::App {
                 changed.objects.retain(|object| !matches!(object.kind, ObjectKind::Web { .. }));
                 format!("slide {} has no web page", index + 1)
             } else {
-                match changed.objects.iter_mut().find_map(|object| match &mut object.kind {
-                    ObjectKind::Web { url } => Some(url),
-                    _ => None,
-                }) {
-                    Some(url) => *url = address.clone(),
-                    // Over the whole slide, as `Object::web` makes it, behind everything.
-                    None => changed.objects.insert(0, sp_model::Object::web(address.clone())),
-                }
+                show_web_page(&mut changed, &address);
                 format!("slide {} shows the web page {address}", index + 1)
             };
             song.with_slide(index, changed).map(|song| (song, said))
@@ -1136,9 +1129,47 @@ impl crate::App {
     }
 }
 
+/// `sp slide web`'s change: the slide's web page box shows `address`, or a new one, over the
+/// whole slide as `Object::web` makes it, goes just under the slide's words (as one added in
+/// the Edit view does).
+fn show_web_page(slide: &mut sp_model::Slide, address: &str) {
+    let shown = slide.objects.iter_mut().find_map(|object| match &mut object.kind {
+        ObjectKind::Web { url } => Some(url),
+        _ => None,
+    });
+    match shown {
+        Some(url) => address.clone_into(url),
+        None => {
+            let at = slide.under_the_words();
+            slide.objects.insert(at, sp_model::Object::web(address.to_owned()));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A new web page box goes just under the words, over a picture behind them; a second
+    /// address changes the box that is there.
+    #[test]
+    fn sp_slide_web_puts_its_box_under_the_words_and_over_a_picture() {
+        use sp_model::{Object, Role, Slide};
+        let picture = Object::image("behind.png".to_owned(), "Behind".to_owned(), 16, 9);
+        let words = Object::text(Role::primary(), "Words".to_owned());
+        let (behind, said) = (picture.id, words.id);
+        let mut slide = Slide::new(vec![picture, words]);
+        show_web_page(&mut slide, "https://example.org/one");
+        let ids: Vec<_> = slide.objects.iter().map(|o| o.id).collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!((ids[0], ids[2]), (behind, said), "over the picture, under the words");
+        let web = &slide.objects[1];
+        assert!(matches!(&web.kind, ObjectKind::Web { url } if url == "https://example.org/one"));
+        assert_eq!(web.frame, Some(sp_model::WHOLE_SLIDE));
+        show_web_page(&mut slide, "https://example.org/two");
+        assert_eq!(slide.objects.len(), 3, "the same box");
+        assert!(matches!(&slide.objects[1].kind, ObjectKind::Web { url } if url == "https://example.org/two"));
+    }
 
     #[test]
     fn transitions_are_read_by_name_and_seconds() {

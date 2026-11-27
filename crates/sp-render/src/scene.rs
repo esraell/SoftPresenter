@@ -527,8 +527,8 @@ fn object_web_url(object: &sp_model::Object) -> &str {
 }
 
 /// A web page box: the page's newest picture, laid out at the box's size so it fills it; before
-/// there is one, nothing on the screens and a placeholder (a see-through panel with a globe, so
-/// what is under the box still shows) in the operator's window.
+/// there is one, nothing on the screens and a placeholder (the see-through panel of
+/// [`see_through_placeholder`], with a globe) in the operator's window.
 fn draw_web(scene: &mut Scene, placed: Affine, url: &str, rect: SlideRect, outline: &BezPath) {
     let operator = PLACEHOLDERS.with(std::cell::Cell::get);
     // In the operator's window, a stand-in's picture first (its own may cost to open).
@@ -543,7 +543,7 @@ fn draw_web(scene: &mut Scene, placed: Affine, url: &str, rect: SlideRect, outli
         return;
     }
     let (x, y, w, h) = (f64::from(rect.x), f64::from(rect.y), f64::from(rect.w), f64::from(rect.h));
-    scene.fill(Fill::NonZero, placed, Color::from_rgba8(40, 56, 84, 110), None, outline);
+    see_through_placeholder(scene, placed, rect, outline, false);
     scene.stroke(&Stroke::new(3.0), placed, Color::from_rgba8(90, 110, 140, 255), None, outline);
     // A globe in the middle: a circle, its equator and a meridian.
     let radius = (w.min(h) * 0.18).clamp(12.0, 120.0);
@@ -562,8 +562,8 @@ fn draw_web(scene: &mut Scene, placed: Affine, url: &str, rect: SlideRect, outli
 /// is sending and held for two seconds after it stops, then faded out over half a second (and
 /// faded back in when it returns); before it has sent anything, nothing. No tag. In the
 /// operator's window (the editor, thumbnails): its newest picture with a small tag at its foot;
-/// a plain dashed box where there is none yet; an amber one, tagged "not sending", where the
-/// source is not there.
+/// a dashed, see-through box ([`see_through_placeholder`]) where there is none yet; an amber
+/// one, tagged "not sending", where the source is not there.
 #[allow(clippy::too_many_arguments)]
 fn draw_ndi(
     scene: &mut Scene,
@@ -606,9 +606,7 @@ fn draw_ndi(
         Some(picture) => paint_picture(scene, placed, &picture, fit, rect, outline),
         None => {
             let ink = if stopped { amber } else { Color::from_rgba8(150, 150, 156, 255) };
-            if stopped {
-                scene.fill(Fill::NonZero, placed, Color::from_rgba8(60, 44, 0, 150), None, outline);
-            }
+            see_through_placeholder(scene, placed, rect, outline, stopped);
             let dashed = Stroke::new(4.0).with_dashes(0.0, [18.0, 12.0]);
             scene.stroke(&dashed, placed, ink, None, outline);
         }
@@ -618,7 +616,8 @@ fn draw_ndi(
 
 /// An AirPlay box: on the screens, the mirrored screen's newest picture (held and
 /// faded as an NDI source's is when its sender goes) or nothing; in the operator's window, the
-/// picture while somebody is showing one, else a dashed box, with a tag saying what the box is.
+/// picture while somebody is showing one, else a dashed, see-through box
+/// ([`see_through_placeholder`]), with a tag saying what the box is.
 fn draw_mirror(
     scene: &mut Scene,
     fonts: &mut Fonts,
@@ -645,11 +644,48 @@ fn draw_mirror(
     match shown.picture.filter(|_| !shown.stopped) {
         Some(picture) => paint_picture(scene, placed, &picture, fit, rect, outline),
         None => {
+            see_through_placeholder(scene, placed, rect, outline, false);
             let dashed = Stroke::new(4.0).with_dashes(0.0, [18.0, 12.0]);
             scene.stroke(&dashed, placed, Color::from_rgba8(150, 150, 156, 255), None, outline);
         }
     }
     draw_ndi_tag(scene, fonts, placed, "AirPlay", false, template, rect, outline);
+}
+
+/// A web page, NDI source or AirPlay box with nothing to show yet, in the operator's window (the
+/// owner, 27 November: "somewhat transparent to see whats behind"): a dark fill at 62% (30, 32,
+/// 36), so what is behind it in the layers shows dimmed and what is in front of it is at full
+/// strength, with a faint hatch over it as the design draws it: white at 7%, as CSS's
+/// `repeating-linear-gradient(45deg, … 0 6%, transparent 6% 12%)`. `stopped` is an NDI source
+/// that isn't sending: amber at 10% over the dark fill in place of the hatch.
+fn see_through_placeholder(scene: &mut Scene, placed: Affine, rect: SlideRect, outline: &BezPath, stopped: bool) {
+    scene.fill(Fill::NonZero, placed, Color::from_rgba8(30, 32, 36, 158), None, outline);
+    if stopped {
+        scene.fill(Fill::NonZero, placed, Color::from_rgba8(255, 196, 0, 26), None, outline);
+        return;
+    }
+    // The gradient runs from the box's bottom left corner towards its top right, along a line
+    // through its middle that is (w + h) / √2 long; its stripes cross that line.
+    let (w, h) = (f64::from(rect.w), f64::from(rect.h));
+    let length = (w + h) * std::f64::consts::FRAC_1_SQRT_2;
+    let middle = (f64::from(rect.x) + w / 2.0, f64::from(rect.y) + h / 2.0);
+    let along = Affine::translate(middle)
+        * Affine::rotate(-std::f64::consts::FRAC_PI_4)
+        * Affine::translate((-length / 2.0, 0.0));
+    let (stripe, every) = (length * 0.06, length * 0.12);
+    let mut stripes = BezPath::new();
+    let mut at = 0.0;
+    while at < length {
+        stripes.move_to((at, -length));
+        stripes.line_to((at + stripe, -length));
+        stripes.line_to((at + stripe, length));
+        stripes.line_to((at, length));
+        stripes.close_path();
+        at += every;
+    }
+    scene.push_clip_layer(Fill::NonZero, placed, outline);
+    scene.fill(Fill::NonZero, placed * along, Color::from_rgba8(255, 255, 255, 18), None, &stripes);
+    scene.pop_layer();
 }
 
 /// A small tag at the foot of an NDI box, on a dark strip, amber when the source is not sending.
