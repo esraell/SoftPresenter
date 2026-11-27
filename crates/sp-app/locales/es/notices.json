@@ -422,7 +422,7 @@
   "notices.import.reason.xml_songbook": "es un cancionero guardado como XML, que SoftPresenter aún no lee",
   "notices.import.reason.text_too_large": "es más grande que cualquier cancionero",
   "notices.import.reason.too_many_songs": "tiene más canciones que cualquier cancionero",
-  "notices.import.reason.song_too_long": "tiene una canción más larga que cualquier canción",
+  "notices.import.reason.song_too_long": "una de sus canciones es demasiado larga",
   "notices.import.reason.document_too_large": "el archivo es demasiado grande para ser una canción",
   "notices.import.reason.document_damaged": "el archivo está dañado o no es un documento de canción",
   "notices.import.reason.no_slides": "no tiene diapositivas, o no es un documento de canción",

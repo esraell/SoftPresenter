@@ -422,7 +422,7 @@
   "notices.import.reason.xml_songbook": "це збірник, збережений як XML, а такі SoftPresenter поки не читає",
   "notices.import.reason.text_too_large": "він більший за будь-який збірник",
   "notices.import.reason.too_many_songs": "у ньому більше пісень, ніж у будь-якому збірнику",
-  "notices.import.reason.song_too_long": "у ньому є пісня, довша за будь-яку пісню",
+  "notices.import.reason.song_too_long": "одна з пісень у ньому задовга",
   "notices.import.reason.document_too_large": "файл завеликий для пісні",
   "notices.import.reason.document_damaged": "файл пошкоджено, або це не документ пісні",
   "notices.import.reason.no_slides": "у ньому немає слайдів, або це не документ пісні",

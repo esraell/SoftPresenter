@@ -60,7 +60,7 @@ pub enum Reason {
     TextTooLarge,
     /// More songs than any songbook.
     TooManySongs,
-    /// A song with more parts than any song.
+    /// One of its songs has more parts than any song has.
     SongTooLong,
 
     // Song documents (`.pro`).
@@ -142,7 +142,7 @@ impl fmt::Display for Reason {
             Reason::XmlSongbook => "it is a songbook saved as XML, which SoftPresenter doesn't read yet",
             Reason::TextTooLarge => "it is larger than any songbook",
             Reason::TooManySongs => "it has more songs than any songbook",
-            Reason::SongTooLong => "it has a song longer than any song",
+            Reason::SongTooLong => "one of its songs is too long to be a song",
             Reason::DocumentTooLarge => "the file is too large to be a song",
             Reason::DocumentDamaged => "the file is damaged or isn't a song document",
             Reason::NoSlides => "it has no slides in it, or isn't a song document",

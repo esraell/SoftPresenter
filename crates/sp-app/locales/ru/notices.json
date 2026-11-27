@@ -422,7 +422,7 @@
   "notices.import.reason.xml_songbook": "это сборник, сохранённый как XML, а такие SoftPresenter пока не читает",
   "notices.import.reason.text_too_large": "он больше любого сборника",
   "notices.import.reason.too_many_songs": "в нём больше песен, чем в любом сборнике",
-  "notices.import.reason.song_too_long": "в нём есть песня длиннее любой песни",
+  "notices.import.reason.song_too_long": "одна из песен в нём слишком длинная",
   "notices.import.reason.document_too_large": "файл слишком большой для песни",
   "notices.import.reason.document_damaged": "файл повреждён, или это не документ песни",
   "notices.import.reason.no_slides": "в нём нет слайдов, или это не документ песни",

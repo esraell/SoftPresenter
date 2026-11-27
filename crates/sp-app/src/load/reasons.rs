@@ -140,7 +140,9 @@ pub fn words(reason: &Reason) -> String {
         )),
         Reason::TextTooLarge => fixed(t("notices.import.reason.text_too_large", "it is larger than any songbook")),
         Reason::TooManySongs => fixed(t("notices.import.reason.too_many_songs", "it has more songs than any songbook")),
-        Reason::SongTooLong => fixed(t("notices.import.reason.song_too_long", "it has a song longer than any song")),
+        Reason::SongTooLong => {
+            fixed(t("notices.import.reason.song_too_long", "one of its songs is too long to be a song"))
+        }
         Reason::DocumentTooLarge => {
             fixed(t("notices.import.reason.document_too_large", "the file is too large to be a song"))
         }
