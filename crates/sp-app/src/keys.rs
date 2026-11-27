@@ -57,13 +57,18 @@ impl Numbers {
 }
 
 /// The modifier in front of a key, as a tag or the list writes it.
-pub fn modifier() -> &'static str {
-    if cfg!(target_os = "macos") { "\u{2318}" } else { "Ctrl+" }
+pub fn modifier() -> String {
+    if cfg!(target_os = "macos") { "\u{2318}".to_owned() } else { format!("{}+", ctrl_word()) }
 }
 
 /// Shift with the modifier.
 pub fn shift_modifier() -> String {
-    if cfg!(target_os = "macos") { "\u{21e7}\u{2318}".to_owned() } else { format!("Ctrl+{}+", shift_word()) }
+    if cfg!(target_os = "macos") { "\u{21e7}\u{2318}".to_owned() } else { format!("{}+{}+", ctrl_word(), shift_word()) }
+}
+
+/// The word for the Control key off a Mac, as the language's keyboards print it (Strg in German).
+fn ctrl_word() -> &'static str {
+    t("keys.cap.ctrl", "Ctrl")
 }
 
 /// The word for the Shift key off a Mac, as the language's keyboards print it (Mayús in Spanish).
@@ -157,7 +162,7 @@ fn chord_on(mac: bool, control: bool, option: bool, shift: bool, command: bool, 
         }
     } else {
         // Off a Mac the command key is Ctrl, so Control and Command are one key there.
-        for (on, word) in [(control || command, "Ctrl"), (option, "Alt"), (shift, shift_word())] {
+        for (on, word) in [(control || command, ctrl_word()), (option, "Alt"), (shift, shift_word())] {
             if on {
                 chord.push_str(word);
                 chord.push('+');

@@ -1327,7 +1327,7 @@ Screens and settings
                                end_mark=on|off (a mark under a song's last slide as sung)
                                start_with=nothing|media-playlist:NAME|announcements:SONG
                                view=grid|words|table columns=1-12
-                               language=auto|en|es|ru|uk (the app's own words)
+                               language=auto|en|es|ru|uk|de (the app's own words)
   view words [SONG]            Edit Words: a song's words as text to change (view reflow too)
   help COMMAND                 the help for one command
 

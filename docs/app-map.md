@@ -362,7 +362,7 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   numbers are the first row's. The rule is in `bible_language.rs` (`Reading`); the computer's
   language is read once at start in `system_language.rs`.
 - **The app's own language** (not the Bible's): `i18n.rs` holds the language in use
-  (`Choice`: the computer's, or English, Spanish, Russian, Ukrainian; kept in `Prefs.language`),
+  (`Choice`: the computer's, or English, German, Spanish, Russian, Ukrainian; kept in `Prefs.language`),
   `t`/`ts`/`tf`/`tn` look words up by place key with the English as the fallback, and the tables
   are `crates/sp-app/locales/<language>/<area>.json` (listed by `build.rs`). The Language card is
   `home.rs` (`language_card`, `language_menu`), also used by the setup's first step.

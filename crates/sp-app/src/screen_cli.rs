@@ -628,7 +628,7 @@ impl crate::App {
     pub(crate) fn ctl_settings(&mut self, args: &[String]) -> Result<Reply, String> {
         let usage = "settings | settings set transition=KIND[:SECONDS] media_transition=… copyright=never|first|last|every \
                      ccli_licence=NUMBER continuous=on|off end_mark=on|off view=grid|words|table columns=1-12 \
-                     language=auto|en|es|ru|uk interface_size=auto|80|90|100|125|150|175";
+                     language=auto|en|es|ru|uk|de interface_size=auto|80|90|100|125|150|175";
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
         if args.get(1).is_none() {
             let prefs = state.prefs();
@@ -748,7 +748,7 @@ impl crate::App {
                     let choice = crate::i18n::Choice::ALL
                         .into_iter()
                         .find(|choice| choice.code() == typed)
-                        .ok_or_else(|| format!("language is auto, en, es, ru or uk, not {value}."))?;
+                        .ok_or_else(|| format!("language is auto, en, es, ru, uk or de, not {value}."))?;
                     said.push(format!("language {}", choice.code()));
                     changes.push(Box::new(move |_| crate::i18n::set_choice(choice)));
                 }

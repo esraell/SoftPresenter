@@ -1,0 +1,8 @@
+{
+  "_note": "How German writes numbers and quotation marks: 1.234 and 13.613 with a full stop (four figures grouped too, as German software does), a decimal comma, „…“ (the low mark first).",
+  "decimal": ",",
+  "group": ".",
+  "group_from": 4,
+  "quote_open": "„",
+  "quote_close": "“"
+}

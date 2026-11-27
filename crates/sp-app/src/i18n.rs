@@ -1,4 +1,4 @@
-//! The app's own words in other languages (English, Spanish, Russian, Ukrainian). Songs, Bible
+//! The app's own words in other languages (English, Spanish, Russian, Ukrainian, German). Songs, Bible
 //! text and Bible book names are content and keep their own languages; this is only what the
 //! app itself says: buttons, menus, tooltips, notices. `docs/translating.md` is the guide for
 //! whoever wraps the next area.
@@ -17,13 +17,13 @@
 //!
 //! A key starts with the name of its area's table (`right.` is in `locales/<language>/right.json`)
 //! so that agents working on different areas never meet. A language's table is a flat JSON
-//! object: a key and its words, or, for a plural, its forms in an array (two for English and
-//! Spanish: one and other; three for Russian and Ukrainian: one, few and many). Anything a table
+//! object: a key and its words, or, for a plural, its forms in an array (two for English, Spanish
+//! and German: one and other; three for Russian and Ukrainian: one, few and many). Anything a table
 //! lacks is read in English, so a half-translated language still works.
 //!
 //! # The current language
 //!
-//! The choice is saved with the settings (`auto`, `en`, `es`, `ru` or `uk`); `auto` follows the
+//! The choice is saved with the settings (`auto`, `en`, `es`, `ru`, `uk` or `de`); `auto` follows the
 //! computer's language. Every call looks the language up as it runs, so a change shows at once
 //! in the next drawing, with no restart.
 //!
@@ -46,10 +46,12 @@ pub enum Language {
     Spanish,
     Russian,
     Ukrainian,
+    German,
 }
 
 impl Language {
-    pub const ALL: [Language; 4] = [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian];
+    pub const ALL: [Language; 5] =
+        [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian, Language::German];
 
     /// The short code settings and tables use.
     pub fn code(self) -> &'static str {
@@ -58,10 +60,12 @@ impl Language {
             Language::Spanish => "es",
             Language::Russian => "ru",
             Language::Ukrainian => "uk",
+            Language::German => "de",
         }
     }
 
-    /// The language a code (or a system's language tag such as `es-ES`, `ru_RU.UTF-8`) names.
+    /// The language a code (or a system's language tag such as `es-ES`, `ru_RU.UTF-8`, `de-AT`)
+    /// names: German in Germany, Austria, Switzerland or anywhere else alike.
     pub fn from_tag(tag: &str) -> Option<Language> {
         let first = tag.trim().split(['-', '_', '.', '@']).next().unwrap_or("").to_ascii_lowercase();
         match first.as_str() {
@@ -69,6 +73,7 @@ impl Language {
             "es" | "spa" => Some(Language::Spanish),
             "ru" | "rus" => Some(Language::Russian),
             "uk" | "ukr" => Some(Language::Ukrainian),
+            "de" | "deu" | "ger" => Some(Language::German),
             _ => None,
         }
     }
@@ -80,6 +85,7 @@ impl Language {
             Language::Spanish => "Español",
             Language::Russian => "Русский",
             Language::Ukrainian => "Українська",
+            Language::German => "Deutsch",
         }
     }
 
@@ -87,12 +93,12 @@ impl Language {
         self as usize
     }
 
-    /// Which form of a counted word `n` takes: 0 is the first of the table's forms. English and
-    /// Spanish have two (1, then the rest); Russian and Ukrainian three (1, 21, 31...; 2 to 4,
-    /// 22 to 24...; the rest, and 11 to 14).
+    /// Which form of a counted word `n` takes: 0 is the first of the table's forms. English,
+    /// Spanish and German have two (1, then the rest); Russian and Ukrainian three (1, 21, 31...;
+    /// 2 to 4, 22 to 24...; the rest, and 11 to 14).
     pub fn plural_form(self, n: u64) -> usize {
         match self {
-            Language::English | Language::Spanish => usize::from(n != 1),
+            Language::English | Language::Spanish | Language::German => usize::from(n != 1),
             Language::Russian | Language::Ukrainian => {
                 let (units, tens) = (n % 10, n % 100);
                 if units == 1 && tens != 11 {
@@ -110,7 +116,7 @@ impl Language {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn plural_forms(self) -> usize {
         match self {
-            Language::English | Language::Spanish => 2,
+            Language::English | Language::Spanish | Language::German => 2,
             Language::Russian | Language::Ukrainian => 3,
         }
     }
@@ -124,10 +130,12 @@ pub enum Choice {
 }
 
 impl Choice {
-    /// The choices in the order the Language card lists them: the computer's first.
-    pub const ALL: [Choice; 5] = [
+    /// The choices in the order the Language card lists them: the computer's first, then English,
+    /// then the others by their own names, those in Latin letters first (Deutsch, Español).
+    pub const ALL: [Choice; 6] = [
         Choice::Computer,
         Choice::Is(Language::English),
+        Choice::Is(Language::German),
         Choice::Is(Language::Spanish),
         Choice::Is(Language::Russian),
         Choice::Is(Language::Ukrainian),
@@ -146,9 +154,9 @@ impl Choice {
     }
 }
 
-// The choice, as `Choice::code` numbered: 0 the computer's, then 1 to 4 the languages.
+// The choice, as `Choice::code` numbered: 0 the computer's, then 1 to 5 the languages.
 static CHOICE: AtomicU8 = AtomicU8::new(0);
-// The computer's language as a number (1 to 4 the languages; 0 when not read yet, or not one of
+// The computer's language as a number (1 to 5 the languages; 0 when not read yet, or not one of
 // ours).
 static COMPUTER: AtomicU8 = AtomicU8::new(0);
 
@@ -591,14 +599,14 @@ pub fn number_format(language: Language) -> serde_json::Value {
     })
 }
 
-/// A whole number as the current language writes it: 13,613 in English, 13.613 in Spanish,
-/// 13 613 (a no-break space) in Russian and Ukrainian.
+/// A whole number as the current language writes it: 13,613 in English, 13.613 in Spanish and
+/// German, 13 613 (a no-break space) in Russian and Ukrainian.
 pub fn count(n: u64) -> String {
     group_digits(&n.to_string(), format_of(current()))
 }
 
 /// A percentage as the current language writes it: "75%" in English, "75 %" (a no-break space)
-/// in Spanish, Russian and Ukrainian. Its words are the Interface size setting's, which wrote
+/// in Spanish, Russian, Ukrainian and German. Its words are the Interface size setting's, which wrote
 /// percentages first.
 pub fn percent(n: u64) -> String {
     tf("settings.size.percent", "{n}%", &[("n", &count(n))])
@@ -644,7 +652,7 @@ pub fn seconds(value: f64) -> String {
 }
 
 /// Puts a name or phrase in the language's quotation marks (“…” in English and Spanish, «…» in
-/// Russian and Ukrainian).
+/// Russian and Ukrainian, „…“ in German).
 pub fn quoted(text: &str) -> String {
     let format = format_of(current());
     format!("{}{text}{}", format.open, format.close)
@@ -854,6 +862,7 @@ mod tests {
         };
         assert_eq!(forms(Language::English, &[0, 1, 2, 21]), [1, 0, 1, 1]);
         assert_eq!(forms(Language::Spanish, &[0, 1, 2, 21]), [1, 0, 1, 1]);
+        assert_eq!(forms(Language::German, &[0, 1, 2, 21, 101]), [1, 0, 1, 1, 1]);
         for language in [Language::Russian, Language::Ukrainian] {
             assert_eq!(
                 forms(language, &[1, 2, 4, 5, 11, 12, 14, 20, 21, 22, 25, 101, 111, 112]),
@@ -911,6 +920,15 @@ mod tests {
             assert_eq!(seconds(0.4), "0,4 с");
             assert_eq!(quoted("Аминь"), "«Аминь»");
         });
+        with_language(Language::German, || {
+            assert_eq!(count(13613), "13.613");
+            assert_eq!(count(1234), "1.234", "German groups four figures too");
+            assert_eq!(count(999), "999");
+            assert_eq!(number(0.4, 1), "0,4");
+            assert_eq!(number(-1234.5, 1), "\u{2212}1.234,5");
+            assert_eq!(seconds(0.4), "0,4 s");
+            assert_eq!(quoted("Amen"), "\u{201e}Amen\u{201c}");
+        });
         let russian = Format { decimal: ",", group: "\u{a0}", group_from: 4, open: "«", close: "»" };
         assert_eq!(group_digits("13613", &russian), "13\u{a0}613");
     }
@@ -922,9 +940,15 @@ mod tests {
         assert_eq!(Language::from_tag("es_MX.UTF-8"), Some(Language::Spanish));
         assert_eq!(Language::from_tag("ru"), Some(Language::Russian));
         assert_eq!(Language::from_tag("uk-UA"), Some(Language::Ukrainian));
-        assert_eq!(Language::from_tag("de-DE"), None, "a language we have no words in: English");
+        // German wherever it is spoken, however the system writes it.
+        for tag in ["de-DE", "de", "de-AT", "de-CH", "de_DE.UTF-8", "de_CH.UTF-8@euro", "deu", "ger", "DE-de"] {
+            assert_eq!(Language::from_tag(tag), Some(Language::German), "{tag}");
+        }
+        assert_eq!(Language::from_tag("fr-FR"), None, "a language we have no words in: English");
+        assert_eq!(Language::from_tag("dsb"), None, "Lower Sorbian is not German");
         assert_eq!(Choice::from_code("auto"), Choice::Computer);
         assert_eq!(Choice::from_code("es"), Choice::Is(Language::Spanish));
+        assert_eq!(Choice::from_code("de"), Choice::Is(Language::German));
         assert_eq!(Choice::from_code("klingon"), Choice::Computer);
         for choice in Choice::ALL {
             assert_eq!(Choice::from_code(choice.code()), choice);
@@ -942,7 +966,9 @@ mod tests {
         assert_eq!(current(), Language::English);
         assert_eq!(t("right.clear_all", "Clear All"), "Clear All", "the very next call");
         set_choice(Choice::Computer);
-        set_computer(&["de-DE"]);
+        set_computer(&["de-AT", "en-GB"]);
+        assert_eq!(current(), Language::German, "a German-speaking computer: German");
+        set_computer(&["fr-FR"]);
         assert_eq!(current(), Language::English, "a computer in another language: English");
         set_computer::<&str>(&[]);
         set_choice(Choice::Computer);
@@ -1038,6 +1064,9 @@ mod tests {
     // Ukrainian is translated in full too: every area Spanish has finished, Ukrainian has, so a
     // string wrapped later without its Ukrainian fails here as well.
     const UKRAINIAN_DONE: &[&str] = SPANISH_DONE;
+    // German joins an area at a time, as its tables are written; from then on a string wrapped
+    // without its German fails here as well.
+    const GERMAN_DONE: &[&str] = &[];
 
     /// What `language` lacks in the areas `done` lists, as "key (English)".
     fn lacking_in(language: Language, done: &[&str]) -> Vec<String> {
@@ -1058,6 +1087,13 @@ mod tests {
     fn the_finished_areas_have_all_their_ukrainian() {
         let lacking = lacking_in(Language::Ukrainian, UKRAINIAN_DONE);
         assert!(lacking.is_empty(), "no Ukrainian yet for: {lacking:#?}");
+    }
+
+    #[test]
+    fn the_finished_areas_have_all_their_german() {
+        assert!(GERMAN_DONE.iter().all(|area| SPANISH_DONE.contains(area)), "German is held to Spanish's areas");
+        let lacking = lacking_in(Language::German, GERMAN_DONE);
+        assert!(lacking.is_empty(), "no German yet for: {lacking:#?}");
     }
 
     #[test]

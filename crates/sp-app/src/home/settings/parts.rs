@@ -1096,7 +1096,7 @@ fn clip_y(points: &[Pos2], top: f32, bottom: f32) -> Vec<Pos2> {
 }
 
 /// A language's flag, 30 × 20 with small rounded corners and a faint ring: the flag most people
-/// know that language by (the United States for English, Spain, Russia, Ukraine).
+/// know that language by (the United States for English, Spain, Russia, Ukraine, Germany).
 pub fn flag(painter: &egui::Painter, rect: Rect, language: crate::i18n::Language) {
     use crate::i18n::Language;
     const R: f32 = 3.0;
@@ -1140,6 +1140,12 @@ pub fn flag(painter: &egui::Painter, rect: Rect, language: crate::i18n::Language
         Language::Ukrainian => {
             paint(outline.clone(), Color32::from_rgb(0x00, 0x57, 0xb7));
             paint(rows(8.0, 16.0), Color32::from_rgb(0xff, 0xd7, 0x00));
+        }
+        // Black, red and gold, in three equal bands.
+        Language::German => {
+            paint(outline.clone(), Color32::BLACK);
+            paint(rows(5.33, 16.0), Color32::from_rgb(0xdd, 0x00, 0x00));
+            paint(rows(10.67, 16.0), Color32::from_rgb(0xff, 0xce, 0x00));
         }
     }
     // The design's ring: 1 point outside the flag, on the same curve.

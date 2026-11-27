@@ -126,8 +126,8 @@ impl SystemLanguage {
         if cfg!(test) {
             return;
         }
-        // Testing aid: SOFTPRESENTER_LANGUAGE=ru (or uk, es, en) stands in for the computer's
-        // language, so a test copy can start as a Russian, Ukrainian or Spanish computer would
+        // Testing aid: SOFTPRESENTER_LANGUAGE=ru (or uk, es, de, en) stands in for the computer's
+        // language, so a test copy can start as a Russian, Ukrainian, Spanish or German computer would
         // (the Bible view and the app's own words both follow it, unless the Language setting
         // chose one). Several, separated by commas (ru,uk,en), stand in for its preferred
         // languages, its own first (the Bibles window lists Bibles in them first).
