@@ -59,7 +59,7 @@ impl crate::App {
     }
 
     /// `bible view [page|slides]`, `bible books [keypad|lists]`, `bible language
-    /// [auto|en|ru|uk]`: how the Bible page shows a passage, how it offers the books, and the
+    /// [auto|en|ru|uk|de]`: how the Bible page shows a passage, how it offers the books, and the
     /// language the operator reads it in, as its switches set them (kept with the preferences).
     /// Without a value, says which. None of them changes the slides on screen.
     fn bible_look(&mut self, what: &str, value: Option<&str>) -> Result<Reply, String> {
@@ -78,7 +78,8 @@ impl crate::App {
                     "en" | "english" => Some("en"),
                     "ru" | "russian" | "русский" => Some("ru"),
                     "uk" | "ukrainian" | "українська" => Some("uk"),
-                    other => return Err(format!("The language is auto, en, ru or uk, not {other}.")),
+                    "de" | "german" | "deutsch" => Some("de"),
+                    other => return Err(format!("The language is auto, en, ru, uk or de, not {other}.")),
                 };
                 if let Some(language) = chosen
                     && !page.languages_in_use().iter().any(|have| have == language)

@@ -143,7 +143,7 @@ pub fn section_name(line: &str) -> Option<String> {
     // has), and the names in Spanish, the app's other language. Some are words a line of a
     // song could be, so they name a section only alone or with a number ("Dia 2", not "Diana"
     // or "Dia de").
-    const NUMBERED: [&str; 22] = [
+    const NUMBERED: [&str; 31] = [
         "strophe",
         "verš",
         "sbor",
@@ -166,6 +166,16 @@ pub fn section_name(line: &str) -> Option<String> {
         "estribillo",
         "precoro",
         "puente",
+        // German's own, beside SoftProjector's Strophe, Einleitung and Ende.
+        "vers",
+        "brücke",
+        "vorrefrain",
+        "pre-refrain",
+        "vorspiel",
+        "zwischenspiel",
+        "nachspiel",
+        "schluss",
+        "schluß",
     ];
     let trimmed = line.trim().trim_end_matches(':').trim();
     if trimmed.is_empty() || trimmed.chars().count() > 24 {
@@ -686,11 +696,31 @@ mod tests {
             ("Závěr", "Závěr"),
             ("Coro 2", "Coro 2"),
             ("Estrofa 1", "Estrofa 1"),
+            ("Vers 2", "Vers 2"),
+            ("BRÜCKE:", "Brücke"),
+            ("Vorrefrain", "Vorrefrain"),
+            ("Pre-Refrain", "Pre-refrain"),
+            ("Vorspiel", "Vorspiel"),
+            ("Zwischenspiel 1", "Zwischenspiel 1"),
+            ("Nachspiel", "Nachspiel"),
+            ("Schluss", "Schluss"),
         ] {
             assert_eq!(section_name(line).as_deref(), Some(name), "{line}");
         }
         // Words of a song that only start like a name are words.
-        for line in ["Diana", "Dia de fiesta", "Ende gut", "Verses", "Insert coin", "Coronation", "Sborník"] {
+        for line in [
+            "Diana",
+            "Dia de fiesta",
+            "Ende gut",
+            "Verses",
+            "Insert coin",
+            "Coronation",
+            "Sborník",
+            "Versöhnung",
+            "Vers für Vers",
+            "Schlussendlich",
+            "Brücken bauen",
+        ] {
             assert_eq!(section_name(line), None, "{line}");
         }
     }

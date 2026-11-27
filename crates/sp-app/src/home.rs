@@ -1276,7 +1276,7 @@ impl BiblePage {
         crate::bible::build_passage(&lookup, &choices, &options, self.template)
     }
 
-    /// A passage typed as on the page (in English, Russian or Ukrainian, read in that language's
+    /// A passage typed as on the page (in English, Russian, Ukrainian or German, read in that language's
     /// numbering), made with the page's translations and options as looking it up would make
     /// it, but leaving the page as it is: its slides, and the passage as a playlist keeps it
     /// (named and numbered in the language typed, as Add to keeps a passage looked up).
@@ -2825,7 +2825,7 @@ impl HomeState {
         self.bible.view = if prefs.bible_view == "slides" { BibleView::Slides } else { BibleView::Page };
         self.bible.books = if prefs.bible_books == "lists" { BookPicker::Lists } else { BookPicker::Keypad };
         self.bible.read_in = match prefs.bible_language.as_str() {
-            language @ ("en" | "ru" | "uk") => Some(language.to_owned()),
+            language @ ("en" | "ru" | "uk" | "de") => Some(language.to_owned()),
             _ => None,
         };
         self.playlist_open = prefs.playlist_in_front;
@@ -8983,7 +8983,7 @@ fn bible_bar(
 /// The Аа button: the language the operator reads the Bible page in (book names, the reference,
 /// the page's first translation, the find box's Bible rows), Auto or one with a Bible in use.
 /// 76 wide whatever it says, so nothing moves. Its menu: Auto with the language it reads in
-/// now, then English, Русский and Українська (one with no Bible in use greyed). The slides on
+/// now, then English, Русский, Українська and Deutsch (one with no Bible in use greyed). The slides on
 /// screen never change with it.
 fn bible_read_in(ui: &mut egui::Ui, state: &mut HomeState, rect: Rect) {
     use crate::studio::{Flat, TEXT, TEXT_FAINT, paint_flat};
@@ -9021,7 +9021,7 @@ fn bible_read_in(ui: &mut egui::Ui, state: &mut HomeState, rect: Rect) {
         {
             picked = Some(None);
         }
-        for language in ["en", "ru", "uk"] {
+        for language in ["en", "ru", "uk", "de"] {
             let name = crate::bible::language_name(language);
             let has = in_use.iter().any(|have| have == language);
             let words = if has {
@@ -9156,7 +9156,7 @@ pub(crate) fn add_passage(state: &mut HomeState, playlist: Option<usize>, saved:
     crate::studio::add_items(state, at, vec![item]);
 }
 
-/// The reference field: a reference in English, Russian or Ukrainian (whole names or short
+/// The reference field: a reference in English, Russian, Ukrainian or German (whole names or short
 /// forms), or words to find. The chapter follows what is typed a moment after typing stops;
 /// Return picks the passage's first verse and gives the keyboard back, for Enter. While a
 /// book's name is typed, the books it could be are offered under it. An F row set to Show
@@ -10745,7 +10745,12 @@ mod tests {
             (page(Some("en-US")).session_language(), page(Some("en-US")).names_language()),
             ("en".into(), "en".into())
         );
-        assert_eq!(page(Some("de-DE")).names_language(), "en", "any other language: English");
+        assert_eq!(page(Some("fr-FR")).names_language(), "en", "any other language: English");
+        // German with no German Bible in use: the session is German, the names the first Bible's.
+        assert_eq!(
+            (page(Some("de-AT")).session_language(), page(Some("de-AT")).names_language()),
+            ("de".into(), "ru".into())
+        );
         assert_eq!(page(None).names_language(), "en", "not read (yet): English");
         // Ukrainian with no Ukrainian Bible in use: the first Bible's language.
         let ukrainian = page(Some("uk-UA"));
@@ -16157,7 +16162,7 @@ mod tests {
 
     #[test]
     fn every_books_key_is_short_and_its_own_in_each_language() {
-        for language in ["en", "ru", "uk"] {
+        for language in ["en", "ru", "uk", "de"] {
             let keys: Vec<String> = (0..66).map(|book| crate::bible_page::book_key(book, language)).collect();
             for (book, key) in keys.iter().enumerate() {
                 let places = key.chars().count();
@@ -16173,6 +16178,11 @@ mod tests {
             ["Быт", "3Цар", "Нав", "Пс", "Мф", "Ин"]
         );
         assert_eq!([key(0, "uk"), key(5, "uk"), key(joh, "uk"), key(65, "uk")], ["Бут", "Нав", "Ів", "Об"]);
+
+        assert_eq!(
+            [key(0, "de"), key(6, "de"), key(18, "de"), key(44, "de"), key(51, "de"), key(joh, "de"), key(65, "de")],
+            ["1Mo", "Ri", "Ps", "Röm", "1Th", "Joh", "Offb"]
+        );
     }
 
     #[test]
@@ -16300,7 +16310,9 @@ mod tests {
         let mut fresh = HomeState::default();
         fresh.apply_prefs(&prefs);
         assert_eq!(fresh.bible.read_in.as_deref(), Some("ru"));
-        for (saved, read) in [("auto", None), ("", None), ("de", None), ("uk", Some("uk")), ("en", Some("en"))] {
+        for (saved, read) in
+            [("auto", None), ("", None), ("fr", None), ("uk", Some("uk")), ("en", Some("en")), ("de", Some("de"))]
+        {
             fresh.apply_prefs(&crate::service::Prefs { bible_language: saved.to_owned(), ..Default::default() });
             assert_eq!(fresh.bible.read_in.as_deref(), read, "{saved:?}");
         }

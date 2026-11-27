@@ -209,8 +209,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   and the new one is added after; inserts, slides, intros, endings and bridges are shown where
   they are, with no chorus after them; a pre-chorus is sung just before the chorus that follows
   its verse; a part named "&Куплет" or "&Припев" is more of the verse or chorus before. Verses
-  are the groups named Verse, Куплет, Strophe, Verš or Estrofa, choruses Chorus, Припев,
-  Приспів, Refrain, Sbor, Refrén, Coro or Estribillo, with any number. A song whose order
+  are the groups named Verse, Куплет, Strophe, Vers, Verš or Estrofa, choruses Chorus, Припев,
+  Приспів, Refrain, Sbor, Refrén, Coro or Estribillo, pre-choruses Pre-Chorus, Предприпев,
+  Передприспів, Precoro, Vorrefrain or Pre-Refrain, with any number. A song whose order
   doesn't change (its chorus written out after every verse) gets none. The arrangement follows
   the song's parts as they change (words edited as text, a group started, renamed or emptied in
   the editor or by `sp`), and goes when the song has no chorus or no verse any more, until it is
@@ -580,7 +581,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the window can't tell where the pointer is, so there songs go to the library shown and
   pictures to the media bin, as before, and only those places light up.
   Sections are found from lines naming them ("Verse 1", "Chorus:", "Bridge", "Куплет 1",
-  "Припев", "Приспів"…); slides break at blank lines, and more than four lines without one are
+  "Припев", "Приспів", German's "Strophe 1", "Vers 2", "Refrain", "Brücke", "Vorspiel",
+  "Zwischenspiel", "Schluss"…; a German name that is also a word starts a part only alone or
+  with a number); slides break at blank lines, and more than four lines without one are
   shared out evenly (eight lines make two slides of four). A song the library already has,
   word for word under the same title, isn't added twice.
 - The left column lists one thing at a time, a playlist or a library, and says which in a small
@@ -1339,10 +1342,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   translations line, the passage's title with the Bibles read, then the passage. The right
   column is the same as in every view. Hide puts the left column away (the middle takes its
   room) and Books, beside the reference field, brings it back; the choice is kept.
-- The reference field takes a reference in English, Russian and Ukrainian (`John 3:16-18`,
-  `jn 3:16`, `Psalm 23`, `Пс 22:1-3`, `Ів 3:16`) or words to find. A short form is read in the
+- The reference field takes a reference in English, Russian, Ukrainian and German (`John 3:16-18`,
+  `jn 3:16`, `Psalm 23`, `Пс 22:1-3`, `Ів 3:16`, and as German writes it, `Joh 3,16-18`,
+  `1. Mose 1,1`, `Joh 3,16.18` for verses listed (read from the first to the last, as `3:16,18` is),
+  `Joh 3,16f` for a verse and the next and
+  `Joh 3,16ff` for the rest of the chapter) or words to find. A short form is read in the
   language of the first translation first ("1 Цар" is 1 Samuel to a Russian Bible, 1 Kings to a
-  Ukrainian one), and a Ukrainian Bible shows its books' Ukrainian names.
+  Ukrainian one), a Ukrainian Bible shows its books' Ukrainian names, and a German Bible its
+  books' German names with a comma between chapter and verse (`Johannes 3,16`).
 - **The passage is what was asked for**, however it was looked up (the reference field, the
   find box, a verse key or row, History): John 3:16 is John 3:16. The title names it (a whole
   chapter by its number alone, `John 3`), + Add keeps exactly it, and only its verses are lit on
@@ -1353,8 +1360,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   has only its own slides.
 - **A psalm reads as one psalm.** The title, the reference field, History, the find box's Bible
   rows, the verses found and the reference on the slides name one psalm `Psalm 23` (`Psalm 23:1-6`;
-  in Russian and in Ukrainian `Псалом 22`), and a run across psalms `Psalms 23–24` (Ukrainian
-  `Псалми`; Russian keeps the book's own name, `Псалтирь`). What a playlist keeps and each
+  in Russian and in Ukrainian `Псалом 22`, in German `Psalm 23`), and a run across psalms
+  `Psalms 23–24` (Ukrainian `Псалми`, German `Psalmen`; Russian keeps the book's own name,
+  `Псалтирь`). What a playlist keeps and each
   slide's name stay as the Bible names the book (`Psalms 23:1-6`, `Псалтирь 22:1-6`); every one
   of these names reads back as the same psalm.
 - **Page** (the first look) shows the passage's whole chapter to read: a verse to a row, its
@@ -1402,11 +1410,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - With nothing typed to go by (the Bible page opened fresh, a book or verse clicked, a passage
   from History or a playlist), the operator reads in the language last typed this session; at
   the start of a session, in the computer's: Russian if its first language is Russian,
-  Ukrainian if Ukrainian, otherwise English (falling back to the first translation when that
-  language has no Bible in use).
-- **Аа**, between Page | Slides and Options (76 wide, saying Auto, EN, RU or UK, so nothing
+  Ukrainian if Ukrainian, German if German, otherwise English (falling back to the first
+  translation when that language has no Bible in use).
+- **Аа**, between Page | Slides and Options (76 wide, saying Auto, EN, RU, UK or DE, so nothing
   moves), chooses the language the operator reads the Bible page in: Auto (the rule above, as it
-  was), English, Русский or Українська; a language with no Bible in use is greyed in its menu
+  was), English, Русский, Українська or Deutsch; a language with no Bible in use is greyed in its menu
   ("no Bible in use"). A language chosen names the books (keypad and lists), the passage in the
   reference field and the title, reads that language's Bible first on the page, and names and
   quotes the find box's Bible rows and the verses words were found in (tagged with the Bible

@@ -348,7 +348,8 @@ mod tests {
 
     #[test]
     fn parts_are_known_by_their_names_in_russian_ukrainian_spanish_and_softprojectors_languages() {
-        for verse in ["Verse", "Verse 2", "Куплет 1", "куплет", "Strophe 3", "Verš 1", "Estrofa 2", "VERSE 1:"]
+        for verse in
+            ["Verse", "Verse 2", "Куплет 1", "куплет", "Strophe 3", "Verš 1", "Estrofa 2", "VERSE 1:", "Vers 2"]
         {
             assert_eq!(part_of(verse), Part::Verse, "{verse}");
         }
@@ -356,7 +357,8 @@ mod tests {
         {
             assert_eq!(part_of(chorus), Part::Chorus, "{chorus}");
         }
-        for pre in ["Pre-Chorus", "Prechorus", "Предприпев", "Передприспів", "Precoro"] {
+        for pre in ["Pre-Chorus", "Prechorus", "Предприпев", "Передприспів", "Precoro", "Vorrefrain"]
+        {
             assert_eq!(part_of(pre), Part::PreChorus, "{pre}");
         }
         for other in ["Вставка", "Слайд", "Intro", "Вступление", "Окончание", "Закінчення", "Bridge", "Мост", "Tag", ""]

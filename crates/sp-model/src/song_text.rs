@@ -74,14 +74,15 @@ pub const GROUP_KEYS: [(char, &[&str]); 17] = [
 ];
 
 /// The words churches name a song's parts with in the app's languages (Russian, Ukrainian,
-/// Spanish), and the ones SoftProjector's songs name them with (German and Czech too), each
-/// with the English the group keys and colours know. Every name the app's Group menu offers, in
+/// Spanish, German), and the ones SoftProjector's songs name them with (Czech too), each with
+/// the English the group keys and colours know. Every name the app's Group menu offers, in
 /// each language, starts with one of these (or is English).
-const PART_WORDS: [(&str, &str); 41] = [
+const PART_WORDS: [(&str, &str); 50] = [
     ("куплет", "verse"),
     ("estrofa", "verse"),
     ("verso", "verse"),
     ("strophe", "verse"),
+    ("vers", "verse"),
     ("verš", "verse"),
     ("припев", "chorus"),
     ("приспів", "chorus"),
@@ -95,16 +96,20 @@ const PART_WORDS: [(&str, &str); 41] = [
     ("мост", "bridge"),
     ("міст", "bridge"),
     ("puente", "bridge"),
+    ("brücke", "bridge"),
     ("предприпев", "prechorus"),
     ("пре-припев", "prechorus"),
     ("передприспів", "prechorus"),
     ("precoro", "prechorus"),
     ("pre-coro", "prechorus"),
+    ("vorrefrain", "prechorus"),
+    ("pre-refrain", "prechorus"),
     ("тег", "tag"),
     ("вступление", "intro"),
     ("вступ", "intro"),
     ("introducción", "intro"),
     ("einleitung", "intro"),
+    ("vorspiel", "intro"),
     ("úvod", "intro"),
     ("окончание", "ending"),
     ("концовка", "ending"),
@@ -112,13 +117,17 @@ const PART_WORDS: [(&str, &str); 41] = [
     ("кінцівка", "ending"),
     ("final", "ending"),
     ("ende", "ending"),
+    ("schluss", "ending"),
+    ("schluß", "ending"),
     ("závěr", "ending"),
     ("konec", "ending"),
     ("кода", "outro"),
     ("coda", "outro"),
+    ("nachspiel", "outro"),
     ("проигрыш", "interlude"),
     ("програш", "interlude"),
     ("interludio", "interlude"),
+    ("zwischenspiel", "interlude"),
 ];
 
 /// A group's name as the group keys and colours know it: lower case, and in English when a
@@ -291,6 +300,20 @@ mod tests {
         assert_eq!(key_for_group("Refrain"), Some('C'));
         assert_eq!(key_for_group("Úvod"), Some('I'));
         assert_eq!(key_for_group("Závěr"), Some('E'));
+        // And as German churches name them.
+        assert_eq!(key_for_group("Strophe 2"), Some('S'));
+        assert_eq!(key_for_group("Vers 3"), Some('D'));
+        assert_eq!(key_for_group("Refrain"), Some('C'));
+        assert_eq!(key_for_group("Brücke"), Some('B'));
+        assert_eq!(key_for_group("Vorrefrain"), Some('P'));
+        assert_eq!(key_for_group("Pre-Refrain"), Some('P'));
+        assert_eq!(key_for_group("Vorspiel"), Some('I'));
+        assert_eq!(key_for_group("Einleitung"), Some('I'));
+        assert_eq!(key_for_group("Schluss"), Some('E'));
+        assert_eq!(key_for_group("Ende"), Some('E'));
+        assert_eq!(key_for_group("Nachspiel"), Some('O'));
+        assert_eq!(group_color("Zwischenspiel"), group_color("Interlude"));
+        assert_eq!(group_name_in_english("Versuch"), "versuch", "only the whole word");
     }
 
     #[test]

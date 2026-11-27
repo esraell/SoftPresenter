@@ -352,30 +352,37 @@ impl Bible {
     }
 }
 
-/// How a run of verses is named in a language (`en`, `ru`, `uk`; English for any other), as a
-/// Bible of that language names it: "John 3:16-18", "От Иоанна 3:16-18". The numbers are used
-/// as they are given; nothing is converted.
+/// How a run of verses is named in a language (`en`, `ru`, `uk`, `de`; English for any other), as
+/// a Bible of that language names it: "John 3:16-18", "От Иоанна 3:16-18", and in German with a
+/// comma between chapter and verse, "Johannes 3,16-18". The numbers are used as they are given;
+/// nothing is converted.
 pub fn label_in(language: &str, first: VerseRef, last: VerseRef) -> String {
-    label_with(book_name(first.book, language), first, last)
+    label_with(book_name(first.book, language), first, last, chapter_mark(language))
+}
+
+/// What a language writes between a chapter and its verse: a comma in German ("Johannes 3,16",
+/// as German Bibles write it), a colon in the others. Either reads back.
+fn chapter_mark(language: &str) -> char {
+    if language == "de" { ',' } else { ':' }
 }
 
 /// How a run of verses reads to people in a language: as [`label_in`] names it, with the book
-/// named as [`reading_book_name`] has it ("Psalm 23:1-6", "Псалом 22:1", "Psalms 23:1-24:6").
-/// It reads back as the same verses. For what people read (a title, the reference field, the
-/// reference on a slide); what is kept is named by [`label_in`].
+/// named as [`reading_book_name`] has it ("Psalm 23:1-6", "Псалом 22:1", "Psalms 23:1-24:6",
+/// "Psalm 23,1-6"). It reads back as the same verses. For what people read (a title, the
+/// reference field, the reference on a slide); what is kept is named by [`label_in`].
 pub fn reading_label(language: &str, first: VerseRef, last: VerseRef) -> String {
     let one_chapter = (first.book, first.chapter) == (last.book, last.chapter);
-    label_with(reading_book_name(first.book, language, one_chapter), first, last)
+    label_with(reading_book_name(first.book, language, one_chapter), first, last, chapter_mark(language))
 }
 
-/// A run of verses named with the book's name given.
-fn label_with(book: &str, first: VerseRef, last: VerseRef) -> String {
+/// A run of verses named with the book's name given, and `mark` between chapter and verse.
+fn label_with(book: &str, first: VerseRef, last: VerseRef, mark: char) -> String {
     if first == last {
-        format!("{book} {}:{}", first.chapter, first.verse)
+        format!("{book} {}{mark}{}", first.chapter, first.verse)
     } else if first.chapter == last.chapter {
-        format!("{book} {}:{}-{}", first.chapter, first.verse, last.verse)
+        format!("{book} {}{mark}{}-{}", first.chapter, first.verse, last.verse)
     } else {
-        format!("{book} {}:{}-{}:{}", first.chapter, first.verse, last.chapter, last.verse)
+        format!("{book} {}{mark}{}-{}{mark}{}", first.chapter, first.verse, last.chapter, last.verse)
     }
 }
 
@@ -388,13 +395,14 @@ fn parse_verse_line(line: &str) -> Option<(VerseRef, &str)> {
     Some((place, words.trim()))
 }
 
-/// Reads what someone typed, such as "John 3:16", "jn 3:16-18", "1 Cor 13", "Пс 22:1-3" or
-/// "John 3:16-4:2", into the verses it names. The error is a plain sentence.
+/// Reads what someone typed, such as "John 3:16", "jn 3:16-18", "1 Cor 13", "Пс 22:1-3",
+/// "John 3:16-4:2" or, as German writes it, "Joh 3,16-18", "Joh 3,16.18" and "Joh 3,16f", into
+/// the verses it names. The error is a plain sentence.
 pub fn parse_reference(typed: &str) -> Result<Range, String> {
     parse_reference_in(typed, "")
 }
 
-/// The same, reading the book's name in a language first (`en`, `ru` or `uk`), as
+/// The same, reading the book's name in a language first (`en`, `ru`, `uk` or `de`), as
 /// [`books::find_book_in`] does.
 pub fn parse_reference_in(typed: &str, language: &str) -> Result<Range, String> {
     read_reference(typed, language).map(|reference| reference.range)
@@ -405,8 +413,9 @@ pub fn parse_reference_in(typed: &str, language: &str) -> Result<Range, String> 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Reference {
     pub range: Range,
-    /// `en`, `ru` or `uk`, in that order; two when the name is spelt alike in two languages
-    /// ("Пс 23" and "1 Кор 13" are Russian and Ukrainian alike). See [`books::find_book_typed`].
+    /// `en`, `ru`, `uk` or `de`, in that order; two when the name is spelt alike in two languages
+    /// ("Пс 23" and "1 Кор 13" are Russian and Ukrainian alike, "Joh 3" English and German). See
+    /// [`books::find_book_typed`].
     pub languages: Vec<&'static str>,
 }
 
@@ -443,11 +452,22 @@ pub fn read_reference(typed: &str, language: &str) -> Result<Reference, String> 
         }
     };
     let numbers = numbers.trim();
-    // "3:16,18" lists verses; it is read as 16 to 18.
+    // German's "3,16f" is the verse and the next, "3,16ff" the verse and the rest of the chapter
+    // (each also with a full stop after it).
+    let (numbers, following) = match numbers.trim_end_matches('.').trim_end() {
+        rest if rest.ends_with("ff") => (rest.trim_end_matches("ff").trim_end(), Some(LAST)),
+        rest if rest.ends_with('f') => (rest.trim_end_matches('f').trim_end(), Some(1)),
+        _ => (numbers, None),
+    };
+    // "3:16,18" lists verses, and so does German's "3,16.18"; it is read as 16 to 18.
     let listed;
-    let numbers = match numbers.split_once(':') {
-        Some((chapter, verses)) if verses.contains(',') && !verses.contains(['-', '\u{2013}', '\u{2014}']) => {
-            let parts: Vec<&str> = verses.split(',').map(str::trim).filter(|part| !part.is_empty()).collect();
+    let list = match numbers.split_once(':') {
+        Some((chapter, verses)) => Some((chapter, verses, ',')),
+        None => numbers.split_once(',').map(|(chapter, verses)| (chapter, verses, '.')),
+    };
+    let numbers = match list {
+        Some((chapter, verses, apart)) if verses.contains(apart) && !verses.contains(['-', '\u{2013}', '\u{2014}']) => {
+            let parts: Vec<&str> = verses.split(apart).map(str::trim).filter(|part| !part.is_empty()).collect();
             match (parts.first(), parts.last()) {
                 (Some(first), Some(last)) => {
                     listed = format!("{chapter}:{first}-{last}");
@@ -474,6 +494,12 @@ pub fn read_reference(typed: &str, language: &str) -> Result<Reference, String> 
     };
     let (chapter, verse) = place(first).ok_or_else(unclear)?;
     let start = VerseRef { book, chapter, verse: verse.unwrap_or(1) };
+    if let Some(more) = following {
+        // "f" and "ff" follow a verse, and only a verse: "3,16f", not "3f" or "3,16-18f".
+        let (Some(verse), None) = (verse, second) else { return Err(unclear()) };
+        let end = VerseRef { book, chapter, verse: if more == LAST { LAST } else { verse.saturating_add(more) } };
+        return Ok(Reference { range: Range { start, end }, languages });
+    }
     let end = match second {
         None => VerseRef { book, chapter, verse: verse.unwrap_or(LAST) },
         Some(second) => match (place(second).ok_or_else(unclear)?, verse) {
@@ -558,11 +584,49 @@ mod tests {
     }
 
     #[test]
+    fn german_references_are_read_as_german_writes_them() {
+        let read = |typed: &str| parse_reference_in(typed, "de");
+        assert_eq!(read("Joh 3,16"), Ok(range("JOH", (3, 16), (3, 16))));
+        assert_eq!(read("Johannes 3,16"), Ok(range("JOH", (3, 16), (3, 16))));
+        assert_eq!(read("Johannes 3,16-18"), Ok(range("JOH", (3, 16), (3, 18))));
+        assert_eq!(read("Joh 3,16–4,2"), Ok(range("JOH", (3, 16), (4, 2))));
+        assert_eq!(read("1. Mose 1,1"), Ok(range("GEN", (1, 1), (1, 1))));
+        assert_eq!(read("1Mo 1,1-3"), Ok(range("GEN", (1, 1), (1, 3))));
+        assert_eq!(read("Röm 8,28"), Ok(range("ROM", (8, 28), (8, 28))));
+        assert_eq!(read("Roem 8,28"), Ok(range("ROM", (8, 28), (8, 28))));
+        assert_eq!(read("1. Kor 13"), Ok(range("1CO", (13, 1), (13, LAST))));
+        assert_eq!(read("Ps 23"), Ok(range("PSA", (23, 1), (23, LAST))));
+        assert_eq!(read("Psalm 23,1-4"), Ok(range("PSA", (23, 1), (23, 4))));
+        assert_eq!(read("Offb 21,1-4"), Ok(range("REV", (21, 1), (21, 4))));
+        // Verses listed with full stops, as with commas after a colon: first to last.
+        assert_eq!(read("Joh 3,16.18"), Ok(range("JOH", (3, 16), (3, 18))));
+        // "f" is the verse and the next, "ff" the rest of the chapter, with or without a stop.
+        assert_eq!(read("Joh 3,16f"), Ok(range("JOH", (3, 16), (3, 17))));
+        assert_eq!(read("Joh 3,16 f."), Ok(range("JOH", (3, 16), (3, 17))));
+        assert_eq!(read("Joh 3,16ff"), Ok(range("JOH", (3, 16), (3, LAST))));
+        assert_eq!(read("Joh 3,16ff."), Ok(range("JOH", (3, 16), (3, LAST))));
+        assert!(read("Joh 3f").is_err(), "f follows a verse");
+        assert!(read("Joh 3,16-18f").is_err());
+        // The English ways still read the same.
+        assert_eq!(parse_reference("John 3:16,18"), Ok(range("JOH", (3, 16), (3, 18))));
+        assert_eq!(parse_reference("Jn3.16"), Ok(range("JOH", (3, 16), (3, 16))));
+        assert_eq!(parse_reference("Jude"), Ok(range("JUD", (1, 1), (1, LAST))));
+    }
+
+    #[test]
     fn a_reference_says_which_language_it_was_typed_in() {
         let languages = |typed: &str, preferred: &str| read_reference(typed, preferred).map(|r| r.languages);
         // English, Russian and Ukrainian, whole names and short forms.
-        for typed in ["gen 1 1", "Genesis 1:1", "John 3:16", "jn 3:16-18", "1 Cor 13", "ps 23"] {
+        for typed in ["Genesis 1:1", "John 3:16", "jn 3:16-18", "1 Cor 13"] {
             assert_eq!(languages(typed, "ru"), Ok(vec!["en"]), "{typed}");
+        }
+        // German.
+        for typed in ["1. Mose 1,1", "Johannes 3,16", "Offb 21", "Röm 8,28"] {
+            assert_eq!(languages(typed, "en"), Ok(vec!["de"]), "{typed}");
+        }
+        // Spelt alike in English and German.
+        for typed in ["gen 1 1", "ps 23", "Joh 3,16", "Dan 3"] {
+            assert_eq!(languages(typed, "ru"), Ok(vec!["en", "de"]), "{typed}");
         }
         for typed in ["Быт 1 1", "Бытие 1:1", "Ин 3:16", "От Иоанна 3:16", "Иоанна 3:16"] {
             assert_eq!(languages(typed, "en"), Ok(vec!["ru"]), "{typed}");
@@ -589,7 +653,9 @@ mod tests {
         assert_eq!(label_in("en", at(3, 16), at(3, 18)), "John 3:16-18");
         assert_eq!(label_in("ru", at(3, 16), at(3, 16)), "От Иоанна 3:16");
         assert_eq!(label_in("uk", at(3, 16), at(4, 2)), "Від Івана 3:16-4:2");
-        assert_eq!(label_in("de", at(3, 16), at(3, 16)), "John 3:16");
+        assert_eq!(label_in("de", at(3, 16), at(3, 16)), "Johannes 3,16");
+        assert_eq!(label_in("de", at(3, 16), at(4, 2)), "Johannes 3,16-4,2");
+        assert_eq!(label_in("fr", at(3, 16), at(3, 16)), "John 3:16");
         assert_eq!(small().label(at(3, 16), at(3, 17)), label_in("en", at(3, 16), at(3, 17)));
     }
 
@@ -598,8 +664,8 @@ mod tests {
         // Names written in the page's language are read back with the first Bible's preferred
         // ("1 Царів" is Ukrainian 1 Kings, though "1 цар" is a Russian short form for 1 Samuel).
         for book in 0..BOOKS.len() {
-            for written in ["en", "ru", "uk"] {
-                for preferred in ["en", "ru", "uk"] {
+            for written in ["en", "ru", "uk", "de"] {
+                for preferred in ["en", "ru", "uk", "de"] {
                     let name = format!("{} 1", book_name(book, written));
                     let read = parse_reference_in(&name, preferred).map(|range| range.start.book);
                     assert_eq!(read, Ok(book), "{name} read with {preferred} preferred");
@@ -623,10 +689,13 @@ mod tests {
             ("uk", at(22, 1), at(23, 6), "Псалми 22:1-23:6"),
             ("en", john(3, 16), john(3, 16), "John 3:16"),
             ("ru", john(3, 16), john(3, 18), "От Иоанна 3:16-18"),
+            ("de", at(23, 1), at(23, 6), "Psalm 23,1-6"),
+            ("de", at(23, 1), at(24, 10), "Psalmen 23,1-24,10"),
+            ("de", john(3, 16), john(3, 18), "Johannes 3,16-18"),
         ] {
             assert_eq!(reading_label(language, first, last), read, "{language}");
             // Read back in any of the languages, it is the same verses.
-            for reader in ["en", "ru", "uk", ""] {
+            for reader in ["en", "ru", "uk", "de", ""] {
                 let range = parse_reference_in(read, reader).map(|range| (range.start, range.end));
                 assert_eq!(range, Ok((first, last)), "{read} read in {reader:?}");
             }

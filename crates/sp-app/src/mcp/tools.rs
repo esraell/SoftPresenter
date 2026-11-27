@@ -122,7 +122,7 @@ pub const TOOLS: &[Tool] = &[
         idempotent: true,
         schema: || {
             object(
-                json!({"reference": {"type": "string", "description": "As typed on the Bible page: John 3:16-18, Psalm 23 (a whole chapter), 1 Corinthians 13:4-7; Russian and Ukrainian book names work too. English and Russian Bibles number some chapters (the Psalms) differently: type it in the language its numbering comes from."}}),
+                json!({"reference": {"type": "string", "description": "As typed on the Bible page: John 3:16-18, Psalm 23 (a whole chapter), 1 Corinthians 13:4-7; Russian, Ukrainian and German book names work too (German as German writes it: Joh 3,16-18). English and Russian Bibles number some chapters (the Psalms) differently: type it in the language its numbering comes from."}}),
                 &["reference"],
             )
         },

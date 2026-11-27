@@ -77,8 +77,8 @@ under Settings › About › What's new. In short:
   as pictures of its slides drawn by an app on the Mac that can open it; PDFs and folders of
   pictures come in as slides.
 - **Bible.** Four Bibles come with the app and seventy-seven more, in 29 languages, install from
-  its Bibles window; up to four translations on one slide, and book names in English, Russian
-  and Ukrainian.
+  its Bibles window; up to four translations on one slide, and book names in English, Russian,
+  Ukrainian and German.
 - **Media.** Pictures and videos behind the words or on their own, and an announcements layer
   that loops by itself. Video the Mac plays goes to the screens without being copied. A web page,
   an NDI source or an AirPlay screen goes on a slide as a box that fills it, behind the words.

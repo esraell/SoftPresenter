@@ -368,7 +368,7 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   `home.rs` (`language_card`, `language_menu`), also used by the setup's first step.
   `SOFTPRESENTER_LANGUAGE=es` stands in for the computer's language in a test copy.
 - Command line: `bible REFERENCE [--show]`, `bible view page|slides`, `bible books keypad|lists`,
-  `bible language auto|en|ru|uk`.
+  `bible language auto|en|ru|uk|de`.
 
 ## Other windows
 

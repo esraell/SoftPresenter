@@ -1,6 +1,6 @@
 //! The computer's language, for the Bible view: when nothing typed says which language the
 //! operator reads, a session starts in the computer's (Russian if its first language is
-//! Russian, Ukrainian if Ukrainian, otherwise English).
+//! Russian, Ukrainian if Ukrainian, German if German, otherwise English).
 //!
 //! Each system is asked in its own way, as the clock asks for its setting (`clock.rs`): on a
 //! Mac the user's preferred languages (the global `AppleLanguages` default, read with
@@ -15,13 +15,14 @@
 
 use std::sync::{Arc, OnceLock};
 
-/// The Bible language a language tag stands for: `ru` or `uk`, otherwise `en`. Takes the tags
-/// systems write (`ru-RU`, `uk`, `ru_UA.UTF-8`, `en-US@calendar=…`).
+/// The Bible language a language tag stands for: `ru`, `uk` or `de`, otherwise `en`. Takes the
+/// tags systems write (`ru-RU`, `uk`, `ru_UA.UTF-8`, `de-AT`, `en-US@calendar=…`).
 pub fn bible_language(tag: &str) -> &'static str {
     let first = tag.trim().split(['-', '_', '.', '@']).next().unwrap_or("").to_ascii_lowercase();
     match first.as_str() {
         "ru" | "rus" => "ru",
         "uk" | "ukr" => "uk",
+        "de" | "deu" | "ger" => "de",
         _ => "en",
     }
 }
@@ -145,7 +146,7 @@ impl SystemLanguage {
         });
     }
 
-    /// `en`, `ru` or `uk`, once the computer has answered.
+    /// `en`, `ru`, `uk` or `de`, once the computer has answered.
     pub fn get(&self) -> Option<&'static str> {
         self.read.get().map(|tag| bible_language(tag))
     }
@@ -173,7 +174,10 @@ mod tests {
             ("uk", "uk"),
             ("uk_UA.UTF-8@euro", "uk"),
             ("en-US", "en"),
-            ("de-DE", "en"),
+            ("de-DE", "de"),
+            ("de-CH", "de"),
+            ("de_AT.UTF-8", "de"),
+            ("fr-FR", "en"),
             ("be-BY", "en"),
             ("", "en"),
         ] {

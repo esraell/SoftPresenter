@@ -416,15 +416,16 @@ fn lists(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<C
 }
 
 /// A book's key on the keypad, in the operator's language: in English its code with the first
-/// letter capital (`Gen`, `1sa`, `Joh`); in Russian or Ukrainian the first short form the
-/// reference reader knows that has two letters or more, fits four places and begins like a
-/// word of the book's name (`Быт`, `1Цар`, `Мф`, `Нав`), else the first that fits, else the
-/// first short form cut to four places, else the name's start.
+/// letter capital (`Gen`, `1sa`, `Joh`); in Russian, Ukrainian or German the first short form
+/// the reference reader knows that has two letters or more, fits four places and begins like a
+/// word of the book's name (`Быт`, `1Цар`, `Мф`, `Нав`, `1Mo`, `Offb`), else the first that fits,
+/// else the first short form cut to four places, else the name's start.
 pub fn book_key(book: usize, language: &str) -> String {
     let entry = &sp_bible::BOOKS[book.min(sp_bible::BOOKS.len() - 1)];
     let (name, shorts) = match language {
         "ru" => (entry.russian, entry.russian_short),
         "uk" => (entry.ukrainian, entry.ukrainian_short),
+        "de" => (entry.german, entry.german_short),
         _ => {
             let mut code = entry.code.chars();
             return code.next().into_iter().chain(code.flat_map(char::to_lowercase)).collect();
@@ -629,13 +630,15 @@ fn section_heading(ui: &mut egui::Ui, text: &str, note: Option<(&'static str, &'
 
 /// Every book's key in a language, worked out once for each language.
 fn book_keys(language: &str) -> &'static [String] {
-    static KEYS: std::sync::OnceLock<[Vec<String>; 3]> = std::sync::OnceLock::new();
+    static KEYS: std::sync::OnceLock<[Vec<String>; 4]> = std::sync::OnceLock::new();
     let all = KEYS.get_or_init(|| {
-        ["en", "ru", "uk"].map(|language| (0..sp_bible::BOOKS.len()).map(|book| book_key(book, language)).collect())
+        ["en", "ru", "uk", "de"]
+            .map(|language| (0..sp_bible::BOOKS.len()).map(|book| book_key(book, language)).collect())
     });
     match language {
         "ru" => &all[1],
         "uk" => &all[2],
+        "de" => &all[3],
         _ => &all[0],
     }
 }

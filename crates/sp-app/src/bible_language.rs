@@ -3,7 +3,8 @@
 //! The slides made from a passage follow the translations chosen (which Bible goes in which
 //! box), whatever language the reference was typed in. What the operator reads follows the
 //! language typed: a reference written with an English book name is named back in English and
-//! quoted from the first English Bible in use; one written in Russian or Ukrainian, in that.
+//! quoted from the first English Bible in use; one written in Russian, Ukrainian or German, in
+//! that.
 //! With nothing typed to go by (a book clicked in the lists, the Bible view opened fresh) it is
 //! the language last typed this session, or at its start the computer's. A language with no
 //! Bible in use falls back to the first Bible in the translations, as before.
@@ -31,6 +32,7 @@ pub fn language_of(given: &str) -> String {
         "eng" => "en".to_owned(),
         "rus" => "ru".to_owned(),
         "ukr" => "uk".to_owned(),
+        "deu" | "ger" => "de".to_owned(),
         _ => first,
     }
 }
@@ -182,6 +184,8 @@ mod tests {
         assert_eq!(language_of("RU"), "ru");
         assert_eq!(language_of("uk-UA"), "uk");
         assert_eq!(language_of("rus"), "ru");
+        assert_eq!(language_of("de-DE"), "de");
+        assert_eq!(language_of("ger"), "de");
         assert_eq!(language_of(""), "");
     }
 
