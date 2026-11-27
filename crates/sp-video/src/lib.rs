@@ -30,7 +30,7 @@ pub mod web;
 pub use web::WebPage;
 
 mod ffmpeg;
-pub use ffmpeg::{SoundInfo, SoundProblem, SoundReader, decode_sound, sound_info};
+pub use ffmpeg::{SoundInfo, SoundProblem, SoundReader, decode_sound, sound_info, wait_for_players_let_go};
 
 mod pace;
 pub use pace::{PaceMinute, fps_words, take_pace_totals};

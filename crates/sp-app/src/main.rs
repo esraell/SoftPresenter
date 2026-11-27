@@ -221,6 +221,15 @@ fn say_video_pace(player: &mut sp_video::Player, stopping: bool) {
     }
 }
 
+/// Waits, a second at most, until the video players let go have ended their FFmpeg, as the
+/// app quits; the log says if some hadn't.
+fn wait_for_videos_let_go() {
+    let left = sp_video::wait_for_players_let_go(Duration::from_secs(1));
+    if left > 0 {
+        applog::event("video", &format!("{left} video players let go hadn't ended their FFmpeg a second on"));
+    }
+}
+
 /// A video's pictures a second for the log, as `29.97 fps`, or that the file doesn't say.
 fn fps_said(fps: f64) -> String {
     if fps > 0.0 { format!("{} fps", sp_video::fps_words(fps)) } else { "its pictures a second not said".to_owned() }
@@ -5293,11 +5302,14 @@ impl App {
         // between. Not for ever: once `video_wait::LIMIT` has passed they go on without it
         // (its still, if it has one), and its pictures follow as they come.
         let waits = self.video_wait.as_ref().is_some_and(video_wait::FirstPicture::keeps);
+        // The video that played on meanwhile is let go only once the screens have been told
+        // what follows it.
+        let mut let_go = None;
         let (video, media, media_fit) = if waits {
             let leaving = self.video_leaving.as_ref().map(sp_video::Player::frames);
             (leaving, self.media_on_screens.0.clone(), self.media_on_screens.1)
         } else {
-            self.video_leaving = None;
+            let_go = self.video_leaving.take();
             self.media_on_screens = (media.clone(), media_fit);
             (video, media, media_fit)
         };
@@ -5332,6 +5344,7 @@ impl App {
                 running.home_state.output_has_stopped();
             }
         }
+        drop(let_go);
         self.refresh_preview(true);
         // The picture or video the slide Next would show is read ahead, so it goes on sharp.
         if let Some(item) = next_media.and_then(|id| self.show.media().iter().find(|item| item.id == id)) {
@@ -12436,6 +12449,9 @@ impl App {
         }
         self.video_leaving = None;
         self.announcing = None;
+        // Every video player is let go now, so its FFmpeg has ended by the time the app goes
+        // (`quit` waits for them, briefly).
+        self.slide_videos.clear();
         self.quitting = Some(Instant::now());
         // The last anonymous report, if reports are on, goes from its own thread while the
         // rest of the leaving is done.
@@ -12472,6 +12488,7 @@ impl App {
         self.canva.shut_down();
         self.remove_replaced_canva_videos();
         self.mirror.quit();
+        wait_for_videos_let_go();
         if let Ok(mut listening) = self._control.lock() {
             listening.take();
         }
@@ -12565,6 +12582,9 @@ impl App {
         if !reports::quit_done() {
             return;
         }
+        // FFmpeg's programs end with their players (let go without waiting, see
+        // `sp_video::wait_for_players_let_go`): waited for here, briefly, so none outlives the app.
+        wait_for_videos_let_go();
         // All done: nothing is left for `exiting` to do.
         self.left = true;
         el.exit();

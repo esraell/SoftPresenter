@@ -1222,9 +1222,22 @@ fn play_on_this_thread(opening: Opening, asks: &Receiver<Ask>, told: &Mutex<Told
     }
 }
 
-/// How long letting go of a player waits for its thread to end FFmpeg: all it takes on a
-/// computer that isn't held up. Past that the thread ends it by itself, a moment later.
-const END_WITHIN: Duration = Duration::from_millis(300);
+/// The threads of players let go that may still be ending FFmpeg (one still asking FFmpeg
+/// what its video is, or starting it, finishes that first): looked at only by
+/// [`wait_for_players_let_go`], as the app quits, so FFmpeg's programs never outlive it.
+static LET_GO: Mutex<Vec<Receiver<()>>> = Mutex::new(Vec::new());
+
+/// Waits, for at most `within`, until every player let go has ended its FFmpeg (as the app
+/// quits). Says how many hadn't by then.
+pub fn wait_for_players_let_go(within: Duration) -> usize {
+    let until = Instant::now() + within;
+    let mut left = std::mem::take(&mut *LET_GO.lock().unwrap_or_else(PoisonError::into_inner));
+    left.retain(|gone| {
+        let wait = until.saturating_duration_since(Instant::now());
+        matches!(gone.recv_timeout(wait), Err(RecvTimeoutError::Timeout))
+    });
+    left.len()
+}
 
 /// A video playing through FFmpeg, with its sound.
 ///
@@ -1255,10 +1268,19 @@ pub struct Player {
 }
 
 impl Drop for Player {
+    /// Never waits: the thread ends FFmpeg's programs by itself once nobody can ask it anything
+    /// more, a moment later (after the prober, or FFmpeg starting, if it is in one). Letting go
+    /// happens on the window's thread, which must go on at once (a Clear reaches the screens
+    /// straight away); the app waits for the threads only as it quits
+    /// ([`wait_for_players_let_go`]).
     fn drop(&mut self) {
-        // The thread ends FFmpeg's programs when nobody can ask it anything more.
         self.asks = None;
-        let _ = self.gone.recv_timeout(END_WITHIN);
+        let (_, gone) = std::sync::mpsc::channel();
+        let gone = std::mem::replace(&mut self.gone, gone);
+        let mut let_go = LET_GO.lock().unwrap_or_else(PoisonError::into_inner);
+        // Those that have ended are forgotten.
+        let_go.retain(|kept| matches!(kept.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)));
+        let_go.push(gone);
     }
 }
 
@@ -1551,7 +1573,7 @@ mod tests {
         // Letting it go ends FFmpeg without holding the caller.
         let letting_go = Instant::now();
         drop(player);
-        assert!(letting_go.elapsed() < END_WITHIN + Duration::from_millis(200), "{:?}", letting_go.elapsed());
+        assert!(letting_go.elapsed() < Duration::from_millis(50), "{:?}", letting_go.elapsed());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1565,7 +1587,10 @@ mod tests {
         assert_eq!(slow_open_for("soon", other), Duration::ZERO);
     }
 
-    /// A player let go while FFmpeg is still slow to answer doesn't wait for it.
+    /// A player let go while it is still opening its video (here held back 3 s before FFmpeg
+    /// is asked anything, as on a slow computer) doesn't wait for it: the caller, the window's
+    /// thread, is held for no more than a moment. Its thread ends by itself after; waiting for
+    /// it as the app quits is bounded.
     #[test]
     fn a_video_let_go_while_it_opens_holds_nobody() {
         let Some((dir, path)) = grey_video("let-go", 1) else { return };
@@ -1573,7 +1598,16 @@ mod tests {
         let letting_go = Instant::now();
         drop(player);
         let took = letting_go.elapsed();
-        assert!(took < END_WITHIN + Duration::from_millis(200), "letting go took {took:?}");
+        assert!(took < Duration::from_millis(50), "letting go held the caller {took:?}");
+        // (Other tests' players may be in the same wait, under `cargo test`: only its bound is
+        // looked at.)
+        let waiting = Instant::now();
+        wait_for_players_let_go(Duration::from_millis(200));
+        assert!(
+            waiting.elapsed() < Duration::from_millis(400),
+            "the wait at quitting is bounded: {:?}",
+            waiting.elapsed()
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
