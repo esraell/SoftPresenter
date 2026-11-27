@@ -2374,6 +2374,23 @@ impl HomeState {
             || self.slides_sheet
     }
 
+    /// Whether the Theme Editor is to be closed now: it was asked to leave (its own way out, or
+    /// another view asked for), or its draft has gone without that, as Go to the Slide on Screen
+    /// and a passage asked for by `sp` or the phone put it away. The window then shows another
+    /// view; left half open, the keys that run the show would go on following the Edit view's
+    /// rule there, and the theme would wait unsaved.
+    pub fn theme_editor_is_left(&self) -> bool {
+        self.theme_edit.as_ref().is_some_and(|edit| edit.leave || self.editing.is_none())
+    }
+
+    /// Closes the Theme Editor: its theme and its draft go, and its end mark's window with them.
+    /// The app saves the theme and shows it to the audience (`App::handle_themes`).
+    pub fn close_theme_editor(&mut self) {
+        self.theme_edit = None;
+        self.editing = None;
+        crate::end_look::editor_left(self);
+    }
+
     /// Whether the find box is being typed in: its search is open and it has the keyboard, or
     /// is about to (not given back after a drop: [`HomeState::search_resting`]). Then every key
     /// is the box's.
@@ -2817,6 +2834,8 @@ fn home_view(
     library_search(ui, show, state, escape_above_find, &mut commands);
     // Edit › Stage edits the open layout as a draft, as the other kinds do.
     crate::stage_editor::prepare(state);
+    // A theme's end mark opened in the Theme Editor goes with the editor, however it was left.
+    crate::end_look::editor_left(state);
     if state.editing.is_some() {
         edit_view(ui, show, state, theme, thumb, canvas);
         // A theme's end mark, opened from the theme's own rows.

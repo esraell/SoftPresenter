@@ -80,10 +80,26 @@ pub fn open(state: &mut HomeState, theme: usize, door: Door) {
     }
 }
 
+/// Whether the Theme Editor, the editor door's own window, is what the operator's window shows.
+fn in_the_theme_editor(state: &HomeState) -> bool {
+    state.editing.is_some() && state.theme_edit.is_some()
+}
+
 /// Whether the window is open over the operator's window, where the keys that run the show
-/// wait for it and Escape is its own.
+/// wait for it and Escape is its own: opened from the Theme Editor, and the editor still there
+/// to draw it in. Left open when the editor was left (another view asked for by a key, the menu,
+/// `sp` or the phone), it is over nothing, and holds no key back.
 pub fn over_the_operators_window(state: &HomeState) -> bool {
-    state.end_look.is_some_and(|open| open.door == Door::Editor)
+    state.end_look.is_some_and(|open| open.door == Door::Editor) && in_the_theme_editor(state)
+}
+
+/// The Theme Editor has gone, however it was left: a window opened from it goes with it, so it
+/// isn't there again the next time the editor opens. Called before the operator's window is
+/// drawn, whichever view it shows.
+pub fn editor_left(state: &mut HomeState) {
+    if state.end_look.is_some_and(|open| open.door == Door::Editor) && !in_the_theme_editor(state) {
+        state.end_look = None;
+    }
 }
 
 /// The Settings window has closed: a window opened from it goes with it.
@@ -671,13 +687,36 @@ mod tests {
         // wait for it, Escape is its own, and it goes with the editor.
         let mut state = opened();
         assert!(!over_the_operators_window(&state));
+        let theme = Theme::builtin();
+        state.editing =
+            Some(crate::editor::EditDraft::of_slide(theme.templates[0].as_slide(crate::editor::sample_words()), 0));
+        state.theme_edit = Some(crate::home::ThemeEdit::of(0, theme));
         open(&mut state, 0, Door::Editor);
         assert!(over_the_operators_window(&state) && state.escape_taken_above(&ctx));
         settings_closed(&mut state);
         assert!(state.end_look.is_some(), "Settings closing leaves the editor\u{2019}s alone");
-        ctx.run_ui(egui::RawInput::default(), |ui| window(ui.ctx(), &mut state, &song(), Door::Editor))
-            .drop_without_applying_deltas();
-        assert_eq!(state.end_look, None, "no Theme Editor is open");
+        editor_left(&mut state);
+        assert!(state.end_look.is_some(), "the editor is still there");
+        // The editor left with the window open, by either of the two things that say it is
+        // open: the window is over nothing at once, before anything is drawn, and then it goes.
+        for leave in [
+            (|state: &mut HomeState| state.editing = None) as fn(&mut HomeState),
+            |state: &mut HomeState| state.theme_edit = None,
+            |state: &mut HomeState| (state.editing, state.theme_edit) = (None, None),
+        ] {
+            let mut left = HomeState { end_look: state.end_look, ..opened() };
+            left.editing.clone_from(&state.editing);
+            left.theme_edit.clone_from(&state.theme_edit);
+            leave(&mut left);
+            assert!(left.end_look.is_some());
+            assert!(!over_the_operators_window(&left) && !left.escape_taken_above(&ctx), "over nothing");
+            editor_left(&mut left);
+            assert_eq!(left.end_look, None, "no Theme Editor is open");
+        }
+        // One opened from Settings is none of the editor's business.
+        let mut settings = opened();
+        editor_left(&mut settings);
+        assert!(settings.end_look.is_some());
     }
 
     #[test]

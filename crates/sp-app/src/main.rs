@@ -9505,10 +9505,12 @@ impl App {
         let Some(running) = self.running.as_mut() else {
             return;
         };
+        // Asked to leave, or its draft gone without that (`HomeState::theme_editor_is_left`).
+        let leave = running.home_state.theme_editor_is_left();
         let Some(edit) = running.home_state.theme_edit.as_mut() else {
             return;
         };
-        let (changed, leave, index) = (std::mem::take(&mut edit.changed), edit.leave, edit.index);
+        let (changed, index) = (std::mem::take(&mut edit.changed), edit.index);
         if changed {
             let theme = edit.theme.clone();
             // In the main theme, another template for Bible slides (one marked, or the one
@@ -9534,8 +9536,7 @@ impl App {
         }
         if leave {
             if let Some(running) = self.running.as_mut() {
-                running.home_state.theme_edit = None;
-                running.home_state.editing = None;
+                running.home_state.close_theme_editor();
             }
             // The theme is finished with: write it, and let the audience see it.
             self.save_unsaved();
@@ -11142,6 +11143,12 @@ impl App {
                     state.editing = edit.show(first, 0);
                 } else if what == "add-version" && state.theme_edit.is_some() {
                     state.version_sheet = Some(home::VersionSheet::adding(state));
+                } else if what == "end-look"
+                    && let Some(theme) = state.theme_edit.as_ref().map(|edit| edit.index)
+                {
+                    // Testing aid: =end-look opens the theme's end mark's window over the
+                    // editor, as Song end's Change… does.
+                    end_look::open(state, theme, end_look::Door::Editor);
                 }
             }
             // Testing aid: as if the theme's name and its first template's name had been
@@ -15809,6 +15816,99 @@ mod tests {
         assert!(scripture_lookup_has_the_keyboard(&keyboard), "Scripture Lookup has the keyboard");
         assert!(keyboard.ctx.text_edit_focused());
         keyboard
+    }
+
+    /// The Theme Editor open on the usual theme, with its end mark's window open over it, drawn.
+    fn end_mark_window_open_in_the_theme_editor() -> Keyboard {
+        let theme = Theme::builtin();
+        let draft = editor::EditDraft::of_slide(theme.templates[0].as_slide(editor::sample_words()), 0);
+        let mut keyboard = Keyboard::new(home::HomeState {
+            theme_names: vec![theme.name.clone()],
+            theme_ids: vec![theme.id],
+            theme_end_looks: vec![sp_model::EndLook::default()],
+            theme_edit: Some(home::ThemeEdit::of(0, theme)),
+            editing: Some(draft),
+            ..home::HomeState::default()
+        });
+        end_look::open(&mut keyboard.state, 0, end_look::Door::Editor);
+        keyboard.draw();
+        assert!(keyboard.state.end_look.is_some(), "the window is open over the editor");
+        keyboard
+    }
+
+    /// After a way out of the Theme Editor was taken with its end mark's window open: no key
+    /// is held back by a window that is over nothing, at once, before anything is drawn; then
+    /// the window is drawn, the app closes the editor as it does after every frame
+    /// (`handle_themes`), and the keys that run the show act: Space goes on a slide, and Escape
+    /// clears the screens.
+    fn the_show_keys_run_the_show(keyboard: &mut Keyboard, said: &str) {
+        let (space, escape) = (us(&Key::Named(NamedKey::Space)), us(&Key::Named(NamedKey::Escape)));
+        keyboard.draw();
+        assert!(keyboard.state.theme_editor_is_left(), "{said}: the editor is to be closed");
+        keyboard.state.close_theme_editor();
+        assert!(keyboard.state.theme_edit.is_none() && keyboard.state.editing.is_none(), "{said}");
+        assert_eq!(keyboard.state.end_look, None, "{said}: the window went with the editor");
+        assert!(!show_key_held_back(&keyboard.state, &keyboard.ctx, &space, true), "{said}: Space is held back");
+        assert!(!show_key_held_back(&keyboard.state, &keyboard.ctx, &escape, true), "{said}: Escape is held back");
+        assert!(!escape_closes_something(&keyboard.state, &keyboard.ctx), "{said}: Escape has nothing to close");
+        keyboard.press(Key::Named(NamedKey::Space));
+        assert_eq!(keyboard.live(), Some((0, 1)), "{said}: Space went on a slide");
+        keyboard.press(Key::Named(NamedKey::Escape));
+        assert_eq!(keyboard.live(), None, "{said}: Escape cleared the screens");
+    }
+
+    /// The window opened in the editor holds nothing back once the editor's draft has gone,
+    /// whatever is left of the editor: before any frame is drawn.
+    fn the_window_is_over_nothing(keyboard: &Keyboard, said: &str) {
+        let (space, escape) = (us(&Key::Named(NamedKey::Space)), us(&Key::Named(NamedKey::Escape)));
+        assert!(keyboard.state.end_look.is_some(), "{said}: nothing has cleared it yet");
+        assert!(!end_look::over_the_operators_window(&keyboard.state), "{said}");
+        assert!(!show_key_held_back(&keyboard.state, &keyboard.ctx, &space, true), "{said}: Space is held back");
+        assert!(!show_key_held_back(&keyboard.state, &keyboard.ctx, &escape, true), "{said}: Escape is held back");
+        assert!(!escape_closes_something(&keyboard.state, &keyboard.ctx), "{said}: Escape closes nothing");
+    }
+
+    #[test]
+    fn the_end_marks_window_in_the_theme_editor_keeps_the_show_keys_only_while_the_editor_is_there() {
+        // Open over the editor, the keys wait for it and Escape is its own.
+        let mut keyboard = end_mark_window_open_in_the_theme_editor();
+        assert!(show_key_held_back(&keyboard.state, &keyboard.ctx, &us(&Key::Named(NamedKey::Space)), true));
+        assert!(escape_closes_something(&keyboard.state, &keyboard.ctx));
+        keyboard.press(Key::Named(NamedKey::Space));
+        assert_eq!(keyboard.live(), Some((0, 0)), "Space ran nothing under the window");
+        assert!(!keyboard.state.theme_editor_is_left(), "and the editor stays");
+
+        // The Service or the Bible view asked for (Command-1, Command-2, the View menu, `sp
+        // view`, the phone, an assistant): the bar asks the app to leave the editor.
+        for view in [0, 2] {
+            let mut keyboard = end_mark_window_open_in_the_theme_editor();
+            keyboard.state.view_request = Some(view);
+            the_show_keys_run_the_show(&mut keyboard, if view == 0 { "the Service view" } else { "the Bible view" });
+        }
+
+        // Go to the Slide on Screen (Command-L, and the Program preview's key), as `menu_action`
+        // does it: the song on screen chosen in the Service view, the editor's draft put away.
+        let mut keyboard = end_mark_window_open_in_the_theme_editor();
+        keyboard.state.editing = None;
+        keyboard.state.bible_open = false;
+        the_window_is_over_nothing(&keyboard, "Go to the Slide on Screen");
+        the_show_keys_run_the_show(&mut keyboard, "Go to the Slide on Screen");
+
+        // `sp bible John 3:16` (and the phone's and an assistant's passage), as `ctl_bible`
+        // does it: the Bible view, the editor's draft put away.
+        let mut keyboard = end_mark_window_open_in_the_theme_editor();
+        keyboard.state.bible_open = true;
+        keyboard.state.editing = None;
+        the_window_is_over_nothing(&keyboard, "a passage asked for from outside");
+        the_show_keys_run_the_show(&mut keyboard, "a passage asked for from outside");
+
+        // The app closed the editor between two frames (as it does when asked to leave) with
+        // the window still noted as open: no key waits for a frame to clear it.
+        let mut keyboard = end_mark_window_open_in_the_theme_editor();
+        (keyboard.state.theme_edit, keyboard.state.editing) = (None, None);
+        the_window_is_over_nothing(&keyboard, "the editor closed by the app");
+        keyboard.press(Key::Named(NamedKey::Space));
+        assert_eq!(keyboard.live(), Some((0, 1)), "Space went on a slide before any frame was drawn");
     }
 
     fn scripture_lookup_has_the_keyboard(keyboard: &Keyboard) -> bool {
