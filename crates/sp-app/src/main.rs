@@ -15781,6 +15781,17 @@ mod tests {
         keyboard.draw();
         assert_eq!(keyboard.state.notices.refused(), Some(NOTHING_TO_ADD));
         assert!(playlist_items(&keyboard).is_empty());
+        // Beta open from a library, but the chooser of playlists and libraries open in its place:
+        // no library is listed, so it isn't a library's song open. (With the playlist listed, a
+        // song not in it puts the library back in the list as the window draws.)
+        let mut keyboard = in_softprojector_style(home::HomeState::default());
+        keyboard.show.apply(Command::Select(1));
+        keyboard.state.services.chosen = None;
+        keyboard.draw();
+        keyboard.state.chooser_open = true;
+        keyboard.press(Key::Named(NamedKey::F2));
+        assert_eq!(keyboard.state.notices.refused(), Some(NOTHING_TO_ADD), "the chooser open");
+        assert!(playlist_items(&keyboard).is_empty());
         // A song the app makes (the Bible's place) open in the Service view.
         let mut keyboard = in_softprojector_style(home::HomeState::default());
         keyboard.show.apply(Command::Select(2));
@@ -15843,6 +15854,7 @@ mod tests {
                 _ => state.chooser_open = true,
             }
             let mut keyboard = in_softprojector_style(state);
+            assert_eq!(keyboard.state.item_picks.places, [1], "{view}: Beta still picked, so the listing refuses");
             keyboard.press(Key::Named(NamedKey::F3));
             keyboard.draw();
             assert_eq!(keyboard.state.notices.refused(), Some(NOTHING_PICKED), "{view}");
