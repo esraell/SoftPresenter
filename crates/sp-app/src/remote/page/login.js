@@ -194,7 +194,6 @@ const REMOTE_WORDS = {
    "No song is open": "No hay ninguna canción abierta",
    "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Aún no hay canciones aquí. Crea una, importa algunas o arrastra canciones sobre el nombre de esta biblioteca.",
    "No tracks yet. Add music files from this computer.": "Aún no hay pistas. Añade archivos de música de este ordenador.",
-   "Not connected to SoftPresenter.": "No hay conexión con SoftPresenter.",
    "Notes": "Notas",
    "Nothing found": "No se encontró nada",
    "Nothing showing": "No se muestra nada",
@@ -285,11 +284,11 @@ const REMOTE_WORDS = {
    "Template": "Plantilla",
    "The car with the lights on, please": "El coche con las luces encendidas, por favor",
    "The computer didn't answer.": "El ordenador no respondió.",
-   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "La diapositiva o el versículo marcado pasa a pantalla (después de una búsqueda, o con ↑ ↓)",
-   "The item above or below, cued at its first slide; in Bible, the verse before or after": "El elemento de arriba o de abajo; en Biblia, elegir el versículo anterior o siguiente",
+   "The item above or below, picked at its first slide; in Bible, the verse before or after": "El elemento de arriba o de abajo; en Biblia, elegir el versículo anterior o siguiente",
    "The keys listed in Settings › Keys do what it says there. Any other key can be added.": "Las teclas de la lista de Ajustes › Teclas hacen lo que allí se indica. Se puede añadir cualquier otra tecla.",
    "The live tools": "Las herramientas en vivo",
    "The menu for the slide on screen": "El menú de la diapositiva que está en pantalla",
+   "The picked slide or verse goes on screen (after a search, or ↑ ↓)": "La diapositiva o el versículo marcado pasa a pantalla (después de una búsqueda, o con ↑ ↓)",
    "then 1–9": "luego 1 … 9",
    "This device is remembered once it signs in, until it is forgotten in Settings › Phone remote on the computer.": "Este dispositivo se recuerda en cuanto inicia sesión, hasta que lo olvides en Ajustes › Mando del móvil en el ordenador.",
    "This library has no songs yet.": "Esta biblioteca aún no tiene canciones.",
@@ -307,7 +306,7 @@ const REMOTE_WORDS = {
    "Waiting for SoftPresenter to answer. Try again in a moment.": "Esperando la respuesta de SoftPresenter. Vuelve a intentarlo en un momento.",
    "When a track ends, go on to the next": "Al terminar una pista, pasar a la siguiente",
    "Wipe": "Barrido",
-   "With nothing on screen, move the cue; Space or Page Down or Enter puts it on": "Sin nada en pantalla, mueve la marca; Espacio, Av Pág o Intro la pone en pantalla",
+   "With nothing on screen, move the pick; Space or Page Down or Enter puts it on": "Sin nada en pantalla, mueve la marca; Espacio, Av Pág o Intro la pone en pantalla",
    "Words": {
     "in": [
      [
@@ -322,7 +321,8 @@ const REMOTE_WORDS = {
    "Words only": "Solo letra",
    "Zoom In": "Acercar",
    "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Dejar que un teléfono, iPad o Mac muestre su pantalla se decide en el ordenador, no desde la página remota.",
-   "There is no track to play. Add music at the computer.": "No hay ninguna pista para reproducir. Añade música en el ordenador."
+   "There is no track to play. Add music at the computer.": "No hay ninguna pista para reproducir. Añade música en el ordenador.",
+   "Not connected to SoftPresenter.": "No hay conexión con SoftPresenter."
   },
   "patterns": [
    {
@@ -606,7 +606,6 @@ const REMOTE_WORDS = {
    "No song is open": "Песня не открыта",
    "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Здесь пока нет песен. Создайте песню, импортируйте или перетащите песни на название этой библиотеки.",
    "No tracks yet. Add music files from this computer.": "Треков пока нет. Добавьте музыкальные файлы с этого компьютера.",
-   "Not connected to SoftPresenter.": "Нет связи с SoftPresenter.",
    "Notes": "Заметки",
    "Nothing found": "Ничего не найдено",
    "Nothing showing": "Ничего не показано",
@@ -697,11 +696,11 @@ const REMOTE_WORDS = {
    "Template": "Шаблон",
    "The car with the lights on, please": "Чья машина с включёнными фарами?",
    "The computer didn't answer.": "Компьютер не ответил.",
-   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "Выбранный слайд или стих выходит на экран (после поиска или ↑ ↓)",
-   "The item above or below, cued at its first slide; in Bible, the verse before or after": "Пункт выше или ниже; в Библии — стих до или после",
+   "The item above or below, picked at its first slide; in Bible, the verse before or after": "Пункт выше или ниже; в Библии — стих до или после",
    "The keys listed in Settings › Keys do what it says there. Any other key can be added.": "Клавиши из списка Настройки › Клавиши делают то, что там указано. Можно добавить любую другую клавишу.",
    "The live tools": "Инструменты показа",
    "The menu for the slide on screen": "Меню слайда, который на экране",
+   "The picked slide or verse goes on screen (after a search, or ↑ ↓)": "Выбранный слайд или стих выходит на экран (после поиска или ↑ ↓)",
    "then 1–9": "затем 1 … 9",
    "This device is remembered once it signs in, until it is forgotten in Settings › Phone remote on the computer.": "Это устройство запоминается после входа, пока его не забудут на компьютере: Настройки › Пульт на телефоне.",
    "This library has no songs yet.": "В этой библиотеке пока нет песен.",
@@ -719,7 +718,7 @@ const REMOTE_WORDS = {
    "Waiting for SoftPresenter to answer. Try again in a moment.": "Ждём ответа SoftPresenter. Попробуйте ещё раз через минуту.",
    "When a track ends, go on to the next": "Когда трек кончится, перейти к следующему",
    "Wipe": "Шторка",
-   "With nothing on screen, move the cue; Space or Page Down or Enter puts it on": "Когда на экране пусто, выбрать слайд; пробел, Page Down или Enter выводит его на экран",
+   "With nothing on screen, move the pick; Space or Page Down or Enter puts it on": "Когда на экране пусто, выбрать слайд; пробел, Page Down или Enter выводит его на экран",
    "Words": {
     "in": [
      [
@@ -734,7 +733,8 @@ const REMOTE_WORDS = {
    "Words only": "Только слова",
    "Zoom In": "Приближение",
    "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Разрешить телефону, iPad или Mac показывать свой экран можно только за компьютером, а не со страницы пульта.",
-   "There is no track to play. Add music at the computer.": "Нет трека для воспроизведения. Добавьте музыку за компьютером."
+   "There is no track to play. Add music at the computer.": "Нет трека для воспроизведения. Добавьте музыку за компьютером.",
+   "Not connected to SoftPresenter.": "Нет связи с SoftPresenter."
   },
   "patterns": [
    {
@@ -1018,7 +1018,6 @@ const REMOTE_WORDS = {
    "No song is open": "Жодну пісню не відкрито",
    "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Тут ще немає пісень. Створіть пісню, імпортуйте кілька або перетягніть пісні на назву цієї бібліотеки.",
    "No tracks yet. Add music files from this computer.": "Треків ще немає. Додайте музичні файли з цього компʼютера.",
-   "Not connected to SoftPresenter.": "Немає звʼязку з SoftPresenter.",
    "Notes": "Нотатки",
    "Nothing found": "Нічого не знайдено",
    "Nothing showing": "Нічого не показується",
@@ -1109,11 +1108,11 @@ const REMOTE_WORDS = {
    "Template": "Шаблон",
    "The car with the lights on, please": "Чиє авто з увімкненими фарами?",
    "The computer didn't answer.": "Компʼютер не відповів.",
-   "The cued slide or verse goes on screen (after a search, or ↑ ↓)": "Вибраний слайд або вірш виходить на екран (після пошуку або ↑ ↓)",
-   "The item above or below, cued at its first slide; in Bible, the verse before or after": "Пункт вище чи нижче; у Біблії — вибрати попередній чи наступний вірш",
+   "The item above or below, picked at its first slide; in Bible, the verse before or after": "Пункт вище чи нижче; у Біблії — вибрати попередній чи наступний вірш",
    "The keys listed in Settings › Keys do what it says there. Any other key can be added.": "Клавіші зі списку Налаштування › Клавіші роблять те, що там указано. Можна додати будь-яку іншу клавішу.",
    "The live tools": "Під час служіння",
    "The menu for the slide on screen": "Меню слайда, що на екрані",
+   "The picked slide or verse goes on screen (after a search, or ↑ ↓)": "Вибраний слайд або вірш виходить на екран (після пошуку або ↑ ↓)",
    "then 1–9": "потім 1 … 9",
    "This device is remembered once it signs in, until it is forgotten in Settings › Phone remote on the computer.": "Цей пристрій запамʼятовується після входу, доки його не забудуть на компʼютері: Налаштування › Пульт на телефоні.",
    "This library has no songs yet.": "У цій бібліотеці поки що немає пісень.",
@@ -1131,7 +1130,7 @@ const REMOTE_WORDS = {
    "Waiting for SoftPresenter to answer. Try again in a moment.": "Чекаємо на відповідь SoftPresenter. Спробуйте ще раз за мить.",
    "When a track ends, go on to the next": "Коли трек закінчується, переходити до наступного",
    "Wipe": "Шторка",
-   "With nothing on screen, move the cue; Space or Page Down or Enter puts it on": "Коли на екрані порожньо, вибрати слайд; пробіл, Page Down або Enter виводить його на екран",
+   "With nothing on screen, move the pick; Space or Page Down or Enter puts it on": "Коли на екрані порожньо, вибрати слайд; пробіл, Page Down або Enter виводить його на екран",
    "Words": {
     "in": [
      [
@@ -1146,7 +1145,8 @@ const REMOTE_WORDS = {
    "Words only": "Лише слова",
    "Zoom In": "Наближення",
    "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Дозволити телефону, iPad чи Mac показувати свій екран можна лише за компʼютером, не зі сторінки пульта.",
-   "There is no track to play. Add music at the computer.": "Немає треку для відтворення. Додайте музику за компʼютером."
+   "There is no track to play. Add music at the computer.": "Немає треку для відтворення. Додайте музику за компʼютером.",
+   "Not connected to SoftPresenter.": "Немає звʼязку з SoftPresenter."
   },
   "patterns": [
    {
