@@ -207,13 +207,15 @@ process, and nextest gives each test a process of its own). One test alone:
   the displays changing, `web_mac` for web pages), `sp-ndi`'s `runtime` module, `sp-winapi`'s `windows` module (the few Windows calls the
   app needs: joining the console a command was typed in, asking a monitor for its work area,
   renaming a file into place written through to the disk, hearing on the operator's window that
-  Windows is ending the session (subclassing it, so the app saves before Windows is answered),
+  Windows is ending the session or an installer asks the app to close (subclassing it, so the app
+  saves before Windows is answered) and telling Windows why it waits, the reason its shut-down
+  screen shows (`ShutdownBlockReasonCreate` and `ShutdownBlockReasonDestroy`),
   asking Windows the names the monitors give themselves and the country the user's location is set to, reading how much processor time and
   memory the app, the programs it started and the computer use (its `stats` part, for the
   anonymous reports), putting a folder on the user's PATH and
   taking it off again, holding a named mutex that keeps the app to one copy per data folder,
   letting the copy running come to the front when another start asks and asking Windows the
-  user's display languages for the message such a start shows when that copy doesn't answer, for the app's file windows, setting up OLE on the thread that shows one, bringing it back to the front and giving the operator's window the front back when it closes, asking Windows to keep the display on and the computer awake while the screens are on (a power request), in its `security` part, reading and setting who owns and may open the
+  user's display languages for the message such a start shows when that copy doesn't answer, for the app's file windows, setting up OLE on the thread that shows one, bringing it back to the front and giving the operator's window the front back when it closes, asking Windows to keep the display on and the computer awake while the screens are on (a power request: `PowerCreateRequest`, `PowerSetRequest` and `PowerClearRequest`), in its `security` part, reading and setting who owns and may open the
   control socket's folder and finding the user the app runs as, and, in its `credentials` part,
   reading, writing and removing the user's entries in Credential Manager, where keys are kept) and
   `sp-decklink`'s `ffi`
