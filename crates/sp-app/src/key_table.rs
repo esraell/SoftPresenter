@@ -470,8 +470,27 @@ impl ShowKey {
 
     /// The key as its cap says it (a US keyboard's legend for a mark), as the list of keys and
     /// Settings › Keys write it.
+    #[cfg(test)]
     pub fn cap(self) -> String {
         self.cap_for(cfg!(target_os = "macos"))
+    }
+
+    /// The key as a sentence names it: its cap, a mark in quotes (“.”, “,”) so that it
+    /// can't be taken for the sentence's own punctuation.
+    pub fn said(self) -> String {
+        self.said_for(cfg!(target_os = "macos"))
+    }
+
+    /// As [`ShowKey::said`], for a Mac's keyboard (`mac`) or a PC's.
+    pub fn said_for(self, mac: bool) -> String {
+        let cap = self.cap_for(mac);
+        let mut letters = cap.chars();
+        match (letters.next(), letters.next()) {
+            (Some(mark), None) if mark.is_ascii_punctuation() => {
+                tf("keys.said.mark", "\u{201c}{key}\u{201d}", &[("key", &cap)])
+            }
+            _ => cap,
+        }
     }
 
     /// The cap as a Mac's keyboard prints it (`mac`) or as a PC's does: they differ for the key
@@ -671,7 +690,7 @@ impl Refusal {
                 return Some(tf(
                     "settings.keys.refused.listed",
                     "{key} is in the list already.",
-                    &[("key", &key.cap())],
+                    &[("key", &key.said())],
                 ));
             }
             Refusal::Held if mac => t(
@@ -1119,6 +1138,13 @@ mod tests {
         assert_eq!(added.cap_for(true), "\u{a7}", "a Mac\u{2019}s");
         assert_eq!(added.cap(), added.cap_for(cfg!(target_os = "macos")));
         assert_eq!(ShowKey::PageDown.cap_for(false), "Page Down");
+        // In a sentence a mark is quoted, and nothing else is.
+        assert_eq!(ShowKey::Period.said(), "\u{201c}.\u{201d}");
+        assert_eq!(
+            (ShowKey::Escape.said(), ShowKey::Right.said(), ShowKey::F1.said()),
+            ("Esc".into(), "\u{2192}".into(), "F1".into())
+        );
+        assert_eq!(added.said_for(false), "<>");
     }
 
     #[test]

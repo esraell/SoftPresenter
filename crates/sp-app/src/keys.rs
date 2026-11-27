@@ -95,8 +95,17 @@ pub fn action_hint(table: &KeyTable, what: &str, action: KeyAction) -> String {
 
 /// As [`action_hint`], with the F rows (`f_keys`, off a Mac) or without them.
 fn action_hint_on(table: &KeyTable, what: &str, action: KeyAction, f_keys: bool) -> String {
-    let keys: Vec<String> = table.keys_for(action, f_keys).into_iter().map(|key| key.cap_for(!f_keys)).collect();
+    let keys: Vec<String> = table.keys_for(action, f_keys).into_iter().map(|key| key.said_for(!f_keys)).collect();
     if keys.is_empty() { what.to_owned() } else { format!("{what} ({})", keys.join(", ")) }
+}
+
+/// A list as a sentence says it, "A, B or C", with the language's own "or".
+pub fn any_of(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [first @ .., last] => crate::i18n::tf("keys.list.or", "{a} or {b}", &[("a", &first.join(", ")), ("b", last)]),
+    }
 }
 
 /// What the list of keys says in place of a key for something only a button does.
@@ -413,7 +422,6 @@ pub fn every_key_for(table: &KeyTable, f_keys: bool) -> Vec<(&'static str, Vec<R
     use crate::key_table::ShowKey;
     let caps = |keys: Vec<ShowKey>| keys.into_iter().map(|key| key.cap_for(!f_keys)).collect::<Vec<_>>();
     let doing = |action: KeyAction| caps(table.keys_for(action, f_keys));
-    let either = |a: &str, b: &str| crate::i18n::tf("keys.list.or", "{a} or {b}", &[("a", a), ("b", b)]);
     // A row for each of `actions` that has keys.
     let rows_of = |actions: &[(KeyAction, &str)]| -> Vec<Row> {
         actions
@@ -444,10 +452,15 @@ pub fn every_key_for(table: &KeyTable, f_keys: bool) -> Vec<(&'static str, Vec<R
         .map(|(key, _)| key)
         .collect();
     let pick = (!arrows.is_empty()).then(|| {
-        let mut puts: Vec<String> =
-            caps(table.keys_for(KeyAction::Next, f_keys).into_iter().filter(|key| *key != ShowKey::Right).collect());
+        // In the sentence a mark is quoted, so "," isn't taken for the sentence's own comma.
+        let mut puts: Vec<String> = table
+            .keys_for(KeyAction::Next, f_keys)
+            .into_iter()
+            .filter(|key| *key != ShowKey::Right)
+            .map(|key| key.said_for(!f_keys))
+            .collect();
         puts.push(t("keys.cap.enter", "Enter").to_owned());
-        let puts = puts.into_iter().reduce(|all, key| either(&all, &key)).unwrap_or_default();
+        let puts = any_of(&puts);
         let what = crate::i18n::tf(
             "keys.list.pick",
             "With nothing on screen, move the pick; {keys} puts it on",
@@ -483,8 +496,7 @@ pub fn every_key_for(table: &KeyTable, f_keys: bool) -> Vec<(&'static str, Vec<R
     .collect();
     if !layers.is_empty() {
         layers.push(t("keys.list.layer.announcements", "announcements"));
-        let last = layers.pop().unwrap_or_default();
-        let named = either(&layers.join(", "), last);
+        let named = any_of(&layers.iter().map(|layer| (*layer).to_owned()).collect::<Vec<_>>());
         clearing.push((
             button_only(),
             crate::i18n::tf(
@@ -902,8 +914,8 @@ mod tests {
         let hint = |what: &str, action, f_keys| action_hint_on(&table, what, action, f_keys);
         assert_eq!(hint("Clear the slide", KeyAction::ClearSlide, true), "Clear the slide (Esc, F2)");
         assert_eq!(hint("Clear the slide", KeyAction::ClearSlide, false), "Clear the slide (Esc)");
-        assert_eq!(hint("Clear All", KeyAction::ClearAll, true), "Clear All (F1, .)");
-        assert_eq!(hint("Clear All", KeyAction::ClearAll, false), "Clear All (.)");
+        assert_eq!(hint("Clear All", KeyAction::ClearAll, true), "Clear All (F1, \u{201c}.\u{201d})");
+        assert_eq!(hint("Clear All", KeyAction::ClearAll, false), "Clear All (\u{201c}.\u{201d})");
         assert_eq!(hint("Clear the media", KeyAction::ClearMedia, false), "Clear the media");
         assert_eq!(f_keys(), !cfg!(target_os = "macos"));
         // The list of keys, off a Mac: one row for each action that has keys.
@@ -930,8 +942,7 @@ mod tests {
                 ("End", "Last slide of the song, or verse in Bible"),
             ])
         );
-        let cue =
-            ("\u{2190}  \u{2192}", "With nothing on screen, move the pick; Space or Page Down or Enter puts it on");
+        let cue = ("\u{2190}  \u{2192}", "With nothing on screen, move the pick; Space, Page Down or Enter puts it on");
         assert_eq!(running[6], (cue.0.to_owned(), cue.1.to_owned()));
         assert_eq!((running.len(), running[7].0.as_str()), (8, "A letter"));
         // On a Mac no F key is in it, and the layers no key clears are their buttons'.
@@ -1014,6 +1025,14 @@ mod tests {
         table.set(ShowKey::Other(winit::keyboard::KeyCode::KeyB), KeyAction::Next);
         let running = group(&every_key_for(&table, false), "Running the slides");
         assert_eq!(running[0], ("B  Space  \u{2192}  Page Down".to_owned(), "Next slide".to_owned()));
+        // A mark doing Next is quoted in the pick's sentence, and the list reads "A, B or C".
+        table.add(&crate::key_table::Pressed::from(winit::keyboard::Key::Character(",".into())), false).expect("added");
+        table.set(ShowKey::Other(winit::keyboard::KeyCode::Comma), KeyAction::Next);
+        let running = group(&every_key_for(&table, false), "Running the slides");
+        let pick = "With nothing on screen, move the pick; \u{201c},\u{201d}, B, Space, Page Down or Enter puts it on";
+        assert!(running.iter().any(|(_, what)| what == pick), "{running:?}");
+        assert_eq!(any_of(&["A".to_owned()]), "A");
+        assert_eq!(any_of(&["A".to_owned(), "B".to_owned()]), "A or B");
         // The keys that are always the same have no row of the table's among them.
         let fixed: Vec<String> = fixed_keys().into_iter().flat_map(|(_, rows)| rows).map(|(_, what)| what).collect();
         assert!(fixed.iter().any(|what| what.starts_with("The item above or below")));

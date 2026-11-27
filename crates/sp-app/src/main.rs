@@ -12146,7 +12146,7 @@ impl App {
                 can_redo: state.can_undo(true),
                 style_copied: state.inspector.copied_style.is_some(),
                 checking_updates: updates::status().checking,
-                listening: state.keys_card.listening,
+                listening: home::settings::keys_card::listening(state),
             });
             menu.set_checked(|action| match action {
                 A::Audience => output_on,
@@ -12914,9 +12914,11 @@ impl ApplicationHandler<AppEvent> for App {
         // Add a Key (Settings › Keys) is listening: the Settings window's next key is its own, by
         // its place on the keyboard, and reaches nothing else in that window. The menus' items
         // are greyed meanwhile (`tick_menu`), so a shortcut does nothing but get its sentence.
+        // It listens only while Settings is open on Keys (`keys_card::listening`): a page
+        // changed by a command ends it, though the card is never drawn again to say so.
         if let WindowEvent::KeyboardInput { event: key, .. } = &event
             && let Some(running) = self.running.as_mut()
-            && running.home_state.keys_card.listening
+            && home::settings::keys_card::listening(&running.home_state)
             && let Some(panel) =
                 running.panels.iter().find(|panel| panel.window.id() == id && panel.kind == Panel::Settings)
         {
@@ -12967,10 +12969,23 @@ impl ApplicationHandler<AppEvent> for App {
                 }
                 WindowEvent::RedrawRequested => {
                     let size_before = self.running.as_ref().map(|running| running.home_state.interface_size);
+                    let sheet_before = self.running.as_ref().is_some_and(|running| running.home_state.key_sheet);
                     let commands = self.draw_panel(id);
                     self.apply(commands);
                     // Add a Key (Settings › Keys) greys the menus' items while it listens.
                     self.tick_menu();
+                    // Every key (Settings › Keys) opens the list of keys, which is the operator's
+                    // window's: that window comes forward to show it.
+                    let quiet = self.quiet();
+                    if let Some(running) = self.running.as_ref()
+                        && running.home_state.key_sheet
+                        && !sheet_before
+                    {
+                        running.home_window.request_redraw();
+                        if !quiet {
+                            running.home_window.focus_window();
+                        }
+                    }
                     // Another Interface size chosen in Settings: the main window takes it at once.
                     if let Some(running) = self.running.as_ref()
                         && size_before != Some(running.home_state.interface_size)

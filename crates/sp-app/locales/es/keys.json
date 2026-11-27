@@ -64,8 +64,8 @@
   "keys.cap.numpad": "Num {key}",
   "keys.list.show_selected": "Mostrar la diapositiva o el versículo elegido, como hace Intro",
   "keys.list.show_again": "Volver a mostrar lo que se ocultó o se quitó, si nada ha salido después",
-  "keys.list.first": "Primera diapositiva de la canción, o versículo en Biblia",
-  "keys.list.last": "Última diapositiva de la canción, o versículo en Biblia",
+  "keys.list.first": "Primera diapositiva de la canción, o el primer versículo en Biblia",
+  "keys.list.last": "Última diapositiva de la canción, o el último versículo en Biblia",
   "keys.list.pick": "Sin nada en pantalla, mover la elección; {keys} la pone en pantalla",
   "keys.list.or": "{a} o {b}",
   "keys.list.hide_words": "Ocultar la letra; el fondo sigue en pantalla",
@@ -82,10 +82,11 @@
   "keys.list.layer.audio": "el audio",
   "keys.list.layer.messages": "los mensajes",
   "keys.list.layer.announcements": "los anuncios",
-  "keys.nothing": "Nada en la presentación, según Ajustes › Teclas",
+  "keys.nothing": "No hacen nada durante el culto, según Ajustes › Teclas",
   "keys.list.go_service": "Culto",
   "keys.list.go_bible": "Biblia",
   "keys.list.add_to_playlist": "Añadir a la lista la canción abierta, o el pasaje",
   "keys.list.remove_from_playlist": "Quitar de la lista los elementos elegidos",
-  "keys.foot": "Las teclas de Ajustes › Teclas hacen lo que allí se indica. Cualquier otra tecla se puede añadir."
+  "keys.foot": "Las teclas de Ajustes › Teclas hacen lo que allí se indica. Cualquier otra tecla se puede añadir.",
+  "keys.said.mark": "«{key}»"
 }

@@ -1151,8 +1151,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     action that has keys, "Button only" for a clear no key does, and one row for the keys set
     to Nothing. The clear buttons' hints (the six layer keys, Clear All, a message's Hide) name
     the keys that do each now, or none.
+  - **Always the same** has an **Every key** key in its head, which opens the list of keys in
+    the operator's window. Where a sentence names a key that is a mark, the mark is in quotes
+    (“.”, “,”), and a list of keys reads "A, B or C".
+  - Add a Key's line, right of DOES, says faintly what Add a Key is for until it has something
+    to say. It listens only while Settings is open on Keys: a page changed by a command or a
+    menu ends it.
   - Nothing on the page changes size when a choice or the layout changes. In a window too
-    narrow for a line beside its control, the line goes under it.
+    narrow for a line beside its control, the line goes under it; there a row's note takes two
+    lines before it is cut short.
 - **Clearing from the keyboard**, as it comes (the Standard layout): Escape clears everything. On a Mac no F key is used (they
   are the system's: brightness, volume, Mission Control), so clearing one layer is its key
   under the preview, and the list of keys says "Button only" for

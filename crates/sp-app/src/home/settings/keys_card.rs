@@ -105,7 +105,9 @@ impl Card {
 /// the list at the top; one in the list already is shown instead; one the app keeps, or held
 /// with a modifier, says why and it goes on listening; a modifier by itself says nothing.
 pub fn key_pressed(state: &mut HomeState, pressed: &Pressed) {
-    if !state.keys_card.listening {
+    if !listening(state) {
+        // Left listening on a page since gone from view: it listens no more.
+        state.keys_card.stop();
         return;
     }
     let f_keys = state.keys_card.f_keys();
@@ -128,9 +130,16 @@ pub fn key_pressed(state: &mut HomeState, pressed: &Pressed) {
     }
 }
 
+/// Whether Add a Key is listening: only while Settings is open on Keys. A page changed from
+/// outside the window (a command, a menu) draws nothing of this card again, so the page is
+/// asked, not the card: the menus' items and the Settings window's keys go by this.
+pub fn listening(state: &HomeState) -> bool {
+    state.keys_card.listening && state.preferences_open && state.preferences_pane == super::Pane::Keys
+}
+
 /// "{key} is in the list already.", with the key as this system's keyboards print it.
 fn listed_words(key: ShowKey, f_keys: bool) -> String {
-    tf("settings.keys.refused.listed", "{key} is in the list already.", &[("key", &key.cap_for(!f_keys))])
+    tf("settings.keys.refused.listed", "{key} is in the list already.", &[("key", &key.said_for(!f_keys))])
 }
 
 /// What the layout chosen is, in a line: off a Mac, or on one (`mac`), where the F keys have no
@@ -200,13 +209,15 @@ pub fn default_words(action: KeyAction) -> String {
 /// now." It names only Next, Previous, First and Last: the clears have their buttons, and the
 /// newer actions have no key as they come, so naming them would never let the line go.
 pub fn none_line(table: &KeyTable, f_keys: bool) -> String {
-    let none = [KeyAction::Next, KeyAction::Previous, KeyAction::First, KeyAction::Last]
+    let none: Vec<String> = [KeyAction::Next, KeyAction::Previous, KeyAction::First, KeyAction::Last]
         .into_iter()
         .filter(|action| table.keys_for(*action, f_keys).is_empty())
         .map(KeyAction::words)
-        .reduce(|all, action| tf("keys.list.or", "{a} or {b}", &[("a", &all), ("b", &action)]));
-    none.map(|actions| tf("settings.keys.none", "No key does {actions} now.", &[("actions", &actions)]))
-        .unwrap_or_default()
+        .collect();
+    if none.is_empty() {
+        return String::new();
+    }
+    tf("settings.keys.none", "No key does {actions} now.", &[("actions", &crate::keys::any_of(&none))])
 }
 
 /// What an added row says of itself: a letter takes over from the group it jumped to; other
@@ -271,17 +282,15 @@ pub fn keys_card(ui: &mut egui::Ui, state: &mut HomeState) {
             head(ui, state, f_keys, &mut asked);
             layout_line(ui, state, f_keys, &mut asked);
             let chooser = chooser_width(ui);
-            table_head(ui, state, f_keys, chooser);
+            table_head(ui, state, f_keys);
             // A chooser's list is as tall as its 22 lines where the window has the room. The
             // toolkit gives a new list's area 400 points whatever its chooser asks for
             // (`default_area_size`), so that is raised while the choosers are made, and put back.
-            let ctx = ui.ctx().clone();
-            let usual = ctx.global_style().spacing.default_area_size;
-            ctx.global_style_mut(|style| style.spacing.default_area_size.y = usual.y.max(LIST + 60.0));
+            let taller = TallerLists::raise(ui.ctx());
             for key in state.keys.listed(f_keys) {
                 key_row(ui, state, f_keys, key, chooser, &mut asked);
             }
-            ctx.global_style_mut(|style| style.spacing.default_area_size = usual);
+            drop(taller);
             notes(ui, state, f_keys);
         },
     );
@@ -319,6 +328,28 @@ pub fn keys_card(ui: &mut egui::Ui, state: &mut HomeState) {
     if let Some(key) = asked.remove {
         state.keys.remove(key);
         state.keys_card.say.clear();
+    }
+}
+
+/// The room the toolkit gives a new list's area, raised while this lives and put back as it is
+/// dropped, however the code between ends.
+struct TallerLists {
+    ctx: egui::Context,
+    usual: egui::Vec2,
+}
+
+impl TallerLists {
+    fn raise(ctx: &egui::Context) -> TallerLists {
+        let usual = ctx.global_style().spacing.default_area_size;
+        ctx.global_style_mut(|style| style.spacing.default_area_size.y = usual.y.max(LIST + 60.0));
+        TallerLists { ctx: ctx.clone(), usual }
+    }
+}
+
+impl Drop for TallerLists {
+    fn drop(&mut self) {
+        let usual = self.usual;
+        self.ctx.global_style_mut(|style| style.spacing.default_area_size = usual);
     }
 }
 
@@ -471,14 +502,22 @@ fn chooser_width(ui: &egui::Ui) -> f32 {
     (widest(ui, &names, &font) + around + 2.0).ceil().max(CHOOSER)
 }
 
-/// The table's head: KEY and DOES over their columns, and what Add a Key says, in a line that
-/// is always kept: at the right of Does where every sentence fits there on one line, else
-/// under the headings, with the room the longest takes.
-fn table_head(ui: &mut egui::Ui, state: &HomeState, f_keys: bool, chooser: f32) {
+/// The table's head: KEY and DOES over their columns, and Add a Key's line, always kept: what
+/// it said last, or, with nothing said, faintly what Add a Key is for, so the line never reads
+/// as a gap. It starts a little after DOES where every sentence fits there on one line, else it
+/// is under the headings, with the room the longest takes.
+fn table_head(ui: &mut egui::Ui, state: &HomeState, f_keys: bool) {
     let width = ui.available_width();
     let font = FontId::proportional(12.0);
-    let say_left = KEY_COLUMN + BETWEEN + chooser + BETWEEN;
-    let sentences = every_sentence(f_keys);
+    let does = t("settings.keys.col.does", "Does").to_uppercase();
+    let does_left = KEY_COLUMN + BETWEEN;
+    let say_left = does_left + spaced(ui, &does, fixed_semibold(CAPS), TEXT_DIM, CAPS_SPACING).size().x + BETWEEN;
+    let hint = t(
+        "settings.keys.add.hint",
+        "Any key on the keyboard, or a clicker\u{2019}s button, can be given something to do",
+    );
+    let mut sentences = every_sentence(f_keys);
+    sentences.push(hint.to_owned());
     let wide: Vec<&str> = sentences.iter().map(String::as_str).collect();
     let beside = widest(ui, &wide, &font) <= width - say_left;
     let (place, _) = ui.allocate_exact_size(vec2(width, 28.0), Sense::hover());
@@ -488,20 +527,21 @@ fn table_head(ui: &mut egui::Ui, state: &HomeState, f_keys: bool, chooser: f32) 
             ui,
             pos2(place.min.x + left, middle),
             Align2::LEFT_CENTER,
-            &words.to_uppercase(),
+            words,
             fixed_semibold(CAPS),
             TEXT_DIM,
             CAPS_SPACING,
         );
     };
-    heading(0.0, t("settings.keys.col.key", "Key"));
-    heading(KEY_COLUMN + BETWEEN, t("settings.keys.col.does", "Does"));
-    let say = state.keys_card.say.as_str();
+    heading(0.0, &t("settings.keys.col.key", "Key").to_uppercase());
+    heading(does_left, &does);
+    let (say, ink) = match state.keys_card.say.as_str() {
+        "" => (hint, TEXT_FAINT),
+        said => (said, TEXT),
+    };
     if beside {
-        if !say.is_empty() {
-            let galley = parts::one_line(ui, say, font, TEXT, width - say_left);
-            ui.painter().galley(pos2(place.min.x + say_left, middle - galley.size().y / 2.0), galley, TEXT);
-        }
+        let galley = parts::one_line(ui, say, font, ink, width - say_left);
+        ui.painter().galley(pos2(place.min.x + say_left, middle - galley.size().y / 2.0), galley, ink);
         return;
     }
     let room = sentences
@@ -509,10 +549,8 @@ fn table_head(ui: &mut egui::Ui, state: &HomeState, f_keys: bool, chooser: f32) 
         .map(|sentence| parts::lines(ui, sentence, font.clone(), TEXT, width, LINE_HEIGHT).size().y)
         .fold(LINE_HEIGHT, f32::max);
     let (under, _) = ui.allocate_exact_size(vec2(width, room + 6.0), Sense::hover());
-    if !say.is_empty() {
-        let galley = parts::lines(ui, say, font, TEXT, width, LINE_HEIGHT);
-        ui.painter().galley(under.min, galley, TEXT);
-    }
+    let galley = parts::lines(ui, say, font, ink, width, LINE_HEIGHT);
+    ui.painter().galley(under.min, galley, ink);
 }
 
 /// A line of a chooser's list.
@@ -627,7 +665,17 @@ fn key_row(ui: &mut egui::Ui, state: &mut HomeState, f_keys: bool, key: ShowKey,
     let note_left = place.min.x + KEY_COLUMN + BETWEEN + chooser + BETWEEN;
     let note_right = if added { place.max.x - 28.0 - 10.0 } else { place.max.x };
     if !note.is_empty() && note_right - note_left > 20.0 {
-        let galley = parts::one_line(ui, &note, FontId::proportional(12.0), TEXT_DIM, note_right - note_left);
+        // Two lines at most inside the row, and only then cut short, said whole under the pointer.
+        let mut job = egui::text::LayoutJob::default();
+        let look = egui::TextFormat {
+            font_id: FontId::proportional(12.0),
+            color: TEXT_DIM,
+            line_height: Some(16.0),
+            ..Default::default()
+        };
+        job.append(&note, 0.0, look);
+        job.wrap = egui::text::TextWrapping { max_width: note_right - note_left, max_rows: 2, ..Default::default() };
+        let galley = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
         let cut = galley.elided;
         let at = Rect::from_min_size(pos2(note_left, middle - galley.size().y / 2.0), galley.size());
         ui.painter().galley(at.min, galley, TEXT_DIM);
@@ -637,7 +685,7 @@ fn key_row(ui: &mut egui::Ui, state: &mut HomeState, f_keys: bool, key: ShowKey,
     }
     if added {
         let at = Rect::from_min_size(pos2(place.max.x - 28.0, middle - 14.0), vec2(28.0, 28.0));
-        let hint = tf("settings.keys.remove", "Take {key} out of the list", &[("key", &cap)]);
+        let hint = tf("settings.keys.remove", "Take {key} out of the list", &[("key", &key.said_for(!f_keys))]);
         if icon_key(ui, at, ui.scope_id().with(("remove key", key.name())), Icon::Close, 10.0, true)
             .on_hover_text(hint)
             .clicked()
@@ -684,7 +732,7 @@ mod tests {
 
     /// Settings at Keys, as on a computer with the F rows (`f_keys`) or a Mac.
     fn state_on(f_keys: bool) -> HomeState {
-        let mut state = HomeState { preferences_pane: Pane::Keys, ..HomeState::default() };
+        let mut state = HomeState { preferences_open: true, preferences_pane: Pane::Keys, ..HomeState::default() };
         state.keys_card.f_keys = Some(f_keys);
         state
     }
@@ -974,7 +1022,7 @@ mod tests {
         for key in [ShowKey::Left, ShowKey::PageUp, ShowKey::End] {
             state.keys.set(key, KeyAction::ShowAgain);
         }
-        assert_eq!(none_line(&state.keys, false), "No key does Next Slide or Previous Slide or Last Slide now.");
+        assert_eq!(none_line(&state.keys, false), "No key does Next Slide, Previous Slide or Last Slide now.");
         // In SoftProjector's layout on a Mac no key does Clear All: its button does, and the
         // line says nothing of it.
         let mut state = state_on(false);
@@ -1094,6 +1142,84 @@ mod tests {
     }
 
     #[test]
+    fn the_sentences_line_is_beside_the_headings_at_1100_and_says_what_add_a_key_does() {
+        for language in Language::ALL {
+            crate::i18n::with_language(language, || {
+                for (width, f_keys) in [(1100.0, true), (1100.0, false), (1040.0, true), (1280.0, false), (820.0, true)]
+                {
+                    let said = format!("{language:?} at {width}, F keys {f_keys}");
+                    let ctx = crate::studio::tests::styled();
+                    let mut state = state_on(f_keys);
+                    let (words, _) = page(&ctx, &mut state, width);
+                    // With nothing said, the line says what Add a Key is for, so it never reads
+                    // as a gap.
+                    let hint = t(
+                        "settings.keys.add.hint",
+                        "Any key on the keyboard, or a clicker\u{2019}s button, can be given something to do",
+                    );
+                    assert!(shown(&words, hint), "{said}: the line says what Add a Key does");
+                    // From 1040 up the first row follows the headings at once: no band between.
+                    let heading = place(&words, &t("settings.keys.col.key", "Key").to_uppercase());
+                    let names: Vec<String> = KeyAction::ALL.iter().map(|action| action.words()).collect();
+                    let first = words
+                        .iter()
+                        .filter(|(have, _)| names.contains(have))
+                        .map(|(_, rect)| rect.center().y)
+                        .fold(f32::MAX, f32::min);
+                    if width >= 1040.0 {
+                        assert!(first - heading.center().y < 45.0, "{said}: a band of {}", first - heading.center().y);
+                        assert!((place(&words, hint).center().y - heading.center().y).abs() < 2.0, "{said}");
+                    }
+                    // A sentence takes the hint's place.
+                    state.keys_card.listening = true;
+                    state.keys_card.say = Refusal::Held.reason(!f_keys).unwrap_or_default();
+                    let (words, _) = page(&ctx, &mut state, width);
+                    assert!(shown(&words, &state.keys_card.say) && !shown(&words, hint), "{said}");
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn leaving_the_keys_page_without_a_click_ends_listening() {
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut state = state_on(false);
+        let rows = crate::key_table::rows(false);
+        assert!(click(&ctx, &mut state, &show, "Add a Key\u{2026}"));
+        assert!(listening(&state));
+        // Another page is chosen from outside the window (a command), and nothing is drawn yet:
+        // it listens no more, so the menus come back and a key pressed is not added.
+        state.preferences_pane = Pane::About;
+        assert!(!listening(&state), "not on the Keys page");
+        key_pressed(&mut state, &typed("b"));
+        assert_eq!(state.keys.listed(false), rows, "nothing was added");
+        assert!(!state.keys_card.listening);
+        // The same when Settings is closed.
+        state.preferences_pane = Pane::Keys;
+        assert!(click(&ctx, &mut state, &show, "Add a Key\u{2026}"));
+        state.preferences_open = false;
+        assert!(!listening(&state), "Settings is closed");
+        key_pressed(&mut state, &typed("b"));
+        assert_eq!(state.keys.listed(false), rows);
+    }
+
+    #[test]
+    fn an_added_keys_note_takes_two_lines_in_the_narrowest_window() {
+        let ctx = crate::studio::tests::styled();
+        let mut state = state_on(true);
+        state.keys.add(&typed("b"), true).expect("added");
+        let note = "Added \u{b7} no longer jumps to Bridge 1";
+        let (wide, _) = page(&ctx, &mut state, 1280.0);
+        assert!(place(&wide, note).height() < 20.0, "one line where there is room");
+        let (narrow, _) = page(&ctx, &mut state, 820.0);
+        let at = place(&narrow, note);
+        assert!(at.height() > 20.0 && at.height() <= 40.0, "two lines inside its row: {}", at.height());
+        // In the middle of its row, beside its key's cap.
+        assert!((at.center().y - place(&narrow, "B").center().y).abs() < 3.0);
+    }
+
+    #[test]
     fn reset_is_lit_only_while_a_row_listed_here_differs_or_a_key_was_added() {
         let ctx = crate::studio::tests::styled();
         let show = Show::new(Vec::new());
@@ -1130,6 +1256,13 @@ mod tests {
                     changing.push(t("settings.keys.add", "Add a Key\u{2026}").to_owned());
                     changing.push(t("settings.keys.add.listening", "Press a key\u{2026}").to_owned());
                     changing.push(held.clone());
+                    changing.push(
+                        t(
+                            "settings.keys.add.hint",
+                            "Any key on the keyboard, or a clicker\u{2019}s button, can be given something to do",
+                        )
+                        .to_owned(),
+                    );
                     let still = |words: &[(String, Rect)]| -> Vec<(String, Rect)> {
                         words.iter().filter(|(have, _)| !changing.contains(have)).cloned().collect()
                     };

@@ -779,16 +779,20 @@ fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
     for (menu, command, key) in crate::menubar::shortcuts() {
         rows.push((menu, command.trim_end_matches('…').to_owned(), keys_words(&[key])));
     }
-    card(
+    // Every key opens the list of keys (`?`), in the operator's window.
+    let every = t("settings.keys.fixed.every", "Every key");
+    if parts::card_with_key(
         ui,
         t("settings.keys.fixed.title", "Always the same"),
         t("settings.keys.fixed.about", "Fixed keys \u{b7} press ? anywhere for the whole list"),
-        None,
+        Some(every),
         |ui| {
             keys_table(ui, &rows);
             ui.add_space(8.0);
         },
-    );
+    ) {
+        state.key_sheet = true;
+    }
 }
 
 /// A group as Settings writes it: the fuller of its names ("Verse 1" for the group that
