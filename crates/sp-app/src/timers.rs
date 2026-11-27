@@ -175,16 +175,24 @@ fn file() -> Option<std::path::PathBuf> {
     crate::bible_store::data_dir().map(|dir| dir.join("timers.json"))
 }
 
-pub fn load() -> Vec<Timer> {
-    file()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default()
+/// The timers as last saved; and a file there that couldn't be read, kept aside (`whole_file`).
+pub fn load() -> (Vec<Timer>, Option<crate::whole_file::Unread>) {
+    file().map_or((Vec::new(), None), |path| load_from(&path))
+}
+
+fn load_from(path: &std::path::Path) -> (Vec<Timer>, Option<crate::whole_file::Unread>) {
+    crate::whole_file::read_or_default(path, crate::whole_file::What::Timers, |text| {
+        serde_json::from_str(text).map_err(|e| e.to_string())
+    })
 }
 
 pub fn save(timers: &[Timer]) -> Result<(), String> {
     let path = file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
+    save_to(&path, timers)
+}
+
+fn save_to(path: &std::path::Path, timers: &[Timer]) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
             tf(
@@ -194,21 +202,30 @@ pub fn save(timers: &[Timer]) -> Result<(), String> {
             )
         })?;
     }
-    let partial = path.with_extension("json.part");
-    std::fs::write(&partial, serde_json::to_string_pretty(timers).unwrap_or_default())
-        .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| {
-            tf(
-                "tools.timers.not_saved",
-                "Could not save the timers: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })
+    crate::whole_file::write(path, serde_json::to_string_pretty(timers).unwrap_or_default().as_bytes()).map_err(|e| {
+        tf(
+            "tools.timers.not_saved",
+            "Could not save the timers: {error}",
+            &[("error", &crate::notices::write_problem(&e))],
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_timers_file_that_cant_be_read_is_kept_aside_and_never_saved_over() {
+        let good = serde_json::to_string_pretty(&vec![Timer::new("Sermon".to_owned())]).unwrap();
+        crate::whole_file::tests::check_loader(
+            "timers.json",
+            crate::whole_file::What::Timers,
+            good.as_bytes(),
+            |path| load_from(path).1,
+            |path| save_to(path, &[]).unwrap(),
+        );
+    }
 
     #[test]
     fn a_countdown_runs_pauses_resets_and_stops_at_zero_unless_it_may_run_over() {

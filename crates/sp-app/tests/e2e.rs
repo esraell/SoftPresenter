@@ -801,6 +801,45 @@ fn a_run_that_was_closed_from_outside_is_said_once_at_the_next_start() {
     );
 }
 
+#[test]
+fn a_damaged_screens_file_is_kept_aside_and_said_at_the_start() {
+    let Some(run) = Run::new("a_damaged_screens_file_is_kept_aside_and_said_at_the_start") else { return };
+    // Cut short part way through, as a power cut during a save leaves it.
+    let damaged = br#"{"format":"softpresenter-screens","version":1,"screens":[{"id":"6f0e1c52-8d1e-4d39-9f38"#;
+    std::fs::create_dir_all(&run.data).expect("the copy's data folder");
+    std::fs::write(run.data.join("screens.json"), damaged).expect("the damaged file");
+    let copy = run.start(&[]);
+    let kept = run.data.join("screens (could not be read).json");
+    assert_eq!(std::fs::read(&kept).ok().as_deref(), Some(&damaged[..]), "the bytes are kept{}", run.context());
+    let reply = copy.ok(&["notices"]);
+    let told: Vec<&Value> = reply
+        .data
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|notice| notice["text"].as_str().is_some_and(|text| text.contains("screen settings")))
+        .collect();
+    assert_eq!(told.len(), 1, "said once: {}{}", reply.text, run.context());
+    assert_eq!(told[0]["kind"], "trouble", "{}", reply.text);
+    assert_eq!(
+        told[0]["text"].as_str().unwrap_or_default(),
+        format!(
+            "SoftPresenter couldn't read its screen settings, so it started with new ones. The old file is kept as {}.",
+            kept.display()
+        )
+    );
+    // The app runs on the screens it made, and the log says why.
+    assert!(!copy.ok(&["screens"]).text.is_empty());
+    let quitted = copy.quit();
+    quitted.assert_clean(&run);
+    assert!(
+        quitted.log.lines().any(|line| line.contains("[settings] screens.json") && line.contains("It was kept as")),
+        "the log says why{}",
+        run.context()
+    );
+    assert_eq!(std::fs::read(&kept).ok().as_deref(), Some(&damaged[..]), "still kept after the quit{}", run.context());
+}
+
 // ---------------------------------------------------------------------------------------------
 // One copy per data folder
 

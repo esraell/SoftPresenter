@@ -451,5 +451,15 @@
   "notices.import.damage.unknown_kind": "одно из значений такого типа, какого не бывает ни в одном файле базы данных",
   "notices.import.damage.table_outside_file": "одна из таблиц начинается на странице, которой нет в файле",
   "notices.unreachable": "Нет связи с {service}. SoftPresenter продолжает попытки. Проверьте подключение этого компьютера к интернету.",
-  "notices.unreachable_try_again": "Нет связи с {service}. Проверьте подключение этого компьютера к интернету и попробуйте ещё раз."
+  "notices.unreachable_try_again": "Нет связи с {service}. Проверьте подключение этого компьютера к интернету и попробуйте ещё раз.",
+  "notices.unread.screens": "SoftPresenter не смог прочитать настройки экранов, поэтому начал с новых.",
+  "notices.unread.settings": "SoftPresenter не смог прочитать свои настройки, поэтому начал с обычных.",
+  "notices.unread.media": "SoftPresenter не смог прочитать медиатеку и медиасписки, поэтому они пусты.",
+  "notices.unread.audio": "SoftPresenter не смог прочитать аудиосписки, поэтому они пусты.",
+  "notices.unread.macros": "SoftPresenter не смог прочитать макросы, поэтому начал без них.",
+  "notices.unread.timers": "SoftPresenter не смог прочитать таймеры, поэтому начал без них.",
+  "notices.unread.playlists": "SoftPresenter не смог прочитать списки, поэтому начал с одного пустого.",
+  "notices.unread.libraries": "SoftPresenter не смог прочитать библиотеки, поэтому начал без них.",
+  "notices.unread.kept": "Старый файл сохранён как {file}.",
+  "notices.unread.not_kept": "Сохранить старый файл не удалось: {error}"
 }

@@ -102,6 +102,7 @@ mod updates;
 mod versions;
 mod voxlive;
 mod whats_new;
+mod whole_file;
 mod window_plan;
 mod writer;
 
@@ -2349,6 +2350,9 @@ struct App {
     following: [followed::Following; 2],
     /// The media playlists read at the start, handed to the window's state once it is made.
     media_playlists: Vec<media::Playlist>,
+    /// The settings files the start couldn't read, kept aside (`whole_file`): told in the notices
+    /// once the window's state is made.
+    unread: Vec<whole_file::Unread>,
     unsaved_since: Option<Instant>,
     /// Whether the Edit view was open at the last drawing (leaving it writes what was changed).
     was_editing: bool,
@@ -2633,6 +2637,8 @@ impl App {
             .collect();
         output.send(OutputMsg::PreviewTargets(live_textures.clone()));
 
+        let (services, unread) = service::load();
+        self.unread.extend(unread);
         Ok(Some(Running {
             file_drops: file_drop::Listening::start(&home_window, self.waker.clone()),
             home_window: repaints::HomeWindow::new(home_window),
@@ -2707,7 +2713,7 @@ impl App {
                 versions: sp_model::all_versions(&self.themes),
                 song_templates: song_templates(&self.theme),
                 bible_layout: self.bible_layout,
-                services: service::load(),
+                services,
                 // A song is found again by its file, without the ending (which changes when
                 // it is first saved); one with no file, by its title.
                 song_keys: self
@@ -11563,7 +11569,8 @@ impl ApplicationHandler<AppEvent> for App {
                 // The Bibles in use, read on a thread of their own, not as the Bible view opens.
                 running.home_state.bible.read_ahead();
                 self.bible_page_saved = running.home_state.bible.choices();
-                let prefs = service::load_prefs();
+                let (prefs, unread) = service::load_prefs();
+                self.unread.extend(unread);
                 running.home_state.apply_prefs(&prefs);
                 // The setup opens once on every Mac that hasn't seen it yet, a fresh install or
                 // one set up before there was a setup. Testing aid: SOFTPRESENTER_SETUP=1 shows
@@ -11581,7 +11588,9 @@ impl ApplicationHandler<AppEvent> for App {
                 // listed makes the list from how the output was set up before: one screen
                 // placed automatically, and one sent over NDI if NDI was on.
                 let quiet = self.quiet();
-                running.home_state.screens = screens::load().unwrap_or_else(|| {
+                let (screens, unread) = screens::load();
+                self.unread.extend(unread);
+                running.home_state.screens = screens.unwrap_or_else(|| {
                     let ndi = (prefs.ndi_on && running.home_state.ndi_available).then_some(prefs.ndi_name.as_str());
                     let made = screens::starting(ndi);
                     if !quiet {
@@ -11598,14 +11607,25 @@ impl ApplicationHandler<AppEvent> for App {
                 }
                 let opening = prefs.start_with.clone();
                 self.prefs_saved = Some(prefs);
-                running.home_state.timers = timers::load();
+                let (timers, unread) = timers::load();
+                self.unread.extend(unread);
+                running.home_state.timers = timers;
                 running.home_state.messages = messages::load();
                 running.home_state.props = props::load();
-                running.home_state.macros = macros::load();
-                running.home_state.libraries = libraries::load();
+                let (macros, unread) = macros::load();
+                self.unread.extend(unread);
+                running.home_state.macros = macros;
+                let (libraries, unread) = libraries::load();
+                self.unread.extend(unread);
+                running.home_state.libraries = libraries;
                 running.home_state.media_playlists = std::mem::take(&mut self.media_playlists);
                 running.home_state.stage_layouts = stage::load_layouts();
-                running.home_state.audio = audio::load();
+                let (audio, unread) = audio::load();
+                self.unread.extend(unread);
+                running.home_state.audio = audio;
+                // A settings file that couldn't be read was kept aside and the start went on with
+                // the usual settings: said once, in the language just set.
+                whole_file::tell(&mut running.home_state.notices, self.unread.drain(..));
                 // Start-up belongs in macros: what Settings once said to play when the app opened
                 // becomes a macro that plays it (and runs below, as it did), said once.
                 // The macro is named in the notice as it is called.
@@ -13124,6 +13144,7 @@ fn main() -> ExitCode {
         timelychurch: timelychurch::Connection::new(timelychurch::gate(), timelychurch::Files::in_data_dir()),
         voxlive_preview: None,
         media_playlists: Vec::new(),
+        unread: Vec::new(),
         announcing: None,
         stamps,
         writer: {
@@ -13172,7 +13193,8 @@ fn main() -> ExitCode {
     };
     // The pictures that were in the media bin last time, then any named on the command line.
     start_steps::mark("app filled in");
-    let saved = media::load_list();
+    let (saved, unread) = media::load_list();
+    app.unread.extend(unread);
     app.media_playlists = saved.playlists;
     let mut pictures_to_load = saved.entries;
     for path in &media_paths {

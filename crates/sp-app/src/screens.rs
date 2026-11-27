@@ -916,25 +916,43 @@ pub fn to_json(screens: &[Screen]) -> String {
     text
 }
 
-/// Reads the list. A file that is not a screens file, or lists none, gives `None`.
-pub fn from_json(text: &str) -> Option<Vec<Screen>> {
-    let file: File = serde_json::from_str(text).ok()?;
-    ((file.format == FORMAT || file.format == OLD_FORMAT) && file.version == 1 && !file.screens.is_empty())
-        .then_some(file.screens)
+/// Reads the list (which may list none). The error, for the log, says why a file isn't a
+/// screens file this build reads.
+pub fn from_json(text: &str) -> Result<Vec<Screen>, String> {
+    let file: File = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    if file.format != FORMAT && file.format != OLD_FORMAT {
+        return Err(format!("it is not a screens file ({:?})", file.format));
+    }
+    if file.version != 1 {
+        return Err(format!("it is version {} of the screens file, made by a newer SoftPresenter", file.version));
+    }
+    Ok(file.screens)
 }
 
 fn file() -> Option<std::path::PathBuf> {
     crate::bible_store::data_dir().map(|dir| dir.join("screens.json"))
 }
 
-/// The saved list, if there is one.
-pub fn load() -> Option<Vec<Screen>> {
-    from_json(&std::fs::read_to_string(file()?).ok()?)
+/// The saved list, if there is one that lists any; and a file there that couldn't be read,
+/// kept aside (`whole_file`).
+pub fn load() -> (Option<Vec<Screen>>, Option<crate::whole_file::Unread>) {
+    file().map_or((None, None), |path| load_from(&path))
+}
+
+fn load_from(path: &std::path::Path) -> (Option<Vec<Screen>>, Option<crate::whole_file::Unread>) {
+    match crate::whole_file::read(path, crate::whole_file::What::Screens, from_json) {
+        Ok(screens) => (screens.filter(|screens| !screens.is_empty()), None),
+        Err(unread) => (None, Some(unread)),
+    }
 }
 
 pub fn save(screens: &[Screen]) -> Result<(), String> {
     let path = file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
+    save_to(&path, screens)
+}
+
+fn save_to(path: &std::path::Path, screens: &[Screen]) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
             tf(
@@ -944,14 +962,36 @@ pub fn save(screens: &[Screen]) -> Result<(), String> {
             )
         })?;
     }
-    let partial = path.with_extension("json.part");
-    std::fs::write(&partial, to_json(screens)).and_then(|()| std::fs::rename(&partial, &path)).map_err(|e| {
+    crate::whole_file::write(path, to_json(screens).as_bytes()).map_err(|e| {
         tf("screens.not_saved", "Could not save the screens: {error}", &[("error", &crate::notices::write_problem(&e))])
     })
 }
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_screens_file_that_cant_be_read_is_kept_aside_and_never_saved_over() {
+        let good = to_json(&[Screen::new("Stream".to_owned(), Output::Ndi("Sanctuary".to_owned()))]);
+        crate::whole_file::tests::check_loader(
+            "screens.json",
+            crate::whole_file::What::Screens,
+            good.as_bytes(),
+            |path| {
+                let (screens, unread) = load_from(path);
+                assert_eq!(screens.is_some(), unread.is_none(), "a good file's screens, or none");
+                unread
+            },
+            |path| save_to(path, &starting(None)).unwrap(),
+        );
+        // A file listing no screens is no damage: the screens are made anew, as with no file.
+        let dir = crate::whole_file::tests::TestDir::new("no-screens");
+        let path = dir.0.join("screens.json");
+        std::fs::write(&path, to_json(&[])).unwrap();
+        let (screens, unread) = load_from(&path);
+        assert!(screens.is_none() && unread.is_none());
+        assert!(path.exists());
+    }
 
     #[test]
     fn a_screens_own_theme_is_saved_and_one_without_says_nothing() {
@@ -1051,7 +1091,7 @@ mod tests {
         };
         let text = to_json(&[stream.clone(), key.clone()]);
         assert!(text.contains("\"see_through\": \"premultiplied\""), "{text}");
-        assert_eq!(from_json(&text), Some(vec![stream.clone(), key.clone()]));
+        assert_eq!(from_json(&text), Ok(vec![stream.clone(), key.clone()]));
         // Straight is the usual kind; every kind reads back by its name.
         assert_eq!(Alpha::default(), Alpha::Straight);
         for alpha in [Alpha::Straight, Alpha::Premultiplied] {
@@ -1427,7 +1467,7 @@ mod tests {
         let text = to_json(std::slice::from_ref(&screen));
         assert!(text.contains("\"decklink\"") && text.contains("\"mode\": \"1080i59.94\""), "{text}");
         assert!(!text.contains("keyer"), "a keyer that is off is not written");
-        assert_eq!(from_json(&text), Some(vec![screen.clone()]));
+        assert_eq!(from_json(&text), Ok(vec![screen.clone()]));
         let mut keyed = Screen {
             output: Output::DeckLink(DeckLinkOut {
                 id: None,
@@ -1445,7 +1485,7 @@ mod tests {
         assert_eq!(out["keyer"], "external");
         assert_eq!(saved["screens"][0]["look"]["see_through"], "premultiplied", "{text}");
         assert!(out.get("id").is_none(), "a device without an id is saved without one: {text}");
-        assert_eq!(from_json(&text), Some(vec![keyed]));
+        assert_eq!(from_json(&text), Ok(vec![keyed]));
     }
 
     #[test]
@@ -1727,16 +1767,20 @@ mod tests {
         crate::i18n::with_language(crate::i18n::Language::English, || {
             let screens = starting(Some("SoftPresenter Audience"));
             assert_eq!(screens.len(), 2);
-            assert_eq!(from_json(&to_json(&screens)), Some(screens.clone()));
-            assert_eq!(from_json("{}"), None);
-            assert_eq!(from_json(&to_json(&[])), None);
+            assert_eq!(from_json(&to_json(&screens)), Ok(screens.clone()));
+            assert!(from_json("{}").is_err(), "not a screens file");
+            assert!(
+                from_json(r#"{"format":"softpresenter-screens","version":2,"screens":[]}"#).is_err(),
+                "a newer one"
+            );
+            assert_eq!(from_json(&to_json(&[])), Ok(Vec::new()), "lists none: made anew as it loads");
             assert_eq!(next_name(&screens, Kind::Audience), "Screen 3");
             assert_eq!(next_name(&screens, Kind::Stage), "Stage Screen 1");
             // A file from before stage screens reads, its screens being audience screens.
             let old = r#"{"format":"softpresenter-screens","version":1,"screens":[{"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e01","name":"A","output":"window"}]}"#;
-            assert_eq!(from_json(old).map(|list| list[0].kind), Some(Kind::Audience));
+            assert_eq!(from_json(old).map(|list| list[0].kind), Ok(Kind::Audience));
             let mixed = vec![Screen::new("A".to_owned(), Output::Window), Screen::stage("B".to_owned(), Output::Off)];
-            assert_eq!(from_json(&to_json(&mixed)), Some(mixed));
+            assert_eq!(from_json(&to_json(&mixed)), Ok(mixed));
             assert_eq!(starting(None).len(), 1);
         });
     }

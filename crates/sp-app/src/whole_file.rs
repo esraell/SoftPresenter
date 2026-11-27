@@ -1,0 +1,481 @@
+//! Settings files read whole or kept aside, and files written whole.
+//!
+//! - **A settings file that is there but can't be read** (cut short by a power cut, filled with
+//!   zeros, not text, damaged, or made by a newer SoftPresenter) is kept beside itself, as
+//!   `screens (could not be read).json` (then `screens (could not be read 2).json`, and so on,
+//!   never over a copy kept before), and the app starts from the usual settings. So what was in
+//!   it is never saved over. The operator is told once, in the notices ([`tell`]), and the log
+//!   says why. A file that isn't there is the usual settings, and nothing is said.
+//! - **A file is written whole** ([`write`]): under a name of its own beside it, flushed to the
+//!   disk, then renamed into place, and its folder flushed after (where the system can: not
+//!   Windows), so a power cut leaves the old file or the new one, never an empty or half-written
+//!   one. A save that fails takes its half-written file away.
+//!
+//! A file the app isn't allowed to open (macOS kept it out of Documents) that can't be moved
+//! either is left where it is, and only the log says so: no save can go over it while its folder
+//! stays shut (a save is written in the same folder and renamed over it), and what keeps the app
+//! out is said once elsewhere (`library_folder.rs`), not once for each settings file. One that
+//! can't be opened for another reason, or can't be read, and can't be moved is told, saying the
+//! old file couldn't be kept.
+//!
+//! These files are small, but flushing one to the disk waits for the disk: on an Apple silicon
+//! Mac about 5.4 ms a file through the library's writer, 10.8 ms for a settings file with its
+//! folder. None is written on the screens' thread; the library's files are written on the
+//! library's writer's thread (`writer.rs`), which flushes a folder once after a run of files
+//! into it, and the small settings files on the window's.
+
+use std::path::{Path, PathBuf};
+
+use crate::i18n::{t, tf};
+
+/// Which settings file couldn't be read, which says what the operator is told.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum What {
+    Screens,
+    Settings,
+    MediaList,
+    Audio,
+    Macros,
+    Timers,
+    Playlists,
+    Libraries,
+}
+
+/// A settings file that was there but couldn't be read, and where it was kept.
+#[derive(Debug)]
+pub struct Unread {
+    pub what: What,
+    /// The copy kept, or why none could be kept (a plain sentence).
+    pub kept: Result<PathBuf, String>,
+}
+
+impl Unread {
+    /// What the operator is told, in the language set.
+    pub fn told(&self) -> String {
+        let first = match self.what {
+            What::Screens => t(
+                "notices.unread.screens",
+                "SoftPresenter couldn't read its screen settings, so it started with new ones.",
+            ),
+            What::Settings => t(
+                "notices.unread.settings",
+                "SoftPresenter couldn't read its settings, so it started with the usual ones.",
+            ),
+            What::MediaList => t(
+                "notices.unread.media",
+                "SoftPresenter couldn't read its media bin and media playlists, so they start empty.",
+            ),
+            What::Audio => {
+                t("notices.unread.audio", "SoftPresenter couldn't read its audio playlists, so they start empty.")
+            }
+            What::Macros => {
+                t("notices.unread.macros", "SoftPresenter couldn't read its macros, so it started with none.")
+            }
+            What::Timers => {
+                t("notices.unread.timers", "SoftPresenter couldn't read its timers, so it started with none.")
+            }
+            What::Playlists => t(
+                "notices.unread.playlists",
+                "SoftPresenter couldn't read its playlists, so it started with an empty one.",
+            ),
+            What::Libraries => {
+                t("notices.unread.libraries", "SoftPresenter couldn't read its libraries, so it started with none.")
+            }
+        };
+        let then = match &self.kept {
+            Ok(kept) => tf(
+                "notices.unread.kept",
+                "The old file is kept as {file}.",
+                &[("file", &crate::applog::plain_paths(&kept.display().to_string()))],
+            ),
+            Err(error) => tf("notices.unread.not_kept", "The old file could not be kept: {error}", &[("error", error)]),
+        };
+        format!("{first} {then}")
+    }
+}
+
+/// Tells the operator of each settings file kept aside: trouble in the notices, once each (and
+/// so in the log too).
+pub fn tell(notices: &mut crate::notices::Notices, unread: impl IntoIterator<Item = Unread>) {
+    for unread in unread {
+        notices.trouble(unread.told());
+    }
+}
+
+/// Reads a settings file whole: `Ok(None)` when there is none. One that is there but can't be
+/// read, isn't text, or that `parse` refuses (with a reason, for the log) is kept aside and comes
+/// back as the [`Unread`] to tell the operator. One the app isn't allowed to open that can't be
+/// moved either is `Ok(None)` too, said only in the log (see the module's notes).
+pub fn read<T>(path: &Path, what: What, parse: impl FnOnce(&str) -> Result<T, String>) -> Result<Option<T>, Unread> {
+    let name = path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            let refused = e.kind() == std::io::ErrorKind::PermissionDenied;
+            return match set_aside(path, None, &format!("{name} could not be read ({e}).")) {
+                Err(_) if refused => Ok(None),
+                kept => Err(Unread { what, kept }),
+            };
+        }
+    };
+    let parsed = match std::str::from_utf8(&bytes) {
+        Ok(text) => parse(text),
+        Err(e) => Err(format!("it is not text (byte {} is not UTF-8)", e.valid_up_to() + 1)),
+    };
+    parsed.map(Some).map_err(|why| Unread {
+        what,
+        kept: set_aside(path, Some(&bytes), &format!("{name}: {}.", why.trim_end_matches('.'))),
+    })
+}
+
+/// [`read`], with the usual value when there is no file or it was kept aside.
+pub fn read_or_default<T: Default>(
+    path: &Path,
+    what: What,
+    parse: impl FnOnce(&str) -> Result<T, String>,
+) -> (T, Option<Unread>) {
+    match read(path, what, parse) {
+        Ok(value) => (value.unwrap_or_default(), None),
+        Err(unread) => (T::default(), Some(unread)),
+    }
+}
+
+/// How many copies of one file are kept at most; past that, the next isn't.
+const KEPT_MOST: u32 = 999;
+
+/// Keeps a settings file the app can't read beside itself, under a name no file has yet
+/// (`screens (could not be read).json`, then `screens (could not be read 2).json`…), so what the
+/// app uses instead is never saved over it, and logs why (`why`, a sentence). The file is renamed;
+/// where it can't be (Windows won't rename a file another program has open), the `bytes` read
+/// from it are written there instead. Returns the copy kept, or why none could be.
+pub fn set_aside(path: &Path, bytes: Option<&[u8]>, why: &str) -> Result<PathBuf, String> {
+    let stem = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+    let ending = path.extension().map_or_else(|| "json".to_owned(), |e| e.to_string_lossy().into_owned());
+    let free = (1..=KEPT_MOST)
+        .map(|n| {
+            let more = if n == 1 { String::new() } else { format!(" {n}") };
+            path.with_file_name(format!("{stem} (could not be read{more}).{ending}"))
+        })
+        // Looked at without following it: a link of that name is a file there too.
+        .find(|candidate| std::fs::symlink_metadata(candidate).is_err());
+    let kept = match free {
+        None => Err(std::io::Error::other(format!("{KEPT_MOST} copies of it are kept already"))),
+        Some(aside) => std::fs::rename(path, &aside)
+            .or_else(|renaming| match bytes {
+                Some(bytes) => write_new(&aside, bytes).map_err(|_| renaming),
+                None => Err(renaming),
+            })
+            .map(|()| aside),
+    };
+    match kept {
+        Ok(aside) => {
+            if let Some(folder) = path.parent() {
+                flush_folder(folder);
+            }
+            crate::applog::problem("settings", &format!("{why} It was kept as {}.", aside.display()));
+            Ok(aside)
+        }
+        Err(e) => {
+            crate::applog::problem("settings", &format!("{why} It could not be kept: {e}"));
+            Err(crate::notices::write_problem(&e))
+        }
+    }
+}
+
+/// Writes `bytes` to a new file at `path`, flushed to the disk, never over a file there (one that
+/// came meanwhile). A copy that can't be finished is taken away.
+fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+    let written = std::io::Write::write_all(&mut file, bytes).and_then(|()| flush(&file));
+    if written.is_err() {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+    }
+    written
+}
+
+/// Writes `bytes` to the file at `path` whole, under `<name>.part` first (see the module's notes),
+/// and flushes its folder after.
+pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let name = path.file_name().map_or_else(|| "file".into(), |name| name.to_string_lossy().into_owned());
+    replace(path, &path.with_file_name(format!("{name}.part")), bytes)?;
+    if let Some(folder) = path.parent() {
+        flush_folder(folder);
+    }
+    Ok(())
+}
+
+/// Writes `bytes` into `temporary`, flushes it to the disk and renames it to `path`. The folder
+/// is left for the caller to flush ([`flush_folder`]): the library's writer flushes it once after
+/// a run of files into it. A failure takes `temporary` away.
+pub fn replace(path: &Path, temporary: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let written = (|| {
+        let mut file = std::fs::File::create(temporary)?;
+        std::io::Write::write_all(&mut file, bytes)?;
+        flush(&file)?;
+        drop(file);
+        std::fs::rename(temporary, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(temporary);
+    }
+    written
+}
+
+/// Flushes a file's bytes to the disk (on a Mac, past the disk's own cache too). A disk that
+/// can't be asked to (some network folders) has the file as it was written.
+fn flush(file: &std::fs::File) -> std::io::Result<()> {
+    match file.sync_all() {
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::Unsupported | std::io::ErrorKind::InvalidInput) => Ok(()),
+        flushed => flushed,
+    }
+}
+
+/// Flushes a folder's list of files to the disk, so a file just renamed into it is there after a
+/// power cut. Where the system can (a Mac, Linux); Windows can't open a folder as a file to flush
+/// it. A disk that can't be asked to (some network folders) is left as it is.
+pub fn flush_folder(folder: &Path) {
+    #[cfg(unix)]
+    {
+        let _ = std::fs::File::open(folder).and_then(|folder| folder.sync_all());
+    }
+    #[cfg(not(unix))]
+    let _ = folder;
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::notices::{Kind, Notices};
+
+    /// A folder of a test's own, removed after.
+    pub struct TestDir(pub PathBuf);
+
+    impl TestDir {
+        pub fn new(name: &str) -> TestDir {
+            static COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!("softpresenter-whole-{}-{n}-{name}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            TestDir(dir)
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// The ways a settings file is found damaged: cut short (a power cut part way through a
+    /// save), empty or filled with zeros (a power cut before its blocks were written), and not
+    /// UTF-8 (saved again as UTF-16 by a text editor).
+    pub fn damaged(good: &[u8]) -> [(&'static str, Vec<u8>); 4] {
+        let text = std::str::from_utf8(good).expect("a good file is text");
+        let mut utf16 = vec![0xFF, 0xFE];
+        utf16.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+        [
+            ("cut short", good[..good.len() / 2].to_vec()),
+            ("empty", Vec::new()),
+            ("zeros", vec![0; good.len()]),
+            ("UTF-16", utf16),
+        ]
+    }
+
+    /// Checks one settings file's loader and saver: each damaged file is kept aside whole, as
+    /// `<stem> (could not be read).json` beside it, a save afterwards never goes over the copy
+    /// kept, and the operator is told where it is. `good` is a file the saver wrote, with
+    /// something in it; `load` reads the file at a path and says what it couldn't read; `save`
+    /// saves the usual settings there.
+    pub fn check_loader(
+        file: &str,
+        what: What,
+        good: &[u8],
+        load: impl Fn(&Path) -> Option<Unread>,
+        save: impl Fn(&Path),
+    ) {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            for (how, bytes) in damaged(good) {
+                let dir = TestDir::new(file);
+                let path = dir.0.join(file);
+                // A good file reads, and says nothing.
+                std::fs::write(&path, good).unwrap();
+                assert!(load(&path).is_none(), "{file}: a good file reads");
+                assert_eq!(std::fs::read(&path).unwrap(), good, "{file}: a good file is left as it is");
+                // A damaged one is kept aside, whole.
+                std::fs::write(&path, &bytes).unwrap();
+                let unread = load(&path).unwrap_or_else(|| panic!("{file} {how}: not kept aside"));
+                assert_eq!(unread.what, what, "{file} {how}");
+                let stem = Path::new(file).file_stem().unwrap().to_string_lossy().into_owned();
+                let kept = dir.0.join(format!("{stem} (could not be read).json"));
+                assert_eq!(unread.kept.as_ref().ok(), Some(&kept), "{file} {how}: {:?}", unread.kept);
+                assert_eq!(std::fs::read(&kept).unwrap(), bytes, "{file} {how}: the bytes are kept");
+                // The usual settings are saved over the file, never over the copy kept.
+                save(&path);
+                assert_eq!(std::fs::read(&kept).unwrap(), bytes, "{file} {how}: the copy survives a save");
+                assert!(load(&path).is_none(), "{file} {how}: what was saved reads");
+                assert!(!dir.0.join(format!("{file}.part")).exists(), "{file} {how}: no half-written file is left");
+                // The operator is told, once, where it is.
+                let mut notices = Notices::default();
+                tell(&mut notices, [unread]);
+                let said: Vec<_> = notices.entries().collect();
+                assert_eq!(said.len(), 1, "{file} {how}");
+                assert_eq!(said[0].kind, Kind::Trouble, "{file} {how}");
+                assert!(said[0].text.starts_with("SoftPresenter couldn't read its "), "{}", said[0].text);
+                assert!(
+                    said[0].text.ends_with(&format!(" The old file is kept as {}.", kept.display())),
+                    "{}",
+                    said[0].text
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn a_file_set_aside_takes_a_name_of_its_own_and_never_one_kept_before() {
+        let dir = TestDir::new("aside");
+        let path = dir.0.join("screens.json");
+        for n in 1..=3 {
+            std::fs::write(&path, format!("damaged {n}")).unwrap();
+            let kept = set_aside(&path, None, "screens.json is damaged.").unwrap();
+            let more = if n == 1 { String::new() } else { format!(" {n}") };
+            assert_eq!(kept, dir.0.join(format!("screens (could not be read{more}).json")));
+            assert!(!path.exists(), "the file is moved, not copied");
+        }
+        // Each copy kept before is as it was.
+        for (n, name) in ["screens (could not be read).json", "screens (could not be read 2).json"].iter().enumerate() {
+            assert_eq!(std::fs::read_to_string(dir.0.join(name)).unwrap(), format!("damaged {}", n + 1));
+        }
+        // A gap is filled first: only a name no file has is taken.
+        std::fs::remove_file(dir.0.join("screens (could not be read 2).json")).unwrap();
+        std::fs::write(&path, "damaged 4").unwrap();
+        assert_eq!(set_aside(&path, None, "again.").unwrap(), dir.0.join("screens (could not be read 2).json"));
+        assert_eq!(std::fs::read_to_string(dir.0.join("screens (could not be read 3).json")).unwrap(), "damaged 3");
+        // Nothing to move: said, and nothing is made.
+        assert!(set_aside(&path, None, "gone.").is_err());
+        assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 3);
+    }
+
+    #[test]
+    fn a_copy_written_where_the_file_cant_be_moved_never_goes_over_another() {
+        let dir = TestDir::new("copy");
+        let kept = dir.0.join("screens (could not be read).json");
+        write_new(&kept, b"first").unwrap();
+        assert!(write_new(&kept, b"second").is_err());
+        assert_eq!(std::fs::read(&kept).unwrap(), b"first");
+    }
+
+    #[test]
+    fn a_file_that_cant_be_opened_is_kept_aside_too() {
+        // A folder where the file should be: it can't be read as a file, so it is moved aside.
+        let dir = TestDir::new("folder");
+        let path = dir.0.join("screens.json");
+        std::fs::create_dir_all(path.join("inside")).unwrap();
+        let unread = read(&path, What::Screens, |_| -> Result<(), String> { panic!("nothing to parse") })
+            .expect_err("kept aside");
+        let kept = dir.0.join("screens (could not be read).json");
+        assert_eq!(unread.kept.as_ref().ok(), Some(&kept));
+        assert!(kept.join("inside").is_dir(), "moved whole");
+        assert!(!path.exists());
+    }
+
+    /// A file the app isn't allowed to open that can't be moved either (its folder can't be
+    /// changed) is left as it is, and not told: no save can go over it. One that can't be opened
+    /// for another reason is told, saying it couldn't be kept.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_that_can_be_neither_opened_nor_moved_is_left_and_not_told() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TestDir::new("shut");
+        let folder = dir.0.join("shut");
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("timers.json");
+        std::fs::write(&path, "[]").unwrap();
+        // A folder where the macros should be can't be opened as a file either, but not for want
+        // of leave.
+        let other = folder.join("macros.json");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // Run as the system's administrator, which every file lets in, there is nothing to check.
+        let checked = std::fs::read(&path).is_err().then(|| {
+            let timers = read(&path, What::Timers, |_| -> Result<u32, String> { Ok(1) });
+            let saved = write(&path, b"[1]");
+            let other = read(&other, What::Macros, |_| -> Result<u32, String> { Ok(1) });
+            (
+                matches!(timers, Ok(None)),
+                saved.is_err(),
+                other.err().map(|unread| crate::i18n::with_language(crate::i18n::Language::English, || unread.told())),
+            )
+        });
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        if let Some((usual, not_saved, other)) = checked {
+            assert!(usual, "the usual settings, said only in the log");
+            assert!(not_saved, "and no save can go over it");
+            assert_eq!(std::fs::read(&path).unwrap(), b"[]", "left as it was");
+            assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 2, "nothing else made there");
+            let told = other.expect("the other is told");
+            assert!(
+                told.starts_with(
+                    "SoftPresenter couldn't read its macros, so it started with none. The old file could not be kept: "
+                ),
+                "{told}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_file_is_the_usual_settings_and_nothing_is_kept_or_said() {
+        let dir = TestDir::new("none");
+        let path = dir.0.join("timers.json");
+        let read = read(&path, What::Timers, |_| -> Result<u32, String> { panic!("nothing to parse") });
+        assert!(matches!(read, Ok(None)));
+        assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 0, "nothing is made");
+    }
+
+    #[test]
+    fn a_file_the_parser_refuses_is_kept_aside_with_its_reason() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let dir = TestDir::new("refused");
+            let path = dir.0.join("screens.json");
+            std::fs::write(&path, r#"{"format":"softpresenter-screens","version":2,"screens":[]}"#).unwrap();
+            let read =
+                read(&path, What::Screens, |_| -> Result<(), String> { Err("made by a newer SoftPresenter".into()) });
+            let unread = read.expect_err("refused");
+            let kept = dir.0.join("screens (could not be read).json");
+            assert_eq!(unread.kept.as_ref().ok(), Some(&kept));
+            assert_eq!(
+                unread.told(),
+                format!(
+                    "SoftPresenter couldn't read its screen settings, so it started with new ones. The old file is kept as {}.",
+                    kept.display()
+                )
+            );
+        });
+    }
+
+    #[test]
+    fn a_file_is_written_whole_and_a_failed_save_leaves_nothing_half_written() {
+        let dir = TestDir::new("write");
+        let path = dir.0.join("macros.json");
+        write(&path, b"[1]").unwrap();
+        write(&path, b"[1, 2]").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"[1, 2]");
+        assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 1, "only the file");
+        // A save that can't be renamed into place (a folder is in the way) takes its half-written
+        // file away.
+        let blocked = dir.0.join("timers.json");
+        std::fs::create_dir_all(blocked.join("inside")).unwrap();
+        assert!(write(&blocked, b"[3]").is_err());
+        assert!(!dir.0.join("timers.json.part").exists(), "no half-written file is left");
+        // So does one whose half-written file can't be finished, through `replace`.
+        let part = dir.0.join(".song.sppres.saving");
+        std::fs::create_dir_all(dir.0.join("Songs")).unwrap();
+        assert!(replace(&dir.0.join("Songs"), &part, b"{}").is_err());
+        assert!(!part.exists(), "no half-written file is left");
+        flush_folder(&dir.0);
+    }
+}

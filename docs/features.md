@@ -97,6 +97,29 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the same for one song, and `sp songs` marks a song whose file changed. Quitting with a change
   that couldn't be saved keeps SoftPresenter's version in the library's "Not saved" folder, so
   neither version is lost.
+- **A settings file that can't be read is kept** (`whole_file.rs`). If the screens, the settings
+  (`preferences.json`, with the transition), the playlists, the libraries, the media bin and
+  media playlists, the audio playlists, the macros or the timers are found damaged as the app
+  starts (cut short or filled with zeros by a power cut, not text, or made by a newer
+  SoftPresenter), the file is kept beside itself as `<name> (could not be read).json` (then
+  `<name> (could not be read 2).json` and so on, never over a copy kept before), the app starts
+  with the usual ones, and the notices say so once, in trouble's amber, with where the copy is
+  ("SoftPresenter couldn't read its screen settings, so it started with new ones. The old file
+  is kept as …"); the log says why. A file that isn't there yet is the usual settings, and
+  nothing is said; so is one the app isn't allowed to open (macOS kept it out of Documents) and
+  can't move, which no save can go over while its folder stays shut, and the log says so. A start turned away because another
+  copy has the library only looks at the settings, and leaves a damaged file to that copy.
+  Messages, props, stage layouts and the Bible page's settings and history aren't covered yet:
+  one of them that can't be read is still taken for none, and saved over.
+- **Saved whole.** Every song and settings file is written under another name beside it, flushed
+  to the disk, then renamed into place, and its folder flushed after (on a Mac and Linux), so a
+  power cut leaves the old file or the new one, never an empty or half-written one; a save that
+  fails takes its half-written file away. A flush waits for the disk (on an Apple silicon Mac
+  about 5.4 ms a file through the library's writer, 10.8 ms for a settings file with its
+  folder): songs, playlists, libraries and the media bin are written on the library's writer's
+  thread, which flushes a folder once after a run of files into it (an import's songs flush the
+  Songs folder once); the small settings files on the window's thread; never on the screens'
+  thread.
 - **Song packs** (`.sppack`), to carry songs prepared at home to the church computer by
   AirDrop, email or a USB stick. File › Export Songs… (the songs picked out, or the one shown),
   a song's or playlist's right-click Export…, or `sp song export SONG… [--playlist NAME] --to

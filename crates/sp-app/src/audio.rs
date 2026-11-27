@@ -7,7 +7,7 @@ mod resample;
 mod ring;
 mod stream;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -129,17 +129,18 @@ impl Default for Library {
 }
 
 impl Library {
-    /// Reads the file's words. A file from before playlists is a plain list of tracks.
-    pub fn from_json(text: &str) -> Option<Library> {
+    /// Reads the file's words. A file from before playlists is a plain list of tracks. The
+    /// error, for the log, says why it isn't an audio list.
+    pub fn from_json(text: &str) -> Result<Library, String> {
         if let Ok(tracks) = serde_json::from_str::<Vec<Track>>(text) {
-            return Some(Library {
+            return Ok(Library {
                 playlists: vec![Playlist { tracks, ..Playlist::new(first_name()) }],
                 ..Library::default()
             });
         }
-        let value: serde_json::Value = serde_json::from_str(text).ok()?;
+        let value: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
         let has_loop = value.get("loop").is_some();
-        let mut library: Library = serde_json::from_value(value).ok()?;
+        let mut library: Library = serde_json::from_value(value).map_err(|e| e.to_string())?;
         if !has_loop {
             library.looping = library.through;
         }
@@ -147,7 +148,7 @@ impl Library {
             library.playlists.push(Playlist::new(first_name()));
         }
         library.current = library.current.min(library.playlists.len() - 1);
-        Some(library)
+        Ok(library)
     }
 
     /// The playlist shown. There is always one.
@@ -790,16 +791,23 @@ fn file() -> Option<PathBuf> {
     crate::bible_store::data_dir().map(|dir| dir.join("audio.json"))
 }
 
-pub fn load() -> Library {
-    file()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| Library::from_json(&text))
-        .unwrap_or_default()
+/// The audio playlists as last saved, or one empty one; and a file there that couldn't be read,
+/// kept aside (`whole_file`).
+pub fn load() -> (Library, Option<crate::whole_file::Unread>) {
+    file().map_or_else(|| (Library::default(), None), |path| load_from(&path))
+}
+
+fn load_from(path: &Path) -> (Library, Option<crate::whole_file::Unread>) {
+    crate::whole_file::read_or_default(path, crate::whole_file::What::Audio, Library::from_json)
 }
 
 pub fn save(library: &Library) -> Result<(), String> {
     let path = file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
+    save_to(&path, library)
+}
+
+fn save_to(path: &Path, library: &Library) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
             tf(
@@ -809,7 +817,7 @@ pub fn save(library: &Library) -> Result<(), String> {
             )
         })?;
     }
-    std::fs::write(&path, serde_json::to_string_pretty(library).unwrap_or_default()).map_err(|e| {
+    crate::whole_file::write(path, serde_json::to_string_pretty(library).unwrap_or_default().as_bytes()).map_err(|e| {
         tf(
             "tools.audio.not_saved",
             "Could not save the audio list: {error}",
@@ -821,6 +829,21 @@ pub fn save(library: &Library) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_audio_list_that_cant_be_read_is_kept_aside_and_never_saved_over() {
+        let mut library = Library::default();
+        library.playlists[0].tracks.push(Track::of(PathBuf::from("/music/Walk In.mp3")));
+        library.through = true;
+        let good = serde_json::to_string_pretty(&library).unwrap();
+        crate::whole_file::tests::check_loader(
+            "audio.json",
+            crate::whole_file::What::Audio,
+            good.as_bytes(),
+            |path| load_from(path).1,
+            |path| save_to(path, &Library::default()).unwrap(),
+        );
+    }
 
     #[test]
     fn tracks_are_named_by_their_file_and_a_missing_file_says_so() {
@@ -850,7 +873,7 @@ mod tests {
             assert!(!library.through && !library.looping);
             library.playlists.push(Playlist::new(library.new_name()));
             assert_eq!(library.playlists[1].name, "New Audio Playlist");
-            assert_eq!(Library::from_json(&serde_json::to_string(&library).unwrap()), Some(library.clone()));
+            assert_eq!(Library::from_json(&serde_json::to_string(&library).unwrap()), Ok(library.clone()));
             // Saved before Loop: Play through went back to the first track after the last
             // then, so it keeps doing so; and the other way round.
             library.through = true;

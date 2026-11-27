@@ -357,8 +357,9 @@ pub struct List {
 }
 
 impl List {
-    /// Reads the file's words. A file from before media settings is a plain list of files.
-    pub fn from_json(text: &str) -> Option<List> {
+    /// Reads the file's words. A file from before media settings is a plain list of files. The
+    /// error, for the log, says why it isn't a media list.
+    pub fn from_json(text: &str) -> Result<List, String> {
         if let Ok(paths) = serde_json::from_str::<Vec<PathBuf>>(text) {
             let entries = paths
                 .into_iter()
@@ -371,18 +372,20 @@ impl List {
                     sample: None,
                 })
                 .collect();
-            return Some(List { entries, playlists: Vec::new() });
+            return Ok(List { entries, playlists: Vec::new() });
         }
-        serde_json::from_str(text).ok()
+        serde_json::from_str(text).map_err(|e| e.to_string())
     }
 }
 
-/// The media bin as it was when the app last closed.
-pub fn load_list() -> List {
-    list_file()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| List::from_json(&text))
-        .unwrap_or_default()
+/// The media bin as it was when the app last closed; and a file there that couldn't be read,
+/// kept aside (`whole_file`).
+pub fn load_list() -> (List, Option<crate::whole_file::Unread>) {
+    list_file().map_or_else(|| (List::default(), None), |path| load_list_from(&path))
+}
+
+fn load_list_from(path: &Path) -> (List, Option<crate::whole_file::Unread>) {
+    crate::whole_file::read_or_default(path, crate::whole_file::What::MediaList, List::from_json)
 }
 
 /// The media bin's file and what goes in it, for the library's writer to write (`writer`), so
@@ -390,13 +393,17 @@ pub fn load_list() -> List {
 pub fn list_to_save(list: &List) -> Result<crate::writer::Save, String> {
     let path = list_file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
+    Ok(list_to_save_at(path, list))
+}
+
+fn list_to_save_at(path: PathBuf, list: &List) -> crate::writer::Save {
     let text = serde_json::to_string_pretty(list).unwrap_or_default();
     let mut save =
         crate::writer::Save::new(path, crate::writer::Kind::MediaList, crate::writer::Guard::Any, move || {
             text.into_bytes()
         });
     save.make_folder = true;
-    Ok(save)
+    save
 }
 
 /// What the window says when the media bin couldn't be written.
@@ -652,6 +659,32 @@ mod tests {
     }
 
     #[test]
+    fn a_media_list_that_cant_be_read_is_kept_aside_and_never_saved_over() {
+        let mut list = List::default();
+        list.entries.push(Entry {
+            id: sp_model::Uuid::new_v4(),
+            path: "/media/Sky.png".into(),
+            fit: sp_model::ImageFit::Fill,
+            looping: true,
+            followed: false,
+            sample: None,
+        });
+        list.playlists.push(Playlist::new("Loop".to_owned()));
+        let good = serde_json::to_string_pretty(&list).unwrap();
+        crate::whole_file::tests::check_loader(
+            "media.json",
+            crate::whole_file::What::MediaList,
+            good.as_bytes(),
+            |path| load_list_from(path).1,
+            |path| {
+                let writer = crate::writer::Writer::start(|| {});
+                writer.write(list_to_save_at(path.to_owned(), &List::default()));
+                writer.drain();
+            },
+        );
+    }
+
+    #[test]
     fn an_old_media_list_still_loads_and_a_new_one_keeps_settings_and_playlists() {
         let old = List::from_json(r#"["/a/sky.png", "/a/loop.mp4"]"#).unwrap();
         assert_eq!(old.entries.len(), 2);
@@ -682,15 +715,15 @@ mod tests {
         };
         let text = serde_json::to_string(&list).unwrap();
         assert_eq!(text.matches("followed").count(), 1, "only an item a folder brought in says so");
-        assert_eq!(List::from_json(&text), Some(list));
+        assert_eq!(List::from_json(&text), Ok(list));
         // A list saved before items said where they came from: every item was added by hand.
         let before = r#"{"entries":[{"id":"6f9619ff-8b86-d011-b42d-00c04fc964ff","path":"/a/sky.png","fit":"fill","looping":true}]}"#;
-        assert!(List::from_json(before).is_some_and(|list| !list.entries[0].followed));
+        assert!(List::from_json(before).is_ok_and(|list| !list.entries[0].followed));
         // ...and before the sample backgrounds: no item is a sample, no playlist is theirs.
         let list = List::from_json(before).unwrap();
         assert_eq!((list.entries[0].sample.as_deref(), list.playlists.len()), (None, 0));
         let old_playlist = r#"{"entries":[],"playlists":[{"id":"6f9619ff-8b86-d011-b42d-00c04fc964ff","name":"Loop","files":["/a/sky.png"]}]}"#;
-        assert!(List::from_json(old_playlist).is_some_and(|list| !list.playlists[0].sample));
+        assert!(List::from_json(old_playlist).is_ok_and(|list| !list.playlists[0].sample));
     }
 
     #[test]

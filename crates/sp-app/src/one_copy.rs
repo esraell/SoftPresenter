@@ -136,7 +136,8 @@ pub fn at_start(capturing: bool, files: bool) -> Start {
 /// saved, else the computer's (Windows' own display languages, asked at once; elsewhere none,
 /// which is English, as nothing here is shown elsewhere).
 fn learn_language() {
-    crate::i18n::set_choice(crate::i18n::Choice::from_code(&crate::service::load_prefs().language));
+    // Only looked at: the copy running has the folder, and a file it can't read is its to keep.
+    crate::i18n::set_choice(crate::i18n::Choice::from_code(&crate::service::peek_prefs().language));
     // Testing aid: SOFTPRESENTER_LANGUAGE stands in for the computer's language, as for the app
     // (`system_language`).
     match std::env::var("SOFTPRESENTER_LANGUAGE") {

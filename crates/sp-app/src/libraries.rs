@@ -84,28 +84,32 @@ pub fn to_json(libraries: &[Library]) -> String {
     text
 }
 
-/// The libraries as last saved. A file that can't be read (or comes from a newer build) is
-/// moved aside, so the empty list used instead is never saved over it.
-pub fn load() -> Vec<Library> {
-    let Some(path) = file() else { return Vec::new() };
-    let Ok(text) = std::fs::read_to_string(&path) else { return Vec::new() };
-    from_json(&text).unwrap_or_else(|problem| {
-        crate::service::set_aside(&path, &problem);
-        Vec::new()
-    })
+/// The libraries as last saved. A file that can't be read (or comes from a newer build) is kept
+/// aside (`whole_file`), so the empty list used instead is never saved over it, and comes back to
+/// tell the operator.
+pub fn load() -> (Vec<Library>, Option<crate::whole_file::Unread>) {
+    file().map_or((Vec::new(), None), |path| load_from(&path))
+}
+
+fn load_from(path: &std::path::Path) -> (Vec<Library>, Option<crate::whole_file::Unread>) {
+    crate::whole_file::read_or_default(path, crate::whole_file::What::Libraries, from_json)
 }
 
 /// The libraries' file and what goes in it, for the library's writer to write (`writer`).
 pub fn to_save(libraries: &[Library]) -> Result<crate::writer::Save, String> {
     let path = file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
+    Ok(to_save_at(path, libraries))
+}
+
+fn to_save_at(path: std::path::PathBuf, libraries: &[Library]) -> crate::writer::Save {
     let text = to_json(libraries);
     let mut save =
         crate::writer::Save::new(path, crate::writer::Kind::Libraries, crate::writer::Guard::Any, move || {
             text.into_bytes()
         });
     save.make_folder = true;
-    Ok(save)
+    save
 }
 
 /// What the window says when the libraries couldn't be written.
@@ -120,6 +124,24 @@ pub fn not_saved(error: &std::io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_libraries_file_that_cant_be_read_is_kept_aside_and_never_saved_over() {
+        let mut christmas = Library::new("Christmas".to_owned());
+        christmas.toggle("songs/joy");
+        let good = to_json(&[christmas]);
+        crate::whole_file::tests::check_loader(
+            "libraries.json",
+            crate::whole_file::What::Libraries,
+            good.as_bytes(),
+            |path| load_from(path).1,
+            |path| {
+                let writer = crate::writer::Writer::start(|| {});
+                writer.write(to_save_at(path.to_owned(), &[]));
+                writer.drain();
+            },
+        );
+    }
 
     #[test]
     fn songs_go_in_and_out_of_libraries_and_names_do_not_repeat() {

@@ -6,7 +6,10 @@
 //!
 //! - **Whole or not at all:** each file is written under a name of its own beside it
 //!   (`.<name>.saving` for a song, `<name>.part` for the rest, which the library tidy knows as
-//!   half-written) and then renamed into place.
+//!   half-written), flushed to the disk and then renamed into place (`whole_file::replace`), so a
+//!   power cut leaves the old file or the new one, never an empty or half-written one. The folder
+//!   is flushed once a run of files into it is written (a big import's songs flush the Songs
+//!   folder once, not once a song), before anything else is written.
 //! - **In order:** a song is on disk before a playlist or library handed over after it, so a
 //!   crash never leaves a playlist naming a song that has no file. A save of a file whose last
 //!   save is still waiting at the end of the queue takes that save's place, so a song saved
@@ -192,7 +195,11 @@ impl Writer {
         if self.thread.is_none() {
             // No thread to write it (it couldn't be started): written here, as before there was one.
             drop(state);
+            let folder = save.path.parent().map(Path::to_path_buf);
             let done = write_one(seq, save, &mut HashMap::new(), None);
+            if let Some(folder) = folder.filter(|_| matches!(done, Done::Written { .. })) {
+                crate::whole_file::flush_folder(&folder);
+            }
             self.shared.lock().done.push(done);
             return seq;
         }
@@ -291,6 +298,10 @@ enum Left {
 
 fn work(shared: &Shared, wake: &dyn Fn(), slow: Option<Duration>) {
     let mut left: HashMap<PathBuf, Left> = HashMap::new();
+    // A folder files were renamed into whose list isn't flushed to the disk yet: flushed once
+    // the next thing to do isn't another file into it, while this thread is still busy (so
+    // quitting waits for it too).
+    let mut unflushed: Option<PathBuf> = None;
     loop {
         let task = {
             let mut state = shared.lock();
@@ -309,9 +320,29 @@ fn work(shared: &Shared, wake: &dyn Fn(), slow: Option<Duration>) {
             }
         };
         let done = match task {
-            Task::Save { seq, save } => Some(write_one(seq, save, &mut left, slow)),
+            Task::Save { seq, save } => {
+                let folder = save.path.parent().map(Path::to_path_buf);
+                let done = write_one(seq, save, &mut left, slow);
+                if matches!(done, Done::Written { .. }) && folder != unflushed {
+                    if let Some(other) = unflushed.take() {
+                        crate::whole_file::flush_folder(&other);
+                    }
+                    unflushed = folder;
+                }
+                Some(done)
+            }
             Task::Job(job) => job().err().map(Done::Problem),
         };
+        if let Some(folder) = &unflushed {
+            let more_into_it = matches!(
+                shared.lock().queue.front(),
+                Some(Task::Save { save, .. }) if save.path.parent() == Some(folder.as_path())
+            );
+            if !more_into_it {
+                crate::whole_file::flush_folder(folder);
+                unflushed = None;
+            }
+        }
         let tell = {
             let mut state = shared.lock();
             state.busy = None;
@@ -356,15 +387,14 @@ fn write_one(seq: u64, save: Save, left: &mut HashMap<PathBuf, Left>, slow: Opti
         if make_folder && let Some(folder) = path.parent() {
             std::fs::create_dir_all(folder)?;
         }
-        std::fs::write(&temporary, &bytes)?;
-        std::fs::rename(&temporary, &path)
+        crate::whole_file::replace(&path, &temporary, &bytes)
     })();
     let stamp = outside::stamp(&path);
     left.insert(path.clone(), Left::As(stamp));
     match written {
         Ok(()) => Done::Written { path, seq, stamp },
         Err(error) => {
-            let _ = std::fs::remove_file(&temporary);
+            // `replace` took its half-written file away.
             crate::applog::problem("saving", &format!("could not write {}: {error}", path.display()));
             Done::Failed { path, seq, kind, error }
         }

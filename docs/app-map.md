@@ -346,7 +346,7 @@ of this one copies it to Documents, checks the copy, and keeps the old folder as
 
 | File or folder | Holds |
 |---|---|
-| `Songs/*.sppres` | Songs made or changed in the app (JSON), each named by its id. Written on a thread of their own (`writer.rs`), in the order they were saved, as are `services.json`, `libraries.json` and `media.json`, so the window never waits for the disk; quitting waits until all are written |
+| `Songs/*.sppres` | Songs made or changed in the app (JSON), each named by its id. Written on a thread of their own (`writer.rs`), in the order they were saved, as are `services.json`, `libraries.json` and `media.json`, so the window never waits for the disk; each is flushed to the disk before it is renamed into place, and its folder once a run of files into it is written (`whole_file.rs`); quitting waits until all are written |
 | `Themes/*.sptheme` | Themes (JSON), each with its versions' names and templates under `versions`; `themes-in-use.txt` says which theme songs and Bible slides use |
 | `Images/` | Pictures put on slides, and slides made from PDFs and presentations; any nothing uses goes to the Trash after a week (`sweep.rs`) |
 | `Media/` | Videos brought in by song packs (a slide names one as `Media/<file>`), and the sample backgrounds when they are added to the media bin (`samples.rs`, under their own names); tidied as `Images/` is |
@@ -366,6 +366,7 @@ of this one copies it to Documents, checks the copy, and keeps the old folder as
 | `ai-assistants.json` | Settings › AI assistants: whether assistants may use SoftPresenter, and change the screens (both off unless switched on) |
 | `.softpresenter-library` | Says the folder is SoftPresenter's library |
 | `Not saved/` | SoftPresenter's version of a song or theme whose file changed outside the app, kept on quitting before Reload or Keep mine was chosen |
+| `<name> (could not be read).json` | A settings file the start couldn't read (cut short, zeros, not text, from a newer version), kept as it was beside where it was, with ` 2`, ` 3`… for later ones; the notices said where (`whole_file.rs`) |
 | `Backup before song ids/` | Files as they were before songs were named by id (only where that was done in place) |
 | `Backup before tidying DATE/` | Each song's file as it was before `sp library tidy --apply` changed it (`tidy_cli.rs`); a second tidy the same day makes `… DATE 2/` |
 | `.opening-pack-<id>/` | A song pack being opened; one a quit left behind goes to the Trash after a day |

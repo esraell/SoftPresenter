@@ -484,16 +484,13 @@ pub fn save_layouts(layouts: &[ThemeTemplate]) -> Result<(), String> {
             )
         })?;
     }
-    let partial = path.with_extension("json.part");
-    std::fs::write(&partial, serde_json::to_string_pretty(layouts).unwrap_or_default())
-        .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| {
-            tf(
-                "tools.stage.not_saved",
-                "Could not save the stage layouts: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })
+    crate::whole_file::write(&path, serde_json::to_string_pretty(layouts).unwrap_or_default().as_bytes()).map_err(|e| {
+        tf(
+            "tools.stage.not_saved",
+            "Could not save the stage layouts: {error}",
+            &[("error", &crate::notices::write_problem(&e))],
+        )
+    })
 }
 
 /// What the stage screens are told about the song on screen besides its slides.

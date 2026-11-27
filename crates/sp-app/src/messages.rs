@@ -221,16 +221,15 @@ pub fn save(messages: &[Message]) -> Result<(), String> {
             )
         })?;
     }
-    let partial = path.with_extension("json.part");
-    std::fs::write(&partial, serde_json::to_string_pretty(messages).unwrap_or_default())
-        .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| {
+    crate::whole_file::write(&path, serde_json::to_string_pretty(messages).unwrap_or_default().as_bytes()).map_err(
+        |e| {
             tf(
                 "tools.messages.not_saved",
                 "Could not save the messages: {error}",
                 &[("error", &crate::notices::write_problem(&e))],
             )
-        })
+        },
+    )
 }
 
 #[cfg(test)]

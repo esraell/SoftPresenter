@@ -995,8 +995,21 @@ fn prefs_file() -> Option<std::path::PathBuf> {
     crate::bible_store::data_dir().map(|dir| dir.join("preferences.json"))
 }
 
-/// The choices as last saved, or the usual ones.
-pub fn load_prefs() -> Prefs {
+/// The choices as last saved, or the usual ones; and a file there that couldn't be read, kept
+/// aside (`whole_file`).
+pub fn load_prefs() -> (Prefs, Option<crate::whole_file::Unread>) {
+    prefs_file().map_or_else(|| (Prefs::default(), None), |path| load_prefs_from(&path))
+}
+
+fn load_prefs_from(path: &std::path::Path) -> (Prefs, Option<crate::whole_file::Unread>) {
+    crate::whole_file::read_or_default(path, crate::whole_file::What::Settings, |text| {
+        serde_json::from_str(text).map_err(|e| e.to_string())
+    })
+}
+
+/// The choices as last saved, or the usual ones, only looked at: for a start that doesn't open
+/// the app (another copy has the data folder), which leaves a file it can't read to that copy.
+pub fn peek_prefs() -> Prefs {
     prefs_file()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| serde_json::from_str(&text).ok())
@@ -1007,6 +1020,10 @@ pub fn load_prefs() -> Prefs {
 pub fn save_prefs(prefs: &Prefs) -> Result<(), String> {
     let path = prefs_file()
         .ok_or_else(|| t("media.no_place", "Could not find where to keep settings on this computer.").to_owned())?;
+    save_prefs_to(&path, prefs)
+}
+
+fn save_prefs_to(path: &std::path::Path, prefs: &Prefs) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
             tf(
@@ -1016,16 +1033,13 @@ pub fn save_prefs(prefs: &Prefs) -> Result<(), String> {
             )
         })?;
     }
-    let partial = path.with_extension("json.part");
-    std::fs::write(&partial, serde_json::to_string_pretty(prefs).unwrap_or_default())
-        .and_then(|()| std::fs::rename(&partial, &path))
-        .map_err(|e| {
-            tf(
-                "notices.save.settings",
-                "Could not save the settings: {error}",
-                &[("error", &crate::notices::write_problem(&e))],
-            )
-        })
+    crate::whole_file::write(path, serde_json::to_string_pretty(prefs).unwrap_or_default().as_bytes()).map_err(|e| {
+        tf(
+            "notices.save.settings",
+            "Could not save the settings: {error}",
+            &[("error", &crate::notices::write_problem(&e))],
+        )
+    })
 }
 
 fn bible_page_file() -> Option<std::path::PathBuf> {
@@ -1075,8 +1089,7 @@ fn save_history_in(path: &std::path::Path, history: &[HistoryEntry]) -> Result<(
         })?;
     }
     let text = serde_json::to_string_pretty(history).unwrap_or_default();
-    let partial = path.with_extension("json.part");
-    std::fs::write(&partial, text).and_then(|()| std::fs::rename(&partial, path)).map_err(|e| {
+    crate::whole_file::write(path, text.as_bytes()).map_err(|e| {
         tf(
             "notices.save.bible_history",
             "Could not save the Bible history: {error}",
@@ -1105,8 +1118,7 @@ pub fn save_bible_page(page: &SavedPassage) -> Result<(), String> {
         })?;
     }
     let text = serde_json::to_string_pretty(page).unwrap_or_default();
-    let partial = path.with_extension("json.part");
-    std::fs::write(&partial, text).and_then(|()| std::fs::rename(&partial, &path)).map_err(|e| {
+    crate::whole_file::write(&path, text.as_bytes()).map_err(|e| {
         tf(
             "notices.save.bible_page",
             "Could not save the Bible page's settings: {error}",
@@ -1120,31 +1132,14 @@ fn file() -> Option<std::path::PathBuf> {
 }
 
 /// The services as last saved, or one empty service. A file that can't be read (or comes from
-/// a newer build) is moved aside, so the empty service used instead is never saved over it.
-pub fn load() -> Services {
-    let Some(path) = file() else { return Services::default() };
-    let Ok(text) = std::fs::read_to_string(&path) else { return Services::default() };
-    Services::from_json(&text).unwrap_or_else(|problem| {
-        set_aside(&path, &problem);
-        Services::default()
-    })
+/// a newer build) is kept aside (`whole_file`), so the empty service used instead is never saved
+/// over it, and comes back to tell the operator.
+pub fn load() -> (Services, Option<crate::whole_file::Unread>) {
+    file().map_or_else(|| (Services::default(), None), |path| load_from(&path))
 }
 
-/// Moves a settings file the app can't read out of the way, beside itself, so what the app uses
-/// instead is never saved over it, and logs where it went.
-pub fn set_aside(path: &std::path::Path, problem: &str) {
-    let stem = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
-    let aside = (1..)
-        .map(|n| {
-            let more = if n == 1 { String::new() } else { format!(" {n}") };
-            path.with_file_name(format!("{stem} (could not be read{more}).json"))
-        })
-        .find(|candidate| !candidate.exists())
-        .unwrap_or_else(|| path.with_extension("unread"));
-    match std::fs::rename(path, &aside) {
-        Ok(()) => crate::applog::problem("settings", &format!("{problem} It was kept as {}.", aside.display())),
-        Err(e) => crate::applog::problem("settings", &format!("{problem} It could not be moved aside: {e}")),
-    }
+fn load_from(path: &std::path::Path) -> (Services, Option<crate::whole_file::Unread>) {
+    crate::whole_file::read_or_default(path, crate::whole_file::What::Playlists, Services::from_json)
 }
 
 /// What the window says when the playlists couldn't be written: a plain sentence with the
@@ -1163,18 +1158,66 @@ pub fn to_save(services: &Services) -> Result<crate::writer::Save, String> {
     let path = file().ok_or_else(|| {
         t("notices.save.no_place_services", "Could not find where to keep playlists on this computer.").to_owned()
     })?;
+    Ok(to_save_at(path, services))
+}
+
+fn to_save_at(path: std::path::PathBuf, services: &Services) -> crate::writer::Save {
     let text = services.to_json();
     let mut save =
         crate::writer::Save::new(path, crate::writer::Kind::Playlists, crate::writer::Guard::Any, move || {
             text.into_bytes()
         });
     save.make_folder = true;
-    Ok(save)
+    save
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Writes a save as the library's writer does, and waits for it.
+    fn written(save: crate::writer::Save) {
+        let writer = crate::writer::Writer::start(|| {});
+        writer.write(save);
+        writer.drain();
+        assert!(writer.finished().iter().all(|done| matches!(done, crate::writer::Done::Written { .. })));
+    }
+
+    #[test]
+    fn a_settings_file_that_cant_be_read_is_kept_aside_and_never_saved_over() {
+        let mut prefs = Prefs { ccli_licence: "12345".to_owned(), ..Prefs::default() };
+        prefs.columns = 6;
+        let good = serde_json::to_string_pretty(&prefs).unwrap();
+        crate::whole_file::tests::check_loader(
+            "preferences.json",
+            crate::whole_file::What::Settings,
+            good.as_bytes(),
+            |path| {
+                let (read, unread) = load_prefs_from(path);
+                if unread.is_some() {
+                    assert_eq!(read, Prefs::default(), "the usual settings instead");
+                } else {
+                    assert!(read == prefs || read == Prefs::default(), "the file's settings");
+                }
+                unread
+            },
+            |path| save_prefs_to(path, &Prefs::default()).unwrap(),
+        );
+    }
+
+    #[test]
+    fn a_playlists_file_that_cant_be_read_is_kept_aside_and_never_saved_over() {
+        let mut services = Services::default();
+        services.add(Item::song("a", "Alpha"));
+        let good = services.to_json();
+        crate::whole_file::tests::check_loader(
+            "services.json",
+            crate::whole_file::What::Playlists,
+            good.as_bytes(),
+            |path| load_from(path).1,
+            |path| written(to_save_at(path.to_owned(), &Services::default())),
+        );
+    }
 
     #[test]
     fn the_first_playlist_of_a_first_start_follows_the_language_until_it_is_changed() {

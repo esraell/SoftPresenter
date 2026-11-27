@@ -451,5 +451,15 @@
   "notices.import.damage.unknown_kind": "одне зі значень такого типу, якого не буває в жодному файлі бази даних",
   "notices.import.damage.table_outside_file": "одна з таблиць починається на сторінці, якої немає у файлі",
   "notices.unreachable": "Немає звʼязку з {service}. SoftPresenter продовжує спроби. Перевірте підключення цього компʼютера до інтернету.",
-  "notices.unreachable_try_again": "Немає звʼязку з {service}. Перевірте підключення цього компʼютера до інтернету й спробуйте ще раз."
+  "notices.unreachable_try_again": "Немає звʼязку з {service}. Перевірте підключення цього компʼютера до інтернету й спробуйте ще раз.",
+  "notices.unread.screens": "SoftPresenter не зміг прочитати налаштування екранів, тож почав із нових.",
+  "notices.unread.settings": "SoftPresenter не зміг прочитати свої налаштування, тож почав зі звичайних.",
+  "notices.unread.media": "SoftPresenter не зміг прочитати медіатеку та медіасписки, тож вони порожні.",
+  "notices.unread.audio": "SoftPresenter не зміг прочитати аудіосписки, тож вони порожні.",
+  "notices.unread.macros": "SoftPresenter не зміг прочитати макроси, тож почав без них.",
+  "notices.unread.timers": "SoftPresenter не зміг прочитати таймери, тож почав без них.",
+  "notices.unread.playlists": "SoftPresenter не зміг прочитати списки, тож почав з одного порожнього.",
+  "notices.unread.libraries": "SoftPresenter не зміг прочитати бібліотеки, тож почав без них.",
+  "notices.unread.kept": "Старий файл збережено як {file}.",
+  "notices.unread.not_kept": "Зберегти старий файл не вдалося: {error}"
 }

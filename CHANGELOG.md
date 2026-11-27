@@ -5,7 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-Remote Control uses less of the computer, and Delete, Undo and Escape in the Edit view act on the box you mean.
+Your changes are safer, Remote Control uses less of the computer, and Delete, Undo and Escape in the Edit view act on the box you mean.
 
 ### Better
 

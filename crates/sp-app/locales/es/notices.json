@@ -451,5 +451,15 @@
   "notices.import.damage.unknown_kind": "un valor es de un tipo que no guarda ningún archivo de base de datos",
   "notices.import.damage.table_outside_file": "una tabla empieza en una página que el archivo no tiene",
   "notices.unreachable": "No se puede conectar con {service}. SoftPresenter sigue intentándolo. Comprueba la conexión a internet de este ordenador.",
-  "notices.unreachable_try_again": "No se puede conectar con {service}. Comprueba la conexión a internet de este ordenador y vuelve a intentarlo."
+  "notices.unreachable_try_again": "No se puede conectar con {service}. Comprueba la conexión a internet de este ordenador y vuelve a intentarlo.",
+  "notices.unread.screens": "SoftPresenter no ha podido leer los ajustes de las pantallas, así que ha empezado con unos nuevos.",
+  "notices.unread.settings": "SoftPresenter no ha podido leer sus ajustes, así que ha empezado con los habituales.",
+  "notices.unread.media": "SoftPresenter no ha podido leer la mediateca ni las listas multimedia, así que empiezan vacías.",
+  "notices.unread.audio": "SoftPresenter no ha podido leer las listas de audio, así que empiezan vacías.",
+  "notices.unread.macros": "SoftPresenter no ha podido leer las macros, así que ha empezado sin ninguna.",
+  "notices.unread.timers": "SoftPresenter no ha podido leer los temporizadores, así que ha empezado sin ninguno.",
+  "notices.unread.playlists": "SoftPresenter no ha podido leer las listas, así que ha empezado con una vacía.",
+  "notices.unread.libraries": "SoftPresenter no ha podido leer las bibliotecas, así que ha empezado sin ninguna.",
+  "notices.unread.kept": "El archivo anterior se conserva como {file}.",
+  "notices.unread.not_kept": "No se ha podido conservar el archivo anterior: {error}"
 }
