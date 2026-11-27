@@ -1779,6 +1779,53 @@ fn a_followed_folders_new_file_that_never_starts_leaves_the_video_playing_going_
     quitted.assert_clean(&run);
 }
 
+/// A media playlist going round never waits for ever on a video of it that never starts (FFmpeg
+/// held back for it alone): once the wait for its first picture is over the playlist goes on to
+/// its next item, as from a video that can't play, and the operator is told once, naming it and
+/// the playlist (not that it will show as soon as it starts: the playlist has gone on).
+#[test]
+fn a_media_playlist_goes_on_from_a_video_of_it_that_never_starts() {
+    let name = "a_media_playlist_goes_on_from_a_video_of_it_that_never_starts";
+    let Some(run) = Run::new(name) else { return };
+    let Some(made) = video_for_ffmpeg(&run, name) else { return };
+    let stuck = run.file("Stuck.mkv");
+    std::fs::copy(&made, &stuck).expect("the video that never starts");
+    let picture = run.file("Blue.png");
+    write_png(&picture, [30, 90, 200]);
+    // Testing aids: FFmpeg held back ten minutes for a file whose name says Stuck, and the most
+    // a video's first picture is waited for 1 s, not 10.
+    let copy = run.start(&[("SOFTPRESENTER_VIDEO_OPEN_SLOW", "600000@Stuck"), ("SOFTPRESENTER_VIDEO_WAIT", "1000")]);
+    copy.ok(&["media", "add", &stuck.to_string_lossy(), &picture.to_string_lossy()]);
+    copy.ok(&["media-playlist", "new", "Loop"]);
+    copy.ok(&["media-playlist", "add", "stuck", "blue", "to", "Loop"]);
+    let began = Instant::now();
+    copy.ok(&["media-playlist", "play", "Loop"]);
+    assert_eq!(copy.status()["media"], "Stuck.mkv", "it starts with the video{}", run.context());
+    // The wait over, the playlist goes on to the picture.
+    copy.wait_for("the media playlist to go on to its next item", Duration::from_secs(20), |status| {
+        status["media"] == "Blue.png"
+    });
+    assert!(began.elapsed() >= Duration::from_secs(1), "it went on before the wait was over");
+    assert_eq!(
+        not_started_notices(&copy),
+        [
+            "Stuck.mkv: this video hasn\u{2019}t started after 1 second, so the media playlist \u{201c}Loop\u{201d} went on \
+          to its next item."
+        ],
+        "{}",
+        run.context()
+    );
+    assert!(
+        run.log().contains("the media playlist Loop goes on to its next item"),
+        "the log says why{}",
+        run.context()
+    );
+    copy.ok(&["media-playlist", "stop"]);
+    copy.ok(&["clear", "media"]);
+    let quitted = copy.quit();
+    quitted.assert_clean(&run);
+}
+
 #[test]
 fn a_song_from_text_runs_slide_by_slide_and_each_layer_clears() {
     let Some(run) = Run::new("a_song_from_text_runs_slide_by_slide_and_each_layer_clears") else { return };

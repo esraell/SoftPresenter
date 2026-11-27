@@ -2370,6 +2370,12 @@ struct App {
     /// For each of those layers, the wait for a file lined up to follow its video to give its
     /// first picture, and what the operator was told when it didn't (see `video_wait::LinedUp`).
     lined_up_wait: [video_wait::LinedUp; 2],
+    /// The video on the media layer that FFmpeg (or the system) said can't play, by its media
+    /// bin item: a playing media playlist goes on from it.
+    video_refused: Option<Uuid>,
+    /// What the operator was told of videos a playing media playlist went on from because no
+    /// picture came in time, by their media bin item: taken back once that item plays.
+    skipped_videos: HashMap<Uuid, String>,
     /// The media playlists read at the start, handed to the window's state once it is made.
     media_playlists: Vec<media::Playlist>,
     /// The settings files the start couldn't read, kept aside (`whole_file`): told in the notices
@@ -2989,8 +2995,18 @@ impl App {
         media::playlist_places(&playlist.files, self.show.media())
     }
 
-    /// Moves a playing media playlist on: a picture after 8 seconds, a video when it ends. It
-    /// stops if the operator puts other media on, or clears it. Says when to look again.
+    /// Whether the media playlist playing goes on from the video on screen if it won't play: it
+    /// shows that video, and has other items to go on to.
+    fn cycle_goes_on_from_video(&self) -> bool {
+        let Some(cycle) = self.media_cycle.as_ref() else { return false };
+        self.show.live_media() == Some(cycle.shown)
+            && self.show.media().get(cycle.shown).is_some_and(|item| media::is_video(&item.path))
+            && self.playlist_media(cycle.playlist).len() > 1
+    }
+
+    /// Moves a playing media playlist on: a picture after 8 seconds, a video when it ends (or
+    /// when it never starts or can't play: `media::video_done`). It stops if the operator puts
+    /// other media on, or clears it. Says when to look again.
     fn tick_media_cycle(&mut self) -> Option<Instant> {
         let cycle = self.media_cycle.as_ref()?;
         let (id, at, since, shown) = (cycle.playlist, cycle.at, cycle.since, cycle.shown);
@@ -3001,8 +3017,14 @@ impl App {
         let items = self.playlist_media(id);
         let is_video = self.show.media().get(shown).is_some_and(|item| media::is_video(&item.path));
         let done = if is_video {
-            // One video on its own loops, so it never ends; with others, it plays to its end.
-            items.len() > 1 && self.video.as_ref().is_some_and(|(_, player)| player.ended())
+            // One video on its own loops, so it never ends; with others, it plays to its end, or
+            // is gone on from when it never starts or can't play.
+            let shown_id = self.show.media().get(shown).map(|item| item.id);
+            let ended = self.video.as_ref().is_some_and(|(_, player)| player.ended());
+            let overdue = self.video.as_ref().is_some_and(|(id, _)| Some(*id) == shown_id)
+                && self.video_wait.as_ref().is_some_and(video_wait::FirstPicture::overdue);
+            let refused = shown_id.is_some() && self.video_refused == shown_id;
+            media::video_done(items.len() > 1, ended, overdue, refused)
         } else {
             since.elapsed() >= Duration::from_secs_f32(PICTURE_SECONDS)
         };
@@ -3242,6 +3264,9 @@ impl App {
             .and_then(|index| self.show.media().get(index))
             .filter(|item| media::is_video(&item.path))
             .cloned();
+        if self.video_refused.is_some() && self.video_refused != live.as_ref().map(|item| item.id) {
+            self.video_refused = None;
+        }
         if self.video.as_ref().map(|(id, _)| *id) == live.as_ref().map(|item| item.id) {
             // The same video: it may have been told to loop or not.
             let loops = live.as_ref().is_some_and(|item| self.loops_now(item));
@@ -3315,6 +3340,7 @@ impl App {
                 // A file just taken out of a followed folder: the layer goes on to what is left
                 // (see `followed`), with nothing to tell the operator.
                 if !self.gone_from_followed_folder(&item.path) {
+                    self.video_refused = Some(item.id);
                     // FFmpeg missing: fetched again where it can be, and said so.
                     let problem = self.video_problem(&item.path, problem);
                     if let Some(running) = self.running.as_mut() {
@@ -3971,23 +3997,77 @@ impl App {
     /// Looks again whether the video on screen has given its first picture, and says what that
     /// changed (see `video_wait`). When the limit passes with none, the operator is told once,
     /// naming the file, and the log says why the screens went on without it; a picture that
-    /// comes after that (or FFmpeg saying the video can't play) takes the notice back.
+    /// comes after that (or FFmpeg saying the video can't play) takes the notice back. A media
+    /// playlist playing goes on from it instead (`tick_media_cycle`), and the operator is told
+    /// that; once that item plays, on a later turn, that notice is taken back.
     fn look_at_first_picture(&mut self) -> video_wait::Change {
         use video_wait::Change;
         if self.video.is_none() {
             self.end_video_wait();
             return Change::Nothing;
         }
-        let Some((_, player)) = self.video.as_ref() else { return Change::Nothing };
+        let goes_on = self.cycle_goes_on_from_video();
+        let Some((item, player)) = self.video.as_ref() else { return Change::Nothing };
         let Some(wait) = self.video_wait.as_mut() else { return Change::Nothing };
         let now = Instant::now();
         let change = wait.look(player.ready(), now);
-        if matches!(change, Change::Nothing | Change::Came) {
+        if change == Change::Nothing {
+            return change;
+        }
+        // An item a playlist went on from before has played now: what was said of it is over.
+        if player.problem().is_none()
+            && matches!(change, Change::Came | Change::CameLate)
+            && let Some(said) = self.skipped_videos.remove(item)
+        {
+            applog::event(
+                "video",
+                &format!("{} plays now: the notice that it hadn't started is taken back", file_name(player.path())),
+            );
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.notices.withdraw(&said);
+            }
+        }
+        if change == Change::Came {
             return change;
         }
         let name = file_name(player.path());
         let waited = format!("{:.1} s", wait.waited(now).as_secs_f64());
-        if change == Change::GaveUp {
+        if change == Change::GaveUp && goes_on {
+            let playlist = self
+                .media_cycle
+                .as_ref()
+                .and_then(|cycle| {
+                    let running = self.running.as_ref()?;
+                    running.home_state.media_playlists.iter().find(|p| p.id == cycle.playlist).map(|p| p.name.clone())
+                })
+                .unwrap_or_default();
+            applog::event(
+                "video",
+                &format!(
+                    "no picture of {name} came in {waited}, the most a video's first picture is waited for: the media \
+                     playlist {playlist} goes on to its next item"
+                ),
+            );
+            let seconds = wait.limit().as_secs_f64().round().max(1.0) as u64;
+            let text = format!(
+                "{name}: {}",
+                crate::i18n::tn(
+                    "notices.media.video_not_started_skipped",
+                    seconds,
+                    "this video hasn\u{2019}t started after {n} second, so the media playlist \u{201c}{playlist}\u{201d} \
+                     went on to its next item.",
+                    "this video hasn\u{2019}t started after {n} seconds, so the media playlist \u{201c}{playlist}\u{201d} \
+                     went on to its next item.",
+                    &[("playlist", &playlist)],
+                )
+            );
+            // Not taken back as the playlist goes on (it stays true), only once the item plays.
+            let item = *item;
+            self.skipped_videos.insert(item, text.clone());
+            if let Some(running) = self.running.as_mut() {
+                running.home_state.notices.trouble(text);
+            }
+        } else if change == Change::GaveUp {
             applog::event(
                 "video",
                 &format!(
@@ -4041,7 +4121,10 @@ impl App {
         // it now, and the video that played on meanwhile is let go.
         let kept = self.video_wait.as_ref().is_some_and(video_wait::FirstPicture::keeps);
         let change = self.look_at_first_picture();
-        if kept && (change != video_wait::Change::Nothing || self.video_wait.is_none()) {
+        // A media playlist playing goes on to its next item from one that never started
+        // (`tick_media_cycle`, straight after): the screens go there, not to its still first.
+        let goes_on = change == video_wait::Change::GaveUp && self.cycle_goes_on_from_video();
+        if kept && !goes_on && (change != video_wait::Change::Nothing || self.video_wait.is_none()) {
             self.refresh_output();
         }
         // Looked at again by the end of the wait at the latest; once it is over with no picture
@@ -4129,10 +4212,12 @@ impl App {
             // video FFmpeg plays says what is wrong with it here, a moment after it was shown,
             // not as it is opened).
             let path = self.show.media().iter().find(|item| item.id == id).map(|item| item.path.clone());
-            if !path.is_some_and(|path| self.gone_from_followed_folder(&path))
-                && let Some(running) = self.running.as_mut()
-            {
-                running.home_state.notices.trouble(problem);
+            if !path.is_some_and(|path| self.gone_from_followed_folder(&path)) {
+                // A playing media playlist goes on from it (`tick_media_cycle`).
+                self.video_refused = Some(id);
+                if let Some(running) = self.running.as_mut() {
+                    running.home_state.notices.trouble(problem);
+                }
             }
             return None;
         }
@@ -13711,6 +13796,8 @@ fn main() -> ExitCode {
         followed_items: std::collections::HashSet::new(),
         following: Default::default(),
         lined_up_wait: Default::default(),
+        video_refused: None,
+        skipped_videos: HashMap::new(),
         unsaved_since: None,
         was_editing: false,
         theme: Arc::new(themes[songs_theme].clone()),

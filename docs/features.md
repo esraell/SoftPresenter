@@ -800,7 +800,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   video whose first picture hasn't come by then is named in the notices, the screens go on
   without it (to its still, if it has one), and its pictures go on screen if they come later,
   which takes the notice back; so does showing something else on the layer, or clearing it,
-  after which it would no longer show. A file FFmpeg can't play says so in the
+  after which it would no longer show. A media playlist playing goes on to its next item
+  instead (see Play This Playlist). A file FFmpeg can't play says so in the
   notices a moment after it was shown. A video the Mac's player plays
   behind the words goes to the screens as the decoder's own picture memory, with no copy through
   the processor (a video whose format can carry clear parts, and a video in a box on a slide or
@@ -865,7 +866,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   plugged in) leaves the playlist as it was. The folder is looked at every few seconds on a
   thread of its own. **Play This Playlist** shows its items in turn on the
   media layer (pictures for 8 seconds, videos to their end), round and round, until other
-  media is put on or cleared.
+  media is put on or cleared. A video of it that can't play, or whose first picture hasn't
+  come ten seconds after it was shown, is gone on from to the next item, and the notices name
+  it and the playlist (taken back once it plays on a later turn).
 - **Announcements layer**: anything that loops can play on it, over the slides and media and
   under props and messages, until it is cleared. **Play on Announcements Layer** is in the
   right-click (and ⋯) menu of a song, a picture or video in the media bin, a picture, video or
