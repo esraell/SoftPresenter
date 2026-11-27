@@ -2557,12 +2557,12 @@ impl crate::App {
     pub(crate) fn ctl_libraries(&self) -> Reply {
         let Some(state) = self.running.as_ref().map(|r| &r.home_state) else { return Reply::done("(none)") };
         // Each library's songs, and how many of them can't be found.
+        let finder = crate::studio::SongFinder::new(&self.show, state);
         let counts: Vec<(usize, usize)> = state
             .libraries
             .iter()
             .map(|l| {
-                let missing =
-                    l.songs.iter().filter(|key| crate::studio::playlist_song(&self.show, state, key).is_none()).count();
+                let missing = l.songs.iter().filter(|key| finder.find(key).is_none()).count();
                 (l.songs.len(), missing)
             })
             .collect();
@@ -2622,10 +2622,11 @@ impl crate::App {
                 let library = state.libraries.get(at).ok_or("No such library.")?;
                 // As data, each song has its place in the library, its title and its stable id
                 // (what `go`, `slides` and `slide` take), or none when it can't be found.
+                let finder = crate::studio::SongFinder::new(&self.show, state);
                 let found: Vec<(String, Option<sp_model::Uuid>)> = library
                     .songs
                     .iter()
-                    .map(|key| match crate::studio::playlist_song(&self.show, state, key) {
+                    .map(|key| match finder.find(key) {
                         Some(index) => {
                             let song = &self.show.presentations()[index];
                             (song.title.clone(), Some(song.id))

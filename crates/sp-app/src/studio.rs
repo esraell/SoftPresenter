@@ -3764,6 +3764,57 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         paint_carried(ui.ctx(), &words);
     }
 }
+use std::collections::HashMap;
+
+/// [`playlist_song`] for many keys at once: the songs are looked through once, when it is made,
+/// instead of once for each key (a library of thousands of songs would take the square of that).
+/// It finds what `playlist_song` finds.
+pub struct SongFinder {
+    /// The first place each key is at, listed or not (as `playlist_song` takes the first).
+    by_key: HashMap<String, usize>,
+    /// The first listed song each id belongs to.
+    by_id: HashMap<sp_model::Uuid, usize>,
+    /// Each title of a listed song: where the first is, and whether a second has it too.
+    by_title: HashMap<String, (usize, bool)>,
+    listed: Vec<bool>,
+}
+
+impl SongFinder {
+    pub fn new(show: &Show, state: &HomeState) -> SongFinder {
+        let hidden = state.bible.slots.unwrap_or([usize::MAX; 2]);
+        let songs = show.presentations();
+        let listed: Vec<bool> = (0..songs.len())
+            .map(|index| {
+                !hidden.contains(&index) && !state.catalog.holds(index) && !state.removed_songs.contains(&index)
+            })
+            .collect();
+        let mut by_key = HashMap::new();
+        for (at, key) in state.song_keys.iter().enumerate() {
+            by_key.entry(key.clone()).or_insert(at);
+        }
+        let (mut by_id, mut by_title) = (HashMap::new(), HashMap::<String, (usize, bool)>::new());
+        for (at, song) in songs.iter().enumerate().filter(|(at, _)| listed[*at]) {
+            by_id.entry(song.id).or_insert(at);
+            by_title.entry(song.title.clone()).and_modify(|(_, several)| *several = true).or_insert((at, false));
+        }
+        SongFinder { by_key, by_id, by_title, listed }
+    }
+
+    pub fn find(&self, key: &str) -> Option<usize> {
+        let listed = |index: usize| self.listed.get(index).copied().unwrap_or(false);
+        self.by_key
+            .get(key)
+            .copied()
+            .filter(|index| listed(*index))
+            .or_else(|| sp_model::Uuid::parse_str(key).ok().and_then(|id| self.by_id.get(&id).copied()))
+            .or_else(|| {
+                let (first, several) = *self.by_title.get(key.strip_prefix("title:")?)?;
+                (!several).then_some(first)
+            })
+            .filter(|index| listed(*index))
+    }
+}
+
 /// The song a playlist names, among the open songs: found by the name its file gave it, or by
 /// its title for one saved before it had a file. `None` when it isn't open (or is hidden).
 pub fn playlist_song(show: &Show, state: &HomeState, key: &str) -> Option<usize> {
@@ -8897,5 +8948,36 @@ pub mod tests {
         assert_eq!(view(48.0, 90.0), (1, 2));
         assert_eq!(view(100.0, 400.0), (2, 4));
         assert_eq!(rows_in_view(&[0.0], Rect::from_min_max(pos2(0.0, 0.0), pos2(10.0, 50.0))), (0, 0));
+    }
+
+    #[test]
+    fn the_song_finder_finds_what_playlist_song_finds() {
+        let songs: Vec<Arc<sp_model::Presentation>> = ["Alpha", "Beta", "Beta", "Gamma", "Delta", "Alpha"]
+            .iter()
+            .map(|title| Arc::new(sp_model::parse_song_text(title, "Words\n")))
+            .collect();
+        let show = Show::new(songs.clone());
+        let mut keys: Vec<String> = ["alpha.txt", "beta.txt", "beta-2.txt", "gamma.txt", "delta.txt"]
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect();
+        keys.push("alpha.txt".to_owned());
+        let mut state = HomeState { song_keys: keys, ..HomeState::default() };
+        // Delta is taken out, so are its key, id and title; the second Alpha shares a key with the first.
+        state.removed_songs.push(4);
+        let mut asked: Vec<String> = ["alpha.txt", "beta.txt", "gamma.txt", "delta.txt", "nothing.txt", "title:Alpha"]
+            .iter()
+            .map(|key| (*key).to_owned())
+            .collect();
+        asked.extend(["title:Beta", "title:Gamma", "title:Delta", "title:Nobody", "", "title:"].map(str::to_owned));
+        asked.extend(songs.iter().map(|song| song.id.to_string()));
+        asked.push(sp_model::Uuid::new_v4().to_string());
+        let finder = SongFinder::new(&show, &state);
+        for key in &asked {
+            assert_eq!(finder.find(key), playlist_song(&show, &state, key), "key {key:?}");
+        }
+        assert_eq!(finder.find("title:Gamma"), Some(3));
+        assert_eq!(finder.find("title:Beta"), None, "two songs have it");
+        assert_eq!(finder.find("delta.txt"), None, "taken out");
     }
 }
