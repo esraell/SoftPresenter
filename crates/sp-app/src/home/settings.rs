@@ -700,7 +700,7 @@ fn end_of_a_song(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
             t("settings.slides.end.line", "Mark the end of a song"),
             t(
                 "settings.slides.end.note",
-                "A mark under the words of a song\u{2019}s last slide as sung, on the audience screens, as SoftProjector draws it",
+                "A mark under the words of a song\u{2019}s last slide as sung, on the audience screens",
             ),
             size,
             |ui, place| {

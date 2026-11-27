@@ -121,7 +121,7 @@
   "settings.slides.end.title": "Final de una canción",
   "settings.slides.end.caption": "Lo que ve la sala bajo la última diapositiva de una canción",
   "settings.slides.end.line": "Marcar el final de una canción",
-  "settings.slides.end.note": "Una marca bajo la letra de la última diapositiva de una canción tal como se canta, en las pantallas del público, como la dibuja SoftProjector",
+  "settings.slides.end.note": "Una marca bajo la letra de la última diapositiva de una canción tal como se canta, en las pantallas del público",
   "settings.transition.title": "Entre diapositivas",
   "settings.transition.about": "Cómo una diapositiva deja paso a la siguiente",
   "settings.transition.own": "Una canción o una diapositiva puede tener la suya",

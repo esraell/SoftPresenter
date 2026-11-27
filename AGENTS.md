@@ -255,7 +255,15 @@ process, and nextest gives each test a process of its own). One test alone:
   and column names, how a song's text is split, the lines of a Bible file); none of its code is
   used, and SoftProjector may be named where the importer says what it reads. Those are SQLite files, read by SoftPresenter's own reader
   (`crates/sp-model/src/sqlite_read.rs`), written from SQLite's published description of the
-  file: no SQLite library is linked and no SQLite tool is run, on any system. A third, agreed by the owner on 2026-11-24: `softpresenter-mirror`
+  file: no SQLite library is linked and no SQLite tool is run, on any system. The owner also
+  named a key layout after it (26 November 2026): Settings › Keys' Key layout is Standard or
+  Like SoftProjector, for the people coming from it, who look for it by name. The interface
+  may name SoftProjector there (the switch, the line beside it and Reset to Defaults' hints,
+  in every language) and where the importers say what they read, and nowhere else; the
+  changelog, the docs, comments and commit messages may say that something works as it does in
+  SoftProjector (the chorus after each verse, the end of a song's mark and its seven marks).
+  SoftProjector is an open-source program (GPL-3.0), not one of the products the rule above
+  keeps out, and none of its code, wording or artwork is used. A third, agreed by the owner on 2026-11-24: `softpresenter-mirror`
   (`crates/sp-mirror`), the separate program that receives an iPhone, iPad or Mac screen,
   follows UxPlay's `lib/` (LGPL-2.1-or-later) and carries a Rust port of playfair (GPL-3.0),
   whose tables came from someone else's study of Apple's own program; it may name Apple,
