@@ -856,7 +856,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   pictures, as above), otherwise at once. A file lined up to take over that hasn't given its
   first picture ten seconds after it was lined up (FFmpeg slow or stuck opening it) is named in
   the notices, and the video playing goes round again meanwhile (from its start, where it would
-  have ended), so the screens never stay on its last picture; the new file takes over at the
+  have ended), so the screens stay on its last picture no longer than those ten seconds; the new file takes over at the
   end of a pass once it starts, and the notice goes then, or when another file is lined up in
   its place or the layer goes on to something else. With nothing left, the last picture stays up for 8
   seconds while the folder is looked at every second, and a new file that comes in that time
@@ -867,8 +867,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   thread of its own. **Play This Playlist** shows its items in turn on the
   media layer (pictures for 8 seconds, videos to their end), round and round, until other
   media is put on or cleared. A video of it that can't play, or whose first picture hasn't
-  come ten seconds after it was shown, is gone on from to the next item, and the notices name
-  it and the playlist (taken back once it plays on a later turn).
+  come ten seconds after it was shown, is passed over: once it has been up as long as a picture
+  (its still, or nothing), the next item goes on, and the notices name it and the playlist,
+  once however many rounds it doesn't play (taken back once it plays on a later turn). After a
+  whole round in which nothing played, the playlist stops going round, on the last item, and a
+  notice says none of its videos would play. Known, to be fixed: a media playlist on the
+  Announcements layer still waits for good on a video of it that never starts or can't play.
 - **Announcements layer**: anything that loops can play on it, over the slides and media and
   under props and messages, until it is cleared. **Play on Announcements Layer** is in the
   right-click (and ⋯) menu of a song, a picture or video in the media bin, a picture, video or
