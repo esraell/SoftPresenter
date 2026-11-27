@@ -1239,6 +1239,18 @@ mod tests {
                         rest.text(&sentence).unwrap_or_else(|| panic!("{}", say("no sentence")));
                     let under = key_of(&rest, choose).expect("Choose a Folder\u{2026}").min.y
                         > sentence_at.y + sentence_galley.size().y;
+                    if width == 820.0 {
+                        // At the narrowest layout, the least a cut leaves still fits in the three
+                        // lines' room: one letter of each of the two folders named, and the
+                        // count of the other three, so the sentence never has to be cut at its
+                        // end.
+                        let least = looks_in_named(&[cut_middle(very_long, 1), cut_middle(ordinary_cyrillic, 1)], 3);
+                        let room = sentence_galley.job.wrap.max_width;
+                        let mut lines = usize::MAX;
+                        ctx.run_ui(egui::RawInput::default(), |ui| lines = parts::note_lines(ui, &least, room))
+                            .drop_without_applying_deltas();
+                        assert!(lines <= SENTENCE_LINES, "{}", say(&format!("{lines} lines for {least}")));
+                    }
                     match (under, beside_from) {
                         (false, None) => beside_from = Some(width),
                         (true, Some(from)) => {
