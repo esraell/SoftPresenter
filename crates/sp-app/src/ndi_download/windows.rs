@@ -26,24 +26,25 @@ pub const ADDRESS: &str = "https://downloads.ndi.tv/SDK/NDI_SDK/NDI%206%20Runtim
 /// The name the download is kept under while it is checked and run.
 pub const DOWNLOAD_FILE: &str = "NDI 6 Runtime.exe";
 /// The company NDI's Windows software is signed by, read from NDI's installer on 27 November
-/// 2026 ("CN=Vizrt AG, O=Vizrt AG, L=Zürich, C=CH", issued by DigiCert).
+/// 2026 (its certificate's name; the whole subject was "CN=Vizrt AG, O=Vizrt AG, L=Zürich,
+/// C=CH", issued by DigiCert).
 pub const SIGNER: &str = "Vizrt AG";
 /// The largest installer run. NDI's was 11,277,792 bytes in November 2026.
 pub const LARGEST_DOWNLOAD: u64 = 256 * 1024 * 1024;
 
-/// True when what Windows said of a file's signature (its status, a bar, the signer's
-/// subject) is a valid signature whose organisation is `signer`.
+/// True when what Windows said of a file's signature (its status, a bar, the signer's name)
+/// is a valid signature by `signer`, the name exactly.
 pub fn signed_by(said: &str, signer: &str) -> bool {
-    let Some((status, subject)) = said.trim().split_once('|') else { return false };
-    let organisation = format!("O={signer}");
-    status == "Valid" && subject.split(", ").any(|part| part == organisation)
+    said.trim().split_once('|').is_some_and(|(status, name)| status == "Valid" && name == signer)
 }
 
 /// Asks Windows (through PowerShell's `Get-AuthenticodeSignature`) who signed `file`, and
-/// refuses it unless the signature is valid and NDI's. The file's name reaches PowerShell in
-/// a variable of its environment, never in the command's words.
+/// refuses it unless the signature is valid (the file whole, the certificate trusted by
+/// Windows) and the signer's name is NDI's company. The name is the certificate's own name
+/// field, asked for by itself, never searched for in a longer text. The file's name reaches
+/// PowerShell in a variable of its environment, never in the command's words.
 pub fn check_signature(powershell: &Path, file: &Path) -> Result<(), Problem> {
-    const ASK: &str = "$s = Get-AuthenticodeSignature -LiteralPath $env:SOFTPRESENTER_NDI_FILE; [Console]::Out.Write($s.Status.ToString() + '|' + $s.SignerCertificate.Subject)";
+    const ASK: &str = "$s = Get-AuthenticodeSignature -LiteralPath $env:SOFTPRESENTER_NDI_FILE; $n = ''; if ($s.SignerCertificate) { $n = $s.SignerCertificate.GetNameInfo('SimpleName', $false) }; [Console]::Out.Write($s.Status.ToString() + '|' + $n)";
     let answer = Command::new(powershell)
         .args(["-NoProfile", "-NonInteractive", "-Command", ASK])
         .env("SOFTPRESENTER_NDI_FILE", file)
@@ -98,15 +99,19 @@ mod tests {
 
     #[test]
     fn only_a_valid_signature_of_ndis_company_counts() {
-        // What Windows said of NDI's installer on 27 November 2026.
-        assert!(signed_by("Valid|CN=Vizrt AG, O=Vizrt AG, L=Z\u{fc}rich, C=CH", SIGNER));
+        // NDI's installer on 27 November 2026 was valid, its subject "CN=Vizrt AG, …": the name
+        // asked for here is that CN. (The exact answer to this question was not read off the PC.)
+        assert!(signed_by("Valid|Vizrt AG", SIGNER));
         for other in [
             "NotSigned|",
-            "HashMismatch|CN=Vizrt AG, O=Vizrt AG, L=Z\u{fc}rich, C=CH",
-            "Valid|CN=Somebody Else, O=Somebody Else, C=US",
+            "HashMismatch|Vizrt AG",
+            "NotTrusted|Vizrt AG",
+            "Valid|Somebody Else",
             // NDI's name inside another name proves nothing.
-            "Valid|CN=Not Vizrt AG, O=Not Vizrt AG, C=US",
-            "Valid|CN=Vizrt AG Fan Club, O=Vizrt AG Fan Club, C=US",
+            "Valid|Not Vizrt AG",
+            "Valid|Vizrt AG Fan Club",
+            "Valid|Evil, O=Vizrt AG",
+            "Valid|",
             "Valid",
             "",
         ] {

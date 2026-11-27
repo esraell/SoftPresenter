@@ -14326,7 +14326,11 @@ fn main() -> ExitCode {
     // NDI downloaded in the app is kept in its own folder, looked in for NDI's runtime. Before
     // it is looked for: a new one unpacked while the old was in use takes its place, and a
     // download a quit left part of the way through is deleted.
-    if let Some(folder) = ndi_download::folder() {
+    // (Not on Windows, where NDI's own installer puts NDI in its own place: nothing of the
+    // app's is ever in that folder there, so nothing is looked for in it.)
+    if !ndi_download::way().installer()
+        && let Some(folder) = ndi_download::folder()
+    {
         ndi_download::settle(&folder);
         sp_ndi::set_own_folder(folder);
     }
