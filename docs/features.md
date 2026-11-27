@@ -515,8 +515,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   and lights up for pictures and videos only; songs over it go to the library shown, which is
   outlined. On macOS the window asks the system where the pointer is while files are over it
   (redrawing at most 30 times a second, for at most a minute of one drag), as the window
-  library doesn't say. On Windows and Linux it can't tell, so there songs go to the library
-  shown and pictures to the media bin, as before, and only those places light up.
+  library doesn't say. On a Linux Wayland desktop (Ubuntu's default) the window library says
+  nothing of dragged files at all, so SoftPresenter hears of them itself, through the
+  clipboard its windows share there: files dragged from the file manager, or from any program that hands
+  over a list of files, come in there too, and as Wayland says where the pointer is all through
+  the drag, they land where the pointer is as on a Mac (seen at display scales of 1 and
+  1.5). What was dragged that isn't a file on the computer (a web address, a file on
+  another computer) is left out, and the log says how many. On Windows and on Linux under X11
+  the window can't tell where the pointer is, so there songs go to the library shown and
+  pictures to the media bin, as before, and only those places light up.
   Sections are found from lines naming them ("Verse 1", "Chorus:", "Bridge", "Куплет 1",
   "Припев", "Приспів"…); slides break at blank lines, and more than four lines without one are
   shared out evenly (eight lines make two slides of four). A song the library already has,

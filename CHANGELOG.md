@@ -5,7 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-A What's new window, a find box that keeps its search after a drag, and a tidier Find songs that speaks your language.
+A What's new window, a find box that keeps its search after a drag, a tidier Find songs, and file drops on Linux's Wayland.
 
 ### New
 
@@ -23,6 +23,7 @@ A What's new window, a find box that keeps its search after a drag, and a tidier
 ### Fixed
 
 - **Reasons in your language.** When a songbook or song file can't be read, Song files and the import's notice now say why in your language. Details and page numbers are in your language too. Before, they said it in English in the middle of a Spanish, Russian or Ukrainian line ("Не удалось прочитать: the file is cut short or damaged…").
+- **Drag files in on Linux.** On Linux, files dragged from the file manager onto SoftPresenter now come in on Wayland desktops too (Ubuntu's default), not only on X11. Before, nothing happened when photos, videos or songs were dragged onto the window there; they had to be added with the + button. They also land where the pointer is, as on a Mac: on the playlist, the library or the media strip you drop them on.
 
 ## 0.9.0-dev.26 — 26 November 2026 (development build)
 

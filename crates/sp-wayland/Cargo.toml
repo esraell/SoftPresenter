@@ -1,0 +1,17 @@
+[package]
+name = "sp-wayland"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+# Files dragged onto a window on a Wayland desktop (Ubuntu's default), which the window library
+# doesn't hand over there. The drags are heard by the clipboard the interface toolkit already
+# runs for each window (smithay-clipboard, SoftPresenter's copy in third_party, which answers
+# drags too): a program can't count on hearing of them any other way. This adds no crate.
+[target.'cfg(target_os = "linux")'.dependencies]
+smithay-clipboard = "=0.7.3"
+raw-window-handle = "0.6"
+
+[lints]
+workspace = true

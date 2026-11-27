@@ -327,6 +327,7 @@ The code is a Rust workspace:
     crates/sp-decklink DeckLink output (a small C++ bridge to Blackmagic's driver)
     crates/sp-video    videos (macOS's AVFoundation, then FFmpeg), system picture formats, and
                        web pages drawn off-screen (macOS's web view)
+    crates/sp-wayland  files dragged onto the window on a Linux Wayland desktop
     crates/sp-app      the app and its windows
     crates/sp-mirror   softpresenter-mirror, a separate program that receives an iPhone, iPad or
                        Mac screen (unofficial; docs/licences/screen-mirroring.md)
@@ -335,6 +336,10 @@ The code is a Rust workspace:
     third_party/fontique  the font finder Parley uses, changed to map only font files nothing
                        else can change and read the rest (outside the workspace; its
                        PROVENANCE.md explains)
+    third_party/smithay-clipboard  the clipboard on Linux Wayland desktops, changed so that the
+                       windows share one thread and one data device (the published crate
+                       makes one of each for every window) and to take files dragged onto the
+                       window (outside the workspace; its PROVENANCE.md explains)
     third_party/decklink-sdk  the DeckLink SDK's header files, unchanged (its PROVENANCE.md
                        lists them)
 
@@ -347,6 +352,21 @@ The code is a Rust workspace:
 The picture tests in `sp-render` need a GPU and the macOS system font. The automatic checks run
 the rest on a Mac, on Windows and on Linux (Ubuntu; `.github/workflows/linux.yml` lists the
 packages a Linux build needs), with the lints on all three.
+
+Files dragged onto the window on a Linux Wayland desktop, and copy and paste there, depend on
+the changed copy of the clipboard crate in `third_party/smithay-clipboard`, which the automatic
+checks can't try (they have no desktop). After an update of egui, winit or that copy, run on a
+Linux computer with GNOME:
+
+    cargo build -p sp-app
+    scripts/wayland-drop-check.sh
+    cargo test -p smithay-clipboard --lib
+
+The script makes real drags and real copy and paste in a private headless GNOME Shell, with no
+one at the desk and nothing of the desktop's own session used, and says which of its three
+runs passed (about three minutes; the script's first lines say what it needs). The last line
+runs the copy's own unit test, which `cargo test --workspace` leaves out (the copy is not a
+workspace crate).
 
 ## Contributing, security and conduct
 

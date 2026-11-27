@@ -637,6 +637,22 @@ fn starts_answers_and_quits_cleanly() {
     let quitted = copy.quit();
     quitted.assert_clean(&run);
     assert!(quitted.log.contains("[control] listening for commands"), "{}", quitted.log);
+    // On a Wayland desktop the window library says nothing of files dragged onto the window, so
+    // the app hears of them itself, through its windows' clipboard (and has stopped, without a
+    // crash, by the time it has quit). Anywhere else it leaves them to the library.
+    // Which of the two the window is on is the window library's choice (it takes X11 when a
+    // Wayland desktop is named but can't be reached), so the copy's own log is asked, not the
+    // environment: on Linux it says one or the other.
+    let listened = quitted.log.contains("[drop] listening for files dragged in on Wayland");
+    let not_wayland = quitted.log.contains("[drop] the window is not on Wayland");
+    let one = cfg!(target_os = "linux") && (listened != not_wayland);
+    let neither = !cfg!(target_os = "linux") && !listened && !not_wayland;
+    assert!(one || neither, "listening for dragged files on Wayland, and only there{}", run.context());
+    if listened {
+        say("the copy listened for files dragged in on Wayland");
+    } else if not_wayland {
+        say("the copy's window was not on Wayland: listening for dragged files was not checked");
+    }
     let gpu = quitted.log.lines().find_map(|line| line.split_once("[gpu] ").map(|(_, said)| said.to_owned()));
     let gpu = gpu.unwrap_or_else(|| panic!("the log names the graphics it drew with{}", run.context()));
     // Said in the output, so a CI run shows what it drew with (WARP, Mesa's lavapipe…).

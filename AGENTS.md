@@ -211,7 +211,12 @@ a minute on a Mac. One test alone:
   font files while it looks for fonts); changes made to it here removed two of its maps and
   added one, which maps only a font file nothing else can change (a Mac's read-only system
   volume, or a private copy left with no name) and says why it is sound. The owner agreed to
-  carrying it, with `unsafe` code of its own, on 2026-11-21. `sp-decklink`'s `ffi` module calls
+  carrying it, with `unsafe` code of its own, on 2026-11-21. The copy of smithay-clipboard in
+  `third_party/smithay-clipboard` (the clipboard on Linux Wayland desktops, which also takes files
+  dragged onto the window there) is not a workspace crate either and carries smithay-clipboard's
+  own `unsafe` code (joining the window library's connection, and reading and writing the
+  clipboard's pipes); changes made to it here add none. The owner agreed to carrying it, with
+  `unsafe` code of its own, on 2026-11-26. `sp-decklink`'s `ffi` module calls
   the DeckLink driver through SoftPresenter's own C++ bridge (`bridge/bridge.cpp`, compiled
   with the DeckLink SDK's headers in `third_party/decklink-sdk`), the same arrangement as NDI's;
   the owner agreed to that on 2026-11-21. The bridge never calls back into Rust, and its

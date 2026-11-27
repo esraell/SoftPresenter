@@ -764,6 +764,10 @@ enum AppEvent {
     /// Files were dropped on the window: sent with the first, so it comes once the system has
     /// handed over all of that drop's files, one after another (see [`App::file_dropped`]).
     FilesDropped,
+    /// A Wayland desktop said of files dragged over the window or dropped on it, which the
+    /// window library doesn't say there (see `file_drop::Listening`).
+    #[cfg(target_os = "linux")]
+    FilesDragged(sp_wayland::Told),
 }
 
 impl AppEvent {
@@ -792,6 +796,8 @@ impl AppEvent {
             AppEvent::DisplaysChanged => "DisplaysChanged",
             AppEvent::Dialog(_) => "Dialog",
             AppEvent::FilesDropped => "FilesDropped",
+            #[cfg(target_os = "linux")]
+            AppEvent::FilesDragged(_) => "FilesDragged",
         }
     }
 }
@@ -1054,14 +1060,17 @@ fn imported_line(songs: usize, files: usize, ms: u128, refused: usize, here: usi
 }
 
 /// Where the pointer is in the window, in its points, while files are dragged over it: asked of
-/// the system, as the window library doesn't say (see `file_drop.rs`). `None` where the system
-/// can't say.
-fn file_drop_pointer(window: &Window, ctx: &egui::Context) -> Option<egui::Pos2> {
+/// the system, as the window library doesn't say (see `file_drop.rs`), or as a Wayland desktop
+/// told `listening`. `None` where the system can't say.
+fn file_drop_pointer(window: &Window, ctx: &egui::Context, listening: &file_drop::Listening) -> Option<egui::Pos2> {
     // Testing aid: SOFTPRESENTER_DROP_AT=X,Y puts the pointer there, in the window's points,
     // for files dragged over or dropped on the window.
     if let Ok(at) = std::env::var("SOFTPRESENTER_DROP_AT") {
         let (x, y) = at.split_once(',')?;
         return Some(egui::pos2(x.trim().parse().ok()?, y.trim().parse().ok()?));
+    }
+    if let Some(at) = listening.pointer() {
+        return Some(file_drop::window_point(at, (0, 0), window.scale_factor(), ctx.pixels_per_point()));
     }
     let screen = file_drop::pointer_on_screen()?;
     let inner = window.inner_position().ok()?;
@@ -1950,6 +1959,12 @@ struct PanelWindow {
 
 /// Everything that exists once the windows are open.
 struct Running {
+    /// Listening for files dragged onto the operator's window on a Wayland desktop. This must
+    /// stay the first field: fields are dropped in order, and the listening has to stop before
+    /// the home window goes. It knows the window by the address of its surface, and once the
+    /// window is gone that address may be given to another surface (another window's, say),
+    /// which would then take drops meant for no one.
+    file_drops: file_drop::Listening,
     home_window: repaints::HomeWindow,
     home_surface: wgpu::Surface<'static>,
     /// How the home window's surface is set up (see `surface_setup`).
@@ -2621,6 +2636,7 @@ impl App {
         output.send(OutputMsg::PreviewTargets(live_textures.clone()));
 
         Ok(Some(Running {
+            file_drops: file_drop::Listening::start(&home_window, self.waker.clone()),
             home_window: repaints::HomeWindow::new(home_window),
             home_surface,
             home_set_up,
@@ -4874,6 +4890,32 @@ impl App {
         running.preview_changed = if fade { now } else { now.checked_sub(Duration::from_secs(60)).unwrap_or(now) };
     }
 
+    /// Takes in what the system says of files dragged from another program: the window library's
+    /// own words on macOS, Windows and X11, and what a Wayland desktop said, put the same way
+    /// (`file_drop::Told::by_wayland`). Where the pointer is, the window asks as it draws (see
+    /// file_drop.rs).
+    fn file_drag_told(&mut self, told: file_drop::Told) {
+        let path = match told {
+            file_drop::Told::Dropped(path) => return self.file_dropped(path),
+            file_drop::Told::Over(path) => Some(path),
+            file_drop::Told::Gone => None,
+        };
+        let Some(running) = self.running.as_mut() else {
+            return;
+        };
+        match path {
+            Some(path) => {
+                running.home_state.drop_hover = true;
+                running.home_state.file_drag.add(path);
+            }
+            None => {
+                running.home_state.drop_hover = false;
+                running.home_state.file_drag = file_drop::FileDrag::default();
+            }
+        }
+        running.home_window.request_redraw();
+    }
+
     /// Notes a file dropped on the window from the Finder. The system hands over several
     /// dropped together one after another; they are taken in together once all have come (see
     /// [`App::finish_drop`]), each to the place the pointer was over at the drop.
@@ -4885,8 +4927,10 @@ impl App {
     /// handling of it; that is still looked at then, in case the event can't be sent.
     fn file_dropped(&mut self, path: PathBuf) {
         if self.dropped.is_empty() {
-            self.drop_pointer =
-                self.running.as_ref().and_then(|running| file_drop_pointer(&running.home_window, &running.egui_ctx));
+            self.drop_pointer = self
+                .running
+                .as_ref()
+                .and_then(|running| file_drop_pointer(&running.home_window, &running.egui_ctx, &running.file_drops));
             self.drop_came = Some((Instant::now(), chrono::Local::now()));
             if let Some(waker) = &self.waker {
                 let _ = waker.send_event(AppEvent::FilesDropped);
@@ -9663,7 +9707,7 @@ impl App {
         // Where the pointer is while files are dragged over the window: asked of the system, as
         // the window library doesn't say (see file_drop.rs).
         if running.home_state.drop_hover {
-            running.home_state.file_drag.pointer = file_drop_pointer(home_window, egui_ctx);
+            running.home_state.file_drag.pointer = file_drop_pointer(home_window, egui_ctx, &running.file_drops);
         }
         // A new size is taken on as it comes, so the window is drawn at the size it has while it
         // is dragged and macOS has nothing to stretch. Setting the surface up waits for what the
@@ -11795,6 +11839,16 @@ impl ApplicationHandler<AppEvent> for App {
                 self.finish_drop("on the drop's own event");
                 return;
             }
+            // Files dragged in on a Wayland desktop: taken in as the window library's own words
+            // about them are (`window_event`), all of a drop's files within this one event.
+            #[cfg(target_os = "linux")]
+            AppEvent::FilesDragged(told) => {
+                if let Some(said) = file_drop::Told::wayland_line(&told) {
+                    applog::event("drop", &said);
+                }
+                file_drop::Told::by_wayland(told).into_iter().for_each(|told| self.file_drag_told(told));
+                return;
+            }
             // Taken in when the loop next waits (`tick_canva`).
             AppEvent::Canva => return,
             // Taken in when the loop next waits (`tick_mirror`, `tick_web`).
@@ -12128,19 +12182,10 @@ impl ApplicationHandler<AppEvent> for App {
             running.home_window.request_redraw_for(|| repaints::Why::Told(repaints::event_name(&event)));
         }
         match event {
-            // Files dragged over the window from the Finder, each told one after another; where
-            // the pointer is, the window asks the system as it draws (see file_drop.rs).
-            WindowEvent::HoveredFile(path) => {
-                running.home_state.drop_hover = true;
-                running.home_state.file_drag.add(path);
-                running.home_window.request_redraw();
-            }
-            WindowEvent::HoveredFileCancelled => {
-                running.home_state.drop_hover = false;
-                running.home_state.file_drag = file_drop::FileDrag::default();
-                running.home_window.request_redraw();
-            }
-            WindowEvent::DroppedFile(path) => self.file_dropped(path),
+            // Files dragged over the window from the Finder, each told one after another.
+            WindowEvent::HoveredFile(path) => self.file_drag_told(file_drop::Told::Over(path)),
+            WindowEvent::HoveredFileCancelled => self.file_drag_told(file_drop::Told::Gone),
+            WindowEvent::DroppedFile(path) => self.file_drag_told(file_drop::Told::Dropped(path)),
             WindowEvent::CloseRequested => self.quit(el),
             WindowEvent::Resized(size) => {
                 if size.width > 0 && size.height > 0 {

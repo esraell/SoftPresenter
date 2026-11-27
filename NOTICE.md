@@ -229,6 +229,16 @@ from the copy in `third_party/fontique`, which SoftPresenter has changed: the co
 Fontique's licence files, marks each change, and says what was changed and why in its
 `PROVENANCE.md`. [`docs/licences/fontique.md`](docs/licences/fontique.md) explains.
 
+### smithay-clipboard
+
+On Linux, SoftPresenter's clipboard on Wayland desktops is smithay-clipboard
+(<https://github.com/Smithay/smithay-clipboard>), copyright Lucas Timmins and Victor Berger,
+licensed under the MIT licence. Its `smithay-clipboard` crate, version 0.7.3, is built from the
+copy in `third_party/smithay-clipboard`, which SoftPresenter has changed: the copy keeps
+smithay-clipboard's licence file, marks each change, and says what was changed and why in its
+`PROVENANCE.md`. [`docs/licences/smithay-clipboard.md`](docs/licences/smithay-clipboard.md)
+explains.
+
 ### SoftPresenter Sans
 
 SoftPresenter sets slides in SoftPresenter Sans, a typeface built into the program: Libertinus

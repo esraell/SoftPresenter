@@ -18,6 +18,7 @@ sp-decklink = { path = "crates/sp-decklink" }
 sp-bible = { path = "crates/sp-bible" }
 sp-video = { path = "crates/sp-video" }
 sp-winapi = { path = "crates/sp-winapi" }
+sp-wayland = { path = "crates/sp-wayland" }
 # Fetching Bibles: a small blocking HTTPS client, and the checksum each download is checked against.
 ureq = "3"
 sha2 = "0.10"
@@ -70,6 +71,10 @@ vello = { path = "third_party/vello" }
 # Fontique 0.13.0, which finds the fonts Parley lays text out in, with font files read into
 # memory instead of mapped: third_party/fontique/PROVENANCE.md says why.
 fontique = { path = "third_party/fontique" }
+# smithay-clipboard 0.7.3, the clipboard the interface toolkit runs for each window on a Linux
+# Wayland desktop, which also answers drags from other programs here, so that files can be
+# dragged onto the window there: third_party/smithay-clipboard/PROVENANCE.md says why.
+smithay-clipboard = { path = "third_party/smithay-clipboard" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
