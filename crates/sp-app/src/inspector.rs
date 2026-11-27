@@ -2395,7 +2395,7 @@ fn text_look(
             (Caps::AllCaps, t("inspector.caps.all", "ALL CAPITALS")),
             (Caps::Lowercase, t("inspector.caps.lower", "all small")),
             (Caps::StartCase, t("inspector.caps.start", "Each Word")),
-            (Caps::TitleCase, t("inspector.caps.title", "Title Case")),
+            (Caps::TitleCase, t("inspector.caps.title", "Like a Title")),
         ];
         choice(ui, "caps", room, &mut wanted.caps, &options);
     });
@@ -2411,11 +2411,11 @@ fn text_look(
     });
     row(ui, column, t("inspector.row.breaks", "Breaks"), |ui| {
         let options = [
-            (LineTransform::None, t("inspector.lines.none", "None")),
-            (LineTransform::RemoveLineReturns, t("inspector.lines.remove", "Remove line returns")),
-            (LineTransform::ReplaceLineReturns, t("inspector.lines.replace", "Replace line returns")),
-            (LineTransform::OneWordPerLine, t("inspector.lines.word", "One word per line")),
-            (LineTransform::OneCharacterPerLine, t("inspector.lines.character", "One character per line")),
+            (LineTransform::None, t("inspector.lines.none", "As typed")),
+            (LineTransform::RemoveLineReturns, t("inspector.lines.remove", "Run together")),
+            (LineTransform::ReplaceLineReturns, t("inspector.lines.replace", "Run together, with / between lines")),
+            (LineTransform::OneWordPerLine, t("inspector.lines.word", "A word on each line")),
+            (LineTransform::OneCharacterPerLine, t("inspector.lines.character", "A letter on each line")),
         ];
         choice(ui, "line transform", room, &mut wanted.line_transform, &options);
     });
@@ -3183,7 +3183,6 @@ mod tests {
     #[test]
     fn the_object_rows_keys_have_their_names_on_one_line_or_are_all_pictures() {
         let theme = Theme::builtin();
-        let mut forms = Vec::new();
         for language in LANGUAGES {
             crate::i18n::with_language(language, || {
                 let names = [
@@ -3212,11 +3211,19 @@ mod tests {
                     let ends = drawn[2].expect("Delete").max.x;
                     assert!(ends <= PANEL_WIDTH, "{language:?}: the names end at {ends}");
                 }
-                forms.push((language, named == 3));
+                // Names only where the three fit the row at the usual size, measured with this
+                // computer's own letters. The row's controls start where the row above's do:
+                // 13 before the words on its first key.
+                let forward = t("inspector.order.forward", "Forward");
+                let (_, above) = words.iter().find(|(said, _)| said == forward).expect("the Order row");
+                let room = (PANEL_WIDTH - (above.min.x - 13.0)).round();
+                let mut fits = false;
+                let measuring = crate::studio::tests::styled();
+                let measured = measuring.run_ui(RawInput::default(), |ui| fits = object_keys_named(ui, room));
+                measured.drop_without_applying_deltas();
+                assert_eq!(named == 3, fits, "{language:?}: names where they fit {room}");
             });
         }
-        assert!(forms.contains(&(crate::i18n::Language::English, true)), "English has room for its names");
-        assert!(forms.contains(&(crate::i18n::Language::Russian, false)), "Russian's don't fit: pictures");
     }
 
     #[test]

@@ -3783,7 +3783,11 @@ fn edit_view(
         // The well may stand into the canvas's margins, short of its edges; which form its
         // keys take follows that room and the window's width, never a click.
         let window = ui.ctx().content_rect().width();
-        let plan = crate::add_bar::Plan::of(ui, &kinds, room.width() + 2.0 * (CANVAS_MARGIN - 8.0), window);
+        let keys_room = room.width() + 2.0 * (CANVAS_MARGIN - 8.0);
+        let plan = crate::add_bar::Plan::of(ui, &kinds, keys_room, window);
+        // For the tests that measure a drawn frame: the room the keys' form was chosen for.
+        #[cfg(test)]
+        ui.data_mut(|data| data.insert_temp(crate::add_bar::well_id().with("room"), (keys_room, window)));
         let (fitted_bar, fitted_centre, fit_width) = crate::add_bar::fit(room, plan.size());
         let pixels = ui.ctx().pixels_per_point();
         let canvas_area = Rect::from_min_max(area.min + vec2(ruler, ruler), area.max);
@@ -10992,6 +10996,9 @@ mod tests {
         keys: Vec<(crate::add_bar::Kind, Rect)>,
         /// The toolbar's well.
         well: Rect,
+        /// The form its keys took, and the room and the window's width it was chosen for.
+        form: Option<crate::add_bar::Form>,
+        room: (f32, f32),
         texts: Vec<(String, Rect)>,
     }
 
@@ -11060,9 +11067,12 @@ mod tests {
             data.remove::<crate::add_bar::Drawn>(crate::add_bar::well_id());
             drawn
         });
+        let form = drawn.as_ref().map(|drawn| drawn.form);
+        let room = ctx.data(|data| data.get_temp::<(f32, f32)>(crate::add_bar::well_id().with("room")));
+        let room = room.unwrap_or_default();
         let (well, keys) = drawn.map_or((Rect::NOTHING, Vec::new()), |drawn| (drawn.well, drawn.keys));
         assert!(keys.is_empty() || blocks.contains(&well), "the well is painted where it is laid out: {well:?}");
-        AddBarFrame { slide, ruler, keys, well, texts }
+        AddBarFrame { slide, ruler, keys, well, form, room, texts }
     }
 
     /// Clicks once at `at` in a window `window` points big, and draws a frame after.
@@ -11099,11 +11109,13 @@ mod tests {
     fn the_add_toolbar_shows_each_editors_kinds_by_name_in_order() {
         use crate::add_bar::{Editor, kinds};
         let (ctx, show) = (crate::studio::tests::styled(), three_songs());
-        let window = vec2(1440.0, 900.0);
+        // A window with room for every name and the caption, whatever this computer's letters.
+        let window = vec2(2560.0, 1440.0);
         for editor in [Editor::Slide, Editor::Template, Editor::Stage] {
             let mut state = add_bar_state(&show, editor);
             add_bar_frame(&ctx, &show, &mut state, window, vec![], 0.1);
             let frame = add_bar_frame(&ctx, &show, &mut state, window, vec![], 0.2);
+            assert_eq!(frame.form, Some(crate::add_bar::Form::Wide), "{editor:?}: {:?}", frame.room);
             let shown: Vec<_> = frame.keys.iter().map(|(kind, _)| *kind).collect();
             assert_eq!(shown, kinds(editor), "{editor:?}");
             for pair in frame.keys.windows(2) {
@@ -11251,8 +11263,8 @@ mod tests {
     /// key is inside the well and none over another, the well is over the slide (or no further
     /// past it than the canvas's margins), centred on it and 34 points above it, and well and
     /// slide are centred together down the canvas. The keys all have their names or all are
-    /// pictures: in English at 1440 × 900 the names, after the caption ADD; at 1100 × 700,
-    /// where the middle column has the left column beside it, pictures alone.
+    /// pictures, and which it is follows from the room and the letters of the computer the test
+    /// runs on: names only where they all fit at full size, pictures only where they don't.
     #[test]
     fn the_add_toolbar_fits_over_the_slide_at_the_smallest_window_in_every_language() {
         use crate::add_bar::{Editor, KEY_TALL, OVER_SLIDE, WELL_TALL};
@@ -11300,17 +11312,46 @@ mod tests {
                     assert!(named.iter().all(|has| *has == named[0]), "{at}: never some of each: {named:?}");
                     let caption = with_language(language, || t("editor.add.caption", "Add").to_uppercase());
                     let caption = frame.texts.iter().any(|(text, rect)| *text == caption && well.contains_rect(*rect));
-                    if window.x == 1100.0 {
-                        // 456 points of middle column: no seven names fit, in any language.
-                        assert!(!named[0] && !caption, "{at}: pictures alone, no caption");
-                        for (kind, key) in keys {
-                            assert_eq!(key.width() > KEY_TALL, kind.chooses(), "{at}: {kind:?} is a square");
+                    // Which form it is follows from the room and this computer's own letters,
+                    // measured here: names only where they all fit at full size, the caption
+                    // only before names in a wide window where that fits too, and pictures
+                    // only where the names don't fit.
+                    use crate::add_bar::{Form, Plan};
+                    let (room, window_wide) = frame.room;
+                    let mut sizes = [0.0_f32; 3];
+                    let measuring = crate::studio::tests::styled();
+                    with_language(language, || {
+                        let measured = measuring.run_ui(RawInput::default(), |ui| {
+                            sizes = [Form::Wide, Form::Tight, Form::Pictures]
+                                .map(|form| Plan::in_form(ui, &kinds, form).size().x);
+                        });
+                        measured.drop_without_applying_deltas();
+                    });
+                    let [wide, tight, pictures] = sizes;
+                    let form = frame.form.expect("a form");
+                    assert_eq!(named[0], form != Form::Pictures, "{at}: names drawn in the forms that have them");
+                    assert_eq!(caption, form == Form::Wide, "{at}: the caption only in the wide form");
+                    assert_eq!(window_wide, window.x, "{at}");
+                    let size = match form {
+                        Form::Wide => {
+                            assert!(window.x >= 1250.0 && wide <= room + 0.01, "{at}: {wide} in {room}");
+                            wide
                         }
-                    } else if language == Language::English {
-                        assert!(named[0] && caption, "{at}: names after ADD");
-                    } else {
-                        assert!(!caption || named[0], "{at}: a caption only before names");
-                    }
+                        Form::Tight => {
+                            assert!(tight <= room + 0.01, "{at}: the names fit: {tight} in {room}");
+                            assert!(window.x < 1250.0 || wide > room, "{at}: the caption would fit: {wide} in {room}");
+                            tight
+                        }
+                        Form::Pictures => {
+                            assert!(tight > room, "{at}: the names would fit: {tight} in {room}");
+                            for (kind, key) in keys {
+                                assert_eq!(key.width() > KEY_TALL, kind.chooses(), "{at}: {kind:?} is a square");
+                            }
+                            pictures
+                        }
+                    };
+                    assert!(pictures <= room + 0.01, "{at}: pictures always fit: {pictures} in {room}");
+                    assert!((well.width() - size).abs() < 0.01, "{at}: the well is its form's size");
                     // Over a slide, well and slide in the middle of the canvas: as much room
                     // over the well as under the slide.
                     if editor == Editor::Slide {
@@ -11445,8 +11486,8 @@ mod tests {
                             home_ui(ui, &show, &mut state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
                         });
                         // Where this frame put the keys, and in which form.
-                        places =
-                            ctx.data(|data| data.get_temp::<([Rect; 5], bool)>(crate::studio::list_keys_drawn_id()));
+                        places = ctx
+                            .data(|data| data.get_temp::<([Rect; 5], bool, f32)>(crate::studio::list_keys_drawn_id()));
                         texts.clear();
                         output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts));
                         output.drop_without_applying_deltas();
@@ -11461,7 +11502,18 @@ mod tests {
                     .iter()
                     .map(|name| texts.iter().find(|(said, _, place)| said == name && column.contains_rect(*place)))
                     .collect();
-                let (keys, named) = places.expect("laid out");
+                let (keys, named, across) = places.expect("laid out");
+                // Names only where the three fit at the app's key size with their least padding
+                // (3 either side), measured with this computer's own letters.
+                let mut words = 0.0;
+                let measuring = crate::studio::tests::styled();
+                let measured = measuring.run_ui(RawInput::default(), |ui| {
+                    let font = crate::studio::list_key_font();
+                    words = names.iter().map(|name| crate::studio::widest(ui, &[name], &font)).sum::<f32>();
+                });
+                measured.drop_without_applying_deltas();
+                let room = across - 16.0 - 2.0 * 26.0 - 4.0 * 4.0;
+                assert_eq!(named, words + 18.0 <= room, "{at}: names where they fit: {words} in {room}");
                 assert!(drawn.iter().all(|name| name.is_some() == named), "{at}: all names or none: {drawn:?}");
                 for (_, size, _) in drawn.iter().flatten() {
                     assert_eq!(*size, 12.5, "{at}: the app's key size, never smaller");
@@ -11484,9 +11536,7 @@ mod tests {
                 forms.push((language, named));
             }
         }
-        // English has room for its names; the form is the same at both window sizes, since the
-        // column is as wide in both.
-        assert!(forms.iter().filter(|(language, _)| *language == Language::English).all(|(_, named)| *named));
+        // The form is the same at both window sizes, since the column is as wide in both.
         for pair in forms.chunks(2) {
             assert_eq!(pair[0].1, pair[1].1, "{:?}: one form whatever the window", pair[0].0);
         }
@@ -12349,17 +12399,25 @@ mod tests {
         assert!(state.props_changed);
     }
 
+    /// The five keys over a list stand in order inside the left column, whichever form this
+    /// computer's letters give them; where they have their names, Duplicate is spelt out.
     #[test]
-    fn the_keys_over_a_list_fit_the_left_column_with_duplicate_spelt_out() {
+    fn the_keys_over_a_list_fit_the_left_column_in_order() {
         let ctx = crate::studio::tests::styled();
         let mut state = props_open(&["Logo"], 0);
         let (output, _) = prop_column(&ctx, &mut state, vec![]);
-        let place = |words: &str| crate::studio::tests::place_of(&output, words).expect(words);
-        let (add, duplicate, delete, down) = (place("Add"), place("Duplicate"), place("Delete"), place("\u{2193}"));
+        let named = crate::studio::tests::place_of(&output, "Duplicate").is_some();
+        let place = |words: &str| {
+            let drawn = crate::studio::tests::place_of(&output, words);
+            assert_eq!(drawn.is_some(), named, "{words}: all names or none");
+            drawn.or_else(|| crate::studio::tests::list_key_place(&ctx, words)).expect(words)
+        };
+        let (add, duplicate, delete) = (place("Add"), place("Duplicate"), place("Delete"));
+        let down = crate::studio::tests::list_key_place(&ctx, "\u{2193}").expect("the last key");
         output.drop_without_applying_deltas();
         assert!(add.x < duplicate.x && duplicate.x < delete.x && delete.x < down.x);
         // The column's room is LEFT_WIDTH less 10 either side; the keys stand 8 in from it, the
-        // last 26 wide.
+        // last no more than 28 wide.
         let right = 10.0 + crate::studio::LEFT_WIDTH - 10.0 - 8.0;
         assert!(down.x + 13.0 <= right + 0.5, "the last key ends at {} of {right}", down.x + 13.0);
     }
@@ -12730,7 +12788,8 @@ mod tests {
         button: egui::PointerButton,
     ) -> Option<PropListAsk> {
         let (output, _) = prop_column(ctx, state, vec![]);
-        let at = crate::studio::tests::place_on_top(&output, words).expect(words);
+        let drawn = crate::studio::tests::place_on_top(&output, words);
+        let at = drawn.or_else(|| crate::studio::tests::list_key_place(ctx, words)).expect(words);
         output.drop_without_applying_deltas();
         let mut asked = None;
         for events in crate::studio::tests::click_frames(at, button) {
@@ -12940,7 +12999,8 @@ mod tests {
     /// Where the slides' column draws `words`.
     fn slide_column_place(ctx: &egui::Context, show: &Show, state: &mut HomeState, words: &str) -> egui::Pos2 {
         let (output, _) = slide_column(ctx, show, state, vec![]);
-        let at = crate::studio::tests::place_of(&output, words).expect(words);
+        let drawn = crate::studio::tests::place_of(&output, words);
+        let at = drawn.or_else(|| crate::studio::tests::list_key_place(ctx, words)).expect(words);
         output.drop_without_applying_deltas();
         at
     }

@@ -235,7 +235,7 @@ pub struct Plan {
 
 impl Plan {
     /// The toolbar in `form`.
-    fn in_form(ui: &egui::Ui, kinds: &[Kind], form: Form) -> Plan {
+    pub fn in_form(ui: &egui::Ui, kinds: &[Kind], form: Form) -> Plan {
         let caption = (form == Form::Wide).then(|| {
             let look = crate::studio::Lettering::cap(crate::studio::TEXT_FAINT);
             crate::studio::spaced(ui, &caption_words().to_uppercase(), look.font, look.ink, look.spacing).size().x
@@ -318,6 +318,7 @@ pub fn pinned(corner: Pos2) -> Pos2 {
 pub struct Drawn {
     pub well: Rect,
     pub keys: Vec<(Kind, Rect)>,
+    pub form: Form,
 }
 
 /// The id of the well: one toolbar is shown at a time.
@@ -333,7 +334,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState, editor: Editor, bar: &Bar)
     #[cfg(test)]
     ui.data_mut(|data| {
         let keys = kinds(editor).into_iter().zip(bar.keys.iter().copied()).collect();
-        data.insert_temp(well_id(), Drawn { well: bar.well, keys });
+        data.insert_temp(well_id(), Drawn { well: bar.well, keys, form: bar.form });
     });
     ui.interact(bar.well, well_id(), Sense::click_and_drag());
     let painter = ui.painter();
@@ -618,11 +619,15 @@ mod tests {
                             assert_eq!(*key > KEY_TALL, kind.chooses(), "{at} {kind:?}: {key}");
                             assert!(*key < KEY_TALL + 12.0, "{at} {kind:?}: {key}");
                         }
-                        let named: std::collections::BTreeSet<i32> = wide.keys.iter().map(|key| *key as i32).collect();
-                        assert!(named.len() > 3, "{at}: each as wide as its name: {:?}", wide.keys);
-                        // The well at the smallest window's canvas (384 across with its margins'
-                        // 56 beside) holds every key.
-                        assert!(pictures.size().x <= 384.0, "{at}: {}", pictures.size().x);
+                        for (kind, key) in kinds.iter().zip(&wide.keys) {
+                            let least =
+                                2.0 * Form::Wide.pad() + PICTURE + super::wide(ui, kind.short(), Form::Wide.font());
+                            assert!(*key >= least && *key < least + 24.0, "{at} {kind:?}: as wide as its name: {key}");
+                        }
+                        // Pictures take no more than a square and a mark each, whatever the
+                        // names are: the well is as wide as that and its padding, no more.
+                        let most = kinds.len() as f32 * (KEY_TALL + 12.0 + KEY_GAP) + 2.0 * WELL_PAD;
+                        assert!(pictures.size().x <= most, "{at}: {}", pictures.size().x);
                     }
                 });
             }

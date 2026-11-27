@@ -1697,7 +1697,7 @@ pub fn list_keys(ui: &mut egui::Ui, salt: &str, can: [bool; 5], hints: [&str; 5]
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0 + LIST_KEYS_UNDER), Sense::hover());
     let (places, named) = list_key_places(ui, row.min, row.width());
     #[cfg(test)]
-    ui.data_mut(|data| data.insert_temp(list_keys_drawn_id(), (places, named)));
+    ui.data_mut(|data| data.insert_temp(list_keys_drawn_id(), (places, named, row.width())));
     let mut pressed = None;
     for (at, key) in ListKey::ALL.into_iter().enumerate() {
         let (rect, id) = (places[at], ui.scope_id().with((salt, at)));
@@ -8701,6 +8701,15 @@ pub mod tests {
     /// Where a frame drew the line `words` (in a menu too), at its middle; `None` if it didn't.
     pub fn place_of(output: &egui::FullOutput, words: &str) -> Option<egui::Pos2> {
         output.shapes.iter().find_map(|clipped| text_place(&clipped.shape, words))
+    }
+
+    /// The middle of the list key called `words` ("Add", "Duplicate", "Delete", or an arrow) in
+    /// the frame `ctx` drew last, for a click on it whether the keys show their names or, on a
+    /// computer whose letters are wider, their pictures.
+    pub fn list_key_place(ctx: &egui::Context, words: &str) -> Option<egui::Pos2> {
+        let at = ListKey::ALL.into_iter().position(|key| key.words() == words)?;
+        let drawn = ctx.data(|data| data.get_temp::<([Rect; 5], bool, f32)>(list_keys_drawn_id()))?;
+        Some(drawn.0[at].center())
     }
 
     /// Where a frame drew `words` last, on top of the rest (in an open menu, say, when the same

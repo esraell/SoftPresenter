@@ -710,7 +710,8 @@ mod tests {
         button: egui::PointerButton,
     ) -> (Option<super::ListRequest>, egui::FullOutput) {
         let (output, _) = column(ctx, state, vec![]);
-        let at = crate::studio::tests::place_on_top(&output, words).expect(words);
+        let drawn = crate::studio::tests::place_on_top(&output, words);
+        let at = drawn.or_else(|| crate::studio::tests::list_key_place(ctx, words)).expect(words);
         output.drop_without_applying_deltas();
         let mut asked = None;
         let mut last = None;
