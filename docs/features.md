@@ -2032,7 +2032,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   ended it on the spot. On Windows too: when Windows signs out, restarts or shuts down, it tells
   the operator's window the session is ending, and the app saves and stops before it answers
   (before, Windows ended it with the last second's changes, and everything still to be written,
-  lost). When an installer asks the app to close because it needs a file the app uses (Windows'
+  lost). Asked first whether the session may end, the app hands every save to its writer at
+  once (harmless if the sign-out is called off), and while the writer has files left to write
+  Windows is told why the app keeps it waiting ("Saving…", in the language set), which its
+  shut-down screen shows beside the app; taken back once everything is written. When an installer asks the app to close because it needs a file the app uses (Windows'
   Restart Manager, as a driver or NDI update does), the session goes on: the app saves
   everything and waits until it is written, and stays open, so the screens keep going.
 - **The log says how each NDI screen's pictures went out.** Once a minute, for each NDI screen,

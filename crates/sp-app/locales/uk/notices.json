@@ -46,6 +46,7 @@
   "notices.save.themes_in_use": "Не вдалося зберегти, яка тема використовується: {error}",
   "notices.save.saved_now": "{name}: тепер збережено.",
   "notices.save.trying_again": "SoftPresenter спробує ще раз за мить; якщо під час закриття зберегти так і не вдасться, зміна залишиться в папці Not saved бібліотеки.",
+  "notices.saving_for_windows": "Збереження…",
   "notices.delete.theme": "Не вдалося видалити тему: {error}",
   "notices.images.no_place": "Не вдалося знайти, де зберігати зображення на цьому компʼютері.",
   "notices.images.no_folder": "Не вдалося створити папку зображень: {error}",

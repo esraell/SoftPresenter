@@ -2781,6 +2781,9 @@ struct App {
     home_timing: applog::Timing,
     /// When quitting began, while it waits for Canva Sync to keep a sign-in it is refreshing.
     quitting: Option<Instant>,
+    /// Windows is told the app is saving (`say_saving_to_windows`).
+    #[cfg(windows)]
+    saying_saving: bool,
     /// Testing aid: SOFTPRESENTER_END_SESSION_WHEN has been acted on (see `about_to_wait`).
     #[cfg(windows)]
     end_session_asked: bool,
@@ -12520,9 +12523,11 @@ impl App {
         applog::event("quit", "Windows asked SoftPresenter to close, as an installer needs a file it uses: saving");
         let began = Instant::now();
         self.hand_over_all();
+        self.say_saving_to_windows();
         self.finish_saves();
         self.writer.drain();
         self.finish_saves();
+        self.stop_saying_saving_to_windows();
         applog::event(
             "quit",
             &format!(
@@ -12530,6 +12535,46 @@ impl App {
                 began.elapsed().as_secs_f64() * 1000.0
             ),
         );
+    }
+
+    /// Windows asked whether the session may end (a log-off, a restart or a shut-down may follow,
+    /// or be called off): everything changed is handed to the library's writer now, so less is
+    /// left to write if the session does end, and Windows is told why the app keeps it waiting
+    /// while it writes. The app stays open, the screens on; nothing is waited for here.
+    fn save_as_session_may_end(&mut self) {
+        applog::event("quit", "Windows asked whether the session may end: handing every save over now");
+        self.hand_over_all();
+        self.say_saving_to_windows();
+    }
+
+    /// While the library's writer has files to write, Windows is told why the app keeps a
+    /// log-off or shut-down waiting ("Saving…", in the language set), which it shows beside the
+    /// app if the wait is long; taken back once everything is written (`about_to_wait`, and the
+    /// leaving). On Windows only.
+    fn say_saving_to_windows(&mut self) {
+        #[cfg(windows)]
+        if !self.saying_saving
+            && !self.writer.is_idle()
+            && let Some(window) = self.running.as_ref().and_then(|running| win32_handle(&running.home_window))
+            && sp_winapi::block_shutdown(window, crate::i18n::t("notices.saving_for_windows", "Saving\u{2026}"))
+        {
+            self.saying_saving = true;
+            applog::event("quit", "told Windows the app is saving, which it shows if it is kept waiting");
+        }
+    }
+
+    /// Takes back what `say_saving_to_windows` told Windows, once the writer has nothing left to
+    /// write.
+    fn stop_saying_saving_to_windows(&mut self) {
+        #[cfg(windows)]
+        if self.saying_saving
+            && self.writer.is_idle()
+            && let Some(window) = self.running.as_ref().and_then(|running| win32_handle(&running.home_window))
+        {
+            sp_winapi::unblock_shutdown(window);
+            self.saying_saving = false;
+            applog::event("quit", "everything is written: Windows is no longer told the app is saving");
+        }
     }
 
     /// What a quit does at once, however it came: what was changed is handed to be saved, and
@@ -12617,7 +12662,13 @@ impl App {
             },
         );
         if !self.left {
+            if self.quitting.is_none() {
+                self.begin_quit();
+            }
+            // Windows is told why it waits while the writer writes what is left.
+            self.say_saving_to_windows();
             self.leave_at_once();
+            self.stop_saying_saving_to_windows();
         }
         sp_winapi::session_end_done();
         el.exit();
@@ -13434,6 +13485,7 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::CloseRequested => match sp_winapi::take_windows_ask() {
                 Some(sp_winapi::WindowsAsk::Ending) => self.leave_for_session_end(el),
                 Some(sp_winapi::WindowsAsk::CloseApp) => self.save_for_close_app(),
+                Some(sp_winapi::WindowsAsk::MayEnd) => self.save_as_session_may_end(),
                 None => self.quit(el),
             },
             WindowEvent::Resized(size) => {
@@ -13719,8 +13771,10 @@ impl ApplicationHandler<AppEvent> for App {
             el.set_control_flow(ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(100)));
             return;
         }
-        // What the library's writer has written since (its stamps), and what it couldn't.
+        // What the library's writer has written since (its stamps), and what it couldn't; once it
+        // is idle, Windows is no longer told the app is saving.
         self.finish_saves();
+        self.stop_saying_saving_to_windows();
         // Files dropped on the window, now that all of the drop have come (if the drop's own
         // event hasn't taken them in already).
         self.finish_drop("as the loop waited");
@@ -14495,6 +14549,8 @@ fn main() -> ExitCode {
         quitting: None,
         #[cfg(target_os = "macos")]
         terminate_asked: false,
+        #[cfg(windows)]
+        saying_saving: false,
         #[cfg(windows)]
         end_session_asked: false,
         left: false,

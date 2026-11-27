@@ -2295,7 +2295,10 @@ fn a_windows_log_off_saves_and_stops_the_app_as_its_own_quit_does() {
     // The log-off comes once this file is there: after the changes below, however slowly the
     // copy started.
     let log_off = run.file("log off now");
-    let copy = run.start(&[("SOFTPRESENTER_END_SESSION_WHEN", &log_off.to_string_lossy())]);
+    // Each file takes a while to write, as on a slow disk, so the writer still has some to write
+    // when Windows asks whether the session may end.
+    let copy = run
+        .start(&[("SOFTPRESENTER_END_SESSION_WHEN", &log_off.to_string_lossy()), ("SOFTPRESENTER_SLOW_WRITES", "300")]);
     copy.ok(&["song", "import", &file.to_string_lossy()]);
     copy.ok(&["go", "Hill Road"]);
     // Changed a moment before Windows ends the session.
@@ -2310,7 +2313,15 @@ fn a_windows_log_off_saves_and_stops_the_app_as_its_own_quit_does() {
         "the switch was not taken{}",
         run.context()
     );
-    assert!(ended.log.contains("Windows is ending the session: saving and stopping first"), "{}", run.context());
+    // Asked whether the session may end, the app handed every save over and told Windows why it
+    // waits; told the session is ending, it wrote what was left and took that back.
+    let log = &ended.log;
+    let at = |words: &str| log.find(words).unwrap_or_else(|| panic!("the log doesn't say {words:?}{}", run.context()));
+    let asked = at("Windows asked whether the session may end: handing every save over now");
+    let told = at("told Windows the app is saving");
+    let ending = at("Windows is ending the session: saving and stopping first");
+    let done = at("everything is written: Windows is no longer told the app is saving");
+    assert!(asked < told && told < ending && ending < done, "in that order{}", run.context());
     let saved = song_file_with(&run.data, "Morning light on the hill").expect("the song's file in Songs");
     assert!(saved.contains("Sing out, the day is here"), "the changed words were not saved: {saved}");
     let prefs: Value = serde_json::from_str(&std::fs::read_to_string(run.data.join("preferences.json")).unwrap())

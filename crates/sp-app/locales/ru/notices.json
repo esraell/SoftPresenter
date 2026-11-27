@@ -46,6 +46,7 @@
   "notices.save.themes_in_use": "Не удалось сохранить, какая тема используется: {error}",
   "notices.save.saved_now": "{name}: теперь сохранено.",
   "notices.save.trying_again": "SoftPresenter попробует снова через мгновение; если при закрытии сохранить так и не удастся, изменение останется в папке Not saved библиотеки.",
+  "notices.saving_for_windows": "Сохранение…",
   "notices.delete.theme": "Не удалось удалить тему: {error}",
   "notices.images.no_place": "Не удалось найти, где хранить картинки на этом компьютере.",
   "notices.images.no_folder": "Не удалось создать папку Images: {error}",

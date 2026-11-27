@@ -51,6 +51,9 @@ pub fn on_session_end(window: isize) -> bool {
 /// What Windows asked of the app's window ([`on_session_end`]), handed over with a close of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WindowsAsk {
+    /// Windows asks whether the session may end (a log-off, a restart or a shut-down may
+    /// follow, or be called off): hand every save over now, and stay open.
+    MayEnd,
     /// The Restart Manager asks the app to close because an installer needs a file it holds (a
     /// driver or NDI update run in the room): save everything, and stay open, as the session
     /// goes on and the screens may be in use.
@@ -66,6 +69,7 @@ pub fn take_windows_ask() -> Option<WindowsAsk> {
     #[cfg(windows)]
     {
         windows::take_windows_ask().map(|ask| match ask {
+            windows::WindowsAsk::MayEnd => WindowsAsk::MayEnd,
             windows::WindowsAsk::CloseApp => WindowsAsk::CloseApp,
             windows::WindowsAsk::Ending => WindowsAsk::Ending,
         })
@@ -74,6 +78,29 @@ pub fn take_windows_ask() -> Option<WindowsAsk> {
     {
         None
     }
+}
+
+/// Tells Windows why the app's window `window` keeps a log-off or shut-down waiting (`reason`,
+/// in the language set: "Saving…"), which Windows shows beside the app if the wait is long, on
+/// the thread that made the window. True when it was given. False on other systems.
+pub fn block_shutdown(window: isize, reason: &str) -> bool {
+    #[cfg(windows)]
+    {
+        windows::block_shutdown(window, reason)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (window, reason);
+        false
+    }
+}
+
+/// Takes back the reason [`block_shutdown`] gave. Nothing on other systems.
+pub fn unblock_shutdown(window: isize) {
+    #[cfg(windows)]
+    windows::unblock_shutdown(window);
+    #[cfg(not(windows))]
+    let _ = window;
 }
 
 /// Whether Windows has said the session is ending ([`on_session_end`]). Always false on other
