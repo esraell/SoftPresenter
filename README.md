@@ -50,7 +50,8 @@ Website: [softpresenter.com](https://softpresenter.com)
   </tr>
 </table>
 
-**Works with:** NDI, Blackmagic DeckLink, Canva Sync and VoxLive captions, each optional.
+**Works with:** NDI, Blackmagic DeckLink, AirPlay from an iPhone, iPad or Mac (unofficial), Canva Sync and
+VoxLive captions, each optional.
 
 ## Who it's for
 
@@ -79,7 +80,8 @@ under Settings › About › What's new. In short:
   its Bibles window; up to four translations on one slide, and book names in English, Russian
   and Ukrainian.
 - **Media.** Pictures and videos behind the words or on their own, and an announcements layer
-  that loops by itself. Video the Mac plays goes to the screens without being copied.
+  that loops by itself. Video the Mac plays goes to the screens without being copied. A web page,
+  an NDI source or an AirPlay screen goes on a slide as a box that fills it, behind the words.
 - **Screens.** Any number of audience screens on displays, in windows, over NDI or out of a
   DeckLink card, each with its own look and theme; stage screens with layouts you design.
 - **Remote Control.** Run the show from a computer or tablet on the church's network: switched
@@ -99,7 +101,8 @@ under Settings › About › What's new. In short:
    File › Import Songs, or by dropping their files on the window: text (see
    [the format](#song-text-files)), ChordPro, rich text, Word, lyric-service files, and whole
    libraries from SoftProjector and other presentation software, keeping each song's groups
-   and arrangements.
+   and arrangements. Settings › Song files › Find songs on this computer looks for the songbooks and
+   song files already on the computer and brings in the ones you tick.
 3. **Build the running order.** Make a playlist with the + beside PLAYLISTS (say "Sunday
    Morning"), drag songs into it in order (the find box keeps its search, so you can drag one
    after another), and add headers to group them. Sermon and notice
