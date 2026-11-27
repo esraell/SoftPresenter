@@ -722,13 +722,24 @@ impl EditDraft {
         self.slide.objects.push(object);
     }
 
-    /// Puts a picture on the slide, selected.
+    /// Puts a picture or a video on the slide, selected, just above its background (pictures,
+    /// videos or a full-slide fill at the bottom of its layers), under everything else
+    /// ([`Slide::over_the_background`]).
     pub fn add_image(&mut self, picture: &crate::images::Imported) {
         self.record();
         let object = Object::image(picture.file.clone(), picture.name.clone(), picture.width, picture.height);
         self.selected = Some(object.id);
         self.also.clear();
-        self.slide.objects.push(object);
+        let at = self.slide.over_the_background();
+        self.slide.objects.insert(at, object);
+    }
+
+    /// Puts several pictures or videos on the slide, as [`EditDraft::add_image`] does each, in
+    /// the order given (dropped together, say): the first is the lowest, and the last is picked.
+    pub fn add_images(&mut self, pictures: &[crate::images::Imported]) {
+        for picture in pictures {
+            self.add_image(picture);
+        }
     }
 
     /// Puts an object on the slide, in front of everything, selected.
@@ -1623,6 +1634,106 @@ mod tests {
             d.add_text();
             assert!(is_text(d.slide.objects.last().unwrap()), "text in front");
         }
+    }
+
+    /// The owner's hand-off (27 November, prototype 7816712): a new picture or video goes just
+    /// above the slide's background (pictures, videos or a full-slide fill at the bottom of the
+    /// layers), under everything else, so a logo added to a slide with a whole-slide background
+    /// (an imported PDF or PowerPoint page) is seen, and it never covers the words. With no
+    /// background it goes to the bottom; a picture moved up over the words doesn't count, nor a
+    /// web page, NDI or AirPlay box. From Media…, a drop on the slide or a stage layout's Add
+    /// menu alike.
+    #[test]
+    fn a_picture_or_a_video_goes_just_above_the_background() {
+        let imported = |file: &str, name: &str| crate::images::Imported {
+            file: file.to_owned(),
+            name: name.to_owned(),
+            width: 1920,
+            height: 1080,
+        };
+        let ids = |d: &EditDraft| d.slide.objects.iter().map(|o| o.id).collect::<Vec<_>>();
+        // A slide with a picture over the whole of it at the bottom, and words.
+        let mut d = draft();
+        let background = Object::image("page.png".to_owned(), "Page 1".to_owned(), 1920, 1080);
+        d.slide.objects.insert(0, background.clone());
+        d.add_web();
+        let before = ids(&d);
+        assert_eq!(before[0], background.id);
+        d.add_image(&imported("logo.png", "Logo"));
+        let after = ids(&d);
+        assert_eq!(after[1], d.selected.unwrap(), "just above the background, and the one picked");
+        assert_eq!([&after[..1], &after[2..]].concat(), before, "nothing else moves");
+        assert!(is_text(d.slide.objects.last().unwrap()), "the words stay in front");
+        d.add_image(&imported("/films/b.mp4", "B"));
+        assert_eq!(ids(&d)[2], d.selected.unwrap(), "a video too, above the pictures at the bottom");
+        d.undo();
+        assert_eq!(ids(&d), after, "Undo takes it away");
+        // No picture at the bottom: it goes to the bottom.
+        let mut d = draft();
+        d.add_text();
+        d.add_image(&imported("a.png", "A"));
+        assert_eq!(d.slide.objects.first().map(|o| o.id), d.selected, "at the bottom");
+        // A picture moved up over a text box stays where it is, and the new one goes under
+        // that text box, at the bottom.
+        let mut d = draft();
+        let above = Object::image("above.png".to_owned(), "Above".to_owned(), 640, 360);
+        d.slide.objects.insert(1, above.clone());
+        assert!(is_text(&d.slide.objects[0]));
+        let before = ids(&d);
+        d.add_image(&imported("new.png", "New"));
+        let after = ids(&d);
+        assert_eq!(after[0], d.selected.unwrap(), "under the first text box");
+        assert_eq!(&after[1..], before.as_slice(), "the picture over the words stays where it was");
+        // Text and shapes still go in front.
+        d.add_shape(sp_model::Shape::Star);
+        assert!(matches!(d.slide.objects.last().unwrap().kind, ObjectKind::Shape { .. }));
+        // A slide imported from PowerPoint: its Background, a shape over the whole slide, then
+        // the words. The new picture goes above the Background and under the words.
+        let mut d = draft();
+        let mut background = Object::shape(sp_model::Shape::Rectangle);
+        background.name = "Background".to_owned();
+        background.frame = Some(sp_model::WHOLE_SLIDE);
+        background.fill = Some(sp_model::Rgba::WHITE);
+        d.slide.objects.insert(0, background.clone());
+        let before = ids(&d);
+        d.add_image(&imported("logo.png", "Logo"));
+        let after = ids(&d);
+        assert_eq!(after[0], background.id);
+        assert_eq!(after[1], d.selected.unwrap(), "over the PowerPoint Background, under the words");
+        assert_eq!([&after[..1], &after[2..]].concat(), before);
+        // A web page, NDI or AirPlay box at the bottom isn't background: the new picture goes
+        // to the very bottom, under it.
+        for add in [EditDraft::add_web as fn(&mut EditDraft), EditDraft::add_ndi, EditDraft::add_mirror] {
+            let mut d = draft();
+            d.slide.objects.retain(|o| !is_text(o));
+            add(&mut d);
+            d.add_text();
+            d.add_image(&imported("a.png", "A"));
+            assert_eq!(d.slide.objects.first().map(|o| o.id), d.selected, "under the box");
+        }
+    }
+
+    /// Several pictures dropped on the slide at once keep their order: the first dropped is the
+    /// lowest, and the last, picked, is on top of them, all under the words.
+    #[test]
+    fn pictures_dropped_together_keep_their_order() {
+        let mut d = draft();
+        let words: Vec<Uuid> = d.slide.objects.iter().map(|o| o.id).collect();
+        let dropped: Vec<crate::images::Imported> = ["one", "two", "three"]
+            .iter()
+            .map(|name| crate::images::Imported {
+                file: format!("{name}.png"),
+                name: (*name).to_owned(),
+                width: 800,
+                height: 600,
+            })
+            .collect();
+        d.add_images(&dropped);
+        let names: Vec<&str> = d.slide.objects.iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(&names[..3], ["one", "two", "three"]);
+        assert_eq!(d.slide.objects[3..].iter().map(|o| o.id).collect::<Vec<_>>(), words, "under the words");
+        assert_eq!(d.selected, Some(d.slide.objects[2].id), "the last one dropped is picked");
+        assert!(d.also.is_empty());
     }
 
     #[test]

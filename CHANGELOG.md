@@ -22,7 +22,9 @@ A What's new window, a find box that keeps its search after a drag, a tidier Fin
 - **Called AirPlay.** What was Phone Screens is now called AirPlay in SoftPresenter's window and in `sp`, in every language, though boxes already on slides keep their name.
 - **Boxes that fill the slide.** A Web Page, NDI Source or AirPlay box added in the Edit view covers the whole slide, and can be moved and sized as usual.
 - **Boxes behind the words.** A new Web Page, NDI Source or AirPlay box goes just under the words, so clicking the words still picks them.
-- **Empty boxes are shaded.** A Web Page, NDI Source or AirPlay box with nothing to show dims what is behind it in SoftPresenter's window, never on the screens.
+- **Empty boxes are shaded.** In the Edit view, a Web Page, NDI Source or AirPlay box with nothing to show dims what is behind it.
+- **Pictures go under the words.** A picture or video added in the Edit view goes just above the slide's background (pictures, videos or a full-slide fill), under the words.
+- **A thin white outline.** A picked box in the Edit view is outlined in thin white.
 
 ### Fixed
 

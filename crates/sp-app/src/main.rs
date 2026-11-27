@@ -10392,6 +10392,13 @@ impl App {
                 {
                     draft.add_ndi();
                 }
+                // Testing aid: SOFTPRESENTER_CAPTURE_AIRPLAY=1 puts an AirPlay box on the slide,
+                // selected, as AirPlay in the tools does.
+                if std::env::var_os("SOFTPRESENTER_CAPTURE_AIRPLAY").is_some()
+                    && let Some(draft) = running.home_state.editing.as_mut()
+                {
+                    draft.add_mirror();
+                }
                 // Testing aids: show the grid, and zoom in.
                 running.home_state.edit_grid = std::env::var_os("SOFTPRESENTER_EDIT_GRID").is_some();
                 if let Some(zoom) = std::env::var("SOFTPRESENTER_EDIT_ZOOM").ok().and_then(|z| z.parse().ok()) {

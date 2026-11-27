@@ -648,6 +648,27 @@ impl Object {
         }
     }
 
+    /// Whether this is part of a slide's background, for where a new picture goes
+    /// ([`Slide::over_the_background`]): a picture or video, or a shape whose frame reaches all
+    /// four edges of the slide, at or beyond each (as the design defines it, 27 November; its
+    /// fill and opacity aren't looked at).
+    pub fn is_background(&self) -> bool {
+        match &self.kind {
+            ObjectKind::Image { .. } => true,
+            ObjectKind::Shape { .. } => self.frame.is_some_and(|frame| {
+                frame.x <= 0.0
+                    && frame.y <= 0.0
+                    && frame.x + frame.w >= crate::SLIDE_WIDTH
+                    && frame.y + frame.h >= crate::SLIDE_HEIGHT
+            }),
+            ObjectKind::Text { .. }
+            | ObjectKind::Web { .. }
+            | ObjectKind::Ndi { .. }
+            | ObjectKind::Mirror { .. }
+            | ObjectKind::Screen { .. } => false,
+        }
+    }
+
     pub fn as_text(&self) -> Option<&str> {
         match &self.kind {
             ObjectKind::Text { text, .. } => Some(text),
@@ -751,6 +772,17 @@ impl Slide {
             .iter()
             .position(|object| matches!(object.kind, ObjectKind::Text { .. }))
             .unwrap_or(self.objects.len())
+    }
+
+    /// Where a new picture or video goes among the objects (the owner's hand-off, 27 November):
+    /// just above the slide's background, the run at the bottom of the layers of pictures,
+    /// videos and shapes that cover the whole slide (an imported PowerPoint slide's Background
+    /// is one), under everything else. So a logo added to a slide with a whole-slide background
+    /// is seen, and it never lands over the words. A picture moved up over a text box or a shape
+    /// doesn't count, nor does a web page, NDI source or AirPlay box; with no background at the
+    /// bottom, it goes to the bottom.
+    pub fn over_the_background(&self) -> usize {
+        self.objects.iter().take_while(|object| object.is_background()).count()
     }
 
     /// A new slide laid out like this one (the same boxes, in the same places, with the same
@@ -1432,6 +1464,42 @@ mod tests {
         assert_eq!(slide.under_the_words(), 1);
         assert_eq!(Slide::new(vec![picture(), Object::shape(Shape::Star)]).under_the_words(), 2);
         assert_eq!(Slide::new(Vec::new()).under_the_words(), 0);
+    }
+
+    /// A new picture goes just above the background at the bottom: pictures, videos and shapes
+    /// that reach all four edges of the slide; one over the words doesn't count.
+    #[test]
+    fn a_new_picture_goes_just_above_the_background() {
+        let picture = || Object::image("a.png".to_owned(), "A".to_owned(), 16, 9);
+        let words = || Object::text(Role::primary(), "Words".to_owned());
+        assert_eq!(Slide::new(vec![picture(), picture(), words(), picture()]).over_the_background(), 2);
+        assert_eq!(Slide::new(vec![words(), picture()]).over_the_background(), 0);
+        assert_eq!(Slide::new(vec![Object::shape(Shape::Star), picture()]).over_the_background(), 0);
+        assert_eq!(Slide::new(Vec::new()).over_the_background(), 0);
+        // A shape over the whole slide at the bottom (an imported PowerPoint slide's Background)
+        // is background too; a smaller one, or a web page, NDI or AirPlay box, isn't.
+        let fill = || {
+            let mut background = Object::shape(Shape::Rectangle);
+            background.frame = Some(crate::WHOLE_SLIDE);
+            background
+        };
+        assert_eq!(Slide::new(vec![fill(), words()]).over_the_background(), 1);
+        assert_eq!(Slide::new(vec![fill(), picture(), words()]).over_the_background(), 2);
+        assert_eq!(Slide::new(vec![Object::shape(Shape::Rectangle), words()]).over_the_background(), 0);
+        // Reaching only three edges, it doesn't count; at or beyond all four, whatever its fill
+        // or opacity, it does.
+        let mut short = fill();
+        short.frame = Some(SlideRect { x: 0.0, y: 0.0, w: crate::SLIDE_WIDTH, h: crate::SLIDE_HEIGHT - 1.0 });
+        assert_eq!(Slide::new(vec![short, words()]).over_the_background(), 0);
+        let mut beyond = fill();
+        beyond.frame =
+            Some(SlideRect { x: -20.0, y: -10.0, w: crate::SLIDE_WIDTH + 40.0, h: crate::SLIDE_HEIGHT + 20.0 });
+        beyond.fill = None;
+        beyond.opacity = 0.2;
+        assert_eq!(Slide::new(vec![beyond, words()]).over_the_background(), 1);
+        for display in [Object::web(String::new()), Object::ndi(String::new()), Object::mirror()] {
+            assert_eq!(Slide::new(vec![display, words()]).over_the_background(), 0);
+        }
     }
 
     #[test]

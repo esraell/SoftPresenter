@@ -423,6 +423,8 @@ impl Thumbs {
         // Large enough to stay sharp when the slide is zoomed in on a Retina screen.
         const W: u32 = 2560;
         const H: u32 = 1440;
+        // Only here is an empty web page, NDI source or AirPlay box see-through.
+        sp_render::shade_empty_boxes(true);
         let built = build_layers(
             &mut self.fonts,
             &Layers {
@@ -439,6 +441,7 @@ impl Thumbs {
             W,
             H,
         );
+        sp_render::shade_empty_boxes(false);
         if self.canvas.is_none() {
             let texture = target_texture(&gpu.device, W, H);
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());

@@ -3044,9 +3044,7 @@ fn edit_view(
     // change is saved like any other.
     let pictures = std::mem::take(&mut state.picture_to_add);
     if let Some(draft) = state.editing.as_mut() {
-        for picture in &pictures {
-            draft.add_image(picture);
-        }
+        draft.add_images(&pictures);
     }
     // Command-B, I and U change the selected objects' text (the typing field has its own, above).
     if !keys_taken && state.editing.is_some() && state.edit_request.is_none() {
@@ -3828,7 +3826,10 @@ fn edit_view(
                 draft.release();
             }
 
-            // Outlines: every object faintly, the selected one with handles.
+            // Outlines: every object faintly, the selected one with handles. A picked box keeps
+            // its place in the layers (the slide above is drawn as it is): only a thin white
+            // outline and its handles go over everything (the owner's hand-off, 26 November;
+            // the design's 1 px #fff).
             for object in &draft.slide.objects {
                 let frame = object_frame(&draft.slide, object, theme);
                 let rect = to_screen(frame);
@@ -3844,7 +3845,7 @@ fn edit_view(
                         })
                         .collect();
                 let stroke = if selected {
-                    Stroke::new(1.5, CHOSEN_LINE)
+                    Stroke::new(1.0, Color32::WHITE)
                 } else {
                     Stroke::new(1.0, Color32::from_white_alpha(45))
                 };

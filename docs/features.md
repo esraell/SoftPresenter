@@ -1432,15 +1432,21 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the editor from the Finder, several at once if you like): a picture,
   copied into the app's Images folder, or a video, which stays where it is and plays in its box,
   looping with its sound, while the slide is on screen (several videos on one slide all play); each can fit, fill or stretch to its
-  box. The Insert
+  box. A new one goes just above the slide's background (pictures, videos or a full-slide fill
+  at the bottom of its layers, such as an imported PowerPoint slide's Background; a fill counts
+  when its frame reaches all four edges of the slide), under everything else, at the bottom
+  when there is none, so it never covers the words and the background never hides it; several
+  dropped together keep their order.
+  The Insert
   menu also adds a text box or any shape.
 - **Web pages** on slides (Web Page above the slide, or `sp slide web SONG N URL`): a box that
   shows a live web page (added, it covers the whole slide and goes just under the slide's first
   words, over any picture behind them, or on top when there are none, so a click on the words
   still picks the words; it can then be moved, sized and restacked as any box; until it has
-  something to show, the operator's window draws it as a dark see-through panel, 62% with a
-  faint hatch, so what is behind it shows dimmed and what is in front at full strength; picked,
-  it keeps its place in the layers and only its outline and handles are drawn over everything),
+  something to show, the Edit view draws it as a dark see-through panel, 62% with a faint
+  hatch, so what is behind it shows dimmed and what is in front at full strength, while the
+  thumbnails keep a faint blue panel; picked, like any box, it keeps its place in the layers
+  and only a thin white outline and its handles are drawn over everything),
   laid out at the box's size and see-through where the page has no
   background, so it can sit over the slide's background or under its words. Only addresses
   starting with https:// open. The page of a song open in the window is loaded ahead, so it has

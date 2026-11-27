@@ -373,12 +373,12 @@ fn a_moved_object_is_drawn_where_it_was_put() {
     assert!(lit(320, 180) > 100, "the letter should be in the bottom-right quarter");
 }
 
-/// The owner, 27 November ("somewhat transparent to see whats behind"): in the operator's
-/// window a web page, NDI source or AirPlay box with nothing to show yet is a dark fill at 62%
-/// (30, 32, 36) with a faint hatch (white at 7%, 45°, 6% stripes every 12%), so what is behind
-/// it shows dimmed; words in front of it are at full strength. On the screens it shows nothing.
+/// The owner, 27 November ("somewhat transparent to see whats behind"): on the Edit view's slide
+/// a web page, NDI source or AirPlay box with nothing to show yet is a dark fill at 62% (30, 32,
+/// 36) with a faint hatch (white at 7%, 45°, 6% stripes every 12%), so what is behind it shows
+/// dimmed; words in front of it are at full strength. On the screens it shows nothing.
 #[test]
-fn an_empty_display_box_shows_what_is_behind_it_dimmed_in_the_operators_window() {
+fn an_empty_display_box_shows_what_is_behind_it_dimmed_on_the_edit_canvas() {
     let (w, h) = (640, 360);
     let mut red = Object::shape(sp_model::Shape::Rectangle);
     red.frame = Some(sp_model::WHOLE_SLIDE);
@@ -390,7 +390,9 @@ fn an_empty_display_box_shows_what_is_behind_it_dimmed_in_the_operators_window()
         words.objects.insert(0, boxed);
         words.objects.insert(0, red.clone());
         sp_render::show_placeholders(true);
+        sp_render::shade_empty_boxes(true);
         let operator = render(Some(&words), w, h);
+        sp_render::shade_empty_boxes(false);
         sp_render::show_placeholders(false);
         let screens = render(Some(&words), w, h);
         // A row across the top, clear of the outline, the tag and a web page's globe.
@@ -407,6 +409,36 @@ fn an_empty_display_box_shows_what_is_behind_it_dimmed_in_the_operators_window()
         assert!(row.iter().any(|p| p[1] >= 33), "{kind}: the hatch");
         assert!(count_lit(&operator) > 200, "{kind}: the words in front at full strength");
         assert!(is_about(pixel(&screens, w, 320, 60), [255, 0, 0]), "{kind}: on the screens, nothing over the red");
+    }
+}
+
+/// Elsewhere in the operator's window (a thumbnail, the playlist) an empty box keeps its old
+/// look: no shade and no hatch (the owner's hand-off: see-through "in the editor").
+#[test]
+fn an_empty_display_box_in_a_thumbnail_has_no_shade_and_no_hatch() {
+    let (w, h) = (640, 360);
+    let mut red = Object::shape(sp_model::Shape::Rectangle);
+    red.frame = Some(sp_model::WHOLE_SLIDE);
+    red.fill = Some(sp_model::Rgba::rgb(255, 0, 0));
+    red.stroke = None;
+    // A web page keeps its faint blue panel; an NDI source or AirPlay box only its dashed edge.
+    for (boxed, inside) in [
+        (Object::web(String::new()), [162, 24, 36]),
+        (Object::ndi(String::new()), [255, 0, 0]),
+        (Object::mirror(), [255, 0, 0]),
+    ] {
+        let kind = boxed.name.clone();
+        let mut words = slide("IIIIIIII", None);
+        words.objects.insert(0, boxed);
+        words.objects.insert(0, red.clone());
+        sp_render::show_placeholders(true);
+        let thumbnail = render(Some(&words), w, h);
+        let row: Vec<[u8; 4]> = (100..540).map(|x| pixel(&thumbnail, w, x, 60)).collect();
+        for p in &row {
+            assert!(is_about(*p, inside), "{kind}: {p:?}, not {inside:?}");
+        }
+        let greens = row.iter().map(|p| p[1]);
+        assert!(greens.clone().max().unwrap() - greens.min().unwrap() <= 2, "{kind}: no hatch");
     }
 }
 
