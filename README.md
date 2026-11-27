@@ -165,6 +165,14 @@ FFmpeg for Windows (`ffmpeg.exe`, `ffprobe.exe`), the sample backgrounds, the li
 READ ME. The program isn't signed yet, so Windows asks the first time ("More info", then "Run
 anyway").
 
+**On Windows** (10 or 11, 64-bit), download `SoftPresenter-<version>-windows.zip` from the
+releases page and unzip it. Keep the `SoftPresenter-Windows` folder together, in Documents, say:
+`SoftPresenter.exe` uses the FFmpeg, backgrounds and licences beside it, and updates go into that
+folder. Start `SoftPresenter.exe` from there, or right-click it to pin it to the taskbar. Windows
+asks once whether SoftPresenter may use the network (for NDI and the phone remote); answer Allow.
+Only one SoftPresenter runs at a time on a library: starting it again while it runs brings the
+open window to the front.
+
 **On Linux** (64-bit Intel or AMD; Ubuntu 22.04 or later, Linux Mint 21 or later, Debian 12 or
 later, and the systems made from them), download `softpresenter_<version>_amd64.deb` from the
 releases page and install it with apt, which fetches the few libraries it needs:
