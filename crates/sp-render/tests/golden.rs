@@ -710,6 +710,47 @@ fn a_themes_picture_is_behind_its_slides_until_media_shows() {
     assert!(is_about(pixel(&draw(Some(&green)), 160, 80, 45), [30, 200, 60]), "media covers it");
 }
 
+/// Hide the Words: the slide stays on screen without its words. The theme's colour, its
+/// picture and the shapes of its layout are drawn as before, and so is the slide's own picture;
+/// only the words go.
+#[test]
+fn a_slide_without_its_words_keeps_the_themes_background_and_picture() {
+    use sp_model::{Rgba, SlideRect};
+    sp_render::set_picture_loader(wide_red);
+    let (w, h) = (320, 180);
+    let mut theme = Theme::builtin();
+    theme.background = Some(Rgba::rgb(20, 40, 160));
+    // A green bar across the bottom of every layout.
+    let mut bar = Object::shape(sp_model::Shape::Rectangle);
+    bar.frame = Some(SlideRect { x: 0.0, y: 900.0, w: 1920.0, h: 180.0 });
+    bar.fill = Some(Rgba::rgb(0, 200, 0));
+    for template in &mut theme.templates {
+        template.objects = vec![bar.clone()];
+    }
+    // Words over the middle, and the slide's own picture in its top left corner.
+    let mut song = slide("WWWWWWWWWWWWWWWWWWWW\nWWWWWWWWWWWWWWWWWWWW", None);
+    let mut picture = Object::image("red.png".to_owned(), "Picture".to_owned(), 200, 100);
+    picture.frame = Some(SlideRect { x: 0.0, y: 0.0, w: 400.0, h: 200.0 });
+    song.objects.insert(0, picture);
+    let with_words = render_with(Some(&song), &theme, w, h);
+    assert!(count_lit(&with_words) > 100, "with its words, they are drawn: {}", count_lit(&with_words));
+
+    let hidden = song.without_words();
+    let drawn = render_with(Some(&hidden), &theme, w, h);
+    assert_eq!(count_lit(&drawn), 0, "no words");
+    assert!(is_about(pixel(&drawn, w, 300, 60), [20, 40, 160]), "the theme's colour: {:?}", pixel(&drawn, w, 300, 60));
+    assert!(is_about(pixel(&drawn, w, 160, 170), [0, 200, 0]), "its layout's bar: {:?}", pixel(&drawn, w, 160, 170));
+    assert!(is_about(pixel(&drawn, w, 20, 10), [230, 30, 30]), "the slide's picture: {:?}", pixel(&drawn, w, 20, 10));
+    // Where the words were, the theme's colour shows through.
+    assert!(is_about(pixel(&drawn, w, 160, 90), [20, 40, 160]), "{:?}", pixel(&drawn, w, 160, 90));
+
+    // A theme with a picture behind its slides: the picture stays, without the words.
+    theme.background_picture = Some("church.png".to_owned());
+    let drawn = render_with(Some(&hidden), &theme, w, h);
+    assert_eq!(count_lit(&drawn), 0, "no words over the theme's picture");
+    assert!(is_about(pixel(&drawn, w, 300, 60), [230, 30, 30]), "the theme's picture: {:?}", pixel(&drawn, w, 300, 60));
+}
+
 #[test]
 fn a_screens_colour_fills_the_empty_room_and_its_covered_edges() {
     use sp_model::Rgba;

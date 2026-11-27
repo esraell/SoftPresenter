@@ -474,5 +474,6 @@
   "notices.unread.props": "SoftPresenter no ha podido leer los gráficos, así que ha empezado sin ninguno.",
   "notices.unread.stage_layouts": "SoftPresenter no ha podido leer los diseños del escenario, así que ha empezado con los habituales.",
   "notices.unread.bible_page": "SoftPresenter no ha podido leer cómo estaba la página de la Biblia, así que se abre como de costumbre.",
-  "notices.unread.bible_history": "SoftPresenter no ha podido leer los pasajes de la Biblia buscados antes, así que el historial empieza vacío."
+  "notices.unread.bible_history": "SoftPresenter no ha podido leer los pasajes de la Biblia buscados antes, así que el historial empieza vacío.",
+  "notices.status.words_hidden": "(letra oculta)"
 }

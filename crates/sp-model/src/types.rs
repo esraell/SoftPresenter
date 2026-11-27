@@ -810,6 +810,21 @@ impl Slide {
         Slide { template: self.template, ..Slide::new(objects) }
     }
 
+    /// The slide as the screens show it while its words are hidden (Hide the Words): the same
+    /// slide, with the same ids, template and objects, so the theme draws it with the same
+    /// template and the same layout behind it. Every text box keeps its place and its look (a
+    /// fill, outline or shadow of its own is still drawn), and its text is empty; a linked box
+    /// loses its link too, which would fill it in again. Pictures, shapes, videos and web pages
+    /// stay as they are. The song itself is never changed.
+    pub fn without_words(&self) -> Slide {
+        let mut slide = self.clone();
+        for object in slide.objects.iter_mut().filter(|object| object.as_text().is_some()) {
+            object.set_text("");
+            object.link = None;
+        }
+        slide
+    }
+
     /// The text of the first text object with this role.
     pub fn text_for(&self, role: &Role) -> Option<&str> {
         self.objects.iter().find(|o| o.role.as_ref() == Some(role)).and_then(Object::as_text)
@@ -1677,6 +1692,65 @@ mod tests {
         let (first, at) = empty.with_slide_added();
         assert_eq!((first.slide_count(), at), (1, 0));
         assert_eq!(first.slide(0).unwrap().1.objects[0].role, Some(Role::primary()));
+    }
+
+    #[test]
+    fn without_words_empties_every_text_box_and_keeps_the_rest() {
+        let mut main = Object::text(Role::primary(), "Light rises\nover the quiet hills");
+        main.frame = Some(SlideRect { x: 100.0, y: 600.0, w: 1720.0, h: 300.0 });
+        main.fill = Some(Rgba::rgb(10, 20, 30));
+        main.stroke = Some(StrokeLook { width: 4.0, color: Rgba::WHITE });
+        if let ObjectKind::Text { style, spans, .. } = &mut main.kind {
+            style.size = Some(80.0);
+            spans.push(crate::TextSpan::new(0, 5, crate::SpanStyle { italic: Some(true), ..Default::default() }));
+        }
+        let translation = Object::text(Role::translation(), "Свет встаёт");
+        // A box linked to the song's title shows the title in place of its words.
+        let mut title = Object::text(Role("title".to_owned()), "[Song Title]");
+        title.link = Some(crate::TextLink::SongTitle);
+        let bar = Object::shape(Shape::Rectangle);
+        let picture = Object::image("church.png".to_owned(), "Picture".to_owned(), 200, 100);
+        let mut slide = Slide::new(vec![bar, picture, main, translation, title]);
+        slide.label = Some("Ending".to_owned());
+        slide.notes = Some("Slow down".to_owned());
+        slide.template = Some(Uuid::new_v4());
+        slide.transition = Some(crate::Transition::default());
+        slide.actions = vec![crate::ShowAction::Clear { what: crate::ClearWhat::Media }];
+        let before = slide.clone();
+
+        let shown = slide.without_words();
+        let empty = String::new();
+        assert_eq!(
+            shown.texts(),
+            [
+                (Some(Role::primary()), empty.clone()),
+                (Some(Role::translation()), empty.clone()),
+                (Some(Role("title".to_owned())), empty)
+            ]
+        );
+        // Every box keeps its place and its look; the pictures and shapes are as they were.
+        assert_eq!(shown.objects.len(), slide.objects.len());
+        for (after, was) in shown.objects.iter().zip(&slide.objects) {
+            assert_eq!(
+                (after.id, &after.role, after.frame, after.fill, after.stroke, after.shadow, after.hidden),
+                (was.id, &was.role, was.frame, was.fill, was.stroke, was.shadow, was.hidden)
+            );
+            match (&after.kind, &was.kind) {
+                (ObjectKind::Text { text, style, spans }, ObjectKind::Text { style: had, .. }) => {
+                    assert!(text.is_empty() && spans.is_empty(), "{after:?}");
+                    assert_eq!(style, had);
+                    assert_eq!(after.link, None, "a linked box would be filled in again: {after:?}");
+                }
+                (kind, had) => assert_eq!((after, kind), (was, had)),
+            }
+        }
+        // The slide is the same slide: its id, template, transition, actions, label and notes.
+        assert_eq!(
+            (shown.id, shown.template, shown.transition, &shown.actions, &shown.label, &shown.notes),
+            (slide.id, slide.template, slide.transition, &slide.actions, &slide.label, &slide.notes)
+        );
+        // The song's own words are never changed.
+        assert_eq!(slide, before);
     }
 }
 

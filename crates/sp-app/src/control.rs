@@ -44,6 +44,17 @@ pub(crate) fn no_such_slide(title: &str, count: usize, number: &str) -> String {
     )
 }
 
+/// The status's first line: what is on screen (`App::live_words`), and while the slide's words
+/// are hidden (Hide the Words), that they are: "On screen: River Song, slide 2 of 3 (Verse 2)
+/// (words hidden)."
+pub(crate) fn on_screen_line(live_words: String, words_hidden: bool) -> String {
+    if !words_hidden {
+        return live_words;
+    }
+    let said = live_words.strip_suffix('.').unwrap_or(&live_words);
+    format!("{said} {}.", crate::i18n::t("notices.status.words_hidden", "(words hidden)"))
+}
+
 /// The most a request may be; a longer one is refused.
 const MAX_REQUEST: u64 = 64 * 1024;
 
@@ -1894,7 +1905,7 @@ impl crate::App {
             })
             .unwrap_or_default();
         let selected = self.show.presentations().get(self.show.selected()).map(|s| s.title.clone());
-        let mut lines = vec![self.live_words()];
+        let mut lines = vec![on_screen_line(self.live_words(), self.show.words_hidden())];
         if let Some(words) = &words {
             lines.push(format!("Words: {words}"));
         }
@@ -3952,6 +3963,19 @@ mod tests {
         assert_eq!(spanish, "River Song tiene 6 diapositivas; no hay diapositiva 9.");
         // What `sp` writes (write_reply) is in English again.
         assert_eq!(english_of(&spanish), english);
+    }
+
+    #[test]
+    fn the_status_says_when_the_words_on_screen_are_hidden() {
+        use crate::i18n::{Language, english_of, with_language};
+        let on_screen = "On screen: River Song, slide 2 of 3 (Verse 2).";
+        assert_eq!(super::on_screen_line(on_screen.to_owned(), false), on_screen);
+        let hidden = "On screen: River Song, slide 2 of 3 (Verse 2) (words hidden).";
+        assert_eq!(with_language(Language::English, || super::on_screen_line(on_screen.to_owned(), true)), hidden);
+        // In the window's language for a page; `sp` gets it in English, as all its replies.
+        let spanish = with_language(Language::Spanish, || super::on_screen_line(on_screen.to_owned(), true));
+        assert_ne!(spanish, hidden);
+        assert_eq!(english_of(&spanish), hidden);
     }
 
     /// `job N` always says the run it comes from, and `done` only for a job this run has: so a

@@ -1028,6 +1028,7 @@ mod tests {
         "mcp",
         "freesongbooks",
         "reports",
+        "program",
     ];
 
     // Russian is translated in full too: every area Spanish has finished, Russian has, so a

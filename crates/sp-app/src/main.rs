@@ -405,6 +405,32 @@ type AdvanceAt = (sp_engine::SlideRef, usize, Option<(usize, usize)>);
 /// How many slides in a row can set each other going through their actions.
 const MAX_ACTION_CHAIN: u8 = 3;
 
+/// The live slide as the screens and the Program preview draw it: as it is, or while its words
+/// are hidden (Hide the Words), the same slide without them, so its theme's background, its
+/// pictures and the media behind it stay up.
+fn frame_slide(show: &Show, slide: Arc<Slide>) -> Arc<Slide> {
+    if show.words_hidden() { Arc::new(slide.without_words()) } else { slide }
+}
+
+/// The copyright line of the song on screen, on the slides Settings says (`when`), with the
+/// church's CCLI licence number: none for what the app made (`app_made`, by the presentation's
+/// place: a Bible passage, the VoxLive item, a song of the song catalog), and none while the
+/// song's words are hidden, since the line goes with them.
+fn copyright_line(
+    show: &Show,
+    app_made: impl Fn(usize) -> bool,
+    when: service::CopyrightShow,
+    licence: &str,
+) -> Option<String> {
+    let at = show.live().filter(|_| !show.words_hidden())?;
+    if app_made(at.presentation) {
+        return None;
+    }
+    let song = show.presentations().get(at.presentation)?;
+    (!song.copyright.is_empty() && when.shows_on(at.slide, song.slide_count()))
+        .then(|| song.copyright.line(&song.title, licence))
+}
+
 /// What Clear All, Clear Messages and Clear Props take off: the message and the props. Returns
 /// whether anything was showing.
 fn clear_overlays(state: &mut home::HomeState, command: &Command) -> bool {
@@ -2092,6 +2118,8 @@ struct NextLineAt {
     cursor: Option<sp_engine::SlideRef>,
     place: Option<(usize, usize)>,
     build: usize,
+    // What Next puts on screen depends on it too (`Show::next_on_screen`).
+    words_hidden: bool,
     selected: usize,
     picked: Option<sp_engine::SlideRef>,
     picked_word: Option<&'static str>,
@@ -2140,6 +2168,7 @@ impl NextLineAt {
             cursor: show.cursor(),
             place: show.position(),
             build: show.build_step(),
+            words_hidden: show.words_hidden(),
             selected: show.selected(),
             picked: state.pick(show),
             picked_word: state.picked_word(show),
@@ -4960,7 +4989,7 @@ impl App {
         let Some(running) = self.running.as_mut() else {
             return;
         };
-        let slide = self.show.live_slide().map(|(_, slide)| Arc::new(slide.clone()));
+        let slide = self.show.live_slide().map(|(_, slide)| frame_slide(&self.show, Arc::new(slide.clone())));
         // The slide Next would show, in the song's play order, for the stage screens.
         let next = self.show.live().and(self.show.upcoming()).and_then(|at| {
             let song = self.show.presentations().get(at.presentation)?;
@@ -5066,9 +5095,11 @@ impl App {
             copyright: copyright.as_deref(),
         };
         // The audience's picture shows the slide in the version that is on, as the screens do;
-        // the stage's shows it as it is.
+        // the stage's shows it as it is. Both without its words while they are hidden, as the
+        // screens are sent it.
+        let live = self.show.live_slide().map(|(_, slide)| frame_slide(&self.show, Arc::new(slide.clone())));
         let slide_in = |version: Option<Uuid>| {
-            self.show.live_slide().map(|(_, slide)| {
+            live.as_deref().map(|slide| {
                 let in_version = version.and_then(|version| theme.slide_in_version(slide, version));
                 let built = in_version.as_ref().unwrap_or(slide).built(&theme, sp_model::BuildClock::settled(step)).0;
                 Arc::new(links::fill(&built, &values).into_owned())
@@ -11332,13 +11363,7 @@ impl App {
         // The copyright line of the song on screen, on the slides Settings says.
         let copyright_line = self.running.as_ref().and_then(|running| {
             let state = &running.home_state;
-            let at = self.show.live()?;
-            if self.app_made(at.presentation) {
-                return None;
-            }
-            let song = self.show.presentations().get(at.presentation)?;
-            (!song.copyright.is_empty() && state.copyright_show.shows_on(at.slide, song.slide_count()))
-                .then(|| song.copyright.line(&song.title, state.ccli_licence.trim()))
+            copyright_line(&self.show, |at| self.app_made(at), state.copyright_show, state.ccli_licence.trim())
         });
         self.hand_over_lists(false);
         let Some(running) = self.running.as_mut() else {
@@ -14801,5 +14826,113 @@ mod tests {
         keyboard.draw();
         assert_eq!(keyboard.live(), Some((0, 0)), "nothing cleared");
         assert!(keyboard.state.library_search.is_none(), "the find box closed");
+    }
+
+    /// The slide on screen as `refresh_output` hands it to the screens.
+    fn framed(show: &Show) -> Option<Arc<Slide>> {
+        show.live_slide().map(|(_, slide)| frame_slide(show, Arc::new(slide.clone())))
+    }
+
+    /// The words of a framed slide, its boxes' words joined.
+    fn framed_words(show: &Show) -> Option<String> {
+        framed(show).map(|slide| slide.texts().into_iter().map(|(_, words)| words).collect::<Vec<_>>().join("/"))
+    }
+
+    #[test]
+    fn while_the_words_are_hidden_the_frame_has_the_songs_theme_and_no_words() {
+        let mut song = parse_song_text("Song", "One\n--\nUno\n\nTwo\n");
+        song.theme = Some(Uuid::new_v4());
+        let mut show = Show::new(vec![Arc::new(song)]);
+        show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        let live = Arc::new(show.live_slide().expect("on screen").1.clone());
+        assert!(Arc::ptr_eq(&frame_slide(&show, live.clone()), &live), "with its words, the slide as it is");
+        assert_eq!(framed_words(&show).as_deref(), Some("One/Uno"));
+
+        show.apply(Command::HideWords);
+        let hidden = frame_slide(&show, live.clone());
+        assert_eq!(framed_words(&show).as_deref(), Some("/"), "every box is there, with no words");
+        assert_eq!((hidden.id, hidden.objects.len()), (live.id, live.objects.len()), "the same slide");
+        // Both frame builders draw with the theme of the presentation on screen
+        // (`show.live()`), the song's, not the songs theme they fall back on with nothing up.
+        assert_eq!(show.live().map(|at| at.presentation), Some(0));
+
+        show.apply(Command::ShowAgain);
+        assert_eq!(framed_words(&show).as_deref(), Some("One/Uno"), "Show Again brings them back");
+    }
+
+    #[test]
+    fn a_linked_box_is_not_filled_in_again_while_the_words_are_hidden() {
+        let mut song = parse_song_text("River Song", "One\n");
+        let mut title = sp_model::Object::text(sp_model::Role("title".to_owned()), "[Song Title]");
+        title.link = Some(sp_model::TextLink::SongTitle);
+        song.groups[0].slides[0].objects.push(title);
+        let mut show = Show::new(vec![Arc::new(song)]);
+        show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        let values = links::Values {
+            timers: &[],
+            title: Some("River Song"),
+            group: None,
+            next: None,
+            stage_message: None,
+            copyright: None,
+        };
+        // The screens and the preview fill linked boxes in after the frame is made.
+        let filled = |show: &Show| {
+            let slide = framed(show).expect("on screen");
+            links::fill(&slide, &values).texts().into_iter().map(|(_, words)| words).collect::<Vec<_>>()
+        };
+        assert_eq!(filled(&show), ["One", "River Song"]);
+        show.apply(Command::HideWords);
+        assert_eq!(filled(&show), ["", ""], "no words, the song's title neither");
+    }
+
+    #[test]
+    fn hide_the_words_over_a_playing_video_keeps_the_video_and_next_brings_words_back() {
+        let mut show = Show::new(vec![Arc::new(parse_song_text("Song", "One\n\nTwo\n"))]);
+        let video = show.add_media(MediaItem::new("Waves".to_owned(), PathBuf::from("waves.mp4")));
+        assert!(media::is_video(&show.media()[video].path));
+        show.apply(Command::ShowMedia(video));
+        show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        let changes = show.apply(Command::HideWords);
+        // The media layer is not touched, so `sync_video` keeps the same player going.
+        assert!(changes.slides && !changes.media, "{changes:?}");
+        assert_eq!(show.live_media(), Some(video), "the video plays on behind");
+        assert_eq!(framed_words(&show).as_deref(), Some(""), "the slide stays up without its words");
+
+        let changes = show.apply(Command::Next);
+        assert!(!changes.media, "{changes:?}");
+        assert_eq!(show.live_media(), Some(video), "still the same video");
+        assert_eq!(framed_words(&show).as_deref(), Some("Two"), "Next shows the next slide with its words");
+    }
+
+    #[test]
+    fn the_copyright_line_goes_with_the_words() {
+        let mut song = parse_song_text("River Song", "One\n\nTwo\n");
+        song.copyright.author = "A. Writer".to_owned();
+        let mut show = Show::new(vec![Arc::new(song)]);
+        show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        let line = |show: &Show| copyright_line(show, |_| false, service::CopyrightShow::EverySlide, "1234");
+        let shown = line(&show).expect("the copyright line on the slide on screen");
+        assert!(shown.contains("A. Writer"), "{shown}");
+        assert_eq!(copyright_line(&show, |_| true, service::CopyrightShow::EverySlide, ""), None, "app-made");
+
+        show.apply(Command::HideWords);
+        assert_eq!(line(&show), None, "Hide the Words takes the copyright line off with the words");
+        show.apply(Command::ShowAgain);
+        assert_eq!(line(&show), Some(shown), "Show Again puts it back");
+    }
+
+    #[test]
+    fn the_next_line_is_worked_out_again_when_the_words_are_hidden_or_shown_again() {
+        let mut show = Show::new(vec![Arc::new(parse_song_text("Song", "One\n\nTwo\n"))]);
+        show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 1 }));
+        let state = home::HomeState::default();
+        let from = NextLineFrom::of(&show, &state);
+        assert!(from.holds(&show, &state));
+        show.apply(Command::HideWords);
+        assert!(!from.holds(&show, &state), "Hide the Words changes what Next puts on screen");
+        let from = NextLineFrom::of(&show, &state);
+        show.apply(Command::ShowAgain);
+        assert!(!from.holds(&show, &state), "and so does Show Again");
     }
 }

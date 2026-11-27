@@ -5618,10 +5618,12 @@ fn preview_block(
     ui.painter().galley(pos2(readout.min.x, readout.center().y - number.size().y / 2.0), number, TEXT);
     ui.painter().galley(pos2(readout.min.x + number_wide, base - of_tall + 1.0), of, SCREEN_DIM);
     let words = Rect::from_min_max(pos2(readout.min.x + figures.max(kept) + 10.0, readout.min.y), readout.max);
-    // The second line is there only when there is something to say: the one screen looked at,
-    // or how far the slide's click builds have got.
+    // The second line is there only when there is something to say: that the slide's words are
+    // hidden (it is up without them), the one screen looked at, or how far the slide's click
+    // builds have got.
     let builds = show.live_slide().map_or(0, |(_, slide)| slide.click_steps().len());
     let second = match looked_at(state) {
+        _ if show.words_hidden() => Some(t("program.words_hidden", "Words hidden").to_uppercase()),
         Some(screen) => {
             Some(tf("right.preview.looking_at", "Looking at {screen}", &[("screen", &screen.name)]).to_uppercase())
         }
@@ -8331,6 +8333,56 @@ pub mod tests {
         state.next_line = None;
         let words = preview_frames(&show, &mut state, &[vec![]]);
         assert!(!words.iter().any(|w| w.starts_with("NEXT")), "{words:?}");
+    }
+
+    /// The words the right column draws in one frame, each with its ink.
+    fn right_column_words(show: &Show, state: &mut HomeState) -> Vec<(String, Color32)> {
+        fn words(shape: &egui::Shape, into: &mut Vec<(String, Color32)>) {
+            match shape {
+                egui::Shape::Text(text) => {
+                    into.push((text.galley.rows.iter().map(|row| row.text()).collect(), text.fallback_color));
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| words(shape, into)),
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+            ..RawInput::default()
+        };
+        let preview = crate::home::Preview { amount: 1.0, ..Default::default() };
+        let mut commands = Vec::new();
+        let output = ctx.run_ui(input, |ui| right_column(ui, show, state, preview, &mut commands, |_, _| {}));
+        let mut drawn = Vec::new();
+        output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut drawn));
+        output.drop_without_applying_deltas();
+        drawn
+    }
+
+    #[test]
+    fn with_the_words_hidden_the_preview_says_so_and_the_slide_key_stays_lit() {
+        let mut show = Show::new(vec![Arc::new(sp_model::parse_song_text("Song", "One\n\nTwo\n"))]);
+        show.apply(Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        let mut state = HomeState::default();
+        let ink_of = |drawn: &[(String, Color32)], words: &str| {
+            drawn.iter().find(|(said, _)| said == words).map(|(_, ink)| *ink).unwrap_or_else(|| panic!("{words}"))
+        };
+        let drawn = right_column_words(&show, &mut state);
+        assert!(!drawn.iter().any(|(said, _)| said == "WORDS HIDDEN"), "{drawn:?}");
+        assert_eq!(ink_of(&drawn, "SLIDE"), TEXT, "lit while the slide is up");
+
+        show.apply(Command::HideWords);
+        let drawn = right_column_words(&show, &mut state);
+        assert!(drawn.iter().any(|(said, _)| said == "WORDS HIDDEN"), "the readout's second line: {drawn:?}");
+        assert_eq!(ink_of(&drawn, "SLIDE"), TEXT, "the slide is still up, without its words");
+        assert_eq!(ink_of(&drawn, "MEDIA"), TEXT_FAINT, "(an unlit key, to compare)");
+
+        show.apply(Command::ShowAgain);
+        let drawn = right_column_words(&show, &mut state);
+        assert!(!drawn.iter().any(|(said, _)| said == "WORDS HIDDEN"), "{drawn:?}");
+        show.apply(Command::Clear(Layer::Slides));
+        assert_eq!(ink_of(&right_column_words(&show, &mut state), "SLIDE"), TEXT_FAINT, "cleared: unlit");
     }
 
     #[test]

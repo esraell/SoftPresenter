@@ -474,5 +474,6 @@
   "notices.unread.props": "SoftPresenter не зміг прочитати накладки, тож запустився без них.",
   "notices.unread.stage_layouts": "SoftPresenter не зміг прочитати макети сцени, тож запустився зі звичайними макетами.",
   "notices.unread.bible_page": "SoftPresenter не зміг прочитати, як була налаштована сторінка Біблії, тож вона відкривається як зазвичай.",
-  "notices.unread.bible_history": "SoftPresenter не зміг прочитати знайдені раніше місця Біблії, тож історія порожня."
+  "notices.unread.bible_history": "SoftPresenter не зміг прочитати знайдені раніше місця Біблії, тож історія порожня.",
+  "notices.status.words_hidden": "(слова сховано)"
 }
