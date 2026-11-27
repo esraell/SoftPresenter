@@ -1137,6 +1137,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     Choosing the other layout sets every row; clicking the one already chosen does nothing.
     **Reset to Defaults**, in the card's head, goes back to the layout chosen; it is greyed
     while nothing differs.
+  - **Add a Key…**, beside Reset to Defaults, adds any other key by its place on the keyboard
+    (a letter, a digit, a mark, a number pad key, an F key on a Mac): click it, and while it
+    reads "Press a key…" the next key pressed by itself joins the top of the list, set to
+    Nothing, with a × to take it out. A key already in the list is shown instead. Enter, Tab,
+    ↑, ↓, /, ? and Delete are the app's own and a key held with Command, Control or Option
+    (Ctrl or Alt) is the menus': each says so in a sentence, and it goes on listening. On a
+    Mac the menus' items are greyed while it listens, so Command-Q there only gets its
+    sentence. Esc, a
+    click anywhere else, or leaving the Settings window stops it. Reset to Defaults takes the
+    added keys out; choosing a layout leaves them.
   - **The list of keys (`?`)** writes these keys as the table has them now: one row for each
     action that has keys, "Button only" for a clear no key does, and one row for the keys set
     to Nothing. The clear buttons' hints (the six layer keys, Clear All, a message's Hide) name

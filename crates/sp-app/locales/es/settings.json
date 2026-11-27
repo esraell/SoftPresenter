@@ -329,6 +329,9 @@
   "settings.keys.buttons.note": "Una pequeña etiqueta junto a cada botón con su tecla",
   "settings.keys.show.title": "Durante el culto",
   "settings.keys.show.about": "Qué hace cada tecla",
+  "settings.keys.add": "Añadir una tecla…",
+  "settings.keys.add.listening": "Pulsa una tecla…",
+  "settings.keys.add.hint": "A cualquier tecla del teclado, o botón de un mando, se le puede dar algo que hacer",
   "settings.keys.reset": "Restablecer",
   "settings.keys.reset.hint.sp": "Todas las teclas vuelven a la disposición Estándar; las teclas añadidas se quitan",
   "settings.keys.reset.hint.spj": "Todas las teclas vuelven a la disposición de SoftProjector; las teclas añadidas se quitan",
@@ -354,7 +357,7 @@
   "settings.keys.remove": "Quitar {key} de la lista",
   "settings.keys.none": "Ninguna tecla hace {actions} ahora.",
   "settings.keys.esc_first": "Haga lo que haga Esc aquí, primero cierra un menú, una ventana o la búsqueda que estén abiertos.",
-  "settings.keys.mac_f_keys": "Las teclas F son del Mac (brillo, sonido), así que no están aquí.",
+  "settings.keys.mac_f_keys": "Las teclas F son del Mac (brillo, sonido): Añadir una tecla trae una.",
   "settings.keys.fixed.title": "Siempre igual",
   "settings.keys.fixed.about": "Teclas fijas · pulsa ? en cualquier lugar para ver la lista completa"
 }

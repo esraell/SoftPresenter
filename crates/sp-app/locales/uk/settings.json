@@ -317,6 +317,9 @@
   "settings.keys.buttons.note": "Невелика позначка з клавішею поруч із кожною кнопкою",
   "settings.keys.show.title": "Ведення показу",
   "settings.keys.show.about": "Що робить кожна клавіша",
+  "settings.keys.add": "Додати клавішу…",
+  "settings.keys.add.listening": "Натисніть клавішу…",
+  "settings.keys.add.hint": "Будь-якій клавіші клавіатури чи кнопці клікера можна призначити дію",
   "settings.keys.reset": "Скинути",
   "settings.keys.reset.hint.sp": "Усі клавіші повернуться до розкладки «Стандартна»; додані клавіші зникнуть",
   "settings.keys.reset.hint.spj": "Усі клавіші повернуться до розкладки SoftProjector; додані клавіші зникнуть",
@@ -342,7 +345,7 @@
   "settings.keys.remove": "Вилучити {key} зі списку",
   "settings.keys.none": "Зараз жодна клавіша не робить: {actions}.",
   "settings.keys.esc_first": "Хоч би що робила Esc тут, спершу вона закриває відкрите меню, вікно чи пошук.",
-  "settings.keys.mac_f_keys": "Клавіші F зайняті самим Mac (яскравість, звук), тому їх тут немає.",
+  "settings.keys.mac_f_keys": "Клавіші F зайняті самим Mac (яскравість, звук): «Додати клавішу» вносить будь-яку з них.",
   "settings.keys.fixed.title": "Завжди однаково",
   "settings.keys.fixed.about": "Сталі клавіші · натисніть ? будь-де, щоб побачити весь список"
 }

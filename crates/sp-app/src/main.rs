@@ -2243,7 +2243,10 @@ impl Panel {
                 state.settings_open = false;
                 state.identify = false;
             }
-            Panel::Settings => state.preferences_open = false,
+            Panel::Settings => {
+                state.preferences_open = false;
+                state.keys_card.stop();
+            }
         }
     }
 }
@@ -12143,6 +12146,7 @@ impl App {
                 can_redo: state.can_undo(true),
                 style_copied: state.inspector.copied_style.is_some(),
                 checking_updates: updates::status().checking,
+                listening: state.keys_card.listening,
             });
             menu.set_checked(|action| match action {
                 A::Audience => output_on,
@@ -12907,6 +12911,23 @@ impl ApplicationHandler<AppEvent> for App {
             WindowEvent::Focused(true) => self.focused = Some(id),
             _ => {}
         }
+        // Add a Key (Settings › Keys) is listening: the Settings window's next key is its own, by
+        // its place on the keyboard, and reaches nothing else in that window. The menus' items
+        // are greyed meanwhile (`tick_menu`), so a shortcut does nothing but get its sentence.
+        if let WindowEvent::KeyboardInput { event: key, .. } = &event
+            && let Some(running) = self.running.as_mut()
+            && running.home_state.keys_card.listening
+            && let Some(panel) =
+                running.panels.iter().find(|panel| panel.window.id() == id && panel.kind == Panel::Settings)
+        {
+            if key.state == ElementState::Pressed && !key.repeat {
+                home::settings::keys_card::key_pressed(&mut running.home_state, &Pressed::of(key, self.held));
+            }
+            panel.window.request_redraw();
+            // The menus' items come back as it stops listening.
+            self.tick_menu();
+            return;
+        }
         // A key that is a menu bar shortcut belongs to the menu, which acts on it once.
         #[cfg(target_os = "macos")]
         if self.menu.is_some()
@@ -12916,6 +12937,18 @@ impl ApplicationHandler<AppEvent> for App {
             && menubar::claims(code, self.held, self.running.as_ref().is_some_and(|r| r.home_state.editing.is_some()))
         {
             return;
+        }
+        // Add a Key stops listening when the Settings window loses the keyboard, and the menus'
+        // items come back.
+        if matches!(event, WindowEvent::Focused(false))
+            && let Some(running) = self.running.as_mut()
+            && running.home_state.keys_card.listening
+            && let Some(panel) =
+                running.panels.iter().find(|panel| panel.window.id() == id && panel.kind == Panel::Settings)
+        {
+            running.home_state.keys_card.stop();
+            panel.window.request_redraw();
+            self.tick_menu();
         }
         let Some(running) = self.running.as_mut() else {
             return;
@@ -12936,6 +12969,8 @@ impl ApplicationHandler<AppEvent> for App {
                     let size_before = self.running.as_ref().map(|running| running.home_state.interface_size);
                     let commands = self.draw_panel(id);
                     self.apply(commands);
+                    // Add a Key (Settings › Keys) greys the menus' items while it listens.
+                    self.tick_menu();
                     // Another Interface size chosen in Settings: the main window takes it at once.
                     if let Some(running) = self.running.as_ref()
                         && size_before != Some(running.home_state.interface_size)

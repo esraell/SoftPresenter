@@ -664,7 +664,6 @@ pub enum Refusal {
 impl Refusal {
     /// What Add a Key says, in its line in the table's head (`None` for no key). `mac` is for the
     /// Mac's modifiers (⌘, ⌃, ⌥) and its Delete key, at Backspace's place.
-    #[allow(dead_code)] // Add a Key says it, next.
     pub fn reason(self, mac: bool) -> Option<String> {
         let words = match self {
             Refusal::NoKey => return None,
@@ -990,7 +989,6 @@ impl KeyTable {
     /// Adds the key pressed at the top of the list (Add a Key…), set to Nothing, or an F key on
     /// a Mac (no row there, `f_keys` false) to what the layout gives it off one; or says why not.
     /// The key added is returned.
-    #[allow(dead_code)] // Add a Key adds with it, next.
     pub fn add(&mut self, pressed: &Pressed, f_keys: bool) -> Result<ShowKey, Refusal> {
         let key = ShowKey::to_add(pressed)?;
         if self.is_listed(key, f_keys) {

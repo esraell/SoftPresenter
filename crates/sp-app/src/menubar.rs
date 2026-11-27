@@ -759,16 +759,23 @@ pub struct Greying {
     pub style_copied: bool,
     /// Check for Updates is running: its item is greyed, and says so.
     pub checking_updates: bool,
+    /// Settings › Keys' Add a Key is listening for a key: every item is greyed, so that a key
+    /// pressed with Command (Command-Q, say) does nothing but get its sentence there.
+    pub listening: bool,
 }
 
 /// Whether a menu item can be chosen now. An item that only works in the editor is greyed
 /// elsewhere; Undo and Redo are greyed when there is nothing to take back (never while typing,
 /// as the field's own undo may have something); Paste Style is greyed until a look is copied.
+/// While Add a Key listens (Settings › Keys) every item is greyed, so no shortcut acts.
 /// A Mac menu item has no hover, so these say nothing more than their grey; the buttons in the
 /// window that do the same say why.
 #[cfg(any(target_os = "macos", test))]
 pub fn enabled(action: Action, now: &Greying) -> bool {
     use Action as A;
+    if now.listening {
+        return false;
+    }
     match action {
         A::Undo => now.typing || now.can_undo,
         A::Redo => now.typing || now.can_redo,
@@ -1386,5 +1393,24 @@ mod tests {
         // Check for Updates is greyed while a check runs, and only then.
         assert!(enabled(Action::CheckForUpdates, &Greying::default()));
         assert!(!enabled(Action::CheckForUpdates, &Greying { checking_updates: true, ..Greying::default() }));
+    }
+
+    #[test]
+    fn while_add_a_key_listens_no_menu_item_can_be_chosen_so_no_shortcut_acts() {
+        // Everything that would otherwise be on: in the editor, typing, steps to undo and redo.
+        let on = Greying {
+            editing: true,
+            typing: true,
+            can_undo: true,
+            can_redo: true,
+            style_copied: true,
+            ..Greying::default()
+        };
+        let listening = Greying { listening: true, ..on };
+        for (action, shortcut) in menu_items() {
+            assert!(enabled(action, &on), "{action:?} is on as a rule");
+            assert!(!enabled(action, &listening), "{action:?} (shortcut {shortcut:?}) waits while it listens");
+        }
+        assert!(menu_items().iter().any(|(action, shortcut)| *action == Action::Quit && shortcut.is_some()));
     }
 }

@@ -317,6 +317,9 @@
   "settings.keys.buttons.note": "Небольшая метка с клавишей рядом с каждой кнопкой",
   "settings.keys.show.title": "Ведение показа",
   "settings.keys.show.about": "Что делает каждая клавиша",
+  "settings.keys.add": "Добавить клавишу…",
+  "settings.keys.add.listening": "Нажмите клавишу…",
+  "settings.keys.add.hint": "Любой клавише клавиатуры или кнопке кликера можно назначить действие",
   "settings.keys.reset": "Сбросить",
   "settings.keys.reset.hint.sp": "Все клавиши вернутся к раскладке «Стандартная»; добавленные клавиши уберутся",
   "settings.keys.reset.hint.spj": "Все клавиши вернутся к раскладке SoftProjector; добавленные клавиши уберутся",
@@ -342,7 +345,7 @@
   "settings.keys.remove": "Убрать {key} из списка",
   "settings.keys.none": "Сейчас ни одна клавиша не делает: {actions}.",
   "settings.keys.esc_first": "Что бы ни делала Esc здесь, сначала она закрывает открытое меню, окно или поиск.",
-  "settings.keys.mac_f_keys": "Клавиши F заняты самим Mac (яркость, звук), поэтому их здесь нет.",
+  "settings.keys.mac_f_keys": "Клавиши F заняты самим Mac (яркость, звук): «Добавить клавишу» вносит любую из них.",
   "settings.keys.fixed.title": "Всегда одинаково",
   "settings.keys.fixed.about": "Постоянные клавиши · нажмите ? где угодно, чтобы увидеть весь список"
 }

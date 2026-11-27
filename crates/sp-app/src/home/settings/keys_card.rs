@@ -1,25 +1,30 @@
 //! Settings › Keys › Running the show, as the design draws it (26 November): what each key that
 //! runs the show does, one row a key, from the table in `key_table`.
 //!
-//! - The head has Reset to Defaults at its right, always there, greyed while nothing differs.
+//! - The head has Add a Key… and Reset to Defaults at its right, always there. Add a Key reads
+//!   "Press a key…" in the same width while it listens: the next key pressed by itself joins the
+//!   list at the top, set to Nothing; a key the app keeps says why in a sentence; Esc, or a click
+//!   anywhere else, stops listening. The keys reach it from the Settings window (`key_pressed`,
+//!   called in `main.rs`), by their place on the keyboard.
 //! - The first line is the Key layout switch, Standard or Like SoftProjector, with a line saying
-//!   what the layout is. Choosing the other layout sets every row.
+//!   what the layout is. Choosing the other layout sets every row; the keys added stay.
 //! - Each row has the key's cap, a chooser of one width, and a place for a note: a changed row's
-//!   default, or, for a key added to the table, that it was, with a × to take it out.
+//!   default, or that the key was added, with a × to take it out.
 //! - Nothing here changes size when a choice changes: where the window is too narrow for a
 //!   line beside its control, the line goes under it, by the window's width and the language
 //!   alone, never by what is chosen.
 
 use egui::{Align, Align2, FontId, Layout, Rect, Sense, Stroke, pos2, vec2};
+use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 
 use super::parts;
 use crate::home::HomeState;
 use crate::i18n::{t, tf, tk};
-use crate::icons::Icon;
-use crate::key_table::{ActionGroup, KeyAction, KeyStyle, KeyTable, ShowKey, rows};
+use crate::icons::{self, Icon};
+use crate::key_table::{ActionGroup, KeyAction, KeyStyle, KeyTable, Pressed, Refusal, ShowKey, rows};
 use crate::studio::{
-    Flat, LINE, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, even_switch, fixed_semibold, flat_button, icon_key, paint_spaced,
-    semibold, spaced, widest,
+    Flat, LINE, SELECTED, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, even_switch, fixed_semibold, flat_button, icon_key,
+    paint_flat, paint_spaced, semibold, spaced, widest,
 };
 
 /// The key's column, the room between columns, and how tall a row is, as the design has them.
@@ -32,6 +37,8 @@ const SWITCH: f32 = 300.0;
 const CHOOSER: f32 = 200.0;
 /// The most a chooser's list is tall: room for its 22 lines.
 const LIST: f32 = 640.0;
+/// How long a row just added, or shown instead, stays tinted, in seconds.
+const TINT: f64 = 1.2;
 /// The small capitals of the headings, and the room between their letters.
 const CAPS: f32 = 11.5;
 const CAPS_SPACING: f32 = 0.575;
@@ -41,6 +48,18 @@ const LINE_HEIGHT: f32 = 18.0;
 /// What the card keeps between frames.
 #[derive(Default)]
 pub struct Card {
+    /// Add a Key is listening for the next key.
+    pub listening: bool,
+    /// What Add a Key said last (why a key wasn't added), in its line in the table's head.
+    pub say: String,
+    /// The row just added or shown instead, tinted for a moment, and when that began (set as it
+    /// is first drawn).
+    tinted: Option<(ShowKey, Option<f64>)>,
+    /// The row whose chooser takes the keyboard, and is scrolled to, as it is next drawn.
+    focus: Option<ShowKey>,
+    /// The pass the card was last drawn in: not drawn in the pass before, the page has just come
+    /// into view, and it listens no more.
+    drawn: Option<u64>,
     /// For the tests, which are built on a Mac: the F rows as off a Mac, or not.
     #[cfg(test)]
     pub f_keys: Option<bool>,
@@ -67,6 +86,51 @@ impl Card {
         });
         asked.unwrap_or_else(crate::keys::f_keys)
     }
+
+    /// Stops listening, and forgets what was said.
+    pub fn stop(&mut self) {
+        self.listening = false;
+        self.say.clear();
+    }
+
+    /// Shows `key`'s row: tinted for a moment, scrolled to, its chooser with the keyboard.
+    fn show(&mut self, key: ShowKey) {
+        self.tinted = Some((key, None));
+        self.focus = Some(key);
+    }
+}
+
+/// A key pressed in the Settings window while Add a Key listens. Esc stops it (taken before the
+/// table hears of it, which would say Esc is in the list already); a key pressed by itself joins
+/// the list at the top; one in the list already is shown instead; one the app keeps, or held
+/// with a modifier, says why and it goes on listening; a modifier by itself says nothing.
+pub fn key_pressed(state: &mut HomeState, pressed: &Pressed) {
+    if !state.keys_card.listening {
+        return;
+    }
+    let f_keys = state.keys_card.f_keys();
+    if pressed.logical == Key::Named(NamedKey::Escape) || pressed.physical == PhysicalKey::Code(KeyCode::Escape) {
+        state.keys_card.stop();
+        return;
+    }
+    match state.keys.add(pressed, f_keys) {
+        Ok(key) => {
+            state.keys_card.stop();
+            state.keys_card.show(key);
+        }
+        Err(Refusal::Listed(key)) => {
+            state.keys_card.stop();
+            state.keys_card.say = listed_words(key, f_keys);
+            state.keys_card.show(key);
+        }
+        Err(Refusal::NoKey) => {}
+        Err(refusal) => state.keys_card.say = refusal.reason(!f_keys).unwrap_or_default(),
+    }
+}
+
+/// "{key} is in the list already.", with the key as this system's keyboards print it.
+fn listed_words(key: ShowKey, f_keys: bool) -> String {
+    tf("settings.keys.refused.listed", "{key} is in the list already.", &[("key", &key.cap_for(!f_keys))])
 }
 
 /// What the layout chosen is, in a line: off a Mac, or on one (`mac`), where the F keys have no
@@ -122,6 +186,9 @@ pub fn reset_hint(table: &KeyTable, f_keys: bool) -> String {
 /// Reset to Defaults: every row back to what the layout chosen says, and the keys added out.
 pub fn reset(state: &mut HomeState) {
     state.keys.reset();
+    state.keys_card.stop();
+    state.keys_card.tinted = None;
+    state.keys_card.focus = None;
 }
 
 /// A changed row's note: "Default: Clear All".
@@ -168,14 +235,34 @@ fn foot_note(mac: bool) -> String {
     }
     let f_keys = t(
         "settings.keys.mac_f_keys",
-        "The F keys are the Mac\u{2019}s own (brightness, sound), so they aren\u{2019}t here.",
+        "The F keys are the Mac\u{2019}s own (brightness, sound): Add a Key brings one in.",
     );
     format!("{esc} {f_keys}")
+}
+
+/// Every sentence Add a Key can say, for the room its line keeps.
+fn every_sentence(f_keys: bool) -> Vec<String> {
+    use crate::key_table::Kept;
+    let kept =
+        [Kept::Enter, Kept::Tab, Kept::Up, Kept::Down, Kept::Slash, Kept::QuestionMark, Kept::Delete, Kept::Backspace];
+    let mut all: Vec<String> = kept.into_iter().filter_map(|kept| Refusal::Kept(kept).reason(!f_keys)).collect();
+    all.extend(Refusal::Held.reason(!f_keys));
+    all.push(listed_words(ShowKey::PageDown, f_keys));
+    all
 }
 
 /// The card.
 pub fn keys_card(ui: &mut egui::Ui, state: &mut HomeState) {
     let f_keys = state.keys_card.f_keys();
+    // Not drawn in the pass before: the page has just come into view, so it listens no more.
+    let pass = ui.ctx().cumulative_pass_nr();
+    let card = &mut state.keys_card;
+    if card.drawn.is_none_or(|last| pass != last && pass != last + 1) {
+        card.stop();
+        card.tinted = None;
+        card.focus = None;
+    }
+    card.drawn = Some(pass);
     let mut asked = Asked::default();
     parts::framed(
         ui,
@@ -184,7 +271,7 @@ pub fn keys_card(ui: &mut egui::Ui, state: &mut HomeState) {
             head(ui, state, f_keys, &mut asked);
             layout_line(ui, state, f_keys, &mut asked);
             let chooser = chooser_width(ui);
-            table_head(ui);
+            table_head(ui, state, f_keys, chooser);
             // A chooser's list is as tall as its 22 lines where the window has the room. The
             // toolkit gives a new list's area 400 points whatever its chooser asks for
             // (`default_area_size`), so that is raised while the choosers are made, and put back.
@@ -198,6 +285,26 @@ pub fn keys_card(ui: &mut egui::Ui, state: &mut HomeState) {
             notes(ui, state, f_keys);
         },
     );
+    // A click anywhere but on Add a Key stops it listening.
+    if state.keys_card.listening && !asked.add && ui.input(|input| input.pointer.any_pressed()) {
+        let on_key = ui
+            .input(|input| input.pointer.interact_pos())
+            .is_some_and(|at| asked.add_key.is_some_and(|key| key.contains(at)));
+        if !on_key {
+            state.keys_card.stop();
+        }
+    }
+    if asked.add {
+        let listening = !state.keys_card.listening;
+        state.keys_card.stop();
+        state.keys_card.listening = listening;
+        // Nothing else has the keyboard while it listens.
+        ui.memory_mut(|memory| {
+            if let Some(focused) = memory.focused() {
+                memory.surrender_focus(focused);
+            }
+        });
+    }
     if asked.reset {
         reset(state);
     }
@@ -211,27 +318,36 @@ pub fn keys_card(ui: &mut egui::Ui, state: &mut HomeState) {
     }
     if let Some(key) = asked.remove {
         state.keys.remove(key);
+        state.keys_card.say.clear();
     }
 }
 
 /// What was asked of the card in a frame, carried out once it is drawn.
 #[derive(Default)]
 struct Asked {
+    add: bool,
+    /// Where Add a Key is, for telling a click elsewhere.
+    add_key: Option<Rect>,
     reset: bool,
     style: Option<KeyStyle>,
     set: Option<(ShowKey, KeyAction)>,
     remove: Option<ShowKey>,
 }
 
-/// The card's head: its title and its line in small capitals, and at the right Reset to
-/// Defaults, which never moves. Where the window is too narrow for all of them on one line,
-/// the line in capitals goes under the title, and then the key under that.
+/// The card's head: its title and its line in small capitals, and at the right Add a Key… and
+/// Reset to Defaults, which never move. Where the window is too narrow for all of them on one
+/// line, the line in capitals goes under the title, and then the keys under that.
 fn head(ui: &mut egui::Ui, state: &HomeState, f_keys: bool, asked: &mut Asked) {
     let width = ui.available_width();
     let font = FontId::proportional(12.5);
+    let add_words = t("settings.keys.add", "Add a Key\u{2026}");
+    let listening_words = t("settings.keys.add.listening", "Press a key\u{2026}");
     let reset_words = t("settings.keys.reset", "Reset to Defaults");
+    // Add a Key keeps one width whichever it says: its words with the + before them, or
+    // "Press a key…".
+    let add_wide = (widest(ui, &[add_words], &font) + 18.0).max(widest(ui, &[listening_words], &font)) + 26.0;
     let reset_wide = parts::key_size(ui, reset_words).x;
-    let keys_wide = reset_wide;
+    let keys_wide = add_wide + 8.0 + reset_wide;
     let title =
         parts::lines(ui, t("settings.keys.show.title", "Running the show"), semibold(15.0), TEXT, f32::INFINITY, 21.0);
     let about = t("settings.keys.show.about", "What each key does").to_uppercase();
@@ -259,6 +375,30 @@ fn head(ui: &mut egui::Ui, state: &HomeState, f_keys: bool, asked: &mut Asked) {
         }
     };
     let reset_at = Rect::from_min_size(pos2(keys_place.max.x - reset_wide, keys_place.min.y), vec2(reset_wide, 30.0));
+    let add_at = Rect::from_min_size(pos2(reset_at.min.x - 8.0 - add_wide, keys_place.min.y), vec2(add_wide, 30.0));
+    asked.add_key = Some(add_at);
+    // Add a Key…, lit and reading "Press a key…" while it listens.
+    let listening = state.keys_card.listening;
+    let response = ui.interact(add_at, ui.scope_id().with("add a key"), Sense::click());
+    paint_flat(ui.painter(), add_at, 9.0, if listening { Flat::On } else { Flat::Plain }, response.hovered());
+    if listening {
+        ui.painter().text(add_at.center(), Align2::CENTER_CENTER, listening_words, font.clone(), TEXT);
+    } else {
+        let words = ui.painter().layout_no_wrap(add_words.to_owned(), font.clone(), TEXT);
+        let left = add_at.center().x - (words.size().x + 18.0) / 2.0;
+        icons::paint(
+            ui.painter(),
+            Icon::Plus,
+            Rect::from_center_size(pos2(left + 6.0, add_at.center().y), vec2(12.0, 12.0)),
+            TEXT,
+        );
+        ui.painter().galley(pos2(left + 18.0, add_at.center().y - words.size().y / 2.0), words, TEXT);
+    }
+    let hint = t(
+        "settings.keys.add.hint",
+        "Any key on the keyboard, or a clicker\u{2019}s button, can be given something to do",
+    );
+    asked.add = response.on_hover_text(hint).clicked();
     // Reset to Defaults: always there, greyed while there is nothing to reset.
     let lit = differs(&state.keys, f_keys);
     let reset = flat_button(ui, reset_at, ui.scope_id().with("reset keys"), reset_words, font, Flat::Plain, lit);
@@ -331,9 +471,16 @@ fn chooser_width(ui: &egui::Ui) -> f32 {
     (widest(ui, &names, &font) + around + 2.0).ceil().max(CHOOSER)
 }
 
-/// The table's head: KEY and DOES over their columns.
-fn table_head(ui: &mut egui::Ui) {
+/// The table's head: KEY and DOES over their columns, and what Add a Key says, in a line that
+/// is always kept: at the right of Does where every sentence fits there on one line, else
+/// under the headings, with the room the longest takes.
+fn table_head(ui: &mut egui::Ui, state: &HomeState, f_keys: bool, chooser: f32) {
     let width = ui.available_width();
+    let font = FontId::proportional(12.0);
+    let say_left = KEY_COLUMN + BETWEEN + chooser + BETWEEN;
+    let sentences = every_sentence(f_keys);
+    let wide: Vec<&str> = sentences.iter().map(String::as_str).collect();
+    let beside = widest(ui, &wide, &font) <= width - say_left;
     let (place, _) = ui.allocate_exact_size(vec2(width, 28.0), Sense::hover());
     let middle = place.min.y + 12.0;
     let heading = |left: f32, words: &str| {
@@ -349,6 +496,23 @@ fn table_head(ui: &mut egui::Ui) {
     };
     heading(0.0, t("settings.keys.col.key", "Key"));
     heading(KEY_COLUMN + BETWEEN, t("settings.keys.col.does", "Does"));
+    let say = state.keys_card.say.as_str();
+    if beside {
+        if !say.is_empty() {
+            let galley = parts::one_line(ui, say, font, TEXT, width - say_left);
+            ui.painter().galley(pos2(place.min.x + say_left, middle - galley.size().y / 2.0), galley, TEXT);
+        }
+        return;
+    }
+    let room = sentences
+        .iter()
+        .map(|sentence| parts::lines(ui, sentence, font.clone(), TEXT, width, LINE_HEIGHT).size().y)
+        .fold(LINE_HEIGHT, f32::max);
+    let (under, _) = ui.allocate_exact_size(vec2(width, room + 6.0), Sense::hover());
+    if !say.is_empty() {
+        let galley = parts::lines(ui, say, font, TEXT, width, LINE_HEIGHT);
+        ui.painter().galley(under.min, galley, TEXT);
+    }
 }
 
 /// A line of a chooser's list.
@@ -381,6 +545,21 @@ fn chooser_list() -> Vec<Line> {
 fn key_row(ui: &mut egui::Ui, state: &mut HomeState, f_keys: bool, key: ShowKey, chooser: f32, asked: &mut Asked) {
     let width = ui.available_width();
     let (place, _) = ui.allocate_exact_size(vec2(width, ROW), Sense::hover());
+    // A row just added, or shown instead of being added twice, is tinted for a moment.
+    if let Some((tinted, since)) = state.keys_card.tinted
+        && tinted == key
+    {
+        let now = ui.input(|input| input.time);
+        let since = since.unwrap_or(now);
+        let left = 1.0 - (now - since) / TINT;
+        if left > 0.0 {
+            ui.painter().rect_filled(place, 4.0, TALLY.gamma_multiply(0.16 * left as f32));
+            ui.ctx().request_repaint();
+            state.keys_card.tinted = Some((key, Some(since)));
+        } else {
+            state.keys_card.tinted = None;
+        }
+    }
     ui.painter().hline(place.x_range(), place.min.y + 0.5, Stroke::new(1.0, LINE));
     let middle = place.center().y;
     // The cap, as the list of keys draws one; a name too long for its column is cut short, and
@@ -430,6 +609,11 @@ fn key_row(ui: &mut egui::Ui, state: &mut HomeState, f_keys: bool, key: ShowKey,
         });
     if let Some(action) = shown.inner.flatten() {
         asked.set = Some((key, action));
+    }
+    if state.keys_card.focus == Some(key) {
+        state.keys_card.focus = None;
+        shown.response.request_focus();
+        ui.scroll_to_rect(place, None);
     }
     // The note, in a column of one width on every row, and an added key's ×.
     let added = state.keys.is_added(key) && !rows(f_keys).contains(&key);
@@ -490,12 +674,13 @@ fn notes(ui: &mut egui::Ui, state: &HomeState, f_keys: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::home::settings::tests::words_drawn;
     use crate::home::settings::{Pane, settings_ui};
     use crate::i18n::Language;
-    use crate::key_table::Pressed;
+    use crate::key_table::Refusal;
     use egui::{pos2, vec2};
     use sp_engine::Show;
-    use winit::keyboard::{Key, KeyCode, NamedKey};
+    use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey};
 
     /// Settings at Keys, as on a computer with the F rows (`f_keys`) or a Mac.
     fn state_on(f_keys: bool) -> HomeState {
@@ -762,7 +947,7 @@ mod tests {
                 assert!(shown(&words, wanted), "{style:?}, mac {mac}: {wanted}");
             }
             // The Mac's note under the table, and only there.
-            let mac_note = "Whatever Esc does here, it closes an open menu, window or the find box first. The F keys are the Mac\u{2019}s own (brightness, sound), so they aren\u{2019}t here.";
+            let mac_note = "Whatever Esc does here, it closes an open menu, window or the find box first. The F keys are the Mac\u{2019}s own (brightness, sound): Add a Key brings one in.";
             assert_eq!(shown(&words, mac_note), mac);
             let note = "Whatever Esc does here, it closes an open menu, window or the find box first.";
             assert_eq!(shown(&words, note), !mac);
@@ -802,6 +987,83 @@ mod tests {
         state.keys.add(&typed("n"), false).expect("added");
         state.keys.set(ShowKey::Other(KeyCode::KeyN), KeyAction::Next);
         assert_eq!(none_line(&state.keys, false), "");
+    }
+
+    #[test]
+    fn add_a_key_listens_adds_at_the_top_and_esc_or_a_click_elsewhere_cancels() {
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut state = state_on(false);
+        let rows = crate::key_table::rows(false);
+        assert!(click(&ctx, &mut state, &show, "Add a Key\u{2026}"));
+        assert!(state.keys_card.listening);
+        let (words, _) = page(&ctx, &mut state, 1280.0);
+        assert!(shown(&words, "Press a key\u{2026}") && !shown(&words, "Add a Key\u{2026}"));
+        // A key the app keeps is refused in a sentence, and it goes on listening.
+        key_pressed(&mut state, &key(NamedKey::Enter));
+        let enter = "Enter always puts the picked slide on screen. Press another.";
+        assert_eq!((state.keys_card.say.as_str(), state.keys_card.listening), (enter, true));
+        let (words, _) = page(&ctx, &mut state, 1280.0);
+        assert!(shown(&words, enter));
+        key_pressed(&mut state, &typed("?"));
+        assert_eq!(state.keys_card.say, "? always opens the list of keys. Press another.");
+        // A modifier by itself says nothing new; a key held with one is the menus'.
+        key_pressed(&mut state, &key(NamedKey::Shift));
+        assert_eq!(state.keys_card.say, "? always opens the list of keys. Press another.");
+        let held = Pressed { held: ModifiersState::SUPER, ..typed("b") };
+        key_pressed(&mut state, &held);
+        assert_eq!(
+            state.keys_card.say,
+            "Keys held with \u{2318}, \u{2303} or \u{2325} are the menus\u{2019}. Press a key by itself."
+        );
+        assert!(state.keys_card.listening);
+        // Esc stops listening and is never said to be in the list.
+        key_pressed(&mut state, &key(NamedKey::Escape));
+        assert!(!state.keys_card.listening && state.keys_card.say.is_empty());
+        assert_eq!(state.keys.listed(false), rows, "nothing was added");
+        // Not listening, a key is none of the card's.
+        key_pressed(&mut state, &typed("b"));
+        assert_eq!(state.keys.listed(false), rows);
+        // A key pressed by itself joins at the top, set to Nothing, with its note and its ×.
+        assert!(click(&ctx, &mut state, &show, "Add a Key\u{2026}"));
+        key_pressed(&mut state, &typed("b"));
+        let b = ShowKey::Other(KeyCode::KeyB);
+        assert_eq!(state.keys.listed(false)[0], b);
+        assert_eq!(state.keys.action(b), KeyAction::Nothing);
+        assert!(!state.keys_card.listening && state.keys_card.say.is_empty());
+        let (words, _) = page(&ctx, &mut state, 1280.0);
+        assert!(shown(&words, "Added \u{b7} no longer jumps to Bridge 1"));
+        assert!(place(&words, "B").center().y < place(&words, "Esc").center().y, "above the layout\u{2019}s rows");
+        assert!(shown(&words, "Add a Key\u{2026}"));
+        // The same key again is shown instead, with a sentence.
+        assert!(click(&ctx, &mut state, &show, "Add a Key\u{2026}"));
+        key_pressed(&mut state, &typed("b"));
+        assert_eq!((state.keys_card.say.as_str(), state.keys_card.listening), ("B is in the list already.", false));
+        assert_eq!(state.keys.listed(false).len(), rows.len() + 1);
+        // A click anywhere else stops listening and adds nothing.
+        assert!(click(&ctx, &mut state, &show, "Add a Key\u{2026}"));
+        assert!(state.keys_card.listening && state.keys_card.say.is_empty());
+        assert!(click(&ctx, &mut state, &show, "KEY LAYOUT"));
+        assert!(!state.keys_card.listening);
+        // The other notes: a digit still types in Bible, a mark is only added, and an F key on a
+        // Mac comes in doing what the layout gives it.
+        state.keys.set_style(KeyStyle::SoftProjector);
+        for pressed in [typed("1"), typed(","), key(NamedKey::F1)] {
+            assert!(click(&ctx, &mut state, &show, "Add a Key\u{2026}"));
+            key_pressed(&mut state, &pressed);
+        }
+        assert_eq!(state.keys.action(ShowKey::F1), KeyAction::ClearAll);
+        let (words, _) = page(&ctx, &mut state, 1280.0);
+        assert!(shown(&words, "Added \u{b7} in Bible it still types"));
+        assert_eq!(words.iter().filter(|(have, _)| have == "Added").count(), 2, "the comma and F1");
+        // Its × takes a key out again: at the right end of its row, under Reset to Defaults.
+        let drawn = frame(&ctx, &mut state, vec![]);
+        let words = words_drawn(&drawn);
+        drawn.drop_without_applying_deltas();
+        let at = pos2(place(&words, "Reset to Defaults").max.x - 1.0, place(&words, "F1").center().y);
+        click_at(&ctx, &mut state, at);
+        assert!(!state.keys.is_added(ShowKey::F1), "F1 is out of the list");
+        assert_eq!(state.keys.listed(false).len(), rows.len() + 3);
     }
 
     #[test]
@@ -856,14 +1118,18 @@ mod tests {
                     let said = format!("{language:?} at {width}, F keys {f_keys}");
                     let ctx = crate::studio::tests::styled();
                     let mut state = state_on(f_keys);
-                    // What may change: what the choosers say, the style's line and a changed
-                    // row's note. Everything else stays as it is.
+                    // What may change: what the choosers say, the style's line, a changed row's
+                    // note, Add a Key's words and what it says. Everything else stays as it is.
+                    let held = Refusal::Held.reason(!f_keys).unwrap_or_default();
                     let mut changing: Vec<String> = KeyAction::ALL.iter().map(|action| action.words()).collect();
                     for style in [KeyStyle::SoftPresenter, KeyStyle::SoftProjector] {
                         changing.push(style_line(style, !f_keys).to_owned());
                     }
                     changing.push(default_words(KeyAction::ClearAll));
                     changing.push(default_words(KeyAction::HideWords));
+                    changing.push(t("settings.keys.add", "Add a Key\u{2026}").to_owned());
+                    changing.push(t("settings.keys.add.listening", "Press a key\u{2026}").to_owned());
+                    changing.push(held.clone());
                     let still = |words: &[(String, Rect)]| -> Vec<(String, Rect)> {
                         words.iter().filter(|(have, _)| !changing.contains(have)).cloned().collect()
                     };
@@ -916,6 +1182,14 @@ mod tests {
                     state.keys.set_style(KeyStyle::SoftPresenter);
                     let back = page(&ctx, &mut state, width);
                     assert_eq!(back, standard, "{said}: back to the first layout");
+                    // Listening, with a refusal said: the same blocks, the same words elsewhere.
+                    state.keys_card.listening = true;
+                    state.keys_card.say = held.clone();
+                    let asking = page(&ctx, &mut state, width);
+                    assert!(state.keys_card.listening, "{said}");
+                    assert!(shown(&asking.0, &held), "{said}: the sentence is shown whole");
+                    assert_eq!(still(&asking.0), still(&standard.0), "{said}: listening moved words");
+                    assert_eq!(asking.1, standard.1, "{said}: listening moved a block");
                 }
             });
         }
@@ -934,6 +1208,9 @@ mod tests {
                     for pressed in [typed("b"), typed("1"), key(NamedKey::Insert)] {
                         state.keys.add(&pressed, f_keys).expect("added");
                     }
+                    page(&ctx, &mut state, 820.0);
+                    state.keys_card.listening = true;
+                    state.keys_card.say = Refusal::Held.reason(!f_keys).unwrap_or_default();
                     let (words, blocks) = page(&ctx, &mut state, 820.0);
                     for (have, rect) in words.iter().filter(|(have, _)| !have.is_empty()) {
                         assert!(
