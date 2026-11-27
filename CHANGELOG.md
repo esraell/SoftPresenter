@@ -10,6 +10,7 @@ Settings and playlists that couldn't be saved are tried again.
 ### Fixed
 
 - **Settings and playlists saved again.** A setting, playlist, library or the media bin that couldn't be saved because another program held its file for a moment (a virus scanner, a sync tool) was lost at quit unless something else changed; now SoftPresenter keeps trying, as it does for songs and themes, says when it is saved, and at quit keeps any change it still couldn't save in the library's Not saved folder.
+- **Older Intel Macs.** SoftPresenter now starts on a Mac with Intel's own graphics: tried on a Mac mini of 2014 (Intel Iris, macOS 11.6), where slides, fades and videos now show. Before, it waited about 13 seconds there and closed. Fades over a playing video are slow on that Mac (about 15 pictures a second).
 
 ## 0.9.0-dev.29 — 27 November 2026 (development build)
 

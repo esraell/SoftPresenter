@@ -1782,6 +1782,10 @@ impl super::PrivateDisabilities {
             broken_viewport_near_depth: is_intel
                 && !device.supportsFeatureSet(MTLFeatureSet::macOS_GPUFamily1_v4),
             broken_layered_clear_image: is_intel,
+            // SoftPresenter: the descriptor's own limit, which takes the attribute's place,
+            // came with macOS 10.14, as did the attribute (MSL 2.1).
+            broken_workgroup_size_attribute: is_intel
+                && available!(macos = 10.14, ios = 12.0, tvos = 12.0, visionos = 1.0),
         }
     }
 }

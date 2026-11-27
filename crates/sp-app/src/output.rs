@@ -1660,21 +1660,27 @@ fn run(
 ) {
     let mut painter = match Painter::new(&device) {
         Ok(painter) => painter,
-        Err(e) => return eprintln!("The output cannot draw on this computer: {e}"),
+        // The operator's window makes a painter of its own as the app starts, which fails the
+        // same way and ends the start with a message; this is for the log.
+        Err(e) => {
+            return crate::applog::problem("output", &format!("The screens cannot draw on this computer: {e}"));
+        }
     };
     // Videos the system plays reach the GPU through a small compute pass, and the planes FFmpeg
     // gives are turned into colours by another: compiled now, not when the first video's first
     // picture comes. So is all else a video's first picture would be the first to need, up to
     // the size FFmpeg gives the screens' videos (1080p).
     #[cfg(target_os = "macos")]
-    painter.prepare_texture_copy(&device);
+    if let Err(e) = painter.prepare_texture_copy(&device) {
+        crate::applog::problem("output", &format!("Videos the system plays can't be drawn on this computer: {e}"));
+    }
     let preparing = Instant::now();
     match painter.prepare_video(&device, &queue, 1920, 1080) {
         Ok(()) => crate::applog::event(
             "output",
             &format!("The screens' painter was readied for a 1920 x 1080 video in {:?}", preparing.elapsed()),
         ),
-        Err(e) => crate::applog::event("output", &format!("The screens' painter couldn't be readied for video: {e}")),
+        Err(e) => crate::applog::problem("output", &format!("The screens' painter couldn't be readied for video: {e}")),
     }
     // Testing aid: SOFTPRESENTER_OUTPUT_ROOM (see `output_room`).
     if let Some(room) = std::env::var("SOFTPRESENTER_OUTPUT_ROOM").ok().as_deref().and_then(output_room) {

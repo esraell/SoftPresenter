@@ -377,6 +377,11 @@ struct PrivateDisabilities {
     /// Multi-target clears don't appear to work properly on Intel GPUs.
     #[allow(dead_code)]
     broken_layered_clear_image: bool,
+    /// SoftPresenter: the compiler of Intel's graphics may abort on a compute shader that
+    /// carries the `max_total_threads_per_threadgroup` attribute (an Intel Iris 5100 on macOS
+    /// 11.6 does, for every compute shader). On Intel's graphics the attribute is left out and
+    /// the same number is set on the pipeline's descriptor instead.
+    broken_workgroup_size_attribute: bool,
 }
 
 #[derive(Debug)]

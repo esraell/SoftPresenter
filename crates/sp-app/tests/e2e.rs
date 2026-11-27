@@ -1106,6 +1106,30 @@ fn turned_away(run: &Run, start: &mut Started, what: &str) -> ExitStatus {
     status
 }
 
+/// A GPU whose compiler refuses one of the painter's shaders (an Intel Iris 5100 on macOS 11.6
+/// refused every compute shader, and the start stood for 13 seconds and ended saying only that no
+/// graphics device was found). Testing aid: SOFTPRESENTER_SHADER_FAILS has the painters ask for
+/// a pipeline the graphics must refuse.
+#[test]
+fn a_gpu_that_refuses_a_shader_ends_the_start_at_once_saying_which() {
+    let Some(run) = Run::new("a_gpu_that_refuses_a_shader_ends_the_start_at_once_saying_which") else { return };
+    let began = Instant::now();
+    let mut start = run.launch(&[("SOFTPRESENTER_SHADER_FAILS", "1")]);
+    let status = start
+        .ended_within(Duration::from_secs(30))
+        .unwrap_or_else(|| panic!("the start was still running 30 s later{}", run.context()));
+    say(&format!("{}: the start ended after {:.1} s", run.name, began.elapsed().as_secs_f64()));
+    assert!(!status.success(), "a start that couldn't draw ended with {status}{}", run.context());
+    let said = start.stderr();
+    assert!(said.contains("SoftPresenter can't draw with this computer's graphics ("), "it said so: {said:?}");
+    // Which pipeline, and what the graphics said of it, are in the log (and on the standard error).
+    let log = run.log();
+    let why = log.lines().find(|line| line.contains("[gpu] The graphics (")).unwrap_or_default();
+    assert!(why.contains("can't run the painter's shaders"), "the log says why{}", run.context());
+    assert!(why.contains("sp-render testing aid"), "the log names the pipeline: {why:?}");
+    assert!(!log.contains("panicked"), "nothing panicked{}", run.context());
+}
+
 #[test]
 fn a_second_start_on_the_same_folder_brings_the_first_to_the_front_and_opens_nothing() {
     let Some(run) = Run::new("a_second_start_on_the_same_folder_brings_the_first_to_the_front_and_opens_nothing")

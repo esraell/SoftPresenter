@@ -136,7 +136,9 @@ Everything is marked `SoftPresenter:` in the source. Removed from the published 
   OpenGL, trying the next adapter if one cannot make a device. Elsewhere wgpu's own choice
   is kept. `RenderContext` has a `memory_hints` field, wgpu's default unless the caller sets
   another, which the devices it makes are asked for with (so SoftPresenter can try smaller
-  memory blocks on DirectX 12 and Vulkan).
+  memory blocks on DirectX 12 and Vulkan). It also has a `refused` field: each adapter that
+  was tried and could not make a device, by name, with what wgpu said, which upstream lets go
+  (SoftPresenter's log says it when no device could be made).
 - **`src/lib.rs`, stages on the processor (`RendererOptions::use_cpu`):** Vello can run every
   stage but the last on the processor, "useful for debugging". SoftPresenter draws that way on
   Windows' software graphics (WARP, "Microsoft Basic Render Driver"), whose compiler faults

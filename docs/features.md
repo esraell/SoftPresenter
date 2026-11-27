@@ -1881,7 +1881,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   screen stood still meanwhile. A slide takes a few tens of milliseconds more there (a 5K slide
   of words, about 65 ms on that iMac), the log's `[gpu]` line says so, and the same fixed
   working memory means a slide too heavy for it is refused as too much to draw. Any other
-  graphics card, a Mac with Apple silicon and Linux draw as before.
+  graphics card, a Mac with Apple silicon and Linux draw as before. Intel's own graphics were
+  tried on a Mac mini of 2014 (Intel Iris, macOS 11.6): the app starts in one to three seconds and
+  rests at under 1% of a processor, a fade between slides draws about 70 pictures a second,
+  and one over a playing 1080p video about 15, with a third of the video's pictures dropped
+  meanwhile.
+- **Graphics that can't draw.** When no graphics device can be used, or the graphics refuse
+  one of the shaders SoftPresenter draws with, the start ends at once: the log's `[gpu]` line
+  names the graphics, the shader and what was said of it, and a message window says the app
+  can't start (the window itself has not been tried on a screen).
 - **NDI on Linux.** NDI Tools, which installs NDI's runtime on a Mac and on Windows, doesn't
   exist for Linux, so there, while NDI isn't installed, an NDI screen in the Screens window (and
   an NDI Source box in the inspector) has **Download NDI…** beside the ndi.video link. It

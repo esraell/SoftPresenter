@@ -2926,8 +2926,21 @@ impl App {
             .instance
             .create_surface(home_window.clone())
             .map_err(|e| format!("Could not draw to the home window: {e}"))?;
-        let device_id = pollster::block_on(context.device(Some(&home_surface)))
-            .ok_or("No graphics device was found that SoftPresenter can use.")?;
+        let making = Instant::now();
+        let Some(device_id) = pollster::block_on(context.device(Some(&home_surface))) else {
+            // Why, for the log: the graphics that were tried, and what each said (its
+            // compiler refusing a shader the graphics library builds for itself, say).
+            let why = if context.refused.is_empty() {
+                "this computer listed none that can draw to a window".to_owned()
+            } else {
+                context.refused.join("; ")
+            };
+            applog::problem(
+                "gpu",
+                &format!("No graphics device could be used, after {:.1} s: {why}", making.elapsed().as_secs_f32()),
+            );
+            return Err(no_graphics_words(None));
+        };
         let handle = &context.devices[device_id];
         // Which graphics the app drew with, for the log of a computer that draws slowly: and
         // whether the painters take the early stages of every picture off them
@@ -3018,7 +3031,12 @@ impl App {
         );
         let mut egui_renderer =
             egui_wgpu::Renderer::new(&gpu.device, home_format, egui_wgpu::RendererOptions::default());
-        let mut thumbs = Thumbs::new(&gpu.device, &gpu.queue)?;
+        // A GPU whose compiler won't take the painter's shaders: said now, by the pipeline's
+        // name, where it would otherwise only show as pictures never drawn.
+        let mut thumbs = Thumbs::new(&gpu.device, &gpu.queue).map_err(|why| {
+            applog::problem("gpu", &format!("The graphics ({}) can't run the painter's shaders: {why}", chosen.name));
+            no_graphics_words(Some(&chosen.name))
+        })?;
         let (preview, _) = thumbs.preview(&gpu, &mut egui_renderer, &Layers::default(), &self.theme);
         // The live preview: two small textures the output thread draws the audience picture
         // into, turn about, for the Program preview to show what the screens show.
@@ -13042,7 +13060,12 @@ impl ApplicationHandler<AppEvent> for App {
                 el.exit();
             }
             Err(message) => {
-                eprintln!("{message}");
+                eprintln!("{}", i18n::english_of(&message));
+                // Someone who opened the app from the Dock or the Start menu sees no console:
+                // without this the app would only be gone.
+                if !self.quiet() {
+                    start_failed_window(&message);
+                }
                 self.failed = true;
                 self.left = true;
                 el.exit();
@@ -14026,6 +14049,31 @@ fn app_window(attrs: winit::window::WindowAttributes) -> winit::window::WindowAt
 /// A graphics error nobody asked to catch, written in the log (a window program on Windows has no
 /// console for it to go to). One that comes on every frame is written once, then once a minute
 /// with how many times it came since, so it can't fill the log.
+/// What a start that found no graphics it can draw with says, in the app's language: with the
+/// name of the graphics when a device was made and its compiler then refused the painter's
+/// shaders.
+fn no_graphics_words(graphics: Option<&str>) -> String {
+    match graphics {
+        None => i18n::t("dialogs.no_graphics", "No graphics device was found that SoftPresenter can use.").to_owned(),
+        Some(name) => i18n::tf(
+            "dialogs.graphics_refused",
+            "SoftPresenter can't draw with this computer's graphics ({graphics}), so it can't start. Its log says why.",
+            &[("graphics", name)],
+        ),
+    }
+}
+
+/// Shows why the app couldn't start in a message of the system's own, and waits for it to be
+/// closed. Nothing else is running yet, so nothing is held up by the wait.
+fn start_failed_window(words: &str) {
+    let _ = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title("SoftPresenter")
+        .set_description(words)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+}
+
 fn graphics_error(error: &str) {
     use std::sync::Mutex;
     static SAID: Mutex<Vec<(String, u32, Instant)>> = Mutex::new(Vec::new());

@@ -326,6 +326,12 @@ pub struct Options {
     pub emit_int_div_checks: bool,
     /// Whether to validate ray query calls
     pub ray_query_initialization_tracking: bool,
+    /// SoftPresenter: whether a compute entry point is given the
+    /// `max_total_threads_per_threadgroup` attribute (from MSL 2.1 on). Where it is left out,
+    /// the caller must set `MTLComputePipelineDescriptor.maxTotalThreadsPerThreadgroup` to the
+    /// workgroup's size itself, or Metal may choose a lower limit. The compilers of some older
+    /// Intel graphics abort on the attribute.
+    pub emit_workgroup_size_attribute: bool,
 }
 
 impl Default for Options {
@@ -343,6 +349,7 @@ impl Default for Options {
             mesh_shader_primitive_indices_clamp: true,
             ray_query_initialization_tracking: true,
             emit_int_div_checks: true,
+            emit_workgroup_size_attribute: true,
         }
     }
 }

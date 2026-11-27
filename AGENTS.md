@@ -102,6 +102,7 @@ person:
 | `SOFTPRESENTER_HOLD_WINDOW_PICTURE=<ms>@<seconds>` | The first picture a screen's window asks for that many seconds after the start comes that many milliseconds late, once, as when the window system is slow to give a window its next picture (works in a quiet run) |
 | `SOFTPRESENTER_SLOW_PRESENT=<ms>` or `<ms>@<screen>` | Every picture a screen's window asks for comes that many milliseconds late (only the window of the screen of that name, with one), time after time, as when the window system is slow to take a window's pictures and give them back (a display behind a splitter, a busy window system): the window is shown fewer pictures, and nothing else should be held up by it (works in a quiet run) |
 | `SOFTPRESENTER_FADE_CACHE=0` (or `off`) | The way back to the old drawing, with no new build: a fade draws both slides again at every step, and a slide over a playing video is drawn again for each picture of the video, as before. By default a fade on a solid screen draws each slide once into a texture and then only blends the two (`Output::cache_sides`), and the slide over a video is drawn once into a texture that each picture of the video is laid under (`Output::steady_scene`). A file named `fade-cache-off` in the data folder does the same without setting anything. Read once as the app starts |
+| `SOFTPRESENTER_SHADER_FAILS=1` | Every painter asks the graphics for one more compute pipeline, which they must refuse (`sp-render testing aid`), as a GPU whose compiler won't take one of the painter's shaders does: the start ends at once, saying the graphics can't be drawn with, and the log's `[gpu]` line names the pipeline and what the graphics said of it. In a run that isn't quiet the same words are shown in a message window |
 | `SOFTPRESENTER_GPU_MEMORY=small` | On DirectX 12 and Vulkan, GPU memory comes from wgpu's small blocks (8 to 64 MB) instead of its usual 128 to 256 MB ones, which are kept once made: to compare, on a PC with no new build, the app's memory and the screens' timing (a 4K picture then gets a block of its own each time it is made, on the screens' thread). A Mac's Metal takes no notice. The log's `[gpu]` line says which was asked for. Read once as the app starts |
 | `SOFTPRESENTER_OUTPUT_ROOM=<lines>` | The screens' painter has room for that many lines whatever is drawn, so a fuller slide is too heavy for them |
 | `SOFTPRESENTER_SETUP=1` (or a step: `free-songs`, `bibles`…) | Show the first-start setup in a quiet run too, at that step |
@@ -234,7 +235,11 @@ process, and nextest gives each test a process of its own). One test alone:
   dragged onto the window there) is not a workspace crate either and carries smithay-clipboard's
   own `unsafe` code (joining the window library's connection, and reading and writing the
   clipboard's pipes); changes made to it here add none. The owner agreed to carrying it, with
-  `unsafe` code of its own, on 2026-11-26. `sp-decklink`'s `ffi` module calls
+  `unsafe` code of its own, on 2026-11-26. The copies of naga and wgpu-hal in
+  `third_party/naga` and `third_party/wgpu-hal` (two crates of wgpu, the graphics library, so
+  that Intel's graphics on a Mac are sent compute shaders their compiler takes) are not
+  workspace crates either; naga has no `unsafe` code, wgpu-hal carries its own throughout (calls
+  into the systems' graphics), and changes made to them here add none. `sp-decklink`'s `ffi` module calls
   the DeckLink driver through SoftPresenter's own C++ bridge (`bridge/bridge.cpp`, compiled
   with the DeckLink SDK's headers in `third_party/decklink-sdk`), the same arrangement as NDI's;
   the owner agreed to that on 2026-11-21. The bridge never calls back into Rust, and its

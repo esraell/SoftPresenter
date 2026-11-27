@@ -171,7 +171,9 @@ impl MovingPicture {
 ///   the first of those stages: Metal gave the work up after about a minute, and macOS
 ///   restarted the graphics, the whole screen standing still meanwhile. With the early stages
 ///   on the processor it drew a 5K slide in a few tens of milliseconds. Intel's own graphics
-///   haven't been tried, and are treated the same way.
+///   are treated the same way: an Intel Iris 5100 (a Mac mini of 2014, macOS 11.6) draws so.
+///   (Its compiler takes no compute shader that says its workgroup's size in the shader's
+///   text, the last stage's included: `third_party/wgpu-hal/PROVENANCE.md`.)
 ///
 /// Every other graphics device runs all the stages itself, as before; so does an Intel Mac's
 /// program run on Apple silicon, whose GPU is Apple's.
@@ -183,9 +185,56 @@ pub fn early_stages_on_processor(graphics: &wgpu::AdapterInfo) -> bool {
     }
 }
 
+/// Runs `make`, which builds GPU pipelines, and says what the graphics refused while it ran:
+/// the graphics library hands such an error to whoever listens for the device's errors, long
+/// after, and gives back a pipeline that can never be used, so without this a painter whose
+/// shaders the GPU's compiler would not take looks like one that works. The error names the
+/// pipeline by its label. Only what this thread asks of the device is caught.
+fn refused<T>(device: &wgpu::Device, make: impl FnOnce() -> T) -> Result<T, String> {
+    let internal = device.push_error_scope(wgpu::ErrorFilter::Internal);
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let made = make();
+    // The one asked for last is let go first.
+    let errors = [pollster::block_on(validation.pop()), pollster::block_on(internal.pop())];
+    match errors.into_iter().flatten().next() {
+        None => Ok(made),
+        Some(error) => Err(one_line(&error.to_string())),
+    }
+}
+
+/// A graphics error's lines as one, for a message and the log.
+fn one_line(error: &str) -> String {
+    error.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Testing aid: SOFTPRESENTER_SHADER_FAILS=1 has every painter [`Painter::new`] makes ask the
+/// graphics for one more compute pipeline, which they must refuse (its shader has no function of
+/// the name asked for), as a GPU whose compiler won't take one of the painter's shaders does:
+/// to try what the app says and does then, on any computer.
+fn shader_fails_aid(device: &wgpu::Device) {
+    if std::env::var_os("SOFTPRESENTER_SHADER_FAILS").is_none() {
+        return;
+    }
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("sp-render testing aid"),
+        source: wgpu::ShaderSource::Wgsl("@compute @workgroup_size(1) fn main() {}".into()),
+    });
+    // Only asked for: the pipeline that comes back can never be used.
+    let _ = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("sp-render testing aid"),
+        layout: None,
+        module: &module,
+        entry_point: Some("not_there"),
+        compilation_options: wgpu::PipelineCompilationOptions::default(),
+        cache: None,
+    });
+}
+
 impl Painter {
-    /// Fails if the GPU cannot run the renderer's shaders.
+    /// Fails if the GPU cannot run the renderer's shaders, saying which pipeline the graphics
+    /// refused and why.
     pub fn new(device: &wgpu::Device) -> Result<Painter, String> {
+        refused(device, || shader_fails_aid(device))?;
         Painter::make(device, early_stages_on_processor(&device.adapter_info()))
     }
 
@@ -210,7 +259,8 @@ impl Painter {
             num_init_threads: std::num::NonZeroUsize::new(1),
             pipeline_cache: None,
         };
-        Renderer::new(device, options)
+        // The renderer builds its pipelines here, on this thread (one thread, above).
+        refused(device, || Renderer::new(device, options))?
             .map(|renderer| Painter {
                 renderer,
                 moving: Vec::new(),
@@ -408,7 +458,10 @@ impl Painter {
         width: u32,
         height: u32,
     ) -> Result<(), PaintError> {
-        self.to_colours.get_or_insert_with(|| ToColours::new(device));
+        if self.to_colours.is_none() {
+            // A pipeline the graphics refuse is said, by its label, and not kept.
+            self.to_colours = Some(refused(device, || ToColours::new(device)).map_err(PaintError::Failed)?);
+        }
         let Some(moving) = self.moving_picture(device, width, height, PixelOrder::Rgba) else { return Ok(()) };
         let (cw, ch) = YuvPlanes::chroma_size(width, height);
         let (luma, chroma) = (vec![16u8; width as usize * height as usize], vec![128u8; cw as usize * ch as usize * 2]);
@@ -433,8 +486,14 @@ impl Painter {
     /// Gets the compute pass [`Painter::show_texture`] uses ready, which takes a moment (the
     /// GPU's compiler works on it), so that the first picture of a video doesn't. Does nothing
     /// the second time.
-    pub fn prepare_texture_copy(&mut self, device: &wgpu::Device) {
-        self.swizzle.get_or_insert_with(|| Swizzle::new(device));
+    ///
+    /// Fails, saying why, if the graphics refuse its pipeline; it is then not kept, so
+    /// [`Painter::show_texture`] would ask them for it again.
+    pub fn prepare_texture_copy(&mut self, device: &wgpu::Device) -> Result<(), String> {
+        if self.swizzle.is_none() {
+            self.swizzle = Some(refused(device, || Swizzle::new(device))?);
+        }
+        Ok(())
     }
 
     /// Lets go of the textures [`Painter::show_texture`] held that the GPU has finished with.
@@ -898,6 +957,45 @@ impl Painter {
 mod tests {
     use super::*;
     use wgpu::{AdapterInfo, Backend, DeviceType};
+
+    /// The Metal text of a compute shader, as the graphics library writes it for a Mac with
+    /// macOS 11 (Metal's language 2.3), with or without the attribute that says how many
+    /// threads its workgroup has.
+    #[cfg(target_os = "macos")]
+    fn metal_text(shader: &str, workgroup_attribute: bool) -> String {
+        use wgpu::naga;
+        let module = naga::front::wgsl::parse_str(shader).expect("the shader parses");
+        let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module)
+            .expect("the shader is valid");
+        let options = naga::back::msl::Options {
+            lang_version: (2, 3),
+            emit_workgroup_size_attribute: workgroup_attribute,
+            ..Default::default()
+        };
+        naga::back::msl::write_string(&module, &info, &options, &naga::back::msl::PipelineOptions::default())
+            .expect("written for Metal")
+            .0
+    }
+
+    /// The compiler of an Intel Iris 5100 (a Mac mini of 2014, macOS 11.6) stops at
+    /// `max_total_threads_per_threadgroup` on any compute shader, the app's own and the graphics
+    /// library's, and the app could not start. For Intel's graphics the shaders are written
+    /// without it (the copy of the graphics library's Metal layer sets the number on the
+    /// pipeline instead); for every other GPU they are written as before.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_compute_shader_for_intel_graphics_is_written_without_the_workgroup_attribute() {
+        for shader in [SWIZZLE_SHADER, "@compute @workgroup_size(1) fn main() {}"] {
+            let with = metal_text(shader, true);
+            let without = metal_text(shader, false);
+            assert_eq!(with.matches("max_total_threads_per_threadgroup").count(), 1, "{with}");
+            assert!(!without.contains("max_total_threads_per_threadgroup"), "{without}");
+            // Nothing else changes: taking the attribute out of the one gives the other.
+            let attribute = if shader == SWIZZLE_SHADER { 64 } else { 1 };
+            assert_eq!(with.replace(&format!("[[max_total_threads_per_threadgroup({attribute})]] "), ""), without);
+        }
+    }
 
     /// Only Windows' software graphics (its DirectX 12 device that runs on the processor) and
     /// an Intel Mac's graphics (a Metal device that isn't Apple's) have the renderer's early

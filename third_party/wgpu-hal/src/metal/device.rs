@@ -207,6 +207,11 @@ impl super::Device {
                         _ => (4, 0),
                     },
                     inline_samplers: Default::default(),
+                    // SoftPresenter: see `PrivateDisabilities::broken_workgroup_size_attribute`.
+                    emit_workgroup_size_attribute: !self
+                        .shared
+                        .disabilities
+                        .broken_workgroup_size_attribute,
                     spirv_cross_compatibility: false,
                     fake_missing_bindings: false,
                     per_entry_point_map: naga::back::msl::EntryPointResourceMap::from([(
@@ -1855,6 +1860,16 @@ impl crate::Device for super::Device {
                 descriptor.setLabel(Some(&NSString::from_str(name)));
             }
 
+            // SoftPresenter: where the shader was written without the attribute that says how
+            // many threads its workgroup has, the descriptor says it, and a pipeline that
+            // came out with room for fewer is refused: its dispatches would do nothing.
+            let workgroup_threads = cs.wg_size.width * cs.wg_size.height * cs.wg_size.depth;
+            let workgroup_on_descriptor = self.shared.disabilities.broken_workgroup_size_attribute
+                && !matches!(module.source, ShaderModuleSource::Passthrough(_));
+            if workgroup_on_descriptor {
+                descriptor.setMaxTotalThreadsPerThreadgroup(workgroup_threads);
+            }
+
             let raw = self
                 .shared
                 .device
@@ -1871,6 +1886,16 @@ impl crate::Device for super::Device {
                         format!("new_compute_pipeline_state: {e:?}"),
                     )
                 })?;
+
+            if workgroup_on_descriptor && raw.maxTotalThreadsPerThreadgroup() < workgroup_threads {
+                return Err(crate::PipelineError::Linkage(
+                    wgt::ShaderStages::COMPUTE,
+                    format!(
+                        "the pipeline has room for {} threads in a workgroup, and its shader needs {workgroup_threads}",
+                        raw.maxTotalThreadsPerThreadgroup()
+                    ),
+                ));
+            }
 
             self.counters.compute_pipelines.add(1);
 

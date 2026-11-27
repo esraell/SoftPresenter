@@ -75,6 +75,11 @@ fontique = { path = "third_party/fontique" }
 # Wayland desktop, which also answers drags from other programs here, so that files can be
 # dragged onto the window there: third_party/smithay-clipboard/PROVENANCE.md says why.
 smithay-clipboard = { path = "third_party/smithay-clipboard" }
+# naga 30.0.2 and wgpu-hal 30.0.2 (the shader translator and the layer over Metal of the
+# graphics library), so that Intel's graphics on a Mac are sent compute shaders their compiler
+# takes: third_party/naga/PROVENANCE.md and third_party/wgpu-hal/PROVENANCE.md say why.
+naga = { path = "third_party/naga" }
+wgpu-hal = { path = "third_party/wgpu-hal" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

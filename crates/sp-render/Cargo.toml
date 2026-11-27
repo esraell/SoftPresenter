@@ -9,9 +9,9 @@ license.workspace = true
 sp-model.workspace = true
 vello.workspace = true
 parley.workspace = true
+pollster.workspace = true
 
 [dev-dependencies]
-pollster.workspace = true
 png.workspace = true
 
 [lints]

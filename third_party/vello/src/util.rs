@@ -19,6 +19,9 @@ pub struct RenderContext {
     /// SoftPresenter: how the devices made from now on hand out GPU memory: wgpu's default
     /// unless the caller sets another before asking for a device (see `new_device_on`).
     pub memory_hints: wgpu::MemoryHints,
+    /// SoftPresenter: each adapter that was tried and couldn't make a device, by name, with
+    /// what the graphics library said (see `new_device_on`): upstream lets the reason go.
+    pub refused: Vec<String>,
 }
 
 pub struct DeviceHandle {
@@ -49,6 +52,7 @@ impl RenderContext {
             instance,
             devices: Vec::new(),
             memory_hints: wgpu::MemoryHints::default(),
+            refused: Vec::new(),
         }
     }
 
@@ -243,7 +247,7 @@ impl RenderContext {
         #[cfg(feature = "wgpu-profiler")]
         let maybe_features = maybe_features | wgpu_profiler::GpuProfiler::ALL_WGPU_TIMER_FEATURES;
 
-        let (device, queue) = adapter
+        let asked = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
                 required_features: features & maybe_features,
@@ -252,8 +256,16 @@ impl RenderContext {
                 memory_hints: self.memory_hints.clone(),
                 ..Default::default()
             })
-            .await
-            .ok()?;
+            .await;
+        // SoftPresenter: why an adapter couldn't make a device is kept (`refused`).
+        let (device, queue) = match asked {
+            Ok(made) => made,
+            Err(error) => {
+                self.refused
+                    .push(format!("{}: {error}", adapter.get_info().name));
+                return None;
+            }
+        };
         let device_handle = DeviceHandle {
             adapter,
             device,

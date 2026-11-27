@@ -36,5 +36,7 @@
   "dialogs.live_menu.app_made": "El versículo o el subtítulo en pantalla no tiene menú.",
   "dialogs.live_menu.none": "Pon una diapositiva en pantalla para abrir su menú.",
   "dialogs.media.follows_folder": "{name} sigue una carpeta: saca el archivo de la carpeta.",
-  "dialogs.already_running": "SoftPresenter ya está abierto o todavía se está cerrando: espera un momento y, si sigues sin ver su ventana, finalízalo en el Administrador de tareas."
+  "dialogs.already_running": "SoftPresenter ya está abierto o todavía se está cerrando: espera un momento y, si sigues sin ver su ventana, finalízalo en el Administrador de tareas.",
+  "dialogs.no_graphics": "No se encontró ningún dispositivo gráfico que SoftPresenter pueda usar.",
+  "dialogs.graphics_refused": "SoftPresenter no puede dibujar con los gráficos de este ordenador ({graphics}), así que no puede abrirse. Su registro dice por qué."
 }

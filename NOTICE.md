@@ -229,6 +229,14 @@ from the copy in `third_party/fontique`, which SoftPresenter has changed: the co
 Fontique's licence files, marks each change, and says what was changed and why in its
 `PROVENANCE.md`. [`docs/licences/fontique.md`](docs/licences/fontique.md) explains.
 
+### wgpu
+
+SoftPresenter draws through wgpu (<https://github.com/gfx-rs/wgpu>), copyright the gfx-rs
+developers, licensed under MIT OR Apache-2.0. Its `naga` and `wgpu-hal` crates, version 30.0.2,
+are built from the copies in `third_party/naga` and `third_party/wgpu-hal`, which SoftPresenter
+has changed: each copy keeps wgpu's licence files, marks each change, and says what was changed
+and why in its `PROVENANCE.md`. [`docs/licences/wgpu.md`](docs/licences/wgpu.md) explains.
+
 ### smithay-clipboard
 
 On Linux, SoftPresenter's clipboard on Wayland desktops is smithay-clipboard

@@ -7479,7 +7479,11 @@ template <typename A>
             };
 
             // https://web.archive.org/web/20181029003926/https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf
-            if ep.stage == crate::ShaderStage::Compute && options.lang_version >= (2, 1) {
+            // SoftPresenter: left out where the caller says so (`emit_workgroup_size_attribute`).
+            if ep.stage == crate::ShaderStage::Compute
+                && options.lang_version >= (2, 1)
+                && options.emit_workgroup_size_attribute
+            {
                 let total_threads =
                     ep.workgroup_size[0] * ep.workgroup_size[1] * ep.workgroup_size[2];
                 write!(
