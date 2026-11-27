@@ -1065,7 +1065,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   In the Edit view (its slides, themes, props and stage layouts alike) the keyboard is the
   editor's, and only the keys that clear reach the screens: the F keys as anywhere else (not
   while a text box has the keyboard), and Escape only when it has nothing to do in the editor:
-  no words being typed in a box (Escape puts them back), no name being retyped, nothing picked
+  no words being typed in a box (Escape puts them back), no name being retyped, no field in the
+  inspector with the keyboard (Escape leaves the field, and the box stays picked), nothing picked
   on the canvas (Escape lets go of it), no menu, question or sheet open (Escape closes it) and
   no drag going on (Escape stops it). So a first Escape lets go of the picked object and a
   second clears the screens; holding Escape down never clears there, so the press that let go
@@ -1087,7 +1088,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   open), and a right-click opens its other choices; the objects of the one open stay at the
   foot of the column. Delete with nothing picked on the canvas is the list's Delete key: it
   acts on the slides picked out (or the one open), the prop, the stage layout or the template
-  open. Templates and themes are dragged to another place the same way (the built-in theme
+  open. In the Theme Editor, a click on a theme in the list gives Delete to that theme (it asks
+  first) until a box is picked on the canvas: by a press on the slide, or a box just added (by a
+  tool, a key, the menu bar or a paste). Templates and themes are dragged to another place the same way (the built-in theme
   stays first, and the themes' order is kept for the next start). Under Slides, a SONG heading comes first, over the songs to
   choose from as plain rows with a song's mark (those of the playlist the Service view lists, or
   of the library it lists, and the song open), the open one lighter; a long list scrolls in
@@ -1450,9 +1453,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   laid out at the box's size and see-through where the page has no
   background, so it can sit over the slide's background or under its words. Adding one picks it
   and gives the address field in the inspector's Shape tab the keyboard, so the address can be
-  typed at once; until something is typed there or the field is clicked, Delete and Backspace
-  still take the box away, as for any box picked, and Escape leaves the field with the box still
-  picked. Only addresses starting with https:// open. The page of a song open in the window is loaded ahead, so it has
+  typed at once; until something is typed there or the field is clicked, Delete, Backspace and
+  Undo still take the box away, as for any box picked, and Escape leaves the field with the box
+  still picked. Only addresses starting with https:// open. The page of a song open in the window is loaded ahead, so it has
   loaded and drawn by the time its slide goes on screen; nothing shows on the screens until it
   has, and a page shown again isn't loaded again. Once loaded and drawn for the thumbnails, a
   page off the screens rests (no animation, next to no work) until its slide goes on screen,

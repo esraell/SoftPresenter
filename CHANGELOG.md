@@ -5,7 +5,7 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
-Remote Control uses less of the computer, and a new web page box can be deleted straight away.
+Remote Control uses less of the computer, and Delete, Undo and Escape in the Edit view act on the box you mean.
 
 ### Better
 
@@ -13,7 +13,9 @@ Remote Control uses less of the computer, and a new web page box can be deleted 
 
 ### Fixed
 
-- **Delete a new web page box.** In the Edit view, Delete or Backspace now takes away a Web Page box straight after you add it, as it does any box you pick; its address can still be typed at once. Before, nothing happened until you clicked another box and back, and pressing Escape first let go of the box, so Delete took the slide instead.
+- **Delete a new web page box.** In the Edit view, Delete, Backspace or Undo now takes away a Web Page box straight after you add it, as with any other box; its address can still be typed at once. Before, none of them did anything until you clicked another box and back.
+- **Escape out of a field.** In the Edit view, Escape out of a field in the inspector, such as a web page's address or the slide's notes, now only leaves the field, and the box stays picked. Before, it let go of the box too, so a Delete after it took the slide instead.
+- **Delete in the Theme Editor.** In the Theme Editor, Delete right after adding a box now takes that box away. Before, with a theme picked in the list, it asked about deleting the theme until you clicked the box.
 
 ## 0.9.0-dev.27 — 27 November 2026 (development build)
 

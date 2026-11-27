@@ -2924,21 +2924,21 @@ fn edit_view(
     // other keys never reach the slide, its objects or the list behind the question.
     let keys_taken = ui.ctx().text_edit_focused() || state.alert_open();
     // A web page box just added hands its address field the keyboard, so the address can be
-    // typed at once. Until something is typed there or the field is clicked, Delete and
-    // Backspace are still the box's, as for any box picked; every other key is the field's.
-    let address = state.inspector.address;
-    let fresh_address = address.filter(|address| {
+    // typed at once. Until something is typed there or the field is clicked, Delete, Backspace
+    // and Undo are still the box's (the field has nothing to take back); every other key is
+    // the field's.
+    let fresh_address = state.inspector.address.filter(|address| {
         address.given
             && !state.alert_open()
             && ui.ctx().memory(|memory| memory.has_focus(address.field))
             && state.editing.as_ref().is_some_and(|draft| draft.selection() == [address.object])
     });
-    // An Escape that takes the keyboard out of the address field is the field's alone (the
-    // toolkit lets go of the keyboard on Escape before the window is drawn, so no field has it
-    // here): the box stays picked, so a Delete after it takes the box and not the slide.
-    let escape_left_address = address.is_some_and(|address| {
-        ui.ctx().memory(|memory| memory.had_focus_last_frame(address.field) && !memory.has_focus(address.field))
-    });
+    // An Escape that takes the keyboard out of a field in the inspector is the field's alone
+    // (the toolkit lets go of the keyboard on Escape before the window is drawn, so no field
+    // has it here): the box stays picked, so a Delete after it takes the box and not the slide.
+    let left =
+        |field: egui::Id| ui.ctx().memory(|memory| memory.had_focus_last_frame(field) && !memory.has_focus(field));
+    let escape_left_field = state.inspector.field_with_keys.is_some_and(left);
 
     // Keys: undo and redo, delete and nudging, each only when the keyboard isn't taken.
     let (undo, redo, delete, nudge) = ui.input(|input| {
@@ -2967,8 +2967,10 @@ fn edit_view(
         }
         (undo, redo, delete, nudge)
     });
-    // The new box goes (below), and its address field lets go of the keyboard.
-    if delete && let Some(address) = fresh_address {
+    // Undo takes the new box away as Delete does (below), and its address field lets go of
+    // the keyboard.
+    let undo_new_box = undo && fresh_address.is_some();
+    if let Some(address) = fresh_address.filter(|_| delete || undo) {
         ui.ctx().memory_mut(|memory| memory.surrender_focus(address.field));
         state.inspector.address = None;
     }
@@ -3084,7 +3086,7 @@ fn edit_view(
     // Escape lets go of the objects picked (Edit › Deselect All of the old menu bar), unless it is
     // for something over the editor.
     if !keys_taken
-        && !escape_left_address
+        && !escape_left_field
         && state.edit_request.is_none()
         && state.editing.as_ref().is_some_and(|draft| draft.selected.is_some())
         && !state.escape_taken_above(ui.ctx())
@@ -3194,7 +3196,7 @@ fn edit_view(
         // deleted), or something deleted from the list (a template, prop, layout or version).
         // `HomeState::can_undo` says the same, for the buttons that are greyed without one.
         let apps = |step: Option<&EditStep>| matches!(step, Some(EditStep::Song | EditStep::Deleted));
-        if undo && !keys_taken {
+        if undo && (!keys_taken || undo_new_box) {
             if apps(state.edit_steps.last()) {
                 let step = state.edit_steps.pop().unwrap_or(EditStep::Song);
                 state.edit_redo.push(step);
@@ -4121,6 +4123,12 @@ fn edit_view(
     if let (Some(draft), Some(before)) = (state.editing.as_mut(), before)
         && draft.slide != before
     {
+        // A box just put on the slide (by a tool, a key, the menu bar, a paste or a drop) is
+        // picked: Delete and the other keys act on it, as after a press on the slide, and not
+        // on a theme picked in the Theme Editor's list.
+        if draft.selected.is_some_and(|id| !before.objects.iter().any(|object| object.id == id)) {
+            state.picking = Picking::Nothing;
+        }
         if std::mem::take(&mut state.inspector.new_step) {
             draft.break_run();
         }
@@ -11956,6 +11964,90 @@ mod tests {
         step(&mut state, pressed(Key::Delete, Modifiers::NONE));
         assert!(web_addresses(&state).is_empty(), "Delete then takes the box away");
         assert!(state.slide_request.is_none(), "and not the slide");
+    }
+
+    #[test]
+    fn escape_out_of_a_field_in_the_inspector_leaves_the_box_picked_for_delete() {
+        // A box picked, and the slide's notes typed in under the inspector.
+        let (show, mut state) = song_open(&[("Verse 1", 3)], 1);
+        let first = state.editing.as_ref().and_then(|draft| draft.slide.objects.first().map(|object| object.id));
+        if let Some(draft) = state.editing.as_mut() {
+            draft.select_only(first);
+        }
+        state.inspector.notes_open = true;
+        let (ctx, mut time) = (egui::Context::default(), 0.0);
+        let notes = home_place(&ctx, &show, &mut state, "Notes for whoever runs the slides", time);
+        click_at(&ctx, &show, &mut state, notes, &mut time);
+        let mut step = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            frame_events(&ctx, &show, state, events, time);
+        };
+        step(&mut state, vec![Event::Text("Slow".to_owned())]);
+        assert!(ctx.text_edit_focused(), "the notes have the keyboard");
+        step(&mut state, pressed(Key::Escape, Modifiers::NONE));
+        step(&mut state, Vec::new());
+        assert!(!ctx.text_edit_focused(), "Escape takes the keyboard out of the notes");
+        let picked = state.editing.as_ref().and_then(|draft| draft.selected);
+        assert_eq!(picked, first, "and only that: the box stays picked");
+        assert_eq!(state.editing.as_ref().and_then(|draft| draft.slide.notes.clone()).as_deref(), Some("Slow"));
+        step(&mut state, pressed(Key::Delete, Modifiers::NONE));
+        let still = state.editing.as_ref().is_some_and(|draft| draft.slide.objects.iter().any(|o| Some(o.id) == first));
+        assert!(!still, "Delete then takes the box away");
+        assert!(state.slide_request.is_none(), "and not the slide");
+    }
+
+    #[test]
+    fn undo_right_after_adding_a_web_page_takes_the_box_away() {
+        let (ctx, show, mut state, mut time) = added_by_tool("Web Page");
+        let mut step = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            frame_events(&ctx, &show, state, events, time);
+        };
+        step(&mut state, pressed(Key::Z, Modifiers::COMMAND));
+        assert!(web_addresses(&state).is_empty(), "Undo takes the new box away: its field has nothing to take back");
+        step(&mut state, Vec::new());
+        assert!(!ctx.text_edit_focused(), "the field has let go of the keyboard");
+        step(&mut state, pressed(Key::Z, Modifiers::COMMAND | Modifiers::SHIFT));
+        assert_eq!(web_addresses(&state), [""], "Redo puts it back");
+
+        // Once something is typed, Undo is the field's, and the box stays.
+        let (ctx, show, mut state, mut time) = added_by_tool("Web Page");
+        let mut step = |state: &mut HomeState, events: Vec<Event>| {
+            time += 0.1;
+            frame_events(&ctx, &show, state, events, time);
+        };
+        step(&mut state, vec![Event::Text("a".to_owned())]);
+        step(&mut state, pressed(Key::Z, Modifiers::COMMAND));
+        assert_eq!(web_addresses(&state).len(), 1, "the box stays");
+        assert!(ctx.text_edit_focused(), "the field keeps the keyboard");
+    }
+
+    #[test]
+    fn delete_right_after_adding_a_box_in_the_theme_editor_takes_the_box_not_the_theme() {
+        // A theme picked in the list, as a click on it leaves it: Delete is for the theme until a
+        // box is picked on the canvas, and a box just added is picked, as one clicked on is.
+        let show = three_songs();
+        let count = |state: &HomeState| state.editing.as_ref().map_or(0, |draft| draft.slide.objects.len());
+        for tool in ["Web Page", "Add Text"] {
+            let theme = Theme::builtin();
+            let draft = EditDraft::of_slide(theme.templates[0].as_slide(crate::editor::sample_words()), 0);
+            let mut state = HomeState {
+                theme_edit: Some(ThemeEdit::of(1, theme)),
+                editing: Some(draft),
+                theme_names: vec!["Built-in".to_owned(), "Evening".to_owned()],
+                picking: Picking::Themes,
+                ..HomeState::default()
+            };
+            let boxes = count(&state);
+            let (ctx, mut time) = (egui::Context::default(), 0.0);
+            let at = home_place(&ctx, &show, &mut state, tool, time);
+            click_at(&ctx, &show, &mut state, at, &mut time);
+            assert_eq!(count(&state), boxes + 1, "{tool} adds a box");
+            frame_events(&ctx, &show, &mut state, pressed(Key::Delete, Modifiers::NONE), time + 0.1);
+            assert_eq!(count(&state), boxes, "Delete takes the box {tool} added away");
+            assert_eq!(state.confirm_delete_theme, None, "and doesn't ask about deleting the theme");
+            assert!(state.theme_edit.as_ref().is_some_and(|edit| edit.index == 1), "the theme stays open");
+        }
     }
 
     #[test]

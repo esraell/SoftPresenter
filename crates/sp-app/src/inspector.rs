@@ -61,12 +61,15 @@ pub struct InspectorState {
     pub new_step: bool,
     /// A− or A+ was pressed beside Size: how much to step every size by (slide units).
     pub size_step: f32,
-    /// The web page address field that last had the keyboard (see [`web_address`]), for the Edit
-    /// view's keys, which are read before the panel is drawn.
+    /// The address field of a web page box just added (see [`web_address`]), for the Edit view's
+    /// keys, which are read before the panel is drawn.
     pub address: Option<AddressField>,
+    /// The text field in the panel that had the keyboard when it was last drawn, if one had: an
+    /// Escape that takes the keyboard out of it is its alone (see `edit_view`).
+    pub field_with_keys: Option<egui::Id>,
 }
 
-/// A web page box's address field, as the Edit view's Delete and Escape need it.
+/// A web page box's address field, as the Edit view's Delete and Undo need it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AddressField {
     /// The box.
@@ -74,8 +77,8 @@ pub struct AddressField {
     /// The field, as the toolkit knows it when it has the keyboard.
     pub field: egui::Id,
     /// The field has the keyboard only because the box was just added, ready for the address:
-    /// nothing has been typed in it since, and it hasn't been clicked. Delete and Backspace are
-    /// then still for the box.
+    /// nothing has been typed in it since, and it hasn't been clicked. Delete, Backspace and
+    /// Undo are then still for the box.
     pub given: bool,
 }
 
@@ -683,6 +686,12 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
             ui.allocate_rect(Rect::from_min_size(room.min, vec2(room.width(), TOP + used + BOTTOM)), Sense::hover());
         });
     });
+    // Which of the panel's text fields has the keyboard now, if one has; not one elsewhere in the
+    // window, such as the words being typed on the slide, which are drawn after the panel.
+    let column = ui.max_rect();
+    let focused = ui.memory(|memory| memory.focused()).filter(|_| ui.ctx().text_edit_focused());
+    state.inspector.field_with_keys =
+        focused.filter(|id| ui.ctx().read_response(*id).is_some_and(|field| column.contains(field.rect.center())));
     leave
 }
 
@@ -793,8 +802,7 @@ fn nothing_selected(ui: &mut egui::Ui) {
 /// A web page box's address: what is typed is kept while the field has the keyboard, and taken
 /// when it is left (with https:// put in front of a bare name). An address that isn't https is
 /// refused, and says so. A box just added hands the field the keyboard, so the address can be
-/// typed at once; `address` says which field has it, and whether only for that (see
-/// [`AddressField`]).
+/// typed at once; `address` says so, and for how long (see [`AddressField`]).
 fn web_address(ui: &mut egui::Ui, object: sp_model::Uuid, url: &mut String, address: &mut Option<AddressField>) {
     ui.label(egui::RichText::new(t("inspector.web", "Web Page")).size(12.5).strong().color(INK));
     ui.add_space(2.0);
@@ -807,11 +815,9 @@ fn web_address(ui: &mut egui::Ui, object: sp_model::Uuid, url: &mut String, addr
     if ui.data_mut(|data| data.remove_temp::<bool>(egui::Id::unique("web address focus"))).is_some() {
         field.request_focus();
         *address = Some(AddressField { object, field: field.id, given: true });
-    } else if has_keys(ui) && address.is_none_or(|known| known.field != field.id) {
-        *address = Some(AddressField { object, field: field.id, given: false });
     }
-    // Typing in it, a click in it, or leaving it makes the field the person's: Delete and
-    // Backspace edit its words from then on.
+    // Typing in it, a click in it, or leaving it makes the field the person's: Delete,
+    // Backspace and Undo work on its words from then on.
     if let Some(known) = address.as_mut().filter(|known| known.field == field.id)
         && (field.changed() || field.is_pointer_button_down_on() || !has_keys(ui))
     {
