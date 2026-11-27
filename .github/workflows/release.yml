@@ -1,0 +1,345 @@
+name: Release
+
+# A draft pre-release for a version tag, with its three downloads built here on GitHub. A person
+# reads the draft, tries the downloads and publishes it by hand; this workflow never publishes,
+# and never touches a release that is already there.
+#
+# Push a tag such as v0.9.0-dev.28 on a commit of master, once CHANGELOG.md has a section for
+# that version (git tag v0.9.0-dev.28 <commit> && git push origin v0.9.0-dev.28). Or run it by
+# hand (Actions › Release › Run workflow) with a tag already pushed. The jobs:
+#
+# 1. The gate. The tagged commit's checks must be green on all three systems (Checks, Windows
+#    and Linux, .github/scripts/checks-green.sh). It waits up to 90 minutes for checks still
+#    running, and stops the release at once if one failed. Only a run started by hand can go
+#    on past red checks, and only with a reason written in, which goes into the draft's notes.
+# 2. The three downloads, side by side, each built clean (no cache from other runs):
+#    - SoftPresenter-<version>-mac.zip, universal for Apple silicon and Intel
+#      (scripts/macos-app.sh), signed ad hoc for now;
+#    - SoftPresenter-<version>-windows.zip (scripts/windows-package.sh), cross-built on a Mac
+#      with mingw-w64 as on the maintainer's, with the project's published FFmpeg for Windows;
+#    - softpresenter_<version with ~>_amd64.deb (linux-package.yml, which also installs, tries
+#      and removes it).
+# 3. The draft pre-release for the tag, with the three files and notes from CHANGELOG.md
+#    (.github/scripts/release-notes.sh). Only this job may write to the repository.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to make the draft for, such as v0.9.0-dev.28 (already pushed)"
+        required: true
+        type: string
+      unchecked_reason:
+        description: "Leave empty. Only to build from a commit whose checks aren't all green: why, in words (it goes into the draft's notes)"
+        required: false
+        default: ""
+        type: string
+
+# One run at a time for each tag, and none cancelled.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+# Each job says what it may do.
+permissions: {}
+
+jobs:
+  gate:
+    name: The tagged commit's checks are green
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+      sha: ${{ steps.tag.outputs.sha }}
+      unchecked: ${{ steps.checks.outputs.unchecked }}
+    env:
+      # Handed to the steps as data, never pasted into a command line.
+      TAG_INPUT: ${{ inputs.tag }}
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
+      UNCHECKED_REASON: ${{ inputs.unchecked_reason }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # The tag (pushed, or typed), its version, and the commit it names as GitHub has it: every
+      # job below builds that commit, whatever the tag or master do meanwhile.
+      - name: The tag, its version and its commit
+        id: tag
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then tag=$TAG_INPUT
+          elif [ "$REF_TYPE" = tag ]; then tag=$REF_NAME
+          else echo "::error title=No tag::This workflow runs for a tag."; exit 1; fi
+          if ! printf '%s\n' "$tag" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'; then
+            echo "::error title=Not a version tag::\"$tag\" (expected v0.9.0 or v0.9.0-dev.28)"
+            exit 1
+          fi
+          # A tag with a message is an object of its own, which names the commit.
+          object=$(gh api "repos/$REPO/git/ref/tags/$tag" --jq '.object.type + " " + .object.sha')
+          for _ in 1 2 3; do
+            case "$object" in
+            "tag "*) object=$(gh api "repos/$REPO/git/tags/${object#tag }" --jq '.object.type + " " + .object.sha') ;;
+            *) break ;;
+            esac
+          done
+          case "$object" in
+          "commit "*) sha=${object#commit } ;;
+          *) echo "::error title=No commit::The tag $tag doesn't name a commit ($object)."; exit 1 ;;
+          esac
+          {
+            echo "tag=$tag"
+            echo "version=${tag#v}"
+            echo "sha=$sha"
+          } >>"$GITHUB_OUTPUT"
+          echo "$tag is commit $sha"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.tag.outputs.sha }}
+      # Checked before anything is built: the notes come from this section.
+      - name: CHANGELOG.md has a section for the version
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: .github/scripts/release-notes.sh "$VERSION" >/dev/null
+      - name: Every check on the commit passed (waiting up to 90 minutes)
+        id: checks
+        env:
+          SHA: ${{ steps.tag.outputs.sha }}
+        run: |
+          if .github/scripts/checks-green.sh "$REPO" "$SHA" 90; then exit 0; fi
+          reason=$(printf '%s' "$UNCHECKED_REASON" | tr '\r\n' '  ' | sed 's/^ *//; s/ *$//')
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$(printf '%s' "$reason" | wc -w)" -ge 3 ]; then
+            echo "::warning title=Built without green checks::$reason"
+            echo "unchecked=$reason" >>"$GITHUB_OUTPUT"
+            echo "Going on WITHOUT green checks, because: $reason"
+            exit 0
+          fi
+          exit 1
+
+  mac:
+    name: Mac zip (universal)
+    needs: gate
+    runs-on: macos-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      # The version the app calls itself; with it, macos-app.sh builds for both kinds of Mac.
+      SOFTPRESENTER_RELEASE_VERSION: ${{ needs.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+      - name: Install the Rust version in rust-toolchain.toml, and the Intel Macs' target
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-apple-darwin
+      # FFmpeg's x86 assembly, for the Intel half: without it the Intel FFmpeg is the slow one.
+      - name: Install nasm
+        run: brew install nasm
+      # On its own, as macos-app.sh goes on without FFmpeg if this fails.
+      - name: Build FFmpeg (LGPL, for both kinds of Mac)
+        run: scripts/build-ffmpeg.sh
+      - name: Build the app
+        run: scripts/macos-app.sh
+      # ------------------------------------------------------------------------------------
+      # DEVELOPER ID, LATER: signing with the owner's Developer ID goes here, once its
+      # certificate and an App Store Connect key are in this repository's secrets. Import the
+      # certificate into a keychain made for this run, sign with SOFTPRESENTER_SIGN_IDENTITY set
+      # to it (in the step above, with --options runtime and --timestamp; see macos-app.sh),
+      # then notarize the zip with notarytool and staple the app. Until then the app is signed
+      # ad hoc, and the release notes say how to open it past macOS's warning.
+      # ------------------------------------------------------------------------------------
+      - name: Check the app
+        run: |
+          app=target/release/SoftPresenter.app
+          for program in softpresenter softpresenter-mirror ffmpeg ffprobe; do
+            if [ ! -x "$app/Contents/MacOS/$program" ]; then
+              echo "::error title=Missing from the app::$program isn't in $app/Contents/MacOS"
+              exit 1
+            fi
+            echo "$program: $(lipo -archs "$app/Contents/MacOS/$program")"
+          done
+          if ! strings -a "$app/Contents/MacOS/softpresenter" | grep -qF "$SOFTPRESENTER_RELEASE_VERSION"; then
+            echo "::error title=Wrong version::the app doesn't carry $SOFTPRESENTER_RELEASE_VERSION"
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=2 "$app" 2>&1 | grep -E '^(Identifier|Signature|Authority)' || true
+      - name: Zip it
+        run: |
+          mkdir -p dist
+          zip="dist/SoftPresenter-$SOFTPRESENTER_RELEASE_VERSION-mac.zip"
+          ditto -c -k --keepParent target/release/SoftPresenter.app "$zip"
+          unzip -l "$zip" | head -8
+          ls -l "$zip"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: softpresenter-mac-zip
+          path: dist/SoftPresenter-*-mac.zip
+          if-no-files-found: error
+
+  windows:
+    name: Windows zip
+    needs: gate
+    # A Mac, as on the maintainer's: windows-package.sh cross-builds with Homebrew's mingw-w64
+    # and expects a Mac's tools (/private/tmp, BSD stat).
+    runs-on: macos-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      SOFTPRESENTER_RELEASE_VERSION: ${{ needs.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+      - name: Install the Rust version in rust-toolchain.toml, and Windows' target
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-pc-windows-gnu
+      - name: Install the mingw-w64 toolchain
+        run: brew install mingw-w64
+      # The app on Windows keeps its own copy of FFmpeg, and copies the one beside it only when
+      # the two programs have the SHA-256s it was built with (crates/sp-app/src/ffmpeg_fetch.rs);
+      # otherwise it downloads them. So the package carries exactly that build: the zip the
+      # project published, checked against that file's size and SHA-256s, put where
+      # windows-package.sh finds it already built.
+      - name: The project's FFmpeg for Windows, as the app expects it
+        run: |
+          src=crates/sp-app/src/ffmpeg_fetch.rs
+          url=$(grep -oE 'https://github\.com/[^"]+\.zip' "$src" | head -1)
+          size=$(sed -n 's/^pub const SIZE: u64 = \([0-9_]*\);.*/\1/p' "$src" | tr -d _)
+          zip_sha=$(sed -n 's/^pub const SHA256: &str = "\([0-9a-f]*\)";.*/\1/p' "$src")
+          ffmpeg_sha=$(sed -n 's/^pub const FFMPEG_SHA256: &str = "\([0-9a-f]*\)";.*/\1/p' "$src")
+          ffprobe_sha=$(sed -n 's/^pub const FFPROBE_SHA256: &str = "\([0-9a-f]*\)";.*/\1/p' "$src")
+          version=$(sed -n 's/^VERSION=\([0-9.]*\)$/\1/p' scripts/build-ffmpeg.sh)
+          for value in "$url" "$size" "$zip_sha" "$ffmpeg_sha" "$ffprobe_sha" "$version"; do
+            if [ -z "$value" ]; then echo "::error::couldn't read FFmpeg's address, size or SHA-256s from $src"; exit 1; fi
+          done
+          work="$RUNNER_TEMP/ffmpeg-windows"
+          rm -rf "$work"; mkdir -p "$work"
+          curl -fsSL -o "$work/ffmpeg.zip" "$url"
+          have_size=$(wc -c <"$work/ffmpeg.zip" | tr -d ' ')
+          have_sha=$(shasum -a 256 "$work/ffmpeg.zip" | cut -d' ' -f1)
+          if [ "$have_size" != "$size" ] || [ "$have_sha" != "$zip_sha" ]; then
+            echo "::error title=FFmpeg for Windows::$url is $have_size bytes with SHA-256 $have_sha; expected $size bytes, $zip_sha"
+            exit 1
+          fi
+          unzip -q "$work/ffmpeg.zip" -d "$work/unpacked"
+          out=target/ffmpeg-windows
+          rm -rf "$out"; mkdir -p "$out/bin"
+          cp "$work/unpacked/ffmpeg/ffmpeg.exe" "$work/unpacked/ffmpeg/ffprobe.exe" "$out/bin/"
+          chmod 755 "$out/bin/ffmpeg.exe" "$out/bin/ffprobe.exe"
+          cp "$work/unpacked/ffmpeg/COPYING.LGPLv2.1" "$work/unpacked/ffmpeg/LICENSE.md" "$work/unpacked/ffmpeg/SOURCE.txt" "$out/"
+          echo "$version" >"$out/VERSION"
+          for pair in "ffmpeg.exe=$ffmpeg_sha" "ffprobe.exe=$ffprobe_sha"; do
+            have=$(shasum -a 256 "$out/bin/${pair%%=*}" | cut -d' ' -f1)
+            if [ "$have" != "${pair#*=}" ]; then
+              echo "::error title=FFmpeg for Windows::${pair%%=*} has SHA-256 $have; the app expects ${pair#*=}"
+              exit 1
+            fi
+          done
+          echo "FFmpeg $version for Windows, as published: $url"
+      - name: Build the Windows package
+        run: scripts/windows-package.sh
+      - name: Check and name the zip
+        run: |
+          folder=target/windows-package/SoftPresenter-Windows
+          if ! strings -a "$folder/SoftPresenter.exe" | grep -qF "$SOFTPRESENTER_RELEASE_VERSION"; then
+            echo "::error title=Wrong version::SoftPresenter.exe doesn't carry $SOFTPRESENTER_RELEASE_VERSION"
+            exit 1
+          fi
+          for program in ffmpeg.exe ffprobe.exe; do
+            cmp "$folder/$program" "target/ffmpeg-windows/bin/$program"
+          done
+          mkdir -p dist
+          zip="dist/SoftPresenter-$SOFTPRESENTER_RELEASE_VERSION-windows.zip"
+          cp target/windows-package/SoftPresenter-Windows.zip "$zip"
+          unzip -l "$zip" | head -8
+          ls -l "$zip"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: softpresenter-windows-zip
+          path: dist/SoftPresenter-*-windows.zip
+          if-no-files-found: error
+
+  linux:
+    name: Linux .deb
+    needs: gate
+    permissions:
+      contents: read
+    uses: ./.github/workflows/linux-package.yml
+    with:
+      release_version: ${{ needs.gate.outputs.version }}
+      ref: ${{ needs.gate.outputs.sha }}
+
+  release:
+    name: Draft pre-release
+    needs: [gate, mac, windows, linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The one job that may write: it makes the draft release and uploads its files.
+    permissions:
+      contents: write
+    env:
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.gate.outputs.tag }}
+      VERSION: ${{ needs.gate.outputs.version }}
+      UNCHECKED: ${{ needs.gate.outputs.unchecked }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: softpresenter-*
+          path: dist
+          merge-multiple: true
+      # The files named as before: the .deb keeps the name linux-deb.sh gives it, whose "~"
+      # GitHub shows as ".".
+      - name: The three files
+        run: |
+          deb="softpresenter_$(printf '%s' "$VERSION" | sed 's/-/~/')_amd64.deb"
+          for file in "SoftPresenter-$VERSION-mac.zip" "SoftPresenter-$VERSION-windows.zip" "$deb"; do
+            if [ ! -s "dist/$file" ]; then echo "::error title=Missing file::dist/$file"; exit 1; fi
+          done
+          ls -l dist
+          (cd dist && sha256sum -- *)
+      - name: The notes
+        run: |
+          {
+            if [ -n "$UNCHECKED" ]; then
+              printf '> **Built from a commit whose checks were not all green**, because: %s. Take this line out only once that is settled.\n\n' "$UNCHECKED"
+            fi
+            .github/scripts/release-notes.sh "$VERSION"
+          } >"$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+      # A draft, marked as a pre-release (untick that when publishing a version for everyone).
+      # A release already there for the tag, draft or published, is left alone.
+      - name: Make the draft pre-release
+        run: |
+          existing=$(gh api --paginate "repos/$REPO/releases?per_page=100" --jq '.[] | [.tag_name, (if .draft then "draft" else "published" end), .html_url] | @tsv' \
+            | awk -F '\t' -v tag="$TAG" '$1 == tag { print $2 " " $3; exit }')
+          if [ -n "$existing" ]; then
+            echo "::error title=Release already there::$TAG already has a release (${existing}). Nothing was changed: delete a draft you don't want and run this job again."
+            exit 1
+          fi
+          case "$VERSION" in
+          *-dev.*) title="SoftPresenter $VERSION (development build, not for Sunday use)" ;;
+          *-*) title="SoftPresenter $VERSION (pre-release)" ;;
+          *) title="SoftPresenter $VERSION" ;;
+          esac
+          deb="softpresenter_$(printf '%s' "$VERSION" | sed 's/-/~/')_amd64.deb"
+          gh release create "$TAG" --repo "$REPO" --draft --prerelease --verify-tag \
+            --title "$title" --notes-file "$RUNNER_TEMP/notes.md" \
+            "dist/SoftPresenter-$VERSION-mac.zip" "dist/SoftPresenter-$VERSION-windows.zip" "dist/$deb"
+          echo "### Draft pre-release made for $TAG" >>"$GITHUB_STEP_SUMMARY"
+          echo "Read it, try the downloads, then publish it by hand on the Releases page." >>"$GITHUB_STEP_SUMMARY"

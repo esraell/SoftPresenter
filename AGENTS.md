@@ -320,3 +320,22 @@ matter most:
   `--remap-path-prefix`; for any other build to share (Windows, Linux), set
   `RUSTFLAGS="--remap-path-prefix=$HOME=~"` yourself. Check with
   `strings <program> | grep -c "$HOME"`, which must be 0.
+
+## Releases
+
+- **Only from green checks.** Nothing is built to share, whether a release or a development
+  build, from a commit whose Checks, Windows and Linux runs haven't all passed on GitHub. The
+  commit must be on `master` and the last commit of its push: GitHub runs a push's checks on
+  its last commit only. `.github/scripts/checks-green.sh <owner/repo> <commit>` says whether
+  a commit's checks are green.
+- **A tag makes a draft.** Give the version its heading in CHANGELOG.md (see Rules), push
+  that to `master`, then tag the commit and push the tag: `git tag v0.9.0-dev.28 <commit>`,
+  then `git push origin v0.9.0-dev.28`. `.github/workflows/release.yml` waits for the commit's
+  checks (up to 90 minutes), and stops if one is red. It then builds the Mac zip (universal,
+  signed ad hoc), the Windows zip and the Linux .deb on GitHub's machines, and makes a draft
+  pre-release for the tag with the three files and that CHANGELOG section as its notes.
+- **A person publishes it,** by hand on the Releases page, after reading and editing the notes
+  and trying the downloads. The workflow never publishes, and leaves alone a release already
+  made for the tag.
+- **Past red checks** only by running the workflow by hand (Actions › Release › Run workflow)
+  with a written reason, which goes into the draft's notes.

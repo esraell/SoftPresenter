@@ -3,12 +3,12 @@ name: Linux package
 # The .deb for a release: built with scripts/linux-deb.sh on Ubuntu 22.04, the oldest system it
 # is for; checked with lintian; installed with apt; tried as a quiet test copy on a virtual
 # display (scripts/linux-deb-check.sh); removed with apt, checking nothing of it is left; and
-# kept as the run's artifact. It publishes nothing: the maintainer attaches the .deb to the
-# release.
+# kept as the run's artifact. It publishes nothing itself.
 #
-# Run it by hand (Actions › Linux package › Run workflow) with the pre-release's version, such
-# as 0.9.0-dev.18, or empty for the version in Cargo.toml; or push a tag v0.9.0-dev.18, whose
-# version it takes from the tag.
+# The release workflow (release.yml) runs it for a pushed tag v0.9.0-dev.18, with that version
+# and the tagged commit, and puts the .deb in the draft release. Run it by hand (Actions ›
+# Linux package › Run workflow) to try a package: with a version such as 0.9.0-dev.18, or empty
+# for the version in Cargo.toml.
 on:
   workflow_dispatch:
     inputs:
@@ -17,12 +17,22 @@ on:
         required: false
         default: ""
         type: string
-  push:
-    tags: ["v*"]
+  workflow_call:
+    inputs:
+      release_version:
+        description: "The release's version, such as 0.9.0-dev.18 (empty: the version in Cargo.toml)"
+        required: false
+        default: ""
+        type: string
+      ref:
+        description: "The commit to build (empty: the one the run is for)"
+        required: false
+        default: ""
+        type: string
 
-# One run at a time for each tag or branch, and none cancelled: each is a release's package.
+# One run at a time for each commit or branch, and none cancelled: each is a release's package.
 concurrency:
-  group: linux-package-${{ github.ref }}
+  group: linux-package-${{ inputs.ref || github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -40,12 +50,17 @@ jobs:
       REF_TYPE: ${{ github.ref_type }}
       REF_NAME: ${{ github.ref_name }}
     steps:
+      # The commit the release workflow asks for (its tag's), or else the one the run is for.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # SOFTPRESENTER_RELEASE_VERSION for the build (from the tag, or what was typed), and the
+        with:
+          ref: ${{ inputs.ref }}
+      # SOFTPRESENTER_RELEASE_VERSION for the build (the version given, or a tag's), and the
       # version the installed app must say.
       - name: The version
         run: |
-          if [ "$REF_TYPE" = tag ]; then version=${REF_NAME#v}; else version=$RELEASE_INPUT; fi
+          if [ -n "$RELEASE_INPUT" ]; then version=$RELEASE_INPUT
+          elif [ "$REF_TYPE" = tag ]; then version=${REF_NAME#v}
+          else version=; fi
           if [ -n "$version" ] && ! printf '%s\n' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'; then
             echo "::error title=Not a version::\"$version\" (expected 0.9.0 or 0.9.0-dev.18)"
             exit 1

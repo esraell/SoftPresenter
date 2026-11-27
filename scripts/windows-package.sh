@@ -12,7 +12,9 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+# The version the READ ME names: a release's (SOFTPRESENTER_RELEASE_VERSION, which the build
+# reads too), or the one in Cargo.toml.
+version=${SOFTPRESENTER_RELEASE_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}
 target=x86_64-pc-windows-gnu
 root=target/windows-package
 folder=$root/SoftPresenter-Windows

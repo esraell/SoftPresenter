@@ -70,12 +70,21 @@ place() {
 # SOFTPRESENTER_SIGN_IDENTITY): macOS then sees each new build as the same app, so the
 # Keychain's "Always Allow" for the VoxLive key lasts from build to build. Without one, it is
 # signed "ad hoc", and macOS asks again after every build. No key or certificate is ever kept
-# in this repository; CONTRIBUTING.md says how to make one for your own Mac.
+# in this repository; CONTRIBUTING.md says how to make one for your own Mac. GitHub's Macs,
+# which build the releases (.github/workflows/release.yml), have no such identity, so a release
+# is signed ad hoc too.
+#
+# DEVELOPER ID, LATER: a release signed with the owner's Developer ID, so that macOS opens it
+# without a warning, will set SOFTPRESENTER_SIGN_IDENTITY to that identity, from a certificate
+# the release workflow imports from its secrets into a keychain of its own. That signing also
+# needs --options runtime and --timestamp on each codesign below, and the zip notarized after.
+# Not done yet; release.yml marks the place.
 identity="${SOFTPRESENTER_SIGN_IDENTITY:-SoftPresenter Local Signing}"
 if security find-identity -p codesigning 2>/dev/null | grep -qF "\"$identity\""; then
     sign="$identity"
 else
     sign="-"
+    echo "note: this Mac has no code-signing identity named \"$identity\", so the app is signed ad hoc (codesign -s -)"
 fi
 
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
