@@ -22,6 +22,6 @@
   "topbar.remote.on": "Fernsteuerung ein",
   "topbar.remote.connected": ["Fernsteuerung ein · {n} verbunden", "Fernsteuerung ein · {n} verbunden"],
   "topbar.remote.wrong": ["{n} falsches Passwort", "{n} falsche Passwörter"],
-  "topbar.remote.settings": "Einstellungen › Handy-Fernbedienung",
-  "topbar.remote.open": "Öffne {address} auf einem anderen Gerät (Einstellungen › Handy-Fernbedienung)"
+  "topbar.remote.settings": "Einstellungen › Fernbedienung",
+  "topbar.remote.open": "Öffne {address} auf einem anderen Gerät (Einstellungen › Fernbedienung)"
 }

@@ -144,7 +144,7 @@
   "inspector.text.shape": "Eine Form hat keinen Text. Farbe und Kontur findest du im Tab „Form“.",
   "inspector.text.selected": "AUSGEWÄHLTE WÖRTER",
   "inspector.text.whole_box": "DAS GANZE FELD",
-  "inspector.text.whole_box.note": "Wähle darin Wörter aus, um nur diese zu ändern",
+  "inspector.text.whole_box.note": "Wähle Wörter, um nur sie zu ändern",
   "inspector.text.copy_style": "Stil kopieren",
   "inspector.text.copy_style.hint": "Merken, wie dieser Text aussieht",
   "inspector.text.paste_style": "Stil einfügen",

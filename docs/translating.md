@@ -477,7 +477,7 @@ Glossary (the main window's tables, and every table after them, use these words)
 | key · fill (a video switcher's keyer) | Key · Fill |
 | Settings · Integrations · AI assistants | Einstellungen · Integrationen · KI-Assistenten |
 | Settings groups: The room · On screen · Connect · Advanced | Saal · Auf dem Bildschirm · Verbinden · Erweitert |
-| Phone remote · Remote Control | Handy-Fernbedienung · Fernsteuerung |
+| Phone remote · Remote Control | Fernbedienung (on a phone; „Handy-Fernbedienung“ was cut in Settings’ list) · Fernsteuerung |
 | AirPlay | AirPlay (a name, never translated) |
 | setup (the first start's) | Einrichtung (Ersteinrichtung where it means the first start) |
 | Set up SoftPresenter… | SoftPresenter einrichten… |
@@ -523,7 +523,7 @@ Glossary (the main window's tables, and every table after them, use these words)
 | Stop (a button) · Play · Stop Playing | Stopp · Abspielen · Wiedergabe stoppen |
 | Show keys on buttons | Tasten an Schaltflächen anzeigen |
 | (press ?) · ({key}) in a hint | (drücke ?) · ({key}) |
-| Settings pages: Screens · AirPlay · Slides · Groups · Language · Integrations · AI assistants · Phone remote · Keys · Command line · Song files · About | Bildschirme · AirPlay · Folien · Liedteile · Sprache · Integrationen · KI-Assistenten · Handy-Fernbedienung · Tasten · Befehlszeile · Lieddateien · Info |
+| Settings pages: Screens · AirPlay · Slides · Groups · Language · Integrations · AI assistants · Phone remote · Keys · Command line · Song files · About | Bildschirme · AirPlay · Folien · Liedteile · Sprache · Integrationen · KI-Assistenten · Fernbedienung · Tasten · Befehlszeile · Lieddateien · Info |
 | Settings › Slides (and the old name Settings › General) | Einstellungen › Folien |
 | Set up SoftPresenter › Languages | SoftPresenter einrichten › Sprachen |
 | a notice's Clear All (empties the notices list, nothing to do with the screens) | Alle entfernen |

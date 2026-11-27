@@ -4558,21 +4558,27 @@ mod tests {
 
     #[test]
     fn no_control_reaches_past_the_inspectors_right_edge() {
+        // In every language: a line of words that doesn't fit widens the whole panel past the
+        // window's edge (German's longer note over the Text tab once did).
         let theme = Theme::builtin();
-        for (tab, spans, select) in [
-            (InspectorTab::Own, false, false),
-            (InspectorTab::Own, true, false),
-            (InspectorTab::Own, true, true),
-            (InspectorTab::Box, false, false),
-            (InspectorTab::Animation, false, false),
-        ] {
-            let mut state = editing_text(tab, spans, select);
-            let edge = PANEL_WIDTH;
-            let widest = widest(&mut state, &theme);
-            assert!(
-                widest <= edge + 0.1,
-                "{tab:?} spans {spans} selected {select}: ends at {widest}, the edge is {edge}"
-            );
+        for language in crate::i18n::Language::ALL {
+            crate::i18n::with_language(language, || {
+                for (tab, spans, select) in [
+                    (InspectorTab::Own, false, false),
+                    (InspectorTab::Own, true, false),
+                    (InspectorTab::Own, true, true),
+                    (InspectorTab::Box, false, false),
+                    (InspectorTab::Animation, false, false),
+                ] {
+                    let mut state = editing_text(tab, spans, select);
+                    let edge = PANEL_WIDTH;
+                    let widest = widest(&mut state, &theme);
+                    assert!(
+                        widest <= edge + 0.1,
+                        "{language:?} {tab:?} spans {spans} selected {select}: ends at {widest}, the edge is {edge}"
+                    );
+                }
+            });
         }
     }
 

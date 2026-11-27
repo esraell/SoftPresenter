@@ -26,7 +26,7 @@
   "bible.read_in.title": "Sprache der Bibelseite",
   "bible.read_in.unused": "{name} · keine Bibel verwendet",
   "bible.read_in.slides_kept": "Für die Folien auf den Bildschirmen gilt weiter die Zeile „Übersetzungen“",
-  "bible.add": "Hinzufügen",
+  "bible.add": "Ablauf",
   "bible.add.hint": "{reading} zum Ablauf {playlist} hinzufügen, zum erneuten Öffnen mit diesen Einstellungen",
   "bible.add.first": "Schlage zuerst eine Bibelstelle nach",
   "bible.add.elsewhere": "Zu einem anderen Ablauf hinzufügen",
