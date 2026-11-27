@@ -239,7 +239,10 @@ process, and nextest gives each test a process of its own). One test alone:
   `third_party/naga` and `third_party/wgpu-hal` (two crates of wgpu, the graphics library, so
   that Intel's graphics on a Mac are sent compute shaders their compiler takes) are not
   workspace crates either; naga has no `unsafe` code, wgpu-hal carries its own throughout (calls
-  into the systems' graphics), and changes made to them here add none. `sp-decklink`'s `ffi` module calls
+  into the systems' graphics), and changes made to them here add none. The owner agreed to
+  carrying them, with wgpu-hal's `unsafe` code of its own, on 2026-11-28. wgpu has the fault as
+  its issue 5827, with a fix proposed in its pull request 10731; the copies go when wgpu
+  releases a fix. `sp-decklink`'s `ffi` module calls
   the DeckLink driver through SoftPresenter's own C++ bridge (`bridge/bridge.cpp`, compiled
   with the DeckLink SDK's headers in `third_party/decklink-sdk`), the same arrangement as NDI's;
   the owner agreed to that on 2026-11-21. The bridge never calls back into Rust, and its
