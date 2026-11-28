@@ -214,7 +214,7 @@ fn waiting_in(folder: &Path) -> Option<Installed> {
 
 /// As the app starts, before NDI is looked for: a new runtime that was unpacked and checked
 /// while the old one was in use takes its place (a few renames), anything half-done is
-/// deleted, and a download a quit left behind is deleted on a thread of its own.
+/// deleted, and a download a quit left behind is deleted, all before it returns.
 pub fn settle(folder: &Path) {
     let next = folder.join(NEXT_FOLDER);
     if next.exists() {
@@ -227,9 +227,10 @@ pub fn settle(folder: &Path) {
         }
         let _ = std::fs::remove_dir_all(&next);
     }
+    // Deleted here and now, never on a thread left running: a download begun just after
+    // start goes into the same folder, and a late delete would take it away mid-way.
     if folder.join(DOWNLOAD_FOLDER).exists() {
-        let folder = folder.to_path_buf();
-        let _ = std::thread::Builder::new().name("ndi tidy".to_owned()).spawn(move || forget_download(&folder));
+        forget_download(folder);
     }
 }
 
@@ -1457,6 +1458,34 @@ mod tests {
         let again = fetch(&fixture::sdk_items());
         let (_, waits) = install(&again, &folder, false, &none).unwrap();
         assert!(!waits);
+        assert_eq!(installed_in(&folder).unwrap().version, "6.3.2");
+        let _ = std::fs::remove_dir_all(folder.parent().unwrap());
+    }
+
+    #[test]
+    fn a_download_a_quit_left_behind_is_gone_before_the_start_goes_on() {
+        // It was once deleted on a thread left running, which could delete a download begun
+        // just after while it was fetched or installed (Disk(ENOENT)).
+        let folder = empty_folder("left").join("NDI");
+        let left = folder.join(DOWNLOAD_FOLDER);
+        // Many files, as a Mac's laid-out package leaves, so deleting them takes a while.
+        std::fs::create_dir_all(left.join("package")).unwrap();
+        for n in 0..300 {
+            std::fs::write(left.join("package").join(format!("part-{n}")), b"left by a quit").unwrap();
+        }
+        std::fs::write(left.join(SDK_FILE), b"half of NDI's download").unwrap();
+        settle(&folder);
+        assert!(!left.exists(), "nothing is still being deleted once the app goes on");
+        assert!(!folder.exists(), "the app's NDI folder too, with nothing else in it");
+        if !this_processor() {
+            return;
+        }
+        // A download begun at once is the one installed.
+        let body = fixture::download(&fixture::sdk_items());
+        let address = serve_with("200 OK", Some(body.len()), MARKS, body);
+        let ready = fetch_and_read(&address, Way::Sdk, true, &folder, &Shared::default()).unwrap();
+        let (installed, _) = install(&ready, &folder, false, &AtomicBool::new(false)).unwrap();
+        assert_eq!(installed.unwrap().version, "6.3.2");
         assert_eq!(installed_in(&folder).unwrap().version, "6.3.2");
         let _ = std::fs::remove_dir_all(folder.parent().unwrap());
     }
