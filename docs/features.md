@@ -1432,15 +1432,17 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   single click on a chapter that chapter, the whole chapter being the passage; a click on a verse
   then makes that verse alone the passage, and Shift-click makes a passage from the verse clicked
   before. What a click loads has its first verse picked, so Enter puts it on screen and Next goes
-  on through its chapter; one click puts nothing on screen. A double-click on a verse puts it on
-  screen, as picking it and pressing Enter does: the whole chapter is the passage, a slide a verse, so Next goes on to the
-  next verse; with one slide for the whole passage (Options) the verse alone is the passage, so
-  the slide shown is that verse and never its chapter on one slide. Hovering over a verse says
-  so ("Click to pick. Double-click to put it on screen."; in the lists, also "Shift-click another
-  for a passage."). A double-click counts only when both its clicks are on the same verse: two
-  quick clicks on two different keys (a chapter, then a verse; a verse and the one beside it; a
-  key that moved under the pointer as the column scrolled) are two clicks, and put nothing on
-  screen. The
+  on through its chapter; one click puts nothing on screen. A double-click on a verse is one click and
+  Enter: the verse is looked up as one click looks it up (the verse alone is the passage, named
+  so in the title, History and Add; with a slide a verse its slides are its chapter's, so Next
+  goes on to the next verse), and put on screen as Enter puts the verse picked on. Where another
+  Bible numbers the verse in another chapter (Romans 16:25 beside the Synodal) it is still that
+  verse, and where there is no such verse it says so, as one click does. Hovering over a verse
+  says so ("Click to pick. Double-click to put it on screen."; in the lists, also "Shift-click
+  another for a passage."). Two quick clicks on two different keys (a chapter, then a verse; a
+  verse and the one beside it) are two clicks, as the clicks are too far apart for a
+  double-click; and a double-click counts only when its first click picked the same verse, so a
+  key that moved under the pointer as the column scrolled is only picked. The
   passage showing is lit, however it was looked up. Chapters and verses are numbered as the page
   is read (see above), and what a click opens is kept named in that language.
 - Four Bibles ship with the app (King James, World English, Berean Standard, Russian Synodal)

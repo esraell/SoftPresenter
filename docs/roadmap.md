@@ -126,6 +126,10 @@ rather than a feature, but no church on Windows can use the app without them.
 - **More than four translations at once.** (started: four rows) · S · Low
 - **A long passage split by what fits.** As many verses on each slide as its box holds, then
   the next slide. (started: one verse a slide, or the whole passage on one) · M · Medium
+- **Every verse matched between numberings.** The table that matches verses between the English
+  and the Synodal numberings has no Synodal verse for English 2 Corinthians 13:14 and Acts
+  19:41, so with the Synodal first those verses can't be looked up from an English page (one
+  click says there is no such verse). Fill such gaps in the table. · S · Medium
 
 ## Themes and screen setups
 

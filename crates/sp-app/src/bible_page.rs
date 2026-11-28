@@ -38,20 +38,19 @@ pub enum Choice {
 
 /// Looks up what was chosen, numbered as the page is read (the keypad, the lists and the page
 /// number chapters and verses as the page's Bible does; see `BiblePage::page_bible`). When a
-/// passage was made, returns the slide to pick for Enter (the passage's first verse, or the verse
-/// double-clicked) and whether that slide is to go on screen now, as Enter would put it on: only
-/// for a verse double-clicked, and only when the slide is that verse's.
+/// passage was made, returns the slide to pick for Enter (the passage's first verse) and whether
+/// it is to go on screen now, as Enter would put it on: only for a verse double-clicked.
 ///
 /// A book or chapter is the whole chapter; a verse is that verse alone (its slides its chapter's,
-/// with a slide a verse). A verse double-clicked is its whole chapter, with a slide a verse, so
-/// Space goes on to the next verse; with one slide for the whole passage (Options) it is that
-/// verse alone, as one click makes it, so the slide shown is the verse and never its chapter on
-/// one slide. A double-click counts only as the second click on the same verse (the one a
-/// Shift-click would run from): egui counts two quick clicks at one place, and the keys may have
-/// moved under the pointer between them (the column still scrolling), so a double-click whose
-/// first click picked another verse, or none, only picks this one. Nothing goes on screen here:
-/// the caller picks the slide, and asks the app for Enter (`HomeState::enter_after`) when it is
-/// to go on.
+/// with a slide a verse, so Space goes on to the next verse; see `bible::page_deck`). A verse
+/// double-clicked is looked up exactly as one click looks it up, then shown as Enter shows the
+/// verse picked: one click and Enter, whatever the numberings or the Options, named as one click
+/// names it (the title, History and Add), and with one click's message when there is no such
+/// verse. A double-click counts only as the second click on the same verse (the one a Shift-click
+/// would run from): the keys may have moved under the pointer between the two clicks (the column
+/// still scrolling), so a double-click whose first click picked another verse, or none, only
+/// picks this one. Nothing goes on screen here: the caller picks the slide, and asks the app for
+/// Enter (`HomeState::enter_after`) when it is to go on.
 pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Option<(usize, bool)> {
     let lead = page.lead().and_then(|lead| page.shelf.get(lead).ok())?;
     let book = match choice {
@@ -60,7 +59,6 @@ pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Opti
     };
     let bible = page.page_bible_for(book).unwrap_or_else(|| lead.clone());
     let mut show_it = false;
-    let mut double_clicked = None;
     let reference = match choice {
         Choice::Book(book) => {
             page.list_book = book;
@@ -76,22 +74,15 @@ pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Opti
         Choice::Verse { verse, shift, double } => {
             let (book, chapter) = (page.list_book, page.list_chapter);
             let place = |verse| VerseRef { book, chapter, verse };
-            let double = double && page.list_from == Some(verse);
-            show_it = double;
-            if double && page.options.break_on_new_verse {
-                double_clicked = Some(sp_bible::convert(place(verse), bible.info.numbering, lead.info.numbering));
-                crate::bible::in_its_chapter(&bible, place(verse)).0
-            } else {
-                // One slide for the whole passage: a verse double-clicked is that verse alone.
-                let shift = shift && !double;
-                let from = page.list_from.filter(|_| shift);
-                if !shift {
-                    page.list_from = Some(verse);
-                }
-                match from {
-                    Some(from) => bible.label(place(from.min(verse)), place(from.max(verse))),
-                    None => bible.label(place(verse), place(verse)),
-                }
+            show_it = double && page.list_from == Some(verse);
+            let shift = shift && !double;
+            let from = page.list_from.filter(|_| shift);
+            if !shift {
+                page.list_from = Some(verse);
+            }
+            match from {
+                Some(from) => bible.label(place(from.min(verse)), place(from.max(verse))),
+                None => bible.label(place(verse), place(verse)),
             }
         }
     };
@@ -99,14 +90,7 @@ pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Opti
     page.found.clear();
     page.open_read(reference, bible.info.numbering, live);
     page.pending.as_ref()?;
-    // The verse double-clicked among its chapter's slides, or the one slide of a verse alone.
-    // One its chapter's slides don't hold (a verse the first translation lacks) is not put on
-    // screen: the passage's first verse is picked instead, as before.
-    let verse = match double_clicked {
-        Some(verse) => page.slide_of(verse),
-        None => show_it.then(|| page.passage_slides().start),
-    };
-    Some(verse.map_or((page.passage_slides().start, false), |slide| (slide, show_it)))
+    Some((page.passage_slides().start, show_it))
 }
 
 /// The passage now shown, as the first translation reads it.
@@ -1338,10 +1322,11 @@ mod tests {
         assert_eq!(choose(&mut page, double(17), None), Some((16, false)));
         assert_eq!(page.shown, "От Иоанна 3:17");
         assert_eq!(page.list_from, Some(17), "it is where a Shift-click runs from now");
-        // Both clicks on verse 5: its chapter, and verse 5 to go on screen.
+        // Both clicks on verse 5: looked up as one click looks it up (the verse alone, its slides
+        // its chapter's), and to go on screen.
         page.list_from = Some(5);
         assert_eq!(choose(&mut page, double(5), None), Some((4, true)));
-        assert_eq!(page.shown, "От Иоанна 3:1-36");
+        assert_eq!(page.shown, "От Иоанна 3:5");
         // No verse clicked first (both clicks seen in one slow frame, or a Shift-click before
         // it): picked, and nothing goes on.
         page.list_from = None;
@@ -1353,6 +1338,51 @@ mod tests {
         assert_eq!(choose(&mut page, double(9), None), Some((0, false)));
         assert_eq!(choose(&mut page, double(9), None), Some((0, true)));
         assert_eq!(page.shown, "От Иоанна 3:9");
+    }
+
+    #[test]
+    fn a_double_click_looks_a_verse_up_as_one_click_does_whatever_the_numberings() {
+        // An English computer: the keypad and the lists count as the King James Version does, and
+        // the Synodal, first, numbers the slides. Each verse, clicked once and double-clicked (its
+        // first click on the same verse), makes the same passage, picks the same slide and says
+        // the same; the double-click asks for Enter only when one click made something.
+        let made = |code: &str, chapter: u16, verse: u16, double: bool| {
+            let mut page = BiblePage { slots: Some([2, 3]), ..BiblePage::default() };
+            page.list_book = sp_bible::BOOKS.iter().position(|book| book.code == code).unwrap();
+            page.list_chapter = chapter;
+            page.list_from = Some(verse);
+            let chosen = choose(&mut page, Choice::Verse { verse, shift: false, double }, None);
+            let title = page.pending.as_ref().map(|(_, passage)| (passage.title.clone(), passage.slide_count()));
+            (chosen, page.shown.clone(), page.message.clone(), title)
+        };
+        for (code, chapter, verse) in [("JOH", 3, 5), ("PSA", 51, 5), ("ROM", 16, 25), ("2CO", 13, 14), ("ACT", 19, 41)]
+        {
+            let (once, twice) = (made(code, chapter, verse, false), made(code, chapter, verse, true));
+            assert_eq!(
+                (twice.0.map(|(slide, _)| slide), &twice.1, &twice.2, &twice.3),
+                (once.0.map(|(slide, _)| slide), &once.1, &once.2, &once.3),
+                "{code} {chapter}:{verse}"
+            );
+            assert_eq!(once.0.map(|(_, show)| show), once.0.map(|_| false), "one click puts nothing on");
+            assert_eq!(twice.0.map(|(_, show)| show), once.0.map(|_| true), "{code} {chapter}:{verse}");
+        }
+        // Romans 16:25, at the end of chapter 14 in the Synodal: that verse alone, never its
+        // chapter 16 with verse 1 picked (as opening the chapter did).
+        let (chosen, shown, _, _) = made("ROM", 16, 25, true);
+        assert!(chosen.is_some() && !shown.contains("16:1-"), "{shown}");
+        // After its first click the lists stay on chapter 16 with the verse clicked, so the
+        // second click of a double-click there counts.
+        let mut page = BiblePage { slots: Some([2, 3]), ..BiblePage::default() };
+        page.list_book = sp_bible::BOOKS.iter().position(|book| book.code == "ROM").unwrap();
+        page.list_chapter = 16;
+        choose(&mut page, Choice::Verse { verse: 25, shift: false, double: false }, None);
+        assert_eq!((page.list_chapter, page.list_from), (16, Some(25)), "shown {}", page.shown);
+        // 2 Corinthians 13:14 and Acts 19:41 have no Synodal verse here (a gap in the numberings'
+        // table): one click's message, and nothing to put on screen.
+        for (code, chapter, verse) in [("2CO", 13, 14), ("ACT", 19, 41)] {
+            let (chosen, _, message, _) = made(code, chapter, verse, true);
+            assert!(chosen.is_none() && message.is_some(), "{code} {chapter}:{verse}: {message:?}");
+        }
     }
 
     #[test]

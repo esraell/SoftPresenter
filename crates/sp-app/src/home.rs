@@ -406,8 +406,9 @@ pub struct HomeState {
     /// (`enter_after`) or Bible's Add. Let go of at the end of the frame if no field took it, so
     /// it is never carried out later.
     pub typed_key: Option<KeyAction>,
-    /// Enter, asked by the find box or Scripture Lookup for Show Selected: the app does it once
-    /// the window has drawn and what was opened is in the show (`App::enter_key`).
+    /// Enter, asked by the find box or Scripture Lookup for Show Selected, or by a verse
+    /// double-clicked in the Bible view's keypad or lists: the app does it once the window has
+    /// drawn and what was opened is in the show (`App::enter_key`).
     pub enter_after: bool,
     /// How large the operator's windows draw everything (Settings › Slides › In your window),
     /// and the factor the home window draws at now, for the setting to say.
@@ -1393,17 +1394,6 @@ impl BiblePage {
         let lookup = crate::bible::renumbered(&name, numbering, &in_use);
         let language = self.names_language();
         self.open_in(lookup, Some(language), live);
-    }
-
-    /// The place among the slides made for the passage shown of a verse, as the first
-    /// translation numbers it: its place among their verses with a slide a verse, else the one
-    /// slide. `None` when they don't hold it.
-    pub fn slide_of(&mut self, verse: sp_bible::VerseRef) -> Option<usize> {
-        let lead = self.lead().and_then(|lead| self.shelf.get(lead).ok())?;
-        let deck = sp_bible::parse_reference_in(&self.held[self.showing].deck, &lead.info.language).ok()?;
-        let places = lead.verses(deck);
-        let at = places.iter().position(|(place, _)| *place == verse)?;
-        Some(if self.options.break_on_new_verse { at } else { 0 })
     }
 
     /// The Bible in use whose numbers a reference typed this way is read in: the first of the
@@ -10718,12 +10708,12 @@ mod tests {
     }
 
     #[test]
-    fn a_double_click_on_a_verse_puts_it_on_screen_with_its_chapter_round_it() {
-        for (computer, books) in [
-            (None, BookPicker::Keypad),
-            (None, BookPicker::Lists),
-            (Some("ru-RU"), BookPicker::Keypad),
-            (Some("ru-RU"), BookPicker::Lists),
+    fn a_double_click_on_a_verse_is_one_click_and_enter() {
+        for (computer, books, kept) in [
+            (None, BookPicker::Keypad, "John 3:5"),
+            (None, BookPicker::Lists, "John 3:5"),
+            (Some("ru-RU"), BookPicker::Keypad, "От Иоанна 3:5"),
+            (Some("ru-RU"), BookPicker::Lists, "От Иоанна 3:5"),
         ] {
             let (ctx, mut show, mut state) = bible_view_at(books, "JOH", 3);
             if let Some(computer) = computer {
@@ -10735,10 +10725,12 @@ mod tests {
             assert_eq!(state.bible.shown, "От Иоанна 3:1-36");
             assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "the song stays on screen");
             let commands = double_click_list_row(&ctx, &mut show, &mut state, ("verse", 5u16), 1.0);
-            // Its chapter is the passage, a slide a verse, and the verse is on screen: put on by
-            // Enter, as picking it and pressing Enter does, not by the frame itself.
+            // The verse is the passage, as one click makes it (its slides its chapter's, a slide
+            // a verse), named so for the title, History and Add; and it is on screen, put on by
+            // Enter as after one click, not by the frame itself.
             assert!(!goes_on_screen(&commands), "{commands:?}");
-            assert_eq!(state.bible.shown, "От Иоанна 3:1-36", "{computer:?} {books:?}");
+            assert_eq!(state.bible.shown, "От Иоанна 3:5", "{computer:?} {books:?}");
+            assert_eq!(state.bible.saved().map(|saved| saved.lookup).as_deref(), Some(kept), "{computer:?}");
             let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
             assert_eq!(show.presentations()[slot].slide_count(), 36);
             assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 4 }), "{computer:?} {books:?}");
