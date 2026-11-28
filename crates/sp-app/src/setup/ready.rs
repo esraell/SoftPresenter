@@ -272,13 +272,13 @@ pub(super) fn reports_line(standing: &crate::reports::Standing) -> Line {
     }
 }
 
-/// What the tips line says to a first-timer: Esc clears, or with SoftProjector's keys hides
-/// the words.
+/// What the tips line says to a first-timer: a click shows a slide and Esc clears, or with
+/// SoftProjector's keys a double-click shows it and Esc hides the words.
 fn tips_words(softprojector: bool) -> &'static str {
     if softprojector {
         t(
             "setup.ready.tips_hide",
-            "Click a slide to put it on screen, Space for the next, Esc to hide the words. Later, in Settings: Phone remote, to run the slides from a phone.",
+            "Double-click a slide to put it on screen, Space for the next, Esc to hide the words. Later, in Settings: Phone remote, to run the slides from a phone.",
         )
     } else {
         t(

@@ -798,14 +798,13 @@ pub(crate) fn keys_will_be(setup: &Setup, state: &HomeState) -> (crate::key_tabl
 }
 
 /// The setup was finished with a changed answer to "Coming from SoftProjector?": Yes gives
-/// SoftProjector's key layout and the end of a song's mark, No the standard layout and no mark.
-/// The one place that answer is acted on: what else follows from it (how a click on a slide
-/// shows it) is set here too.
+/// SoftProjector's key layout, its double-click to show a slide and the end of a song's mark;
+/// No the standard layout, one click and no mark. The one place that answer is acted on: the
+/// layout and the click that follows it are the window's own to set
+/// (`HomeState::set_coming_from_softprojector`), the mark is set here.
 pub(crate) fn answered_from_softprojector(state: &mut HomeState, yes: bool) {
-    use crate::key_table::KeyStyle;
-    state.keys.set_style(if yes { KeyStyle::SoftProjector } else { KeyStyle::SoftPresenter });
+    state.set_coming_from_softprojector(yes);
     state.end_mark = yes;
-    // CLICK MODE: the slide click mode (Double-click for Yes) is set here once that setting is in.
 }
 
 /// What Yes to "Coming from SoftProjector?" keeps, said under it: a Mac's F keys are its own, so
@@ -814,11 +813,11 @@ fn from_softprojector_words(system: System) -> &'static str {
     match system {
         System::Mac => t(
             "setup.from.line.mac",
-            "Yes keeps SoftProjector\u{2019}s Esc, which hides the words and leaves the background up, and its *\u{a0}*\u{a0}* under a song\u{2019}s last slide. Both can be changed in Settings \u{203a} Keys and Settings \u{203a} Slides.",
+            "Yes keeps SoftProjector\u{2019}s Esc, which hides the words and leaves the background up, its double-click to show a slide, and its *\u{a0}*\u{a0}* under a song\u{2019}s last slide. All can be changed in Settings \u{203a} Keys and Settings \u{203a} Slides.",
         ),
         System::Windows | System::Linux => t(
             "setup.from.line",
-            "Yes keeps SoftProjector\u{2019}s keys (Esc hides the words, F5 shows, F2 adds to the playlist) and its *\u{a0}*\u{a0}* under a song\u{2019}s last slide. Both can be changed in Settings \u{203a} Keys and Settings \u{203a} Slides.",
+            "Yes keeps SoftProjector\u{2019}s keys (Esc hides the words, F5 shows, F2 adds to the playlist), its double-click to show a slide, and its *\u{a0}*\u{a0}* under a song\u{2019}s last slide. All can be changed in Settings \u{203a} Keys and Settings \u{203a} Slides.",
         ),
     }
 }

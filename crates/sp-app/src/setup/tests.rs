@@ -1081,7 +1081,7 @@ fn install_ndi_in_the_setup_opens_the_window_over_the_home_window() {
 
 #[test]
 fn coming_from_softprojector_changes_the_keys_only_at_the_end_and_only_when_answered() {
-    use crate::key_table::KeyStyle;
+    use crate::key_table::{KeyStyle, SlideClick};
     with_language(Language::English, || {
         let ctx = egui::Context::default();
         let env = env(System::Windows);
@@ -1091,42 +1091,69 @@ fn coming_from_softprojector_changes_the_keys_only_at_the_end_and_only_when_answ
         assert!(said(&words, "Coming from SoftProjector?"));
         assert!(said(
             &words,
-            "Yes keeps SoftProjector\u{2019}s keys (Esc hides the words, F5 shows, F2 adds to the playlist)"
+            "Yes keeps SoftProjector\u{2019}s keys (Esc hides the words, F5 shows, F2 adds to the playlist), its double-click to show a slide, and its *\u{a0}*\u{a0}* under"
         ));
         assert_eq!(state.setup.as_ref().unwrap().from_softprojector, None);
         assert!(press(&ctx, &mut state, &env, "Yes"));
         // Nothing changes until the setup is finished.
         assert_eq!(state.keys.style, KeyStyle::SoftPresenter);
+        assert_eq!(state.slide_click(), SlideClick::One);
         assert!(!state.end_mark);
         state.setup.as_mut().unwrap().step = Step::Ready;
         let ready = draw(&ctx, &mut state, &env);
         assert!(said(&ready, "SoftProjector\u{2019}s keys \u{b7} *\u{a0}*\u{a0}* at a song\u{2019}s end"), "{ready:?}");
-        assert!(said(&ready, "Esc to hide the words"), "{ready:?}");
+        assert!(
+            said(&ready, "Double-click a slide to put it on screen, Space for the next, Esc to hide the words"),
+            "{ready:?}"
+        );
         assert!(press(&ctx, &mut state, &env, "Start Using SoftPresenter"));
         assert_eq!(state.keys.style, KeyStyle::SoftProjector);
+        // A double-click shows a slide now, as in SoftProjector.
+        assert_eq!(state.slide_click(), SlideClick::Double);
         assert!(state.end_mark);
         // Left early, the answer changes nothing.
         let mut state = home("from-left");
         assert!(press(&ctx, &mut state, &env, "Yes"));
         assert!(press(&ctx, &mut state, &env, "Skip Setup"));
         assert_eq!(state.keys.style, KeyStyle::SoftPresenter);
+        assert_eq!(state.slide_click(), SlideClick::One);
         assert!(!state.end_mark);
-        // Answered as things stand, nothing changes: someone with SoftProjector's keys and no
-        // end mark who runs it again keeps both.
+        // Answered as things stand, nothing changes: someone with SoftProjector's keys, no end
+        // mark and one click chosen in Settings who runs it again keeps all three.
         let mut state = home("from-again");
         state.setup_done = true;
         state.keys.set_style(KeyStyle::SoftProjector);
+        state.choose_slide_click(SlideClick::One);
         state.setup = Some(Setup::opened_at("ready"));
         let ready = draw(&ctx, &mut state, &env);
         assert_eq!(state.setup.as_ref().unwrap().from_softprojector, Some(true));
         assert!(said(&ready, "SoftProjector\u{2019}s keys") && !said(&ready, "*\u{a0}*\u{a0}*"), "{ready:?}");
         assert!(press(&ctx, &mut state, &env, "Start Using SoftPresenter"));
         assert_eq!(state.keys.style, KeyStyle::SoftProjector);
+        assert_eq!(state.slide_click(), SlideClick::One);
+        assert!(!state.end_mark);
+        // Run again and answered No: the Standard keys, one click, and the mark off.
+        let mut state = home("from-no");
+        state.setup_done = true;
+        state.keys.set_style(KeyStyle::SoftProjector);
+        state.end_mark = true;
+        assert_eq!(state.slide_click(), SlideClick::Double);
+        state.setup = Some(Setup::new());
+        assert!(press(&ctx, &mut state, &env, "No"));
+        state.setup.as_mut().unwrap().step = Step::Ready;
+        assert!(press(&ctx, &mut state, &env, "Start Using SoftPresenter"));
+        assert_eq!(state.keys.style, KeyStyle::SoftPresenter);
+        assert_eq!(state.slide_click(), SlideClick::One);
         assert!(!state.end_mark);
         // A Mac hears of Esc alone, its F keys being its own.
         let mut state = home("from-mac");
         let mac = draw(&ctx, &mut state, &Env { system: System::Mac, ..env.clone() });
-        assert!(said(&mac, "Yes keeps SoftProjector\u{2019}s Esc, which hides the words") && !said(&mac, "F5"));
+        assert!(
+            said(
+                &mac,
+                "Yes keeps SoftProjector\u{2019}s Esc, which hides the words and leaves the background up, its double-click to show a slide"
+            ) && !said(&mac, "F5")
+        );
     });
 }
 

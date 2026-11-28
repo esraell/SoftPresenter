@@ -2812,7 +2812,6 @@ impl HomeState {
     /// it, a double-click (or one click), forgetting a choice made in Settings › Keys. A layout
     /// already chosen is left as it is, with any rows changed by hand in it; changing the layout
     /// sets every row to the new layout's, as the Key layout switch does.
-    #[cfg_attr(not(test), allow(dead_code))] // Called by the first-time setup's question.
     pub fn set_coming_from_softprojector(&mut self, coming: bool) {
         let style =
             if coming { crate::key_table::KeyStyle::SoftProjector } else { crate::key_table::KeyStyle::SoftPresenter };
