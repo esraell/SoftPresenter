@@ -12,9 +12,11 @@
 //!   has it noted the first time it is looked at.)
 //!
 //! A library that doesn't pass is as if it weren't there: NDI "isn't installed", the log says
-//! why, and Install NDI puts a good one in its place. The answer is kept for as long as the
-//! file's size and date stay the same, so the file is read through once, on a thread of its
-//! own or on NDI's, never on the window's.
+//! why, and Install NDI puts a good one in its place. The answer is kept only for as long as
+//! the file is the very same one, unchanged, as the system itself tells it (its inode and
+//! change time, which a program can't set, with its size): so the file is read through once,
+//! on a thread of its own or on NDI's, never on the window's, and again the moment anything
+//! replaces it or writes to it, whatever size and date the new one is given.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -25,10 +27,34 @@ use sha2::{Digest, Sha256};
 
 use super::{INFO_FILE, Installed};
 
+/// What tells one file from another under the same name, by what a program that writes
+/// files can't choose: which file it is on its disk and when the system last saw it change
+/// (its inode and change time), with its size. A file put in its place, or written again, has
+/// another, whatever size and date it is given. (Where the system has no such thing, its size
+/// and date.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Seen {
+    size: u64,
+    file: (u64, u64),
+    changed: (i64, i64),
+    written: Option<SystemTime>,
+}
+
+fn seen(about: &std::fs::Metadata) -> Seen {
+    #[cfg(unix)]
+    let (file, changed) = {
+        use std::os::unix::fs::MetadataExt;
+        ((about.dev(), about.ino()), (about.ctime(), about.ctime_nsec()))
+    };
+    #[cfg(not(unix))]
+    let (file, changed) = ((0, 0), (0, 0));
+    Seen { size: about.len(), file, changed, written: about.modified().ok() }
+}
+
 /// What has been found out, and what is being found out now.
 #[derive(Default)]
 struct Known {
-    answers: HashMap<PathBuf, (u64, Option<SystemTime>, bool)>,
+    answers: HashMap<PathBuf, (Seen, bool)>,
     asking: HashSet<PathBuf>,
 }
 
@@ -81,12 +107,12 @@ pub fn check(runtime: &Path, may_wait: bool) -> Option<bool> {
 
 fn check_with(runtime: &Path, may_wait: bool, verify: fn(&Path) -> Result<(), String>) -> Option<bool> {
     let about = std::fs::metadata(runtime).ok()?;
-    let now = (about.len(), about.modified().ok());
+    let now = seen(&about);
     let path = runtime.to_path_buf();
     {
         let mut known = known().lock().ok()?;
-        if let Some((len, date, passed)) = known.answers.get(&path)
-            && (*len, *date) == now
+        if let Some((then, passed)) = known.answers.get(&path)
+            && *then == now
         {
             return Some(*passed);
         }
@@ -101,7 +127,7 @@ fn check_with(runtime: &Path, may_wait: bool, verify: fn(&Path) -> Result<(), St
         }
         if let Ok(mut known) = known().lock() {
             known.asking.remove(&path);
-            known.answers.insert(path, (now.0, now.1, found.is_ok()));
+            known.answers.insert(path, (now, found.is_ok()));
         }
         found.is_ok()
     };
@@ -196,6 +222,40 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert_eq!(check_with(&other, false, by_size), Some(true));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_swapped_for_one_of_the_same_size_and_date_is_checked_again() {
+        fn is_good(file: &Path) -> Result<(), String> {
+            if std::fs::read(file).is_ok_and(|bytes| bytes == b"good") {
+                Ok(())
+            } else {
+                Err("not the good one".into())
+            }
+        }
+        let folder = folder("swapped");
+        let runtime = folder.join("libndi");
+        std::fs::write(&runtime, b"good").unwrap();
+        let date = std::fs::metadata(&runtime).unwrap().modified().unwrap();
+        assert_eq!(check_with(&runtime, true, is_good), Some(true));
+        // Another file of the same size, given the same date, put in its place.
+        let other = folder.join("other");
+        std::fs::write(&other, b"evil").unwrap();
+        std::fs::File::options().write(true).open(&other).unwrap().set_modified(date).unwrap();
+        std::fs::rename(&other, &runtime).unwrap();
+        let about = std::fs::metadata(&runtime).unwrap();
+        assert_eq!((about.len(), about.modified().unwrap()), (4, date), "the same size and date");
+        assert_eq!(check_with(&runtime, true, is_good), Some(false), "it is checked again, and refused");
+        // The same file written again in place, with its date put back: checked again too.
+        std::fs::write(&runtime, b"good").unwrap();
+        std::fs::File::options().write(true).open(&runtime).unwrap().set_modified(date).unwrap();
+        assert_eq!(check_with(&runtime, true, is_good), Some(true));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&runtime, b"evil").unwrap();
+        std::fs::File::options().write(true).open(&runtime).unwrap().set_modified(date).unwrap();
+        assert_eq!(check_with(&runtime, true, is_good), Some(false));
         let _ = std::fs::remove_dir_all(&folder);
     }
 }
