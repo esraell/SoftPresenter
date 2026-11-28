@@ -53,6 +53,7 @@ Settings and playlists that couldn't be saved are tried again.
 - **Double-click with the whole passage on one slide.** With Options › Each slide shows set to The whole passage, a double-click on a verse made its whole chapter into one slide, starting at verse 1. Now it shows only the verse you double-clicked.
 - **Double-click on a verse numbered another way.** A double-click on a verse that the first translation numbers in another chapter, such as Romans 16:25 beside the Synodal, opened the wrong chapter with its verse 1 picked, and one with no match there opened without a word. Now a double-click is exactly one click and Enter: it shows that verse, or says there is no such verse, as one click does.
 - **Shift-click after the first verse.** In the Bible view's keypad and lists, a Shift-click straight after the first verse clicked since SoftPresenter started took only the verse Shift-clicked. Now it takes the passage between the two, as it does after any other verse.
+- **Shift-click after another chapter.** After a passage of another chapter was opened from History, typed in, or opened from the playlist, a Shift-click on a verse took the passage from the verse clicked in the chapter before. Now it takes that verse alone, as after a click on a chapter.
 
 ## 0.9.0-dev.29 — 27 November 2026 (development build)
 

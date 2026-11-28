@@ -1379,8 +1379,11 @@ impl BiblePage {
             }
             self.list_numbering = Some(page.info.numbering);
         }
+        // Another chapter, however it came (the History, typed, a playlist's, `sp bible`): a
+        // verse a Shift-click would run from was of the chapter before, and is let go of.
         if (there.start.book, there.start.chapter) != (self.list_book, self.list_chapter) {
             (self.list_book, self.list_chapter) = (there.start.book, there.start.chapter);
+            self.list_from = None;
             self.list_scroll = true;
         }
     }
@@ -10889,6 +10892,34 @@ mod tests {
         shift_click_list_row(&ctx, &mut show, &mut state, ("verse", 4u16), 2.0);
         assert_eq!(state.bible.lookup, "Psalm 51:2-4", "the verses clicked, as the page counts them");
         assert_eq!(state.bible.shown, "Псалтирь 50:4-6");
+    }
+
+    #[test]
+    fn a_passage_of_another_chapter_from_anywhere_lets_go_of_the_verse_a_shift_click_runs_from() {
+        let mut page = BiblePage { slots: Some([2, 3]), ..BiblePage::default() };
+        page.list_book = sp_bible::BOOKS.iter().position(|book| book.code == "JOH").unwrap();
+        page.list_chapter = 3;
+        crate::bible_page::choose(
+            &mut page,
+            crate::bible_page::Choice::Verse { verse: 2, shift: false, double: false },
+            None,
+        );
+        assert_eq!(page.list_from, Some(2), "a click on verse 2");
+        // The same chapter again, from the History: the verse stays where a Shift-click runs from.
+        page.open_kept("John 3:16".to_owned(), None, None);
+        assert_eq!((page.list_chapter, page.list_from), (3, Some(2)));
+        // Another chapter, from the History: let go of, as a click on a chapter lets go of it.
+        page.open_kept("John 4:1".to_owned(), None, None);
+        assert_eq!((page.list_chapter, page.list_from), (4, None));
+        // Typed in the reference field, and a playlist's passage, the same.
+        page.list_from = Some(2);
+        page.lookup = "Romans 8:1".to_owned();
+        page.look_up(None);
+        assert_eq!(page.list_from, None, "typed");
+        page.list_from = Some(2);
+        let saved = crate::service::SavedPassage { lookup: "John 1:1".to_owned(), ..page.settings() };
+        page.open_saved(&saved, None, SlidesOf::Passage);
+        assert_eq!(page.list_from, None, "a playlist's passage");
     }
 
     #[test]
