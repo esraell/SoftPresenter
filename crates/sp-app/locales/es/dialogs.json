@@ -37,6 +37,15 @@
   "dialogs.live_menu.none": "Pon una diapositiva en pantalla para abrir su menú.",
   "dialogs.media.follows_folder": "{name} sigue una carpeta: saca el archivo de la carpeta.",
   "dialogs.already_running": "SoftPresenter ya está abierto o todavía se está cerrando: espera un momento y, si sigues sin ver su ventana, finalízalo en el Administrador de tareas.",
-  "dialogs.no_graphics": "No se encontró ningún dispositivo gráfico que SoftPresenter pueda usar.",
-  "dialogs.graphics_refused": "SoftPresenter no puede dibujar con los gráficos de este ordenador ({graphics}), así que no puede abrirse. Su registro dice por qué."
+  "dialogs.no_graphics.title": "SoftPresenter no puede abrirse",
+  "dialogs.no_graphics.none": "Los gráficos de este ordenador no pueden ejecutar SoftPresenter. No se encontró ningún dispositivo gráfico que pueda usar.",
+  "dialogs.no_graphics.refused": "Los gráficos de este ordenador no pueden ejecutar SoftPresenter. Rechazaron una parte que necesita para dibujar: {name}.",
+  "dialogs.no_graphics.mac": "Actualizar macOS puede arreglarlo: Ajustes del Sistema › General › Actualización de software. Si este Mac ya está al día, sus gráficos son demasiado antiguos para SoftPresenter.",
+  "dialogs.no_graphics.mac_before_13": "Actualizar macOS puede arreglarlo: Preferencias del Sistema › Actualización de software. Si este Mac ya está al día, sus gráficos son demasiado antiguos para SoftPresenter.",
+  "dialogs.no_graphics.windows": "Actualizar el controlador gráfico puede arreglarlo: consigue el más reciente del fabricante del ordenador, o de Intel, AMD o NVIDIA. Si ya es el más reciente, los gráficos de este ordenador son demasiado antiguos para SoftPresenter.",
+  "dialogs.no_graphics.linux": "Actualizar los controladores gráficos puede arreglarlo (Mesa, o los del fabricante de los gráficos). Si ya son los más recientes, los gráficos de este ordenador son demasiado antiguos para SoftPresenter.",
+  "dialogs.no_graphics.tell": "Si crees que debería funcionar, dinos qué ordenador es: {address}",
+  "dialogs.no_graphics.tell_name": "Si crees que debería funcionar, dinos qué ordenador es: {address} e incluye el nombre de arriba.",
+  "dialogs.no_graphics.quit": "Salir",
+  "dialogs.no_graphics.report": "Informar…"
 }

@@ -1121,7 +1121,21 @@ fn a_gpu_that_refuses_a_shader_ends_the_start_at_once_saying_which() {
     say(&format!("{}: the start ended after {:.1} s", run.name, began.elapsed().as_secs_f64()));
     assert!(!status.success(), "a start that couldn't draw ended with {status}{}", run.context());
     let said = start.stderr();
-    assert!(said.contains("SoftPresenter can't draw with this computer's graphics ("), "it said so: {said:?}");
+    // What happened, with the part refused by name; what may fix it on this system; where to
+    // tell us.
+    assert!(
+        said.contains(
+            "This computer's graphics can't run SoftPresenter. They refused a part it needs to draw: sp-render testing aid."
+        ),
+        "it said so: {said:?}"
+    );
+    assert!(said.contains(" may fix it"), "it said what may fix it: {said:?}");
+    assert!(
+        said.contains(
+            "tell us which computer this is: github.com/esraell/SoftPresenter/issues and include the name above."
+        ),
+        "it said where to tell us: {said:?}"
+    );
     // Which pipeline, and what the graphics said of it, are in the log (and on the standard error).
     let log = run.log();
     let why = log.lines().find(|line| line.contains("[gpu] The graphics (")).unwrap_or_default();

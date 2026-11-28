@@ -64,6 +64,7 @@ mod messages;
 mod mirror;
 mod ndi_download;
 mod ndi_in;
+mod no_graphics;
 mod notices;
 mod one_copy;
 mod output;
@@ -2777,8 +2778,9 @@ struct App {
     failed: bool,
     /// The start failed because nothing here can draw: no graphics device could be made, or
     /// the graphics refused the painter's shaders. Only that failure is shown in a message
-    /// window (`start_failed_window`); any other is said on the standard error, as before.
-    no_graphics: bool,
+    /// window (`no_graphics::Failure::show_window`); any other is said on the standard error,
+    /// as before.
+    no_graphics: Option<no_graphics::Failure>,
     /// Set when a test capture has been saved and the program should end.
     capture_done: bool,
     /// How often and how long the operator window is drawn, for the log.
@@ -2943,8 +2945,10 @@ impl App {
                 "gpu",
                 &format!("No graphics device could be used, after {:.1} s: {why}", making.elapsed().as_secs_f32()),
             );
-            self.no_graphics = true;
-            return Err(no_graphics_words(None));
+            let failure = no_graphics::Failure::NoDevice;
+            let words = failure.words(no_graphics::System::here());
+            self.no_graphics = Some(failure);
+            return Err(words);
         };
         let handle = &context.devices[device_id];
         // Which graphics the app drew with, for the log of a computer that draws slowly: and
@@ -3045,8 +3049,10 @@ impl App {
                     "gpu",
                     &format!("The graphics ({}) can't run the painter's shaders: {why}", chosen.name),
                 );
-                self.no_graphics = true;
-                return Err(no_graphics_words(Some(&chosen.name)));
+                let failure = no_graphics::Failure::refused(&why, &chosen.name);
+                let words = failure.words(no_graphics::System::here());
+                self.no_graphics = Some(failure);
+                return Err(words);
             }
         };
         let (preview, _) = thumbs.preview(&gpu, &mut egui_renderer, &Layers::default(), &self.theme);
@@ -13076,8 +13082,8 @@ impl ApplicationHandler<AppEvent> for App {
                 // Graphics that can't draw: someone who opened the app from the Dock or the Start
                 // menu sees no console, and without this the app would only be gone. Any other
                 // failed start (a display asked for that isn't there, say) is said above only.
-                if self.no_graphics && !self.quiet() {
-                    start_failed_window(&message);
+                if let Some(failure) = self.no_graphics.take().filter(|_| !self.quiet()) {
+                    failure.show_window(no_graphics::System::here());
                 }
                 self.failed = true;
                 self.left = true;
@@ -14059,38 +14065,6 @@ fn app_window(attrs: winit::window::WindowAttributes) -> winit::window::WindowAt
     attrs
 }
 
-/// What a start that found no graphics it can draw with says, in the app's language: with the
-/// name of the graphics when a device was made and its compiler then refused the painter's
-/// shaders.
-fn no_graphics_words(graphics: Option<&str>) -> String {
-    match graphics {
-        None => i18n::t("dialogs.no_graphics", "No graphics device was found that SoftPresenter can use.").to_owned(),
-        Some(name) => i18n::tf(
-            "dialogs.graphics_refused",
-            "SoftPresenter can't draw with this computer's graphics ({graphics}), so it can't start. Its log says why.",
-            &[("graphics", name)],
-        ),
-    }
-}
-
-/// Shows why the app couldn't start in a message of the system's own, and waits on the window's
-/// thread for it to be closed; the program ends after that, not before. No screen is open yet
-/// and nothing is on show, so no picture waits on it. The rest of the start is up, though: the
-/// control socket's thread listens (a command sent meanwhile waits for an answer that never
-/// comes), the screens' thread may run, and the copy still holds its data folder. So another
-/// start while the message is open is turned away as from any copy running: it asks this one to
-/// come to the front, gets no answer for ten seconds, and ends, on Windows with the message
-/// that SoftPresenter is already running or still closing (`one_copy`), once for each such
-/// start. Not tried on a real screen.
-fn start_failed_window(words: &str) {
-    let _ = rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Error)
-        .set_title("SoftPresenter")
-        .set_description(words)
-        .set_buttons(rfd::MessageButtons::Ok)
-        .show();
-}
-
 /// A graphics error nobody asked to catch, written in the log (a window program on Windows has no
 /// console for it to go to). One that comes on every frame is written once, then once a minute
 /// with how many times it came since, so it can't fill the log.
@@ -14681,7 +14655,7 @@ fn main() -> ExitCode {
         menu: None,
         running: None,
         failed: false,
-        no_graphics: false,
+        no_graphics: None,
         capture_done: false,
         home_timing: applog::Timing::new("operator window drawings"),
         quitting: None,

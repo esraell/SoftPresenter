@@ -1894,9 +1894,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   names the graphics, the shader and what was said of it. When no graphics device can be made
   at all, the log's `[gpu]` line says which graphics were tried, what each said and how long
   it took; that has not been tried, and making the device can itself take seconds (13 on the
-  Mac mini above, before the fix). Either way a message window says the app can't start,
-  unless the copy is a test's, and the program ends when its OK is pressed. The window has not
-  been tried on a screen.
+  Mac mini above, before the fix). Either way a message window, "SoftPresenter can't
+  start", says that this computer's graphics can't run SoftPresenter (with the name of the part
+  they refused, when one was), what may fix it on this system (updating macOS, by the path
+  that version of macOS has; the graphics driver on Windows; the drivers on Linux) and where to
+  tell us, with two keys: Quit, and Report…, which opens a new issue with only the version,
+  the system and the first line filled in. A test's copy shows no window and says the same on
+  the standard error. The program ends when a key is pressed. The window has not been tried
+  on a screen.
 - **NDI on Linux.** NDI Tools, which installs NDI's runtime on a Mac and on Windows, doesn't
   exist for Linux, so there, while NDI isn't installed, an NDI screen in the Screens window (and
   an NDI Source box in the inspector) has **Download NDI…** beside the ndi.video link. It
