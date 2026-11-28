@@ -937,8 +937,8 @@ pub struct BiblePage {
     /// The numbering `list_chapter` and `list_from` are in; another lets go of `list_from`.
     pub list_numbering: Option<sp_bible::Numbering>,
     pub list_scroll: bool,
-    /// A slide of the passage just looked up to put on screen once the app has it (a verse
-    /// double-clicked in the lists), by its place in the passage.
+    /// A slide of the passage just looked up to put on screen once the app has it (a slide of a
+    /// playlist's Bible passage clicked in the Service view), by its place in the passage.
     pub go_live: Option<usize>,
     /// Two verses made with the choices of the moment, for the Options panel's preview when
     /// no passage is showing, and the choices they were made with.
@@ -10447,6 +10447,29 @@ mod tests {
         row: impl std::hash::Hash + std::fmt::Debug,
         time: f64,
     ) -> Vec<Command> {
+        clicks_on_list_row(ctx, show, state, row, time, 1)
+    }
+
+    /// The same with two clicks in quick succession: a double-click, the app taking what each
+    /// click looked up after its frame, as it does.
+    fn double_click_list_row(
+        ctx: &egui::Context,
+        show: &mut Show,
+        state: &mut HomeState,
+        row: impl std::hash::Hash + std::fmt::Debug,
+        time: f64,
+    ) -> Vec<Command> {
+        clicks_on_list_row(ctx, show, state, row, time, 2)
+    }
+
+    fn clicks_on_list_row(
+        ctx: &egui::Context,
+        show: &mut Show,
+        state: &mut HomeState,
+        row: impl std::hash::Hash + std::fmt::Debug,
+        time: f64,
+        clicks: usize,
+    ) -> Vec<Command> {
         let id = crate::bible::list_row_id(row);
         // Out of view (the keypad's verses under a long book's chapters): the column is
         // scrolled down to it, as the operator would, until the scrolling has settled.
@@ -10482,9 +10505,13 @@ mod tests {
             modifiers: Modifiers::NONE,
         };
         let mut commands = frame_then_app(ctx, show, state, vec![Event::PointerMoved(at)], time);
-        commands.extend(frame_then_app(ctx, show, state, vec![press(true)], time + 0.05));
-        commands.extend(frame_then_app(ctx, show, state, vec![press(false)], time + 0.1));
-        commands.extend(frame_then_app(ctx, show, state, vec![], time + 0.15));
+        let mut clock = time;
+        for _ in 0..clicks {
+            commands.extend(frame_then_app(ctx, show, state, vec![press(true)], clock + 0.05));
+            commands.extend(frame_then_app(ctx, show, state, vec![press(false)], clock + 0.1));
+            clock += 0.1;
+        }
+        commands.extend(frame_then_app(ctx, show, state, vec![], clock + 0.05));
         commands
     }
 
@@ -10648,58 +10675,177 @@ mod tests {
         assert!(state.prefs().bible_lists_hidden, "and stay hidden at the next start");
     }
 
-    #[test]
-    fn a_double_click_in_the_lists_loads_the_chapter_and_picks_a_verse_without_putting_it_on() {
-        let mut state = HomeState { bible_open: true, ..HomeState::default() };
-        state.bible.slots = Some([0, 1]);
-        // A computer set to Russian: with nothing typed yet, the operator reads Russian.
-        state.bible.system_language = crate::system_language::SystemLanguage::answered("ru-RU");
-        state.bible.list_book = sp_bible::BOOKS.iter().position(|book| book.code == "JOH").unwrap();
-        state.bible.list_chapter = 3;
+    /// A Bible view as the app starts it (the Russian Synodal first, the King James Version
+    /// second), its chapter open in the keypad or the lists, during a service: the first song's
+    /// first slide on screen.
+    fn bible_view_at(books: BookPicker, book: &str, chapter: u16) -> (egui::Context, Show, HomeState) {
         let ctx = egui::Context::default();
-        let show = show(3);
-        let mut clock = 0.0;
-        let mut run = |state: &mut HomeState, events: Vec<Event>| {
-            clock += 0.05;
-            let raw = RawInput { focused: true, time: Some(clock), events, ..input(None) };
-            let output = ctx.run_ui(raw, |ui| {
-                home_ui(ui, &show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
-            });
-            output.drop_without_applying_deltas();
-        };
-        run(&mut state, Vec::new());
-        run(&mut state, Vec::new());
-        let double_click = |run: &mut dyn FnMut(&mut HomeState, Vec<Event>), state: &mut HomeState, at: egui::Pos2| {
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { bible_open: true, ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        state.bible.books = books;
+        state.bible.list_book = sp_bible::BOOKS.iter().position(|it| it.code == book).unwrap();
+        state.bible.list_chapter = chapter;
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(&ctx, &mut show, &mut state, vec![], 0.05);
+        (ctx, show, state)
+    }
+
+    /// The name of the slide on screen (a Bible slide is named by its verses), if any.
+    fn live_slide_name(show: &Show) -> Option<String> {
+        let live = show.live()?;
+        show.presentations()[live.presentation].slide(live.slide).map(|(group, _)| group.name.clone())
+    }
+
+    #[test]
+    fn a_double_click_on_a_verse_puts_it_on_screen_with_its_chapter_round_it() {
+        for (computer, books) in [
+            (None, BookPicker::Keypad),
+            (None, BookPicker::Lists),
+            (Some("ru-RU"), BookPicker::Keypad),
+            (Some("ru-RU"), BookPicker::Lists),
+        ] {
+            let (ctx, mut show, mut state) = bible_view_at(books, "JOH", 3);
+            if let Some(computer) = computer {
+                state.bible.system_language = crate::system_language::SystemLanguage::answered(computer);
+            }
+            let commands = double_click_list_row(&ctx, &mut show, &mut state, ("verse", 5u16), 1.0);
+            // Its chapter is the passage, a slide a verse, and the verse is on screen: put on by
+            // Enter, as picking it and pressing Enter does, not by the frame itself.
+            assert!(!goes_on_screen(&commands), "{commands:?}");
+            assert_eq!(state.bible.shown, "От Иоанна 3:1-36", "{computer:?} {books:?}");
+            let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+            assert_eq!(show.presentations()[slot].slide_count(), 36);
+            assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide: 4 }), "{computer:?} {books:?}");
+            assert_eq!(live_slide_name(&show).as_deref(), Some("От Иоанна 3:5"));
+            assert_eq!(state.pick(&show), None, "the pick went on screen");
+            // Space goes on to the next verse.
+            assert_eq!(press_step(&mut show, &state, true), None);
+            assert_eq!(live_slide_name(&show).as_deref(), Some("От Иоанна 3:6"), "{computer:?} {books:?}");
+
+            // One click on another verse, with a passage on screen: picked, in the other place,
+            // and nothing else goes on screen.
+            let commands = click_list_row(&ctx, &mut show, &mut state, ("verse", 7u16), 2.0);
+            assert!(!goes_on_screen(&commands), "{commands:?}");
+            assert_eq!(live_slide_name(&show).as_deref(), Some("От Иоанна 3:6"), "one click puts nothing on");
+            let other = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+            assert_ne!(other, slot, "the passage on screen is left alone");
+            assert_eq!(state.pick(&show), Some(SlideRef { presentation: other, slide: 6 }));
+
+            // A double-click with a passage on screen: the new verse, from the other place.
+            double_click_list_row(&ctx, &mut show, &mut state, ("verse", 9u16), 3.0);
+            assert_eq!(show.live().map(|live| live.presentation), Some(other));
+            assert_eq!(live_slide_name(&show).as_deref(), Some("От Иоанна 3:9"), "{computer:?} {books:?}");
+        }
+    }
+
+    #[test]
+    fn quick_clicks_on_two_keys_are_two_clicks_and_put_nothing_on_screen() {
+        // A double-click is two clicks on the same place: a chapter and then a verse, or a verse
+        // and the one beside it, clicked quickly are each a click, and nothing goes on screen.
+        for books in [BookPicker::Keypad, BookPicker::Lists] {
+            for (first, second, then) in [
+                (("chapter", 3u16), ("verse", 5u16), "От Иоанна 3:5"),
+                (("verse", 5u16), ("verse", 6u16), "От Иоанна 3:6"),
+            ] {
+                let (ctx, mut show, mut state) = bible_view_at(books, "JOH", 3);
+                let at = |row| ctx.read_response(crate::bible::list_row_id(row)).expect("drawn").rect.center();
+                let (a, b) = (at(first), at(second));
+                let press = |pos, pressed| Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                };
+                let mut commands = Vec::new();
+                for (events, time) in [
+                    (vec![Event::PointerMoved(a)], 1.0),
+                    (vec![press(a, true)], 1.05),
+                    (vec![press(a, false)], 1.1),
+                    (vec![Event::PointerMoved(b)], 1.12),
+                    (vec![press(b, true)], 1.15),
+                    (vec![press(b, false)], 1.2),
+                    (vec![], 1.25),
+                ] {
+                    commands.extend(frame_then_app(&ctx, &mut show, &mut state, events, time));
+                }
+                assert!(!goes_on_screen(&commands), "{books:?} {first:?} {second:?}: {commands:?}");
+                assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "{books:?} {first:?}");
+                assert_eq!(state.bible.shown, then, "the second click picked its verse");
+                let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+                assert_eq!(state.pick(&show).map(|at| at.presentation), Some(slot));
+            }
+        }
+    }
+
+    #[test]
+    fn a_shift_click_after_a_verse_still_takes_the_passage_and_puts_nothing_on() {
+        for books in [BookPicker::Keypad, BookPicker::Lists] {
+            let (ctx, mut show, mut state) = bible_view_at(books, "JOH", 3);
+            // The chapter looked up first, as in a service: the lists then know its numbering.
+            click_list_row(&ctx, &mut show, &mut state, ("chapter", 3u16), 0.5);
+            click_list_row(&ctx, &mut show, &mut state, ("verse", 2u16), 1.0);
+            let at = ctx.read_response(crate::bible::list_row_id(("verse", 4u16))).expect("drawn").rect.center();
             let press = |pressed| Event::PointerButton {
                 pos: at,
                 button: egui::PointerButton::Primary,
                 pressed,
-                modifiers: Modifiers::NONE,
+                modifiers: Modifiers::SHIFT,
             };
-            run(state, vec![Event::PointerMoved(at)]);
-            for _ in 0..2 {
-                run(state, vec![press(true)]);
-                run(state, vec![press(false)]);
+            let mut commands = Vec::new();
+            for (events, time) in [
+                (vec![Event::ModifiersChanged(Modifiers::SHIFT), Event::PointerMoved(at)], 2.0),
+                (vec![press(true)], 2.05),
+                (vec![press(false)], 2.1),
+                (vec![Event::ModifiersChanged(Modifiers::NONE)], 2.15),
+            ] {
+                commands.extend(frame_then_app(&ctx, &mut show, &mut state, events, time));
             }
-        };
-        // The chapter: all of it.
-        let chapter = ctx.read_response(crate::bible::list_row_id(("chapter", 3u16))).unwrap().rect.center();
-        double_click(&mut run, &mut state, chapter);
-        assert_eq!(state.bible.lookup, "От Иоанна 3:1-36");
-        assert_eq!(state.bible.go_live, None, "nothing goes on screen");
-        // A verse: its chapter, with its slide picked for Enter; nothing goes on screen. (A
-        // pause first, or the clicks would count on from the chapter's as a triple click.)
-        state.bible.pending = None;
-        for _ in 0..10 {
-            run(&mut state, Vec::new());
+            assert_eq!(state.bible.shown, "От Иоанна 3:2-4", "{books:?}");
+            assert!(!goes_on_screen(&commands), "{commands:?}");
+            assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "the song stays on screen");
         }
-        let verse = ctx.read_response(crate::bible::list_row_id(("verse", 5u16))).unwrap().rect.center();
-        double_click(&mut run, &mut state, verse);
-        assert_eq!(state.bible.lookup, "От Иоанна 3:1-36");
-        assert!(state.bible.pending.is_some());
-        assert_eq!(state.bible.go_live, None, "nothing goes on screen");
-        let picked = state.picked.as_ref().map(|picked| picked.at.slide);
-        assert_eq!(picked, Some(4), "the fifth slide picked, one verse a slide");
+    }
+
+    #[test]
+    fn a_double_click_with_one_slide_for_the_whole_passage_shows_the_verse_alone() {
+        // Options › The whole passage: one slide for the passage. A double-click used to make the
+        // whole chapter that one slide, from verse 1; it shows the verse double-clicked.
+        for books in [BookPicker::Keypad, BookPicker::Lists] {
+            let (ctx, mut show, mut state) = bible_view_at(books, "JOH", 3);
+            state.bible.options.break_on_new_verse = false;
+            double_click_list_row(&ctx, &mut show, &mut state, ("verse", 5u16), 1.0);
+            assert_eq!(state.bible.shown, "От Иоанна 3:5", "{books:?}");
+            let live = show.live().expect("on screen");
+            assert_eq!(Some(live.presentation), state.bible.slots.map(|slots| slots[state.bible.showing]));
+            assert_eq!(show.presentations()[live.presentation].slide_count(), 1);
+            assert_eq!(live_slide_name(&show).as_deref(), Some("От Иоанна 3:5"), "{books:?}");
+        }
+    }
+
+    #[test]
+    fn a_double_click_on_a_psalm_numbered_another_way_shows_that_verse() {
+        // An English computer reads the page in the King James Version's numbering; the Synodal,
+        // first, numbers the slides. Psalm 51:5 is its Psalm 50:7 (two verses of heading), and
+        // Psalm 10:5 is in its Psalm 9 (one psalm there).
+        let psalms = sp_bible::BOOKS.iter().position(|book| book.code == "PSA").unwrap();
+        for (chapter, slide, then, next) in
+            [(51u16, 6, "Псалтирь 50:7", "Псалтирь 50:8"), (10, 25, "Псалтирь 9:26", "Псалтирь 9:27")]
+        {
+            let (ctx, mut show, mut state) = bible_view_at(BookPicker::Lists, "PSA", chapter);
+            let (kjv, syn) = {
+                let bibles = state.bible.bibles_in_use();
+                (bibles[1].info.numbering, bibles[0].info.numbering)
+            };
+            let asked = sp_bible::convert(sp_bible::VerseRef { book: psalms, chapter, verse: 5 }, kjv, syn);
+            assert_eq!(sp_bible::label_in("ru", asked, asked), then, "as the Bibles' numberings have it");
+            double_click_list_row(&ctx, &mut show, &mut state, ("verse", 5u16), 1.0);
+            let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+            assert_eq!(show.live(), Some(SlideRef { presentation: slot, slide }), "Psalm {chapter}");
+            assert_eq!(live_slide_name(&show).as_deref(), Some(then), "Psalm {chapter}:5");
+            assert_eq!(press_step(&mut show, &state, true), None);
+            assert_eq!(live_slide_name(&show).as_deref(), Some(next));
+        }
     }
 
     /// Drags in the Service view's grid from one point to another, over a few frames.
@@ -14016,8 +14162,10 @@ mod tests {
         show
     }
 
-    /// What the app does after drawing a frame: carries out its commands, and puts a passage
-    /// just looked up into its place (and on screen, if a verse was double-clicked).
+    /// What the app does after drawing a frame: carries out its commands, puts a passage just
+    /// looked up into its place (and on screen, if a playlist's passage was clicked), then
+    /// presses Enter if the window asked for it (a verse double-clicked, Show Selected), in the
+    /// order `window_event` in `main.rs` does.
     fn as_the_app_does(show: &mut Show, state: &mut HomeState, commands: Vec<Command>) {
         for command in commands {
             show.apply(command);
@@ -14027,6 +14175,9 @@ mod tests {
             if let Some(slide) = state.bible.go_live.take() {
                 show.apply(Command::GoTo(SlideRef { presentation: slot, slide }));
             }
+        }
+        if std::mem::take(&mut state.enter_after) {
+            press_enter(show, state);
         }
         // A song of the song catalog to look at goes into its place; songs put to use are filed
         // (as `catalog_cli` does, under the key the window gave them).

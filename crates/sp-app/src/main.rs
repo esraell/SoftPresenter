@@ -13985,7 +13985,8 @@ impl ApplicationHandler<AppEvent> for App {
                 // screen, so the output is untouched.
                 if let Some((slot, passage)) = self.running.as_mut().and_then(|r| r.home_state.bible.pending.take()) {
                     self.show.replace_presentation(slot, Arc::new(passage));
-                    // A verse double-clicked in the Bible lists goes on screen, in its chapter.
+                    // A slide of a playlist's passage clicked goes on screen once the passage is in
+                    // its place. (A verse double-clicked in the Bible view goes on by Enter, below.)
                     let go_live = self.running.as_mut().and_then(|r| r.home_state.bible.go_live.take());
                     if let Some(slide) = go_live {
                         self.apply(vec![Command::GoTo(sp_engine::SlideRef { presentation: slot, slide })]);
@@ -14005,9 +14006,10 @@ impl ApplicationHandler<AppEvent> for App {
                 self.handle_songbooks();
                 self.handle_free_songbooks();
                 self.handle_catalog_songs();
-                // Show Selected pressed in the find box or Scripture Lookup: once what it opened
-                // is in the show (the song chosen, the passage in its place, a catalog song in
-                // its own), Enter puts it on screen.
+                // Show Selected pressed in the find box or Scripture Lookup, or a verse
+                // double-clicked in the Bible view's keypad or lists: once what it opened is in
+                // the show (the song chosen, the passage in its place, a catalog song in its
+                // own), Enter puts it on screen.
                 if self.running.as_mut().is_some_and(|running| std::mem::take(&mut running.home_state.enter_after)) {
                     self.enter_key();
                 }

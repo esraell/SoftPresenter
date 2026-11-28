@@ -3,8 +3,9 @@
 //!
 //! Nothing here puts anything on screen but a click on a verse on the page that has a slide (any
 //! verse of the chapter, with a slide a verse; the passage, made into one slide), as a click on
-//! the slide does. A book, chapter or verse clicked in the left column, or a verse on the page
-//! with no slide, is looked up and its first verse picked, for Enter.
+//! the slide does, and a verse double-clicked in the left column, which goes on screen as Enter
+//! puts a verse picked on. A book, chapter or verse clicked once in the left column, or a verse on
+//! the page with no slide, is looked up and its first verse picked, for Enter.
 
 use std::sync::Arc;
 
@@ -31,22 +32,30 @@ pub enum Choice {
     /// A chapter of the book open.
     Chapter(u16),
     /// A verse of the chapter open: that verse alone, or with Shift the passage from the verse
-    /// clicked before; a double-click takes the whole chapter with the verse picked.
+    /// clicked before; a double-click puts the verse on screen (see [`choose`]).
     Verse { verse: u16, shift: bool, double: bool },
 }
 
 /// Looks up what was chosen, numbered as the page is read (the keypad, the lists and the page
-/// number chapters and verses as the page's Bible does; see `BiblePage::page_bible`), and
-/// returns the slide to pick for Enter when a passage was made: the passage's first verse, or the
-/// verse double-clicked. A book or chapter is the whole chapter; a verse is that verse alone (its
-/// slides its chapter's, with a slide a verse). Nothing goes on screen.
-pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Option<usize> {
+/// number chapters and verses as the page's Bible does; see `BiblePage::page_bible`). When a
+/// passage was made, returns the slide to pick for Enter (the passage's first verse, or the verse
+/// double-clicked) and whether that slide is to go on screen now, as Enter would put it on: only
+/// for a verse double-clicked, and only when the slide is that verse's.
+///
+/// A book or chapter is the whole chapter; a verse is that verse alone (its slides its chapter's,
+/// with a slide a verse). A verse double-clicked is its whole chapter, with a slide a verse, so
+/// Space goes on to the next verse; with one slide for the whole passage (Options) it is that
+/// verse alone, as one click makes it, so the slide shown is the verse and never its chapter on
+/// one slide. Nothing goes on screen here: the caller picks the slide, and asks the app for
+/// Enter (`HomeState::enter_after`) when it is to go on.
+pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Option<(usize, bool)> {
     let lead = page.lead().and_then(|lead| page.shelf.get(lead).ok())?;
     let book = match choice {
         Choice::Book(book) => book,
         _ => page.list_book,
     };
     let bible = page.page_bible_for(book).unwrap_or_else(|| lead.clone());
+    let show_it = matches!(choice, Choice::Verse { double: true, .. });
     let mut double_clicked = None;
     let reference = match choice {
         Choice::Book(book) => {
@@ -63,10 +72,12 @@ pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Opti
         Choice::Verse { verse, shift, double } => {
             let (book, chapter) = (page.list_book, page.list_chapter);
             let place = |verse| VerseRef { book, chapter, verse };
-            if double {
+            if double && page.options.break_on_new_verse {
                 double_clicked = Some(sp_bible::convert(place(verse), bible.info.numbering, lead.info.numbering));
                 crate::bible::in_its_chapter(&bible, place(verse)).0
             } else {
+                // One slide for the whole passage: a verse double-clicked is that verse alone.
+                let shift = shift && !double;
                 let from = page.list_from.filter(|_| shift);
                 if !shift {
                     page.list_from = Some(verse);
@@ -81,9 +92,15 @@ pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Opti
     // A search's verses listed give way to the passage.
     page.found.clear();
     page.open_read(reference, bible.info.numbering, live);
-    page.pending
-        .is_some()
-        .then(|| double_clicked.and_then(|verse| page.slide_of(verse)).unwrap_or(page.passage_slides().start))
+    page.pending.as_ref()?;
+    // The verse double-clicked among its chapter's slides, or the one slide of a verse alone.
+    // One its chapter's slides don't hold (a verse the first translation lacks) is not put on
+    // screen: the passage's first verse is picked instead, as before.
+    let verse = match double_clicked {
+        Some(verse) => page.slide_of(verse),
+        None => show_it.then(|| page.passage_slides().start),
+    };
+    Some(verse.map_or((page.passage_slides().start, false), |slide| (slide, show_it)))
 }
 
 /// The passage now shown, as the first translation reads it.
@@ -154,18 +171,23 @@ pub fn left_column(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
         }
         let picked = match state.bible.side {
             BibleSide::Books => books(ui, &mut state.bible, live),
-            BibleSide::History => history(ui, &mut state.bible, live),
+            BibleSide::History => history(ui, &mut state.bible, live).map(|slide| (slide, false)),
         };
-        if let Some(slide) = picked {
-            state.pick_made_verse(show, slide);
+        // A verse double-clicked is picked and goes on screen as Enter puts a verse picked on: the
+        // app presses Enter for it once the passage is in the show.
+        if let Some((slide, show_it)) = picked
+            && state.pick_made_verse(show, slide)
+            && show_it
+        {
+            state.enter_after = true;
         }
     });
     round_corners(ui, column_panel(shown.response.rect, Column::Left));
 }
 
 /// The Books side: the heading, then the book, chapter and verse lists. Returns the slide to
-/// pick when something was looked up.
-fn books(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) -> Option<usize> {
+/// pick when something was looked up, and whether to put it on screen (see [`choose`]).
+fn books(ui: &mut egui::Ui, page: &mut BiblePage, live: Option<usize>) -> Option<(usize, bool)> {
     let width = ui.available_width();
     let (head, _) = ui.allocate_exact_size(vec2(width, 35.0), Sense::hover());
     cap(ui, pos2(head.min.x + 8.0, head.min.y + 16.4), Align2::LEFT_CENTER, t("biblepage.book", "Book"), TEXT_DIM);
@@ -366,7 +388,7 @@ fn lists(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<C
         }
     });
     // Verses of the chapter open: Shift-click takes the passage from the verse clicked before,
-    // a double-click the whole chapter with the verse picked.
+    // a double-click puts the verse on screen.
     let verses =
         if open_chapter == 0 || open_chapter > chapters { 0 } else { bible.last_verse(open_book, open_chapter) };
     numbers_column(ui, "bible verse list", verse_column, t("biblepage.lists.verse", "Verse"), |ui, width| {
@@ -385,8 +407,10 @@ fn lists(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<C
                 continue;
             }
             let row = Row { text: &verse.to_string(), chosen, has: true, number: true };
-            let response = list_row(ui, list_row_id(("verse", verse)), rect, row)
-                .on_hover_text(t("biblepage.lists.verse.hint", "Shift-click another to take the passage between them"));
+            let response = list_row(ui, list_row_id(("verse", verse)), rect, row).on_hover_text(t(
+                "biblepage.lists.verse.hint",
+                "Click to pick. Double-click to put it on screen. Shift-click another for a passage.",
+            ));
             if response.double_clicked() {
                 clicked = Some(Choice::Verse { verse, shift: false, double: true });
             } else if response.clicked() {
@@ -554,7 +578,7 @@ fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<
                 }
             });
             // The verses of the chapter open: Shift takes the passage from the verse clicked
-            // before; a double-click the whole chapter with the verse picked.
+            // before; a double-click puts the verse on screen.
             let verses = if open_chapter == 0 || open_chapter > chapters {
                 0
             } else {
@@ -575,7 +599,7 @@ fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<
                 let response = key(ui, list_row_id(("verse", verse)), rect, &verse.to_string(), true, chosen)
                     .on_hover_text(t(
                         "biblepage.keypad.verse.hint",
-                        "Click a verse; Shift-click another to take the passage between them",
+                        "Click to pick. Double-click to put it on screen.",
                     ));
                 if response.double_clicked() {
                     clicked = Some(Choice::Verse { verse, shift: false, double: true });
@@ -1113,7 +1137,7 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
                 (state.bible.list_book, state.bible.list_chapter) = (book, number);
             }
             let choice = Choice::Verse { verse: verse.verse, shift, double: false };
-            if let Some(slide) = choose(&mut state.bible, choice, live) {
+            if let Some((slide, _)) = choose(&mut state.bible, choice, live) {
                 state.pick_made_verse(show, slide);
             }
         }

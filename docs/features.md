@@ -1425,10 +1425,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   full under Old Testament and New Testament (a long name ends in an ellipsis), the chosen row a
   well with a faint ring. Both do the same: a click on a book loads its first chapter, and a
   single click on a chapter that chapter, the whole chapter being the passage; a click on a verse
-  then makes that verse alone the passage, Shift-click makes a passage from the verse clicked
-  before, and a double-click opens the whole chapter with that verse picked. What a click loads
-  has its first verse (or the verse double-clicked) picked, so Enter puts it on screen and Next
-  goes on through its chapter; nothing goes on screen from them. The
+  then makes that verse alone the passage, and Shift-click makes a passage from the verse clicked
+  before. What a click loads has its first verse picked, so Enter puts it on screen and Next goes
+  on through its chapter; one click puts nothing on screen. A double-click on a verse puts it on
+  screen, as picking it and pressing Enter does: the whole chapter is the passage, a slide a verse, so Next goes on to the
+  next verse; with one slide for the whole passage (Options) the verse alone is the passage, so
+  the slide shown is that verse and never its chapter on one slide. Hovering over a verse says
+  so ("Click to pick. Double-click to put it on screen."; in the lists, also "Shift-click another
+  for a passage."). Two quick clicks on two different keys (a chapter, then a verse; a verse and
+  the one beside it) are two clicks, never a double-click. The
   passage showing is lit, however it was looked up. Chapters and verses are numbered as the page
   is read (see above), and what a click opens is kept named in that language.
 - Four Bibles ship with the app (King James, World English, Berean Standard, Russian Synodal)

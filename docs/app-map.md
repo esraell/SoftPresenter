@@ -336,10 +336,12 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   Enter puts the verse picked on screen (so does Space with nothing on screen, while → and ← move
   the pick); Space, → and ← then go verse by verse. The pick is `HomeState::picked` (`home.rs`),
   the rules for the keys `running.rs`.
-- The lists: a click on a book loads its first chapter, on a chapter that chapter (the whole
-  chapter the passage), on a verse that verse alone (Shift for a passage; a double-click opens the
-  whole chapter with the verse picked), each with its first verse (or that verse) picked; nothing
-  goes on screen from them (`bible_page.rs`, `choose`).
+- The keypad and the lists: a click on a book loads its first chapter, on a chapter that chapter
+  (the whole chapter the passage), on a verse that verse alone (Shift for a passage), each with
+  its first verse picked; one click puts nothing on screen (`bible_page.rs`, `choose`). A
+  double-click on a verse opens its whole chapter (the verse alone with one slide for the whole
+  passage), picks the verse and asks the app for Enter (`HomeState::enter_after`), which puts it
+  on screen once the passage is in its place, through `App::enter_key` as the key does.
 - Words (not a reference) typed in the reference field list the verses holding them as they are
   typed, in place of the page, found on a thread of their own (`find.rs`, `search_page` and
   `Finder`); `sp bible search` lists them too.
