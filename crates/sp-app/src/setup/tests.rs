@@ -33,6 +33,7 @@ fn env(system: System) -> Env {
         catalog: false,
         bibles_download: true,
         version: "0.9.0-dev.30".to_owned(),
+        computer_languages: Vec::new(),
     }
 }
 
@@ -244,6 +245,8 @@ fn a_first_start_goes_through_the_five_steps_to_the_end() {
             "SONGS",
             "BIBLES",
             "SCREENS",
+            "KEYS",
+            "Standard keys",
             "REPORTS",
             "The congregation: Projector",
             "Anonymous: speeds and crashes.",
@@ -540,7 +543,10 @@ fn ready_folds_what_the_system_asks_one_open_at_a_time() {
         }
         // The fold's key keeps its place and size, open or closed.
         assert_eq!(place(&open, "What macOS will ask").size(), place(&closed, "What macOS will ask").size());
-        // Opening the other closes this one.
+        // Opening the other closes this one (once the opened fold has come into view).
+        for _ in 0..40 {
+            draw(&ctx, &mut state, &env);
+        }
         assert!(press(&ctx, &mut state, &env, "What the reports send"));
         let other = draw(&ctx, &mut state, &env);
         assert!(!said(&other, "Local Network") && said(&other, "The next report, as it stands now"), "{other:?}");
@@ -673,7 +679,9 @@ fn songs_found_are_ticked_and_come_in_with_bring_in_and_continue() {
 
 /// The states Ready is checked in: how reports stand, a download that failed, songs brought
 /// in from this computer, no screen chosen.
-fn ready_cases() -> Vec<(&'static str, Option<Standing>, fn(&mut HomeState))> {
+type ReadyCase = (&'static str, Option<Standing>, fn(&mut HomeState));
+
+fn ready_cases() -> Vec<ReadyCase> {
     vec![
         ("reports on", Some(standing(true)), |_| {}),
         ("reports off", Some(standing(false)), |_| {}),
@@ -1028,5 +1036,56 @@ fn install_ndi_in_the_setup_opens_the_window_over_the_home_window() {
         assert_eq!(state.ndi_download.shown_in(), Some(crate::ndi_download::Place::Home));
         // The setup keeps its step, to come back to when the window is left.
         assert!(state.setup.as_ref().is_some_and(|setup| setup.step == Step::Screens));
+    });
+}
+
+#[test]
+fn coming_from_softprojector_changes_the_keys_only_at_the_end_and_only_when_answered() {
+    use crate::key_table::KeyStyle;
+    with_language(Language::English, || {
+        let ctx = egui::Context::default();
+        let env = env(System::Windows);
+        // A first start: unanswered, and what Yes keeps is said under it.
+        let mut state = home("from");
+        let words = draw(&ctx, &mut state, &env);
+        assert!(said(&words, "Coming from SoftProjector?"));
+        assert!(said(
+            &words,
+            "Yes keeps SoftProjector\u{2019}s keys (Esc hides the words, F5 shows, F2 adds to the playlist)"
+        ));
+        assert_eq!(state.setup.as_ref().unwrap().from_softprojector, None);
+        assert!(press(&ctx, &mut state, &env, "Yes"));
+        // Nothing changes until the setup is finished.
+        assert_eq!(state.keys.style, KeyStyle::SoftPresenter);
+        assert!(!state.end_mark);
+        state.setup.as_mut().unwrap().step = Step::Ready;
+        let ready = draw(&ctx, &mut state, &env);
+        assert!(said(&ready, "SoftProjector\u{2019}s keys \u{b7} * * * at a song\u{2019}s end"), "{ready:?}");
+        assert!(said(&ready, "Esc to hide the words"), "{ready:?}");
+        assert!(press(&ctx, &mut state, &env, "Start Using SoftPresenter"));
+        assert_eq!(state.keys.style, KeyStyle::SoftProjector);
+        assert!(state.end_mark);
+        // Left early, the answer changes nothing.
+        let mut state = home("from-left");
+        assert!(press(&ctx, &mut state, &env, "Yes"));
+        assert!(press(&ctx, &mut state, &env, "Skip Setup"));
+        assert_eq!(state.keys.style, KeyStyle::SoftPresenter);
+        assert!(!state.end_mark);
+        // Answered as things stand, nothing changes: someone with SoftProjector's keys and no
+        // end mark who runs it again keeps both.
+        let mut state = home("from-again");
+        state.setup_done = true;
+        state.keys.set_style(KeyStyle::SoftProjector);
+        state.setup = Some(Setup::opened_at("ready"));
+        let ready = draw(&ctx, &mut state, &env);
+        assert_eq!(state.setup.as_ref().unwrap().from_softprojector, Some(true));
+        assert!(said(&ready, "SoftProjector\u{2019}s keys") && !said(&ready, "* * *"), "{ready:?}");
+        assert!(press(&ctx, &mut state, &env, "Start Using SoftPresenter"));
+        assert_eq!(state.keys.style, KeyStyle::SoftProjector);
+        assert!(!state.end_mark);
+        // A Mac hears of Esc alone, its F keys being its own.
+        let mut state = home("from-mac");
+        let mac = draw(&ctx, &mut state, &Env { system: System::Mac, ..env.clone() });
+        assert!(said(&mac, "Yes keeps SoftProjector\u{2019}s Esc, which hides the words") && !said(&mac, "F5"));
     });
 }

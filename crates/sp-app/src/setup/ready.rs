@@ -237,12 +237,34 @@ pub(super) fn reports_line(standing: &crate::reports::Standing) -> Line {
     }
 }
 
-/// What the tips line says to a first-timer.
-fn tips_words() -> &'static str {
-    t(
-        "setup.ready.tips",
-        "Click a slide to put it on screen, Space for the next, Esc to clear. Later, in Settings: Phone remote, to run the slides from a phone.",
-    )
+/// What the tips line says to a first-timer: Esc clears, or with SoftProjector's keys hides
+/// the words.
+fn tips_words(softprojector: bool) -> &'static str {
+    if softprojector {
+        t(
+            "setup.ready.tips_hide",
+            "Click a slide to put it on screen, Space for the next, Esc to hide the words. Later, in Settings: Phone remote, to run the slides from a phone.",
+        )
+    } else {
+        t(
+            "setup.ready.tips",
+            "Click a slide to put it on screen, Space for the next, Esc to clear. Later, in Settings: Phone remote, to run the slides from a phone.",
+        )
+    }
+}
+
+/// The Keys line: the key layout as it will be once the setup is finished, and the end of a
+/// song's mark when it will be on.
+pub(super) fn keys_line(style: crate::key_table::KeyStyle, mark: bool) -> String {
+    let keys = match style {
+        crate::key_table::KeyStyle::SoftProjector => t("setup.ready.keys.softprojector", "SoftProjector\u{2019}s keys"),
+        crate::key_table::KeyStyle::SoftPresenter => t("setup.ready.keys.standard", "Standard keys"),
+    };
+    if mark {
+        tf("setup.ready.keys.mark", "{keys} \u{b7} * * * at a song\u{2019}s end", &[("keys", keys)])
+    } else {
+        keys.to_owned()
+    }
 }
 
 /// What a line's key does.
@@ -305,6 +327,12 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env: &E
                     Key::Go(if screens.mark == Mark::Care { choose } else { change }, Step::Screens),
                 ),
             ];
+            let (style, mark) = super::keys_will_be(setup, state);
+            lines.push((
+                t("setup.ready.keys", "Keys"),
+                Line { words: keys_line(style, mark), mark: Mark::Tick },
+                Key::Go(change, Step::Welcome),
+            ));
             // Anonymous reports: the last line, where the build has them.
             if let Some(standing) = &env.reports {
                 lines.push((
@@ -379,7 +407,8 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env: &E
     // The first-timer's tips; run again from Settings, the sheet leaves them out.
     if !again {
         ui.add_space(8.0);
-        super::words(ui, tips_words(), FontId::proportional(12.5), TEXT_DIM, 18.0, 1);
+        let softprojector = super::keys_will_be(setup, state).0 == crate::key_table::KeyStyle::SoftProjector;
+        super::words(ui, tips_words(softprojector), FontId::proportional(12.5), TEXT_DIM, 18.0, 1);
     }
     go
 }

@@ -126,6 +126,13 @@ pub struct Setup {
     fold_opened: bool,
     /// How reports stood when last known, for the moments the reporter is busy.
     reports: Option<crate::reports::Standing>,
+    /// The welcome's "Coming from SoftProjector?": unanswered on a first start; opened again,
+    /// as things stand (Yes while the keys are SoftProjector's). Only an answer that differs
+    /// from how things stood changes the key layout and the end of a song's mark, and only when
+    /// the setup is finished on Ready.
+    from_softprojector: Option<bool>,
+    /// Whether the keys were SoftProjector's when the setup opened.
+    softprojector_was: bool,
 }
 
 impl Setup {
@@ -143,6 +150,8 @@ impl Setup {
             fold: None,
             fold_opened: false,
             reports: None,
+            from_softprojector: None,
+            softprojector_was: false,
         }
     }
 
@@ -201,6 +210,9 @@ pub struct Env {
     pub bibles_download: bool,
     /// The version, as the build shows it: a pre-release says so on the welcome.
     pub version: String,
+    /// The computer's preferred languages, as the system writes them, its own first: those the
+    /// Languages step offers start chosen.
+    pub computer_languages: Vec<String>,
 }
 
 impl Env {
@@ -214,6 +226,7 @@ impl Env {
             catalog: crate::catalog::offered(),
             bibles_download: crate::bible_store::download_base().is_some(),
             version: crate::updates::VERSION.to_owned(),
+            computer_languages: crate::i18n::computer_tags(),
         }
     }
 }
@@ -267,8 +280,10 @@ pub fn setup_ui_in(ctx: &egui::Context, show: &Show, state: &mut HomeState, comm
     // The first drawing: whether it is a first start, and the answers as things stand.
     if setup.again.is_none() {
         setup.again = Some(state.setup_done);
-        setup.languages = languages::starting(&state.church_languages, &crate::i18n::computer_tags());
+        setup.languages = languages::starting(&state.church_languages, &env.computer_languages);
         setup.bibles = bibles::Choice::starting(state, &setup.languages, setup.again(), env.bibles_download);
+        setup.softprojector_was = state.keys.style == crate::key_table::KeyStyle::SoftProjector;
+        setup.from_softprojector = setup.again().then_some(setup.softprojector_was);
     }
     if env.reports.is_some() {
         setup.reports.clone_from(&env.reports);
@@ -324,7 +339,7 @@ pub fn setup_ui_in(ctx: &egui::Context, show: &Show, state: &mut HomeState, comm
             .show(&mut child, |ui| {
                 ui.set_width(body.width());
                 match step {
-                    Step::Welcome => welcome(ui, again, env),
+                    Step::Welcome => welcome(ui, &mut setup, env),
                     Step::Languages => languages::step(ui, &mut setup, again),
                     Step::Songs => songs::step(ui, &mut setup, state, env, body.height()),
                     Step::Bibles => bibles::step(ui, &mut setup, state, env),
@@ -351,21 +366,24 @@ pub fn setup_ui_in(ctx: &egui::Context, show: &Show, state: &mut HomeState, comm
                 commands.push(Command::GoTo(SlideRef { presentation: show.selected(), slide: 0 }));
                 state.bible_open = false;
             }
-            Some(Pressed::On) => {
-                if passed(&mut setup, state, env, ui.ctx()) {
-                    if step == Step::Ready {
-                        // Ready was read, with its Reports line: the person has been told.
-                        if env.reports.is_some() {
-                            crate::reports::ui::passed_setup_step();
-                        }
-                        open = false;
-                    } else {
-                        setup.step = STEPS[step.at() + 1];
-                        setup.seen = setup.seen.max(setup.step.at());
+            // The way on, where the step can be left (a language is chosen).
+            Some(Pressed::On) if passed(&mut setup, state, env, ui.ctx()) => {
+                if step == Step::Ready {
+                    // Ready was read, with its Reports line: the person has been told.
+                    if env.reports.is_some() {
+                        crate::reports::ui::passed_setup_step();
                     }
+                    // A changed answer to "Coming from SoftProjector?" is taken now.
+                    if let Some(yes) = setup.from_softprojector.filter(|yes| *yes != setup.softprojector_was) {
+                        answered_from_softprojector(state, yes);
+                    }
+                    open = false;
+                } else {
+                    setup.step = STEPS[step.at() + 1];
+                    setup.seen = setup.seen.max(setup.step.at());
                 }
             }
-            None => {}
+            Some(Pressed::On) | None => {}
         }
         if let Some(to) = go_to {
             go(&mut setup, state, to);
@@ -750,9 +768,49 @@ fn pre_release_note(version: &str) -> Option<(String, String)> {
     Some((heading, format!("{about} {updates}")))
 }
 
+/// What the keys and the end of a song's mark will be once the setup is finished: as the answer
+/// to "Coming from SoftProjector?" has them if it differs from how things stood, else as they are.
+pub(crate) fn keys_will_be(setup: &Setup, state: &HomeState) -> (crate::key_table::KeyStyle, bool) {
+    use crate::key_table::KeyStyle;
+    match setup.from_softprojector {
+        Some(yes) if yes != setup.softprojector_was => {
+            (if yes { KeyStyle::SoftProjector } else { KeyStyle::SoftPresenter }, yes)
+        }
+        _ => (state.keys.style, state.end_mark),
+    }
+}
+
+/// The setup was finished with a changed answer to "Coming from SoftProjector?": Yes gives
+/// SoftProjector's key layout and the end of a song's mark, No the standard layout and no mark.
+/// The one place that answer is acted on: what else follows from it (how a click on a slide
+/// shows it) is set here too.
+pub(crate) fn answered_from_softprojector(state: &mut HomeState, yes: bool) {
+    use crate::key_table::KeyStyle;
+    state.keys.set_style(if yes { KeyStyle::SoftProjector } else { KeyStyle::SoftPresenter });
+    state.end_mark = yes;
+    // CLICK MODE: the slide click mode (Double-click for Yes) is set here once that setting is in.
+}
+
+/// What Yes to "Coming from SoftProjector?" keeps, said under it: a Mac's F keys are its own, so
+/// there it speaks of Esc alone.
+fn from_softprojector_words(system: System) -> &'static str {
+    match system {
+        System::Mac => t(
+            "setup.from.line.mac",
+            "Yes keeps SoftProjector\u{2019}s Esc, which hides the words and leaves the background up, and its * * * under a song\u{2019}s last slide. Both can be changed in Settings \u{203a} Keys and Settings \u{203a} Slides.",
+        ),
+        System::Windows | System::Linux => t(
+            "setup.from.line",
+            "Yes keeps SoftProjector\u{2019}s keys (Esc hides the words, F5 shows, F2 adds to the playlist) and its * * * under a song\u{2019}s last slide. Both can be changed in Settings \u{203a} Keys and Settings \u{203a} Slides.",
+        ),
+    }
+}
+
 /// The welcome: the mark, the name and one line, in the middle; the app's own language first of
-/// all, so the rest of the setup is read in it; and, in a pre-release, the card that says so.
-fn welcome(ui: &mut egui::Ui, again: bool, env: &Env) {
+/// all, so the rest of the setup is read in it; "Coming from SoftProjector?"; and, in a
+/// pre-release, the card that says so.
+fn welcome(ui: &mut egui::Ui, setup: &mut Setup, env: &Env) {
+    let again = setup.again();
     let (title, lead) = welcome_words(again);
     let note = pre_release_note(&env.version);
     let width = ui.available_width().min(560.0);
@@ -774,9 +832,10 @@ fn welcome(ui: &mut egui::Ui, again: bool, env: &Env) {
     let note_height = note.as_ref().map_or(0.0, |(_, words)| {
         let galley =
             crate::home::settings::parts::lines(ui, words, FontId::proportional(12.5), TEXT_DIM, width - 28.0, 18.0);
-        18.0 + 22.0 + 4.0 + galley.size().y + 18.0
+        12.0 + 22.0 + 4.0 + galley.size().y + 18.0
     });
-    let height = 54.0 + 20.0 + 46.0 + 12.0 + lead_galley.size().y + 22.0 + 30.0 + note_height;
+    let height =
+        54.0 + 12.0 + 42.0 + 10.0 + lead_galley.size().y + 14.0 + 30.0 + 10.0 + 30.0 + 6.0 + 34.0 + note_height;
     ui.add_space(((room - height) / 2.0).max(0.0));
     ui.vertical_centered(|ui| {
         ui.set_width(ui.available_width());
@@ -784,13 +843,13 @@ fn welcome(ui: &mut egui::Ui, again: bool, env: &Env) {
         let (mark, _) = ui.allocate_exact_size(vec2(84.0, 54.0), Sense::hover());
         ui.painter().rect_filled(mark, 14.0, TEXT);
         ui.painter().circle_filled(pos2(mark.max.x - 21.5, mark.min.y + 19.5), 8.5, crate::studio::TALLY);
-        ui.add_space(20.0);
-        ui.label(egui::RichText::new(title).font(semibold(38.0)).color(Color32::WHITE));
         ui.add_space(12.0);
+        ui.label(egui::RichText::new(title).font(semibold(34.0)).color(Color32::WHITE));
+        ui.add_space(10.0);
         let (place, _) = ui.allocate_exact_size(lead_galley.size(), Sense::hover());
         // Its lines are centred on where it is drawn from.
         ui.painter().galley(pos2(place.center().x, place.min.y), lead_galley, TEXT_DIM);
-        ui.add_space(22.0);
+        ui.add_space(14.0);
         ui.allocate_ui(vec2(ui.available_width(), 30.0), |ui| {
             ui.horizontal(|ui| {
                 let label = t("setup.welcome.language", "Language of SoftPresenter");
@@ -803,9 +862,51 @@ fn welcome(ui: &mut egui::Ui, again: bool, env: &Env) {
                 crate::home::language_menu(ui);
             });
         });
+        // Coming from SoftProjector? Yes or No, and under them what Yes keeps (two lines' room).
+        ui.add_space(10.0);
+        ui.allocate_ui(vec2(ui.available_width(), 30.0), |ui| {
+            ui.horizontal(|ui| {
+                let label = t("setup.from.question", "Coming from SoftProjector?");
+                let font = FontId::proportional(13.0);
+                let label_width = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), TEXT_DIM).size().x;
+                let answers = [(true, t("setup.from.yes", "Yes")), (false, t("setup.from.no", "No"))];
+                let key = key_width(ui, &[answers[0].1, answers[1].1], &font, 14.0, 78.0);
+                ui.add_space(((ui.available_width() - label_width - 12.0 - key * 2.0 - 2.0) / 2.0).max(0.0));
+                ui.label(egui::RichText::new(label).size(13.0).color(TEXT_DIM));
+                ui.add_space(4.0);
+                ui.spacing_mut().item_spacing.x = 2.0;
+                for (yes, words) in answers {
+                    let (place, _) = ui.allocate_exact_size(vec2(key, 28.0), Sense::hover());
+                    let look = if setup.from_softprojector == Some(yes) { Flat::On } else { Flat::Plain };
+                    let id = ui.scope_id().with(("setup from softprojector", yes));
+                    if crate::studio::flat_button(ui, place, id, words, font.clone(), look, true).clicked() {
+                        setup.from_softprojector = Some(yes);
+                    }
+                }
+            });
+        });
+        ui.add_space(6.0);
+        ui.allocate_ui_with_layout(vec2(width, 34.0), egui::Layout::top_down(egui::Align::Center), |ui| {
+            ui.set_width(width);
+            let galley = {
+                let mut job = egui::text::LayoutJob::default();
+                let format = egui::TextFormat {
+                    font_id: FontId::proportional(12.0),
+                    color: TEXT_FAINT,
+                    line_height: Some(17.0),
+                    ..Default::default()
+                };
+                job.append(from_softprojector_words(env.system), 0.0, format);
+                job.wrap.max_width = width;
+                job.halign = egui::Align::Center;
+                ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
+            };
+            let (place, _) = ui.allocate_exact_size(vec2(width, galley.size().y.max(34.0)), Sense::hover());
+            ui.painter().galley(pos2(place.center().x, place.min.y), galley, TEXT_FAINT);
+        });
         // A pre-release says so, calmly, in a small card at the foot (the owner, 2026-11-25).
         if let Some((heading, words)) = note {
-            ui.add_space(18.0);
+            ui.add_space(12.0);
             ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                 Frame::new().fill(CARD).corner_radius(9.0).inner_margin(egui::Margin::symmetric(14, 11)).show(
                     ui,

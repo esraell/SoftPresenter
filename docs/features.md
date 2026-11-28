@@ -1866,7 +1866,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 
 ## Getting started
 - The first start (and the first start after updating, on a Mac set up before there was a
-  setup) opens a short setup that fills the window: a welcome (with the app's own language),
+  setup) opens a short setup that fills the window: a welcome (with the app's own language, and
+  "Coming from SoftProjector?", unanswered on a first start: a Yes or No that differs from how
+  things stand sets the key layout, Like SoftProjector or Standard, and the end of a song's
+  mark, only when the setup is finished on Ready, whose Keys line says what they will be),
   then five steps numbered along the top, each fitting a window of 1100 by 700 with nothing to
   scroll, its keys in the same places on every step (Back, Skip, and the way on). **1
   Languages:** which languages the church shows (English, Español, Русский, Українська, the

@@ -181,7 +181,7 @@ fn language_card(ui: &mut egui::Ui, size: egui::Vec2, code: &str, chosen: bool) 
 
 /// On top and Below: each a menu of the languages chosen. Choosing one for a place swaps it
 /// with what the place had. With one language Below is greyed and says so; with none both are.
-fn order_menus(ui: &mut egui::Ui, width: f32, languages: &mut Vec<String>) {
+fn order_menus(ui: &mut egui::Ui, width: f32, languages: &mut [String]) {
     let labels = [t("setup.bibles.top", "On top"), t("setup.bibles.below", "Below")];
     let label_width = labels
         .iter()

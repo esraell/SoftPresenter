@@ -119,5 +119,15 @@
   "setup.ready.choose": "Elegir",
   "setup.ready.try_again": "Reintentar",
   "setup.ready.look": "Así se verán las canciones. Cambia el aspecto en Edición › Temas.",
-  "setup.ready.tips": "Haz clic en una diapositiva para ponerla en pantalla, Espacio para la siguiente, Esc para borrar. Después, en Ajustes: Mando del móvil, para pasar las diapositivas desde un teléfono."
+  "setup.ready.tips": "Haz clic en una diapositiva para ponerla en pantalla, Espacio para la siguiente, Esc para borrar. Después, en Ajustes: Mando del móvil, para pasar las diapositivas desde un teléfono.",
+  "setup.from.question": "¿Vienes de SoftProjector?",
+  "setup.from.yes": "Sí",
+  "setup.from.no": "No",
+  "setup.from.line.mac": "Sí conserva el Esc de SoftProjector, que oculta la letra y deja el fondo, y su * * * bajo la última diapositiva de una canción. Los dos se pueden cambiar en Ajustes › Teclas y Ajustes › Diapositivas.",
+  "setup.from.line": "Sí conserva las teclas de SoftProjector (Esc oculta la letra, F5 muestra, F2 añade a la lista) y su * * * bajo la última diapositiva de una canción. Los dos se pueden cambiar en Ajustes › Teclas y Ajustes › Diapositivas.",
+  "setup.ready.keys": "Teclas",
+  "setup.ready.keys.softprojector": "Teclas de SoftProjector",
+  "setup.ready.keys.standard": "Teclas estándar",
+  "setup.ready.keys.mark": "{keys} · * * * al final de una canción",
+  "setup.ready.tips_hide": "Haz clic en una diapositiva para ponerla en pantalla, Espacio para la siguiente, Esc para ocultar la letra. Después, en Ajustes: Mando del móvil, para pasar las diapositivas desde un teléfono."
 }

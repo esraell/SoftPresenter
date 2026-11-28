@@ -965,9 +965,7 @@ mod tests {
         let listed = in_setup_order(&["uk", "ru"]);
         assert_eq!(listed.len(), OFFERED.len());
         assert_eq!(listed[0].language, "uk");
-        assert!(
-            listed.iter().skip_while(|book| book.language == "uk").next().is_some_and(|book| book.language == "ru")
-        );
+        assert!(listed.iter().find(|book| book.language != "uk").is_some_and(|book| book.language == "ru"));
         // Once ticked by hand, the recommendation leaves the ticks alone.
         picked.toggle("pv2001");
         picked.recommend(&["en"], &Known::default());
