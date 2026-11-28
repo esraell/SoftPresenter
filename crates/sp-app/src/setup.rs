@@ -87,7 +87,7 @@ impl Step {
 
 /// The languages the Languages step offers, in the order of its cards: those SoftPresenter has
 /// free songs to start with in, or speaks.
-pub const LANGUAGES: [&str; 4] = ["en", "es", "ru", "uk"];
+pub const LANGUAGES: [&str; 5] = ["en", "es", "ru", "uk", "de"];
 
 /// One of Ready's two folds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -17,7 +17,8 @@ use crate::reports::Standing;
 use crate::screens::Output;
 
 const SYSTEMS: [System; 3] = [System::Mac, System::Windows, System::Linux];
-const EVERY_LANGUAGE: [Language; 4] = [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian];
+const EVERY_LANGUAGE: [Language; 5] =
+    [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian, Language::German];
 
 /// How reports stand where they start on (`on`), or off (the EU, the EEA, the UK).
 fn standing(on: bool) -> Standing {
@@ -169,7 +170,7 @@ fn the_welcome_says_a_pre_release_is_one_and_a_release_says_nothing() {
         let release = Env { version: "1.0.0".to_owned(), ..env(System::Mac) };
         assert!(!said(&draw(&ctx, &mut state, &release), "pre-release"));
     });
-    for language in [Language::Spanish, Language::Russian, Language::Ukrainian] {
+    for language in [Language::Spanish, Language::Russian, Language::Ukrainian, Language::German] {
         let said = with_language(language, || pre_release_note("1.0.0-beta.1"));
         let (heading, words) = said.expect("a pre-release says so in every language");
         assert!(heading.contains("1.0.0-beta.1"), "{language:?}: {heading}");
@@ -336,7 +337,10 @@ fn skip_changes_nothing_and_ready_says_what_is_missing() {
 fn the_languages_choose_what_is_recommended() {
     // The computer's languages start chosen, those the step offers; kept answers come back.
     let tags = |tags: &[&str]| tags.iter().map(|tag| (*tag).to_owned()).collect::<Vec<String>>();
-    assert_eq!(languages::starting(&[], &[], &tags(&["ru-RU", "en-US", "de-DE"])), ["ru", "en"]);
+    assert_eq!(languages::starting(&[], &[], &tags(&["ru-RU", "en-US", "fr-FR"])), ["ru", "en"]);
+    // German is offered too: a German computer starts with German chosen.
+    assert_eq!(languages::starting(&[], &[], &tags(&["ru-RU", "en-US", "de-DE"])), ["ru", "en", "de"]);
+    assert_eq!(languages::starting(&[], &[], &tags(&["de-AT"])), ["de"]);
     assert_eq!(languages::starting(&[], &[], &tags(&["cs-CZ"])), ["en"]);
     assert_eq!(languages::starting(&[], &[], &[]), ["en"]);
     assert_eq!(languages::starting(&tags(&["uk", "ru"]), &tags(&["en"]), &tags(&["en-US"])), ["uk", "ru"]);
@@ -355,6 +359,10 @@ fn the_languages_choose_what_is_recommended() {
     let (ukrainian, here) = name("uk").expect("a Ukrainian Bible is offered");
     assert!(!here || shelf.position(ukrainian).is_some());
     assert_eq!(name("xx"), None);
+    // German: Luther 1912 to download, and Elberfelder 1905 the next German one offered.
+    assert_eq!(name("de"), Some(("lut1912", false)));
+    let german: Vec<&str> = all.iter().filter(|bible| bible.language == "de").map(|bible| bible.id.as_str()).collect();
+    assert_eq!(german[..2], ["lut1912", "elb1905"]);
     // Without downloads, only what is here is listed.
     assert!(bibles::every(&shelf, false).iter().all(|bible| bible.here));
     let recommended: Vec<&str> = bibles::recommended_for(&all, &church).iter().map(|bible| bible.id.as_str()).collect();
@@ -774,7 +782,7 @@ fn every_step_fits_a_window_of_1100_by_700_with_nothing_to_scroll() {
         with_language(language, || {
             for system in SYSTEMS {
                 for again in [false, true] {
-                    for church in [vec!["en"], vec!["ru", "uk"], vec!["en", "es", "ru", "uk"]] {
+                    for church in [vec!["en"], vec!["ru", "uk"], vec!["en", "es", "ru", "uk", "de"]] {
                         for step in ["welcome", "languages", "songs", "bibles", "screens"] {
                             let ctx = egui::Context::default();
                             let mut state = home("fit");

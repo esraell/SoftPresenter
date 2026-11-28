@@ -99,6 +99,7 @@ pub fn sample_lines(code: &str) -> [&'static str; 2] {
         "es" => ["La letra de un canto", "como la ver\u{e1} la iglesia"],
         "ru" => ["Слова песни", "как их увидит церковь"],
         "uk" => ["Слова пісні", "як їх побачить церква"],
+        "de" => ["Der Text eines Lieds", "so, wie die Gemeinde ihn sieht"],
         _ => ["The words of a song", "as the church will see them"],
     }
 }

@@ -1922,8 +1922,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the setup is finished on Ready, whose Keys line says what the keys will be),
   then five steps numbered along the top, each fitting a window of 1100 by 700 with nothing to
   scroll, its keys in the same places on every step (Back, Skip, and the way on). **1
-  Languages:** which languages the church shows (English, Español, Русский, Українська, the
-  computer's own chosen to start with) and which is on top, beside a slide that shows the
+  Languages:** which languages the church shows (English, Español, Русский, Українська, Deutsch,
+  the computer's own chosen to start with) and which is on top, beside a slide that shows the
   order; the answer is kept (`church_languages`) and chooses what the next two steps recommend.
   **2 Songs:** Already on this computer (the search Settings › Song files › Find songs on this
   computer makes, with Look on This Computer and Choose Song Files…; what it finds is listed,
@@ -1931,7 +1931,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   build the song catalog's, the church's languages' first and marked Recommended); the step's
   key reads Bring In and Continue while found songs are ticked, and nothing comes in before it
   is pressed. **3 Bibles:** the recommended Bible for each of the church's languages (the
-  first in it, one on this computer before one to download) under For your languages, every
+  first in it, one on this computer before one to download; for German, Luther 1912, with
+  Elberfelder 1905 next under More Bibles) under For your languages, every
   other under More Bibles, by language, the church's first, then Other languages; with two
   languages each row has On top and Below (the two swap; Below again leaves one), with one
   language a plain choice of one; John 3:16 shows beside them; one not on the computer says
