@@ -645,15 +645,14 @@ impl crate::App {
                 let key = state.song_keys.get(at).cloned().ok_or("That song can't be gone to.")?;
                 Ok(ShowAction::Song { key })
             }
+            // A media item by its id, its number or its name, as the media commands take it.
             ("media", _) => {
-                let names: Vec<String> = self.show.media().iter().map(|m| m.name.clone()).collect();
-                let at = named("media item", names, rest(1))?;
+                let at = crate::control::find_media(self.show.media(), &rest(1))?;
                 Ok(ShowAction::Media { id: self.show.media()[at].id })
             }
             // `announce media ITEM`, `announce media-playlist NAME`, `announce SONG`.
             ("announce", "media") if words.len() > 2 => {
-                let names: Vec<String> = self.show.media().iter().map(|m| m.name.clone()).collect();
-                let at = named("media item", names, rest(2))?;
+                let at = crate::control::find_media(self.show.media(), &rest(2))?;
                 Ok(ShowAction::Announce { what: sp_model::Announced::Media { id: self.show.media()[at].id } })
             }
             ("announce", "media-playlist") => {
