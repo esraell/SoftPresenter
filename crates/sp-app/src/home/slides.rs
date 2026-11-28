@@ -590,15 +590,18 @@ impl SlideDeck {
     }
 
     /// Picks a slide of a playlist's Bible passage for Enter, as a click does when set to a
-    /// double-click: the passage is looked up as a click on its slide looks it up (into the Bible
-    /// page's place not on screen), and once the app has put it there its slide is the one
-    /// picked, the passage chosen and its item opened; nothing goes on screen.
+    /// double-click: the passage is looked up as a click on its slide looks it up, and once the
+    /// app has put it there its slide is the one picked, the passage chosen and its item opened;
+    /// nothing goes on screen. It goes into the Bible page's place that neither is on screen nor
+    /// holds the slide last on screen (the show's cursor, after a clear): Next goes on from that
+    /// slide, so a passage picked in its place would be gone on through from where it stood.
     fn pick_passage_slide(&self, show: &Show, state: &mut HomeState, slide: usize, commands: &mut Vec<Command>) {
         if self.item.is_some() {
             state.services.chosen = self.item;
         }
         let Some(saved) = &self.passage else { return };
-        state.bible.open_saved(saved, show.live().map(|at| at.presentation), crate::home::SlidesOf::Passage);
+        let kept = show.live().or(show.cursor()).map(|at| at.presentation);
+        state.bible.open_saved(saved, kept, crate::home::SlidesOf::Passage);
         state.bible.go_live = None;
         let made = state.bible.pending.as_ref().map(|(slot, passage)| (*slot, passage.slide_count()));
         if let Some((slot, _)) = made.filter(|(_, count)| slide < *count) {
@@ -3823,6 +3826,59 @@ mod tests {
         press_and_release(&ctx, &mut show, &mut state, second, 0.6);
         assert_eq!(state.bible.go_live, Some(1), "the second verse");
         assert!(state.bible.pending.is_some());
+    }
+
+    #[test]
+    fn a_passage_picked_by_a_click_after_a_clear_leaves_the_place_cleared_for_next_to_go_on_from() {
+        let (mut show, mut state) = playlist(&[("Alpha", 1)]);
+        state.choose_slide_click(crate::key_table::SlideClick::Double);
+        let slots = [show.add_presentation(song("", 0)), show.add_presentation(song("", 0))];
+        state.bible.slots = Some(slots);
+        let saved = SavedPassage { lookup: "John 3:16-18".to_owned(), ..state.bible.settings() };
+        state.services.add(Item::Passage(saved.clone()));
+        state.services.chosen = Some(0);
+        // A verse from the Bible view on screen, then cleared: the show's cursor stays on it.
+        let reading = SavedPassage { lookup: "Psalm 23:1-3".to_owned(), ..state.bible.settings() };
+        state.bible.open_saved(&reading, None, crate::home::SlidesOf::Passage);
+        let (cleared, passage) = state.bible.pending.take().expect("looked up");
+        let read_title = passage.title.clone();
+        show.replace_presentation(cleared, Arc::new(passage));
+        show.apply(Command::GoTo(SlideRef { presentation: cleared, slide: 0 }));
+        show.apply(Command::ClearAll);
+        assert_eq!((show.live(), show.cursor()), (None, Some(SlideRef { presentation: cleared, slide: 0 })));
+        let ctx = egui::Context::default();
+        frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.0);
+        frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.1);
+        let alpha = rect_of(&state, 0, 0);
+        let second = alpha.center() + vec2(alpha.width() + GAP_X, alpha.height() + INSET + ITEM_BAR + INSET);
+        // A click on the playlist passage's John 3:17: it is looked up into the other place, so
+        // the place cleared still holds the reading the cursor is on.
+        press_and_release(&ctx, &mut show, &mut state, second, 0.5);
+        let (slot, passage) = state.bible.pending.take().expect("the passage was looked up");
+        assert_ne!(slot, cleared, "not into the place the show's cursor is on");
+        show.replace_presentation(slot, Arc::new(passage));
+        frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.55);
+        assert_eq!(state.pick(&show), Some(SlideRef { presentation: slot, slide: 1 }));
+        let at_cursor = show.presentations()[cleared].title.clone();
+        assert_eq!(at_cursor, read_title, "the reading cleared is still where the cursor is");
+        // So no item of the playlist holds the cursor (as `cursor_item` finds it), and Next from
+        // the phone or a Stream Deck, aimed at the passage's item with nothing on screen, starts
+        // that item, as before, never the slide after the cursor in the passage picked.
+        assert!(!state.bible.holds_kept(cleared, &at_cursor, &saved.lookup));
+        let stops = [crate::running::Stop::Song { at: 0, slides: true }, crate::running::Stop::Passage];
+        let titles = ["Alpha".to_owned(), saved.lookup.clone()];
+        let situation = crate::running::Situation {
+            stops: &stops,
+            titles: &titles,
+            open: Some(1),
+            here: crate::running::Here::Elsewhere,
+            at_end: false,
+            at_start: true,
+            continuous: false,
+            picked: None,
+            showing: false,
+        };
+        assert_eq!(crate::running::step(&situation, true), crate::running::Do::Start { item: 1, last: false });
     }
 
     #[test]
