@@ -473,6 +473,11 @@ fn a_test_copy_never_sends_and_the_switch_reaches_only_this_computer() {
         &[("SOFTPRESENTER_REPORTS_TEST_URL", "https://reports.example"), ("SOFTPRESENTER_DATA", "/tmp/x")],
         &[("SOFTPRESENTER_REPORTS_TEST_URL", "http://127.0.0.1.example:80"), ("SOFTPRESENTER_DATA", "/tmp/x")],
         &[("SOFTPRESENTER_REPORTS_TEST_URL", "http://reports.example"), ("SOFTPRESENTER_DATA", "/tmp/x")],
+        // The host is what follows the @: elsewhere, not this computer.
+        &[("SOFTPRESENTER_REPORTS_TEST_URL", "http://127.0.0.1:1@reports.example"), ("SOFTPRESENTER_DATA", "/tmp/x")],
+        &[("SOFTPRESENTER_REPORTS_TEST_URL", "http://localhost@reports.example"), ("SOFTPRESENTER_DATA", "/tmp/x")],
+        &[("SOFTPRESENTER_REPORTS_TEST_URL", "http://127.0.0.1:80/elsewhere"), ("SOFTPRESENTER_DATA", "/tmp/x")],
+        &[("SOFTPRESENTER_REPORTS_TEST_URL", "http://127.0.0.1:"), ("SOFTPRESENTER_DATA", "/tmp/x")],
     ] {
         let pairs: Vec<(String, String)> = refused.iter().map(|(a, b)| ((*a).to_owned(), (*b).to_owned())).collect();
         let var = move |name: &str| pairs.iter().find(|(have, _)| have == name).map(|(_, value)| value.clone());

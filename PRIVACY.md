@@ -94,10 +94,10 @@ never holds up the screens or the window.
 Settings › Integrations › Request an Integration sends something only when you press Send:
 what you typed in its fields (the app, service or device, what it should do, and how your
 church uses it if you said), SoftPresenter's version and the system's name (macOS, Windows or
-Linux). No name, no email, no install id, no logs. It goes over
-HTTPS to the same server as the reports (`reports.softpresenter.com`), which keeps the words as
-you typed them, with the time they arrived, until the project's owner deletes them. It does
-not keep your IP address or your country, and only the project's owner can read the requests.
+Linux). No name, no email, no install id, no logs. It goes over HTTPS to the same server as
+the reports (`reports.softpresenter.com`), which keeps what was sent (the words, the version
+and the system) with the time it arrived, until the project's owner deletes them. It does not
+keep your IP address or your country, and only the project's owner can read the requests.
 Nobody writes back.
 
 ## What else uses the network

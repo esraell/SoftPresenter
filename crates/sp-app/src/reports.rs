@@ -79,17 +79,30 @@ fn environment(quiet_run: bool, var: impl Fn(&str) -> Option<String>) -> Option<
     let set = |name: &str| var(name).is_some_and(|value| !value.is_empty());
     // Testing aid: SOFTPRESENTER_REPORTS_TEST_URL=http://127.0.0.1:<port> sends a test copy's
     // reports to a server on this computer, for the end-to-end test. Honoured only together
-    // with SOFTPRESENTER_DATA, and only for 127.0.0.1 or localhost.
+    // with SOFTPRESENTER_DATA, and only for 127.0.0.1 or localhost (`is_local_test_address`).
     if let Some(address) = var("SOFTPRESENTER_REPORTS_TEST_URL").filter(|address| !address.is_empty()) {
         let address = address.trim().trim_end_matches('/').to_owned();
-        let host = address.strip_prefix("http://").map(|rest| rest.split(['/', ':']).next().unwrap_or(""));
-        return (set("SOFTPRESENTER_DATA") && matches!(host, Some("127.0.0.1" | "localhost")))
+        return (set("SOFTPRESENTER_DATA") && is_local_test_address(&address))
             .then(|| Target { url: format!("{address}{ROUTE}"), local: true });
     }
     if quiet_run || set("SOFTPRESENTER_QUIET") || set("SOFTPRESENTER_DATA") {
         return None;
     }
     Some(Target { url: format!("{SERVER}{ROUTE}"), local: false })
+}
+
+/// Whether a testing aid's address is a server on this computer and nothing else: `http://`,
+/// then exactly 127.0.0.1 or localhost, with a port at most and no path (a last / already taken
+/// off). The whole of what follows `http://` is looked at, so `127.0.0.1:1@elsewhere`, whose
+/// host is elsewhere, is not taken for this computer. Integration requests' testing aid uses it
+/// too.
+pub(crate) fn is_local_test_address(address: &str) -> bool {
+    address.strip_prefix("http://").is_some_and(|authority| {
+        let (host, port) = authority.split_once(':').unwrap_or((authority, "1"));
+        matches!(host, "127.0.0.1" | "localhost")
+            && (1..=5).contains(&port.len())
+            && port.bytes().all(|b| b.is_ascii_digit())
+    })
 }
 
 // ---------------------------------------------------------------------------------------------

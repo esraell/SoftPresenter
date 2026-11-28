@@ -371,6 +371,8 @@
   "integrations.ask.sending": "Enviando…",
   "integrations.ask.failed.offline": "No se pudo enviar: no hay conexión a internet. Lo que has escrito se conserva.",
   "integrations.ask.failed.server": "No se pudo enviar: el servidor no respondió. Lo que has escrito se conserva.",
+  "integrations.ask.failed.refused": "No se pudo enviar: el servidor no la aceptó. Lo que has escrito se conserva.",
+  "integrations.ask.failed.busy": "No se pudo enviar: el servidor no la aceptó ahora. Inténtalo en un minuto. Lo que has escrito se conserva.",
   "integrations.ask.failed.test": "No se envió: una copia de prueba no envía nada. Lo que has escrito se conserva.",
   "integrations.ask.refused": "Di qué aplicación o dispositivo, y qué debería hacer",
   "integrations.ask.issue": "Abrir una incidencia en GitHub ↗",

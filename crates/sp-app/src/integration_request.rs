@@ -9,8 +9,8 @@
 //! from a thread of its own. Nothing else is sent: not the app's language, no name, no email, no
 //! install id, no log, no cookie. Nobody writes back.
 //!
-//! **What is typed stays** until it is sent, however the window is left (Cancel, ✕, Esc, a
-//! failure), and the window opens again as it was. Once a request is sent, the window opens
+//! **What is typed stays** until it is sent (or the app quits: it is never written down),
+//! however the window is left (Cancel, ✕, Esc, a failure), and the window opens again as it was. Once a request is sent, the window opens
 //! empty.
 //!
 //! **A test copy sends nowhere** (quiet, with a data folder of its own, or saving a picture):
@@ -59,8 +59,12 @@ const FIELD: f32 = 32.0;
 pub enum Why {
     /// The server couldn't be reached at all.
     Offline,
-    /// It was reached, and didn't take the request (or didn't answer in time).
-    Server,
+    /// It was reached and gave no answer in time (or the send's thread went away).
+    NoAnswer,
+    /// It answered, and didn't take the request (400, 413, 503 and the like).
+    NotTaken,
+    /// It answered that too many came from this network just now (429): a minute later it will.
+    TooMany,
     /// This is a test copy, which sends nothing.
     TestCopy,
 }
@@ -146,14 +150,7 @@ fn target(capture: bool, var: impl Fn(&str) -> Option<String>) -> Option<Target>
     // a port at most and no path; with any other address the copy sends nowhere.
     if let Some(address) = var("SOFTPRESENTER_INTEGRATION_REQUEST_TEST_URL").filter(|address| !address.is_empty()) {
         let address = address.trim().trim_end_matches('/').to_owned();
-        // The whole of what follows http://, so "127.0.0.1:1@elsewhere" is not taken for this
-        // computer.
-        let local = address.strip_prefix("http://").is_some_and(|authority| {
-            let (host, port) = authority.split_once(':').unwrap_or((authority, "1"));
-            matches!(host, "127.0.0.1" | "localhost")
-                && (1..=5).contains(&port.len())
-                && port.bytes().all(|b| b.is_ascii_digit())
-        });
+        let local = crate::reports::is_local_test_address(&address);
         return (set("SOFTPRESENTER_DATA") && local).then(|| Target { url: format!("{address}{ROUTE}"), local: true });
     }
     if capture || set("SOFTPRESENTER_QUIET") || set("SOFTPRESENTER_DATA") {
@@ -186,9 +183,11 @@ fn body(name: &str, what: &str, how: &str) -> Vec<u8> {
 }
 
 /// The words as they are sent: the ends trimmed; a carriage return (pasted from Windows) made a
-/// new line; and the characters the server refuses or nobody types left out (control
-/// characters, and those that reorder text on screen), keeping new lines and tabs in the texts.
-fn cleaned(text: &str, one_line: bool) -> String {
+/// new line; the characters the server refuses or nobody types left out (control characters,
+/// and those that reorder text on screen), keeping new lines and tabs in the texts; and at most
+/// `most` characters, whatever the field let in, so the request stays within the server's
+/// limits and its 8 KB.
+fn cleaned(text: &str, one_line: bool, most: usize) -> String {
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
     let kept: String = text
         .chars()
@@ -198,7 +197,17 @@ fn cleaned(text: &str, one_line: bool) -> String {
             !reorders && (!c.is_control() || allowed_control)
         })
         .collect();
-    kept.trim().to_owned()
+    let cut: String = kept.trim().chars().take(most).collect();
+    cut.trim_end().to_owned()
+}
+
+/// What the server's answer means: taken (2xx), too many just now (429), or not taken.
+fn answer_of(status: u16) -> Result<(), Why> {
+    match status {
+        200..=299 => Ok(()),
+        429 => Err(Why::TooMany),
+        _ => Err(Why::NotTaken),
+    }
 }
 
 /// Sends one request: the JSON and the header saying so, and nothing else (no key, no cookie,
@@ -215,10 +224,9 @@ pub fn post(target: &Target, body: &[u8]) -> Result<(), Why> {
         .build()
         .into();
     match agent.post(&target.url).header("Content-Type", "application/json").send(body) {
-        Ok(response) if response.status().is_success() => Ok(()),
-        // The server answered and didn't take it; its words are never shown.
-        Ok(_) => Err(Why::Server),
-        Err(ureq::Error::Timeout(_)) => Err(Why::Server),
+        // The server's words are never shown, only what its answer means.
+        Ok(response) => answer_of(response.status().as_u16()),
+        Err(ureq::Error::Timeout(_)) => Err(Why::NoAnswer),
         Err(_) => Err(Why::Offline),
     }
 }
@@ -246,7 +254,7 @@ impl IntegrationRequest {
         let answer = match waiting.try_recv() {
             Ok(answer) => answer,
             Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => Err(Why::Server),
+            Err(mpsc::TryRecvError::Disconnected) => Err(Why::NoAnswer),
         };
         self.waiting = None;
         self.phase = match answer {
@@ -272,7 +280,11 @@ impl IntegrationRequest {
         if self.waiting.is_some() || matches!(self.phase, Phase::Sending | Phase::Sent) {
             return;
         }
-        let (name, what, how) = (cleaned(&self.name, true), cleaned(&self.what, false), cleaned(&self.how, false));
+        let (name, what, how) = (
+            cleaned(&self.name, true, NAME_MOST),
+            cleaned(&self.what, false, TEXT_MOST),
+            cleaned(&self.how, false, TEXT_MOST),
+        );
         if name.is_empty() || what.is_empty() {
             self.refusal = Some(crate::notices::Cue::new(refused_words()));
             return;
@@ -300,7 +312,7 @@ impl IntegrationRequest {
                 self.waiting = Some(rx);
                 self.phase = Phase::Sending;
             }
-            Err(_) => self.phase = Phase::Failed(Why::Server),
+            Err(_) => self.phase = Phase::Failed(Why::NoAnswer),
         }
     }
 
@@ -357,10 +369,24 @@ fn say_words(phase: Phase) -> Option<(&'static str, Color32)> {
             ),
             CARE,
         )),
-        Phase::Failed(Why::Server) => Some((
+        Phase::Failed(Why::NoAnswer) => Some((
             t(
                 "integrations.ask.failed.server",
                 "It couldn\u{2019}t be sent: the server didn\u{2019}t answer. What you typed is kept.",
+            ),
+            CARE,
+        )),
+        Phase::Failed(Why::NotTaken) => Some((
+            t(
+                "integrations.ask.failed.refused",
+                "It couldn\u{2019}t be sent: the server didn\u{2019}t take it. What you typed is kept.",
+            ),
+            CARE,
+        )),
+        Phase::Failed(Why::TooMany) => Some((
+            t(
+                "integrations.ask.failed.busy",
+                "It couldn\u{2019}t be sent: the server didn\u{2019}t take it just now. Try again in a minute. What you typed is kept.",
             ),
             CARE,
         )),
@@ -752,7 +778,7 @@ mod tests {
         Err(Why::Offline)
     }
     fn refused(_: &Target, _: &[u8]) -> Result<(), Why> {
-        Err(Why::Server)
+        Err(Why::NotTaken)
     }
 
     /// A window that would send to `post`, never to the network.
@@ -1004,9 +1030,25 @@ mod tests {
             ask.what = "Bring the plan in".to_owned();
             ask.send(|| {});
             settle(&mut ask);
-            assert_eq!(ask.phase, Phase::Failed(Why::Server));
+            assert_eq!(ask.phase, Phase::Failed(Why::NotTaken));
+            assert!(has(&drawn(&mut ask, Vec::new()), "the server didn\u{2019}t take it. What you typed is kept."));
+            // Too many just now says when to try again; no answer at all says so.
+            ask.phase = Phase::Failed(Why::TooMany);
+            assert!(has(&drawn(&mut ask, Vec::new()), "Try again in a minute."));
+            ask.phase = Phase::Failed(Why::NoAnswer);
             assert!(has(&drawn(&mut ask, Vec::new()), "the server didn\u{2019}t answer. What you typed is kept."));
         });
+    }
+
+    #[test]
+    fn what_the_servers_answer_means() {
+        for taken in [200, 201, 204] {
+            assert_eq!(answer_of(taken), Ok(()), "{taken}");
+        }
+        assert_eq!(answer_of(429), Err(Why::TooMany));
+        for refused in [301, 400, 404, 405, 413, 500, 503] {
+            assert_eq!(answer_of(refused), Err(Why::NotTaken), "{refused}");
+        }
     }
 
     #[test]
@@ -1106,14 +1148,21 @@ mod tests {
 
     #[test]
     fn the_words_are_cleaned_as_the_server_wants_them_and_fit_its_8_kb() {
-        assert_eq!(cleaned("  Planner\u{202e} \u{1b}[2J ", true), "Planner [2J");
-        assert_eq!(cleaned("a\r\nb\rc\td\u{0}e\u{85}f", false), "a\nb\nc\tdef");
-        assert_eq!(cleaned("one\ntwo", true), "onetwo");
-        // Every field full, of four-byte characters, quotes and new lines: still under 8 KB.
-        let name = "\u{1f64f}".repeat(NAME_MOST);
-        let what = "\u{1f64f}\"\n".repeat(TEXT_MOST / 3);
-        let how = "\u{1f64f}".repeat(TEXT_MOST);
-        let sent = body(&cleaned(&name, true), &cleaned(&what, false), &cleaned(&how, false));
+        assert_eq!(cleaned("  Planner\u{202e} \u{1b}[2J ", true, NAME_MOST), "Planner [2J");
+        assert_eq!(cleaned("a\r\nb\rc\td\u{0}e\u{85}f", false, TEXT_MOST), "a\nb\nc\tdef");
+        assert_eq!(cleaned("one\ntwo", true, NAME_MOST), "onetwo");
+        // At most so many characters, whatever the field let in, counted after the ends are
+        // trimmed, with no space left at the cut.
+        assert_eq!(cleaned(&"w".repeat(5000), false, TEXT_MOST).chars().count(), TEXT_MOST);
+        assert_eq!(cleaned(&format!("  {}", "\u{1f64f}".repeat(200)), true, NAME_MOST).chars().count(), NAME_MOST);
+        assert_eq!(cleaned("abc def", true, 4), "abc");
+        // Fields far past their limits, of four-byte characters, quotes and new lines: what is
+        // sent is still under 8 KB.
+        let name = "\u{1f64f}".repeat(NAME_MOST * 10);
+        let what = "\u{1f64f}\"\n".repeat(TEXT_MOST * 3);
+        let how = "\u{1f64f}".repeat(TEXT_MOST * 10);
+        let sent =
+            body(&cleaned(&name, true, NAME_MOST), &cleaned(&what, false, TEXT_MOST), &cleaned(&how, false, TEXT_MOST));
         assert!(sent.len() < 8 * 1024, "{} bytes", sent.len());
         // Within the server's limits.
         const { assert!(NAME_MOST <= 100 && TEXT_MOST <= 2000) };
@@ -1175,7 +1224,7 @@ mod tests {
                     assert!(plan.say.max.y <= body.max.y + 0.5, "{language:?}: the form overflows its body");
                     assert!(plan.what.height() >= 44.0 && plan.how.height() >= 28.0, "{language:?}: boxes too small");
                     // Each failure fits the two lines kept for it.
-                    for why in [Why::Offline, Why::Server, Why::TestCopy] {
+                    for why in [Why::Offline, Why::NoAnswer, Why::NotTaken, Why::TooMany, Why::TestCopy] {
                         let (words, _) = say_words(Phase::Failed(why)).unwrap();
                         let line =
                             ui.painter().layout(words.to_owned(), FontId::proportional(13.0), TEXT, body.width());
@@ -1202,7 +1251,11 @@ mod tests {
         let seen = Arc::new(std::sync::Mutex::new(String::new()));
         let kept = seen.clone();
         let server = std::thread::spawn(move || {
-            for answer in ["HTTP/1.1 204 No Content\r\n\r\n", "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"] {
+            for answer in [
+                "HTTP/1.1 204 No Content\r\n\r\n",
+                "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n",
+                "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 60\r\nContent-Length: 0\r\n\r\n",
+            ] {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                 let mut request = Vec::new();
@@ -1233,7 +1286,8 @@ mod tests {
         let local = Target { url: format!("http://127.0.0.1:{port}/v1/integration-request"), local: true };
         let sent = english(|| body("Planner", "Bring it in", "Sundays"));
         assert_eq!(post(&local, &sent), Ok(()));
-        assert_eq!(post(&local, &sent), Err(Why::Server));
+        assert_eq!(post(&local, &sent), Err(Why::NotTaken));
+        assert_eq!(post(&local, &sent), Err(Why::TooMany));
         server.join().unwrap();
         let request = seen.lock().unwrap().clone();
         assert!(request.starts_with("POST /v1/integration-request HTTP/1.1\r\n"), "{request}");

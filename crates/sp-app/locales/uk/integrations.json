@@ -350,6 +350,8 @@
   "integrations.ask.sending": "Надсилання…",
   "integrations.ask.failed.offline": "Не вдалося надіслати: немає підключення до інтернету. Написане збережено.",
   "integrations.ask.failed.server": "Не вдалося надіслати: сервер не відповів. Написане збережено.",
+  "integrations.ask.failed.refused": "Не вдалося надіслати: сервер не прийняв запит. Написане збережено.",
+  "integrations.ask.failed.busy": "Не вдалося надіслати: сервер зараз не прийняв запит. Спробуйте за хвилину. Написане збережено.",
   "integrations.ask.failed.test": "Не надіслано: тестова копія нічого не надсилає. Написане збережено.",
   "integrations.ask.refused": "Вкажіть застосунок чи пристрій і що він має робити",
   "integrations.ask.issue": "Звернення на GitHub ↗",
