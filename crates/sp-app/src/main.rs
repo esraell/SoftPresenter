@@ -1641,6 +1641,16 @@ fn home_key_command(
     Some(press)
 }
 
+/// Puts a Bible passage just made into its place among the show's presentations (one of the Bible
+/// view's two, never the one on screen). The slide last on screen there, kept so Next goes on from
+/// it after a clear (the show's cursor), was a verse of the passage before; the new passage's
+/// slides are all made anew, so `replace_presentation_following`, which keeps the cursor only on
+/// the same slide, lets go of it. Otherwise it would stay at the same place in the new passage, on
+/// a verse never shown, and Space or a clicker would go on from there.
+fn place_passage(show: &mut Show, slot: usize, passage: sp_model::Presentation) {
+    show.replace_presentation_following(slot, Arc::new(passage));
+}
+
 /// What a key does to a slide picked (`running::pick_key`) while it is set to `action`, as the
 /// prototype has it: only Next and Previous touch the pick. → doing Next moves it on; any other
 /// key doing Next takes it, as Space and Enter do, since Next starts what is lined up when
@@ -5224,12 +5234,12 @@ impl App {
         let state = &running.home_state;
         let picked = if aim.is_some() { None } else { state.picked_word(&self.show) };
         let showing = self.show.live().is_some();
-        // In the editors the show steps as it always has; on the Bible page too, unless a verse
-        // picked waits for Enter with nothing on screen. An aimed step is the playlist's.
+        // In the editors the show steps as it always has; on the Bible page as
+        // `HomeState::bible_step` says. An aimed step is the playlist's.
         Some(if aim.is_none() && state.edit_kind().is_some() {
             running::Do::Show(command)
         } else if aim.is_none() && state.bible_open {
-            running::held_for_enter(picked, showing).unwrap_or(running::Do::Show(command))
+            state.bible_step(&self.show, forward)
         } else {
             let open = aim.or(if state.playlist_open { state.services.chosen } else { None });
             let continuous = state.continuous;
@@ -5525,7 +5535,7 @@ impl App {
         if count == 0 {
             return None;
         }
-        self.show.replace_presentation(slot, Arc::new(passage));
+        place_passage(&mut self.show, slot, passage);
         Some(sp_engine::SlideRef { presentation: slot, slide: if last { count - 1 } else { 0 } })
     }
 
@@ -14026,7 +14036,7 @@ impl ApplicationHandler<AppEvent> for App {
                 // A Bible passage just looked up goes into its slot. It is never the slot on
                 // screen, so the output is untouched.
                 if let Some((slot, passage)) = self.running.as_mut().and_then(|r| r.home_state.bible.pending.take()) {
-                    self.show.replace_presentation(slot, Arc::new(passage));
+                    place_passage(&mut self.show, slot, passage);
                     // A slide of a playlist's passage clicked goes on screen once the passage is in
                     // its place. (A verse double-clicked in the Bible view goes on by Enter, below.)
                     let go_live = self.running.as_mut().and_then(|r| r.home_state.bible.go_live.take());
@@ -16341,7 +16351,7 @@ mod tests {
             }
             // A passage just looked up goes into its place.
             if let Some((slot, passage)) = self.state.bible.pending.take() {
-                self.show.replace_presentation(slot, Arc::new(passage));
+                place_passage(&mut self.show, slot, passage);
             }
             // Show Selected typed in the find box or Scripture Lookup: Enter, once what it opened
             // is in the show, as `window_event` does after the frame.
@@ -16371,6 +16381,13 @@ mod tests {
         /// actions go to it, Show Selected is Enter, and the window's own are
         /// `window_key_action`'s.
         fn act(&mut self, action: KeyAction) {
+            // Next and Previous in the Bible view, as `App::decide_step` decides them.
+            if self.state.bible_open && matches!(action, KeyAction::Next | KeyAction::Previous) {
+                if let running::Do::Show(command) = self.state.bible_step(&self.show, action == KeyAction::Next) {
+                    self.show.apply(command);
+                }
+                return;
+            }
             if let Some(command) = action_command(action) {
                 self.show.apply(command);
             } else if action == KeyAction::ShowSelected {
@@ -17992,6 +18009,80 @@ mod tests {
         keyboard.press(Key::Named(NamedKey::Enter));
         keyboard.draw();
         assert_eq!(keyboard.live(), Some((slot, 16)), "Enter put it on");
+    }
+
+    /// After John 3:16 was shown and cleared, Romans 8:28 looked up in the same place (nothing
+    /// being on screen): typed with Return, and its pick lost to the Service view and back when
+    /// `lose_pick`; or typed and left to show itself after the typing pause, with nothing picked.
+    fn another_passage_looked_up_after_a_clear(how: &str) -> Keyboard {
+        let mut keyboard = verse_shown_then_cleared(key_table::KeyStyle::SoftPresenter);
+        let slot = bible_place(&keyboard).unwrap();
+        keyboard.state.bible.lookup = "Romans 8:28".to_owned();
+        if how == "pause" {
+            // Typed, then the keyboard gone from the field (a click elsewhere): it shows itself
+            // after the pause, with nothing picked.
+            let at = keyboard.time;
+            keyboard.state.bible.typed_at = Some(at);
+            for _ in 0..5 {
+                keyboard.draw();
+            }
+            assert_eq!(picked_at(&keyboard), None, "nothing picked after the pause");
+        } else {
+            keyboard.state.bible.focus_lookup = true;
+            keyboard.draw();
+            keyboard.press(Key::Named(NamedKey::Enter));
+            keyboard.draw();
+            assert_eq!(picked_at(&keyboard), Some((slot, 27)), "Return picked Romans 8:28");
+            if how == "lose pick" {
+                keyboard.state.view_request = Some(0);
+                keyboard.draw();
+                keyboard.state.view_request = Some(2);
+                keyboard.draw();
+                assert_eq!(picked_at(&keyboard), None, "the pick went with the view");
+            }
+        }
+        assert_eq!(bible_place(&keyboard), Some(slot), "the same place, nothing being on screen");
+        assert_eq!(keyboard.state.bible.shown, "К Римлянам 8:28");
+        assert_eq!(keyboard.live(), None);
+        assert_eq!(keyboard.show.cursor(), None, "John 3:16's place in the place is let go of");
+        assert_eq!(keyboard.state.cleared_verse(&keyboard.show), None);
+        keyboard
+    }
+
+    #[test]
+    fn after_another_passage_is_looked_up_the_step_keys_show_it_not_a_verse_never_shown() {
+        // Space and Page Down (a clicker's forward) put Romans 8:28 on, the verse asked for; before,
+        // the cleared John 3:16's place was kept, and Romans 8:17 (the slide after it) went on.
+        for how in ["return", "lose pick", "pause"] {
+            for key in [NamedKey::Space, NamedKey::PageDown] {
+                let mut keyboard = another_passage_looked_up_after_a_clear(how);
+                let slot = bible_place(&keyboard).unwrap();
+                keyboard.press(Key::Named(key));
+                keyboard.draw();
+                assert_eq!(keyboard.live(), Some((slot, 27)), "{how} {key:?}: Romans 8:28 on screen");
+                assert_eq!(
+                    live_name(&keyboard).as_deref(),
+                    Some("К Римлянам 8:28"),
+                    "{how} {key:?}: the verse looked up"
+                );
+            }
+        }
+        // → picks Romans 8:28, the passage's first verse, and puts nothing on; so do ↓ and ↑.
+        for how in ["lose pick", "pause"] {
+            for key in [NamedKey::ArrowRight, NamedKey::ArrowDown, NamedKey::ArrowUp] {
+                let mut keyboard = another_passage_looked_up_after_a_clear(how);
+                let slot = bible_place(&keyboard).unwrap();
+                keyboard.press(Key::Named(key));
+                keyboard.draw();
+                assert_eq!((keyboard.live(), picked_at(&keyboard)), (None, Some((slot, 27))), "{how} {key:?}");
+            }
+        }
+    }
+
+    /// The name of the slide on screen (a Bible slide is named by its verses).
+    fn live_name(keyboard: &Keyboard) -> Option<String> {
+        let live = keyboard.show.live()?;
+        keyboard.show.presentations()[live.presentation].slide(live.slide).map(|(group, _)| group.name.clone())
     }
 
     #[test]

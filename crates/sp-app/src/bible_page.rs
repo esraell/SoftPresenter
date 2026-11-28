@@ -1155,6 +1155,10 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         // A verse with none: looked up, and picked for Enter.
         _ => {
             if let Some((book, number)) = chapter {
+                // Another chapter: the verse a Shift-click runs from was of the one before.
+                if (book, number) != (state.bible.list_book, state.bible.list_chapter) {
+                    state.bible.list_from = None;
+                }
                 (state.bible.list_book, state.bible.list_chapter) = (book, number);
             }
             let choice = Choice::Verse { verse: verse.verse, shift, double: false };

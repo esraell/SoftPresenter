@@ -136,7 +136,7 @@ impl crate::App {
             return Err(message.unwrap_or_else(|| format!("Could not open {title}.")));
         };
         let (count, shown) = (passage.slide_count(), passage.title.clone());
-        self.show.replace_presentation(slot, std::sync::Arc::new(passage));
+        crate::place_passage(&mut self.show, slot, passage);
         if !(1..=count).contains(&number) {
             return Err(format!("{shown} has {count} slides; there is no slide {number}."));
         }

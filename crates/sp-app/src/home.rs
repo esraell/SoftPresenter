@@ -2366,14 +2366,40 @@ impl HomeState {
 
     /// The verse of the Bible view's passage that was on screen until the slides were cleared,
     /// outlined grey, while the arrows only move the pick (`bible_arrows_pick`) and nothing is
-    /// picked: where they move a pick from.
+    /// picked: where they move a pick from. Only while the place still holds the passage the page
+    /// shows (a passage looked up since lets go of the slide last on screen: see `place_passage`
+    /// in `main.rs`).
     pub fn cleared_verse(&self, show: &Show) -> Option<SlideRef> {
         if !self.bible_arrows_pick(show) || self.pick(show).is_some() {
             return None;
         }
         let slot = self.bible.slots.map(|slots| slots[self.bible.showing])?;
-        let count = show.presentations().get(slot).map_or(0, |passage| passage.slide_count());
-        show.cursor().filter(|at| at.presentation == slot && at.slide < count)
+        let passage = show
+            .presentations()
+            .get(slot)
+            .filter(|passage| passage.title == self.bible.held[self.bible.showing].deck)?;
+        show.cursor().filter(|at| at.presentation == slot && at.slide < passage.slide_count())
+    }
+
+    /// What Next (`forward`) or Previous does in the Bible view, as `App::decide_step` carries it
+    /// out for the keys, `sp` and the line under the preview (not in an editor, nor for a remote
+    /// page's own playlist): with a verse picked and nothing on screen, nothing, and it says to
+    /// press Enter (`running::held_for_enter`); with nothing on screen, nothing picked and no verse
+    /// of the passage shown cleared (a passage just looked up, or one whose pick went with another
+    /// view), the passage's first verse goes on, the one asked for, rather than whatever came after
+    /// the slide on screen last (the owner's rule, 2026-11-28); otherwise the show steps, on from
+    /// the slide on screen or the verse cleared.
+    pub fn bible_step(&self, show: &Show, forward: bool) -> crate::running::Do {
+        let showing = show.live().is_some();
+        if let Some(said) = crate::running::held_for_enter(self.picked_word(show), showing) {
+            return said;
+        }
+        if self.cleared_verse(show).is_none()
+            && let Some(first) = self.bible_arrow_pick(show, forward)
+        {
+            return crate::running::Do::Show(Command::GoTo(first));
+        }
+        crate::running::Do::Show(if forward { Command::Next } else { Command::Previous })
     }
 
     /// Where → or ← picks while the arrows only move the pick (`bible_arrows_pick`) and nothing
@@ -14664,7 +14690,7 @@ mod tests {
             show.apply(command);
         }
         if let Some((slot, passage)) = state.bible.pending.take() {
-            show.replace_presentation(slot, Arc::new(passage));
+            crate::place_passage(show, slot, passage);
             if let Some(slide) = state.bible.go_live.take() {
                 show.apply(Command::GoTo(SlideRef { presentation: slot, slide }));
             }
@@ -14746,9 +14772,8 @@ mod tests {
     fn press_step(show: &mut Show, state: &HomeState, forward: bool) -> Option<String> {
         let picked = state.picked_word(show);
         let showing = show.live().is_some();
-        let command = if forward { Command::Next } else { Command::Previous };
         let decided = if state.bible_open {
-            crate::running::held_for_enter(picked, showing).unwrap_or(crate::running::Do::Show(command))
+            state.bible_step(show, forward)
         } else {
             let here =
                 if show.cursor().is_some() { crate::running::Here::Elsewhere } else { crate::running::Here::Nothing };
