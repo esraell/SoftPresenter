@@ -2147,6 +2147,50 @@ fn sp_settings_sets_end_mark() {
     copy.quit().assert_clean(&run);
 }
 
+/// Each audience screen's switch for VoxLive's captions: read from the screens' file (on for a
+/// screen saved before the switch), said by `sp screens`, and set by `sp screen SCREEN voxlive
+/// on|off` and `screen set SCREEN voxlive=on|off`; a stage screen has none.
+#[test]
+fn sp_switches_a_screens_voxlive_captions() {
+    let Some(run) = Run::new("sp_switches_a_screens_voxlive_captions") else { return };
+    // Saved before the switch (the room's and the stream's), and with it off (the lobby's).
+    let screens = r#"{"format":"softpresenter-screens","version":1,"screens":[
+        {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e01","name":"Room","output":"window"},
+        {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e02","name":"Stream","output":"off",
+         "look":{"slides":true,"media":false,"props":true,"messages":true,"announcements":true,
+                 "color":{"r":0,"g":0,"b":0,"a":255},"mask":[0.0,0.0,0.0,0.0]}},
+        {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e03","name":"Lobby","output":"off","look":{"voxlive":false}},
+        {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e04","name":"Stage","output":"off","kind":"stage"}]}"#;
+    std::fs::create_dir_all(&run.data).expect("the copy's data folder");
+    std::fs::write(run.data.join("screens.json"), screens).expect("the screens' file");
+    let copy = run.start(&[]);
+    let switches = |copy: &Copy<'_>| {
+        let reply = copy.ok(&["screens"]);
+        let list = reply.data.as_array().cloned().unwrap_or_default();
+        (list.iter().map(|screen| screen["voxlive"].clone()).collect::<Vec<Value>>(), reply.text)
+    };
+    let (now, text) = switches(&copy);
+    assert_eq!(now, [Value::Bool(true), Value::Bool(true), Value::Bool(false), Value::Null], "{text}");
+    assert!(text.lines().any(|line| line.contains("Lobby") && line.contains("no VoxLive captions")), "{text}");
+    assert!(!text.lines().any(|line| line.contains("Stream") && line.contains("VoxLive")), "{text}");
+    // The short way, by name and by number, and `screen set`.
+    let said = copy.ok(&["screen", "Stream", "voxlive", "off"]);
+    assert!(said.text.contains("shows nothing in place of VoxLive's captions"), "{}", said.text);
+    assert_eq!(switches(&copy).0[1], Value::Bool(false));
+    copy.ok(&["screen", "set", "Stream", "voxlive=on"]);
+    assert_eq!(switches(&copy).0[1], Value::Bool(true));
+    copy.ok(&["screen", "2", "voxlive", "off"]);
+    assert_eq!(switches(&copy).0, [Value::Bool(true), Value::Bool(false), Value::Bool(false), Value::Null]);
+    copy.ok(&["screen", "Lobby", "voxlive", "on"]);
+    assert_eq!(switches(&copy).0[2], Value::Bool(true));
+    // A stage screen never shows the captions; a word other than on or off isn't taken.
+    copy.refused(&["screen", "Stage", "voxlive", "off"], "stage screen");
+    copy.refused(&["screen", "set", "Stream", "voxlive=maybe"], "voxlive is on or off");
+    copy.refused(&["screen", "Stream", "voxlive", "maybe"], "screen SCREEN voxlive on|off");
+    assert_eq!(switches(&copy).0, [Value::Bool(true), Value::Bool(false), Value::Bool(true), Value::Null]);
+    copy.quit().assert_clean(&run);
+}
+
 /// A setting changed by `sp` is kept when the copy quits straight after, its window hardly
 /// drawn (as with the window covered or minimised): the small choices are saved as the window
 /// is drawn, which a quiet copy's, behind everything, seldom is; quitting saves them too.
@@ -3540,4 +3584,135 @@ fn capture_home_saves_a_picture_of_the_window_and_quits() {
         assert!(!log.contains(bad) && !stderr.contains(bad), "the capture run said {bad:?}{}", run.context());
     }
     assert!(!run.data.join("running").exists(), "the capture run left its running note behind{}", run.context());
+}
+
+// ---------------------------------------------------------------------------------------------
+// VoxLive, against a stand-in on this computer
+
+/// A stand-in for VoxLive on this computer: its church API lists one screen (made up for the
+/// test) whose live display and test pattern are its own plain pages; it keeps the first line of
+/// every request (`GET /listen/… HTTP/1.1`), so a test can see which pages were opened.
+struct VoxLiveStandIn {
+    port: u16,
+    asked: std::sync::Arc<Mutex<Vec<String>>>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl VoxLiveStandIn {
+    const SCREEN: &str = "/listen/test-church/screen/sp1";
+
+    fn serve() -> VoxLiveStandIn {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a port for the stand-in");
+        listener.set_nonblocking(true).expect("non-blocking");
+        let port = listener.local_addr().expect("its port").port();
+        let site = format!("http://127.0.0.1:{port}");
+        let screens = serde_json::json!({ "screens": [{
+            "id": "sp1", "name": "Spanish", "language": "es", "mode": "captions", "version": "1", "style": {},
+            "url": format!("{site}{}", Self::SCREEN), "demo_url": format!("{site}{}?demo=1", Self::SCREEN),
+        }]})
+        .to_string();
+        let asked = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (kept, stopping) = (asked.clone(), stop.clone());
+        let thread = std::thread::spawn(move || {
+            while !stopping.load(Ordering::Relaxed) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                };
+                let _ = stream.set_nonblocking(false);
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let mut head = Vec::new();
+                let mut byte = [0u8; 1];
+                while !head.ends_with(b"\r\n\r\n") && stream.read(&mut byte).is_ok_and(|n| n == 1) {
+                    head.push(byte[0]);
+                }
+                let head = String::from_utf8_lossy(&head).into_owned();
+                let line = head.lines().next().unwrap_or_default().to_owned();
+                let path = line.split_whitespace().nth(1).unwrap_or_default().to_owned();
+                if let Ok(mut asked) = kept.lock() {
+                    asked.push(line);
+                }
+                let (status, kind, body) = if path.starts_with("/api/v1/screens") {
+                    (200, "application/json", screens.clone())
+                } else if path.starts_with("/api/v1/screen-style") {
+                    (200, "application/json", r#"{"fields":{}}"#.to_owned())
+                } else if path.starts_with("/listen/") {
+                    (
+                        200,
+                        "text/html",
+                        "<html><body style=\"background:#000;color:#fff\">Captions</body></html>".to_owned(),
+                    )
+                } else {
+                    (404, "text/plain", "not here".to_owned())
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} Answer\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        VoxLiveStandIn { port, asked, stop, thread: Some(thread) }
+    }
+
+    /// The API's address, for `SOFTPRESENTER_VOXLIVE_API`.
+    fn api(&self) -> String {
+        format!("http://127.0.0.1:{}/api/v1", self.port)
+    }
+
+    /// How many times the screen's live display (the page that joins the captions, and can
+    /// start a paid translation) was asked for; its test pattern (`demo=1`) costs nothing.
+    fn live_display_asked(&self) -> usize {
+        let live = format!("GET {} ", Self::SCREEN);
+        self.asked.lock().map(|asked| asked.iter().filter(|line| line.starts_with(&live)).count()).unwrap_or_default()
+    }
+}
+
+impl Drop for VoxLiveStandIn {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// VoxLive's captions put on screen while the only screen leaves them out: the screen's live
+/// display is never opened (it can start a paid translation), until the screen's switch is
+/// turned on, when it is opened at once. Web pages on slides are opened on macOS only.
+#[test]
+fn voxlives_live_display_is_never_opened_while_no_screen_shows_the_captions() {
+    let name = "voxlives_live_display_is_never_opened_while_no_screen_shows_the_captions";
+    if !cfg!(target_os = "macos") {
+        return say_skipped(name, "web pages on slides are opened on macOS only");
+    }
+    let Some(run) = Run::new(name) else { return };
+    let voxlive = VoxLiveStandIn::serve();
+    // The one screen: a stream, in a window, that leaves VoxLive's captions out.
+    let screens = r#"{"format":"softpresenter-screens","version":1,"screens":[
+        {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e01","name":"Stream","output":"window","look":{"voxlive":false}}]}"#;
+    std::fs::create_dir_all(&run.data).expect("the copy's data folder");
+    std::fs::write(run.data.join("screens.json"), screens).expect("the screens' file");
+    let copy = run.start(&[("SOFTPRESENTER_VOXLIVE_API", &voxlive.api())]);
+    let said = run.sp_with_input(&["voxlive", "connect"], Some("vxk_test_0123456789abcdef"));
+    assert!(said.ok, "{}{}", said.text, run.context());
+    let began = Instant::now();
+    while copy.ok(&["voxlive"]).data["screens"] != 1 {
+        assert!(began.elapsed() < Duration::from_secs(20), "VoxLive's screen wasn't found{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    // The captions on screen: the stream leaves them out, so nothing opens the live display.
+    copy.ok(&["voxlive", "show", "1"]);
+    std::thread::sleep(Duration::from_secs(3));
+    assert_eq!(voxlive.live_display_asked(), 0, "the live display was opened{}", run.context());
+    // The switch turned on with the captions up: opened at once.
+    copy.ok(&["screen", "Stream", "voxlive", "on"]);
+    let began = Instant::now();
+    while voxlive.live_display_asked() == 0 {
+        assert!(began.elapsed() < Duration::from_secs(15), "the live display wasn't opened{}", run.context());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    copy.quit().assert_clean(&run);
 }

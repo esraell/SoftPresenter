@@ -187,6 +187,7 @@
   "settings.screens.tech.premultiplied": "Прозрачный, края предумноженные",
   "settings.screens.tech.every_layer": "все слои",
   "settings.screens.tech.no_layers": "без слоёв",
+  "settings.screens.tech.no_voxlive": "без субтитров VoxLive",
   "settings.screens.tech.edges": "края {edges}",
   "settings.screens.tech.colour": "цвет {hex}",
   "settings.groups.used": "Где используется",

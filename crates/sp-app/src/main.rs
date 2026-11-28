@@ -315,16 +315,17 @@ fn open_panel_window(
     let grown = |points: f64, room: Option<f64>| (points * zoom).min(room.unwrap_or(f64::MAX)).max(points);
     let size = (grown(size.0, display.map(|d| d.0)), grown(size.1, display.map(|d| d.1)));
     // Testing aid: SOFTPRESENTER_SETTINGS_SIZE=1100x700 opens the Settings window at that size
-    // (points), to see its pages at the sizes the design was drawn at.
+    // (points), to see its pages at the sizes the design was drawn at; SOFTPRESENTER_SCREENS_SIZE
+    // does the same for the Screens window.
+    let asked_size = |switch: &str| {
+        std::env::var(switch).ok().and_then(|asked| {
+            let (w, h) = asked.split_once('x')?;
+            Some((w.trim().parse::<f64>().ok()?, h.trim().parse::<f64>().ok()?))
+        })
+    };
     let size = match kind {
-        Panel::Settings => std::env::var("SOFTPRESENTER_SETTINGS_SIZE")
-            .ok()
-            .and_then(|asked| {
-                let (w, h) = asked.split_once('x')?;
-                Some((w.trim().parse::<f64>().ok()?, h.trim().parse::<f64>().ok()?))
-            })
-            .unwrap_or(size),
-        Panel::Screens => size,
+        Panel::Settings => asked_size("SOFTPRESENTER_SETTINGS_SIZE").unwrap_or(size),
+        Panel::Screens => asked_size("SOFTPRESENTER_SCREENS_SIZE").unwrap_or(size),
     };
     let attrs = app_window(Window::default_attributes())
         .with_title(kind.title())
@@ -423,6 +424,14 @@ const MAX_ACTION_CHAIN: u8 = 3;
 /// preview draw it without them then (`Frame::words_hidden`, `output::drawn_slide`).
 fn frame_slide(show: &Show) -> Option<Arc<Slide>> {
     show.live_slide().map(|(_, slide)| Arc::new(slide.clone()))
+}
+
+/// How the screens go on to the slide on screen: its own transition, if it has one; then its
+/// song's; otherwise the one chosen for all (`usual`), which is also how a cleared slide layer
+/// goes (nothing is on screen then). VoxLive's captions have none of their own, so a screen
+/// that leaves them out goes from the slide before to nothing as a clear would.
+fn slide_transition(show: &Show, usual: sp_model::Transition) -> sp_model::Transition {
+    show.live_slide().and_then(|(song, slide)| slide.transition.or(song.transition)).unwrap_or(usual)
 }
 
 /// The theme the screens draw the slide on screen with: its presentation's (`theme_of`, by the
@@ -952,6 +961,63 @@ fn web_costs(url: &str) -> bool {
     let voxlive = ((host == "voxlive.app" || host.ends_with(".voxlive.app")) && path.starts_with("/listen/"))
         || lower.starts_with(&voxlive::display_prefix(&voxlive::api_base()));
     voxlive && !lower.contains("demo=1") && !lower.contains("preview=1")
+}
+
+/// True when a slide has a web page box (shown) whose page is a VoxLive screen's live display:
+/// VoxLive's captions, live.
+fn shows_voxlive_display(slide: &Slide) -> bool {
+    slide
+        .objects
+        .iter()
+        .any(|object| !object.hidden && matches!(&object.kind, sp_model::ObjectKind::Web { url } if web_costs(url)))
+}
+
+/// A web page box's page wanted: what its pictures are shown under (`sp_render::web_key`), its
+/// address, its size, and whether it is on the screens (they take its pictures) or loaded ahead.
+type WantedWeb = (String, String, u32, u32, bool);
+
+/// The pages the web page boxes want, before those kept warm (`App::sync_web_pages`): the boxes
+/// of the slide on screen and the layout behind it (`live`), on the screens when `live_shown`
+/// (while it isn't, the slide on screen is VoxLive's captions and no screen going out shows
+/// them, so its boxes are only loaded ahead, as the rest are); those of the stage screens'
+/// layouts, on the screens; then those of the song open and the slide being edited (`ahead`),
+/// loaded ahead. Each page once, on the screens if any box wants it there. A page that costs to
+/// open (a VoxLive screen's live display) is wanted on the screens only; loaded ahead, its free
+/// stand-in is wanted instead, for the operator's window.
+fn web_boxes_wanted(
+    live: &[&[sp_model::Object]],
+    live_shown: bool,
+    stage: &[sp_model::Object],
+    ahead: &[&[sp_model::Object]],
+) -> Vec<WantedWeb> {
+    fn boxes_in(objects: &[sp_model::Object], live: bool, into: &mut Vec<WantedWeb>) {
+        for object in objects.iter().filter(|object| !object.hidden) {
+            let sp_model::ObjectKind::Web { url } = &object.kind else { continue };
+            if !sp_video::web::allowed(url) {
+                continue;
+            }
+            // A page that costs to open is opened only on screen; ahead of that, its free
+            // stand-in is, for the operator's window.
+            let stand_in = (!live).then(|| web_stand_in(url)).flatten();
+            let url = stand_in.as_ref().unwrap_or(url);
+            let place = object.frame.unwrap_or(sp_model::WHOLE_SLIDE);
+            let key = sp_render::web_key(url, place.w, place.h);
+            match into.iter_mut().find(|(have, ..)| *have == key) {
+                Some(found) => found.4 |= live,
+                None => into.push((key, url.clone(), place.w.round() as u32, place.h.round() as u32, live)),
+            }
+        }
+    }
+    let mut wanted = Vec::new();
+    for objects in live {
+        boxes_in(objects, live_shown, &mut wanted);
+    }
+    // The stage screens' layouts are on screen too.
+    boxes_in(stage, true, &mut wanted);
+    for objects in ahead {
+        boxes_in(objects, false, &mut wanted);
+    }
+    wanted
 }
 
 /// Media bin items a pack brings in, as they come: the id each had where the pack was made, and
@@ -3874,50 +3940,48 @@ impl App {
         }
     }
 
+    /// True while the slide on screen shows VoxLive's live captions: one of the VoxLive item's
+    /// slides, or any slide with a web page box showing a VoxLive screen's live display (the
+    /// page that joins the captions). An audience screen whose look leaves VoxLive's captions out
+    /// shows nothing on the slide layer meanwhile (`output::slide_shown`).
+    fn voxlive_on_screen(&self) -> bool {
+        self.show.live().is_some_and(|at| at.presentation == self.voxlive_slot)
+            || self.show.live_slide().is_some_and(|(_, slide)| shows_voxlive_display(slide))
+    }
+
     /// Opens the pages web page boxes want, and closes the rest. The boxes on the slide on screen
     /// (and in the layout behind it) are on screen; the boxes of the song open in the window and
     /// of the slide being edited are loaded ahead, so a page has loaded and drawn by the time its
     /// slide is shown, rather than flashing in as it loads. A page is kept while it is wanted,
     /// and never loaded again only because its slide is shown again. A VoxLive screen's live
-    /// address (it starts a paid translation) is never loaded ahead.
-    fn sync_web_pages(&mut self) {
-        fn boxes_in(objects: &[sp_model::Object], live: bool, into: &mut Vec<(String, String, u32, u32, bool)>) {
-            for object in objects.iter().filter(|object| !object.hidden) {
-                let sp_model::ObjectKind::Web { url } = &object.kind else { continue };
-                if !sp_video::web::allowed(url) {
-                    continue;
-                }
-                // A page that costs to open is opened only on screen; ahead of that, its free
-                // stand-in is, for the operator's window.
-                let stand_in = (!live).then(|| web_stand_in(url)).flatten();
-                let url = stand_in.as_ref().unwrap_or(url);
-                let place = object.frame.unwrap_or(sp_model::WHOLE_SLIDE);
-                let key = sp_render::web_key(url, place.w, place.h);
-                match into.iter_mut().find(|(have, ..)| *have == key) {
-                    Some(found) => found.4 |= live,
-                    None => into.push((key, url.clone(), place.w.round() as u32, place.h.round() as u32, live)),
-                }
+    /// address (it starts a paid translation) is never loaded ahead, nor opened for the screens
+    /// while no screen going out shows VoxLive's captions (`screens::voxlive_wanted`): then the
+    /// boxes of the captions on screen are only loaded ahead, as their free test pattern. True
+    /// when the pages on screen changed (the screens are then told of them by
+    /// `refresh_output`).
+    fn sync_web_pages(&mut self) -> bool {
+        let voxlive = self.voxlive_on_screen();
+        let behind = self.live_layout_objects();
+        let mut wanted = {
+            let mut live: Vec<&[sp_model::Object]> = Vec::new();
+            if let Some((_, slide)) = self.show.live_slide() {
+                live.push(&slide.objects);
+                live.extend(behind.as_ref().map(|behind| behind.objects.as_slice()));
             }
-        }
-        let mut wanted = Vec::new();
-        if let Some((_, slide)) = self.show.live_slide() {
-            boxes_in(&slide.objects, true, &mut wanted);
-            if let Some(behind) = self.live_layout_objects() {
-                boxes_in(&behind.objects, true, &mut wanted);
-            }
-        }
-        // The stage screens' layouts are on screen too.
-        if let Some(running) = self.running.as_ref() {
-            boxes_in(&stage::shown_objects(&running.home_state), true, &mut wanted);
-        }
-        if let Some(song) = self.show.presentations().get(self.show.selected()) {
-            for (_, slide) in song.slides() {
-                boxes_in(&slide.objects, false, &mut wanted);
-            }
-        }
-        if let Some(draft) = self.running.as_ref().and_then(|running| running.home_state.editing.as_ref()) {
-            boxes_in(&draft.slide.objects, false, &mut wanted);
-        }
+            let state = self.running.as_ref().map(|running| &running.home_state);
+            let stage = state.map(stage::shown_objects).unwrap_or_default();
+            // Worked out only while the captions are up.
+            let captions_wanted =
+                !voxlive || state.is_none_or(|state| screens::voxlive_wanted(&state.screens, &stage::pictured(state)));
+            let mut ahead: Vec<&[sp_model::Object]> = self
+                .show
+                .presentations()
+                .get(self.show.selected())
+                .map(|song| song.slides().map(|(_, slide)| slide.objects.as_slice()).collect())
+                .unwrap_or_default();
+            ahead.extend(state.and_then(|state| state.editing.as_ref()).map(|draft| draft.slide.objects.as_slice()));
+            web_boxes_wanted(&live, captions_wanted, &stage, &ahead)
+        };
         // A page that costs, once shown, is kept running a while after it leaves the screens,
         // so going back to it (a verse, then the captions again) is at once: it is running for
         // the service anyway.
@@ -3941,8 +4005,10 @@ impl App {
         let unchanged = wanted.len() == self.web_pages.len()
             && wanted.iter().zip(&self.web_pages).all(|((key, .., live), web)| *key == web.key && *live == web.live);
         if unchanged {
-            return;
+            return false;
         }
+        let live_before: Vec<String> =
+            self.web_pages.iter().filter(|web| web.live).map(|web| web.key.clone()).collect();
         let mut kept = std::mem::take(&mut self.web_pages);
         for (key, url, width, height, live) in wanted {
             if let Some(at) = kept.iter().position(|web| web.key == key) {
@@ -3982,13 +4048,19 @@ impl App {
             applog::event("web", &format!("closed a web page box ({})", web_host(gone.page.address())));
             sp_render::forget_picture(&gone.key);
         }
+        let live_now: Vec<String> = self.web_pages.iter().filter(|web| web.live).map(|web| web.key.clone()).collect();
+        live_now != live_before
     }
 
     /// Keeps the pages of web page boxes drawing: one on screen asks for a new picture as often
     /// as the screens can show one, one loaded ahead twice a second (its picture goes to the
     /// operator's window: the editor and thumbnails). Says when to look again.
     fn tick_web(&mut self) -> Option<Instant> {
-        self.sync_web_pages();
+        // The pages on screen can change without the slide changing (a screen's VoxLive switch
+        // turned on while the captions are up): the screens are told at once.
+        if self.sync_web_pages() {
+            self.refresh_output();
+        }
         let (ndi_first, ndi_fresh, ndi_at) = self.tick_ndi();
         let (mirror_first, mirror_fresh) = self.mirror_pictures();
         if self.web_pages.is_empty() && ndi_first.is_empty() && ndi_fresh.is_empty() && !mirror_first && !mirror_fresh {
@@ -5395,6 +5467,7 @@ impl App {
         let theme = frame_theme(&self.show, &self.theme, |at| self.theme_of(at)).clone();
         let about = self.stage_about();
         let end_mark = self.end_mark_now();
+        let voxlive = self.voxlive_on_screen();
         let Some(running) = self.running.as_mut() else {
             return;
         };
@@ -5439,19 +5512,14 @@ impl App {
                 theme: theme.clone(),
                 version: running.home_state.version_switch.version(),
                 enabled: self.show.output_enabled(),
-                // A slide's own transition, if it has one; then its song's; otherwise the one
-                // chosen for all.
-                transition: self
-                    .show
-                    .live_slide()
-                    .and_then(|(song, slide)| slide.transition.or(song.transition))
-                    .unwrap_or(running.home_state.transition),
+                transition: slide_transition(&self.show, running.home_state.transition),
                 media_transition: running.home_state.media_transition,
                 next,
                 about,
                 build_step: self.show.build_step(),
                 words_hidden: self.show.words_hidden(),
                 end_mark,
+                voxlive,
             };
             if !output.send(OutputMsg::Show(frame)) {
                 running.home_state.output_has_stopped();
@@ -14720,6 +14788,68 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    /// The VoxLive item made from a fake VoxLive screen (its address is never opened here).
+    fn fake_voxlive_item() -> sp_model::Presentation {
+        super::voxlive::item(&[super::voxlive::Screen {
+            id: "abc2345".to_owned(),
+            name: "Spanish".to_owned(),
+            language: "es".to_owned(),
+            mode: "captions".to_owned(),
+            url: "https://voxlive.app/listen/grace/screen/abc2345".to_owned(),
+            ..Default::default()
+        }])
+    }
+
+    #[test]
+    fn voxlives_live_display_is_opened_for_the_screens_only_while_a_screen_shows_the_captions() {
+        let item = fake_voxlive_item();
+        let (_, captions) = item.slide(0).expect("a slide for the screen");
+        let live_url = "https://voxlive.app/listen/grace/screen/abc2345";
+        let costs = |wanted: &[super::WantedWeb]| wanted.iter().filter(|(_, url, ..)| url == live_url).count();
+        // The captions on screen, and a screen going out shows them: the live display is
+        // opened for the screens, once, as it was before the switch.
+        let wanted = super::web_boxes_wanted(&[&captions.objects], true, &[], &[]);
+        assert_eq!(wanted.len(), 1, "{wanted:?}");
+        assert_eq!((wanted[0].1.as_str(), wanted[0].4), (live_url, true), "on the screens");
+        // No screen going out shows them: the live display (it can start a paid translation)
+        // isn't opened at all; only its free test pattern, loaded ahead for the window.
+        let wanted = super::web_boxes_wanted(&[&captions.objects], false, &[], &[]);
+        assert_eq!(costs(&wanted), 0, "the live display isn't opened: {wanted:?}");
+        assert!(wanted.iter().all(|(_, url, .., live)| !live && url.ends_with("demo=1")), "{wanted:?}");
+        // The item open in the window as well changes neither.
+        let open: Vec<&[sp_model::Object]> = item.slides().map(|(_, slide)| slide.objects.as_slice()).collect();
+        let both = super::web_boxes_wanted(&[&captions.objects], true, &[], &open);
+        assert_eq!(costs(&both), 1);
+        assert!(both.iter().any(|(_, url, .., live)| url == live_url && *live), "{both:?}");
+        assert_eq!(costs(&super::web_boxes_wanted(&[&captions.objects], false, &[], &open)), 0);
+        // Another page on a slide is on the screens as ever.
+        let page = sp_model::Slide::new(vec![sp_model::Object::web("https://example.com/clock".to_owned())]);
+        let wanted = super::web_boxes_wanted(&[&page.objects], true, &[], &[]);
+        assert_eq!(wanted.len(), 1);
+        assert!(wanted[0].4 && wanted[0].1 == "https://example.com/clock");
+    }
+
+    #[test]
+    fn voxlives_captions_are_its_items_slides_and_any_box_showing_a_live_display() {
+        let item = fake_voxlive_item();
+        let (_, captions) = item.slide(0).expect("a slide");
+        assert!(super::shows_voxlive_display(captions));
+        let page = |url: &str| sp_model::Slide::new(vec![sp_model::Object::web(url.to_owned())]);
+        assert!(super::shows_voxlive_display(&page("https://voxlive.app/listen/grace/screen/abc2345")));
+        assert!(!super::shows_voxlive_display(&page("https://voxlive.app/listen/grace/screen/abc2345?demo=1")));
+        assert!(!super::shows_voxlive_display(&page("https://example.com/clock")));
+        let mut hidden = page("https://voxlive.app/listen/grace/screen/abc2345");
+        hidden.objects[0].hidden = true;
+        assert!(!super::shows_voxlive_display(&hidden), "a hidden box shows nothing");
+        // The captions have no transition of their own: they go on as a clear goes off.
+        let mut show = sp_engine::Show::new(vec![std::sync::Arc::new(item)]);
+        show.apply(sp_engine::Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        let usual = sp_model::Transition::of(sp_model::TransitionKind::Push);
+        assert_eq!(super::slide_transition(&show, usual), usual);
+        show.apply(sp_engine::Command::Clear(sp_engine::Layer::Slides));
+        assert_eq!(super::slide_transition(&show, usual), usual, "a clear");
+    }
+
     #[test]
     fn a_voxlive_screens_live_address_counts_as_costing_and_its_test_pattern_doesnt() {
         assert!(super::web_costs("https://voxlive.app/listen/grace/screen/abc2345"));

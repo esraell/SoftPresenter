@@ -442,6 +442,26 @@ pub fn shown_objects(state: &crate::home::HomeState) -> Vec<Object> {
     shown
 }
 
+/// The audience screens the stage screens going out show pictures of, each once (by id, as
+/// [`with_sources`] picks them): their pictures are drawn from those screens' own, so what one
+/// of them would show is on the stage too. None while the stage screens are off.
+pub fn pictured(state: &crate::home::HomeState) -> Vec<Uuid> {
+    if !state.stage_on {
+        return Vec::new();
+    }
+    let mut found: Vec<Uuid> = Vec::new();
+    let stages = state.screens.iter().filter(|screen| screen.kind == crate::screens::Kind::Stage && !screen.is_off());
+    for screen in stages {
+        let layout = with_sources(&layout_for(&state.stage_layouts, screen.stage_layout), &state.screens);
+        for id in sources(&layout) {
+            if !id.is_nil() && !found.contains(&id) {
+                found.push(id);
+            }
+        }
+    }
+    found
+}
+
 /// The screens a layout's screen pictures show, each once, as [`with_sources`] left them.
 pub fn sources(layout: &ThemeTemplate) -> Vec<Uuid> {
     let mut found = Vec::new();

@@ -143,6 +143,7 @@
   "settings.screens.tech.premultiplied": "Прозорий, краї попередньо помножені",
   "settings.screens.tech.every_layer": "усі шари",
   "settings.screens.tech.no_layers": "без шарів",
+  "settings.screens.tech.no_voxlive": "без субтитрів VoxLive",
   "settings.screens.tech.edges": "краї {edges}",
   "settings.screens.tech.colour": "колір {hex}",
   "settings.set_up": "Налаштувати SoftPresenter…",

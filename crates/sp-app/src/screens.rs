@@ -279,9 +279,10 @@ fn is_on(on: &bool) -> bool {
 }
 
 /// How an audience screen shows the show: which layers (a lobby screen might show only the
-/// media), the colour where nothing is drawn, and how much of each edge to cover, for a screen
-/// whose edges are cut off; whether it is see-through, for a video switcher to lay the words
-/// over a camera picture; or whether it shows another screen's key instead.
+/// media), whether it shows VoxLive's captions, the colour where nothing is drawn, and how much
+/// of each edge to cover, for a screen whose edges are cut off; whether it is see-through, for a
+/// video switcher to lay the words over a camera picture; or whether it shows another screen's
+/// key instead.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Look {
@@ -290,6 +291,14 @@ pub struct Look {
     pub props: bool,
     pub messages: bool,
     pub announcements: bool,
+    /// Whether it shows VoxLive's live captions when they are put on the screens. Off (a stream
+    /// that carries the songs and the Bible, but must never carry the captions), while captions
+    /// are on screen it shows nothing on the slide layer, as if that layer were cleared on it
+    /// alone; its other layers are as ever, and once a verse or anything else is put up it shows
+    /// that as usual. On unless switched off, so only "off" is written, and a look saved before
+    /// the switch shows the captions.
+    #[serde(skip_serializing_if = "is_on")]
+    pub voxlive: bool,
     pub color: Rgba,
     /// Left, top, right, bottom, in slide units.
     pub mask: [f32; 4],
@@ -347,6 +356,7 @@ impl Default for Look {
             props: true,
             messages: true,
             announcements: true,
+            voxlive: true,
             color: Rgba::BLACK,
             mask: [0.0; 4],
             see_through: None,
@@ -360,8 +370,9 @@ impl Look {
         *self == Look::default()
     }
 
-    /// Every layer, black, nothing covered: the look given back by Show Everything, which
-    /// keeps whether the screen is see-through or a key, so a stream never turns solid by it.
+    /// Every layer and VoxLive's captions, black, nothing covered: the look given back by Show
+    /// Everything, which keeps whether the screen is see-through or a key, so a stream never
+    /// turns solid by it.
     pub fn everything(self) -> Look {
         Look { see_through: self.see_through, key_of: self.key_of, ..Look::default() }
     }
@@ -437,6 +448,22 @@ pub fn key_trouble(screens: &[Screen], index: usize, shown: &[bool]) -> Option<S
         ));
     }
     None
+}
+
+/// Whether a screen would show VoxLive's live captions while they are on screen: an audience
+/// screen that shows the slides and VoxLive's captions, and isn't another screen's key (a key
+/// shows its fill's picture, so the fill decides).
+pub fn shows_voxlive(screen: &Screen) -> bool {
+    screen.kind == Kind::Audience && screen.look.slides && screen.look.voxlive && screen.look.key_of.is_none()
+}
+
+/// Whether any screen going out wants VoxLive's live captions: an audience screen that isn't
+/// switched off (or set to go nowhere) and [`shows_voxlive`], or one a stage screen going out
+/// shows a picture of (`pictured`, by id: a stage layout's picture of a screen is drawn from that
+/// screen's own picture, even when the screen itself goes nowhere). Only then is a VoxLive
+/// screen's live display, which can start a paid translation, opened for the screens.
+pub fn voxlive_wanted(screens: &[Screen], pictured: &[Uuid]) -> bool {
+    screens.iter().any(|screen| shows_voxlive(screen) && (!screen.is_off() || pictured.contains(&screen.id)))
 }
 
 /// What a screen's background is, in a few words, for `sp screens` and the Screens window:
@@ -1048,6 +1075,66 @@ mod tests {
         let back: Screen = serde_json::from_str(&serde_json::to_string(&lobby).unwrap()).unwrap();
         assert_eq!(back, lobby);
         assert!(!back.look.slides && back.look.media);
+    }
+
+    #[test]
+    fn a_screen_shows_voxlives_captions_unless_switched_off_and_only_off_is_written() {
+        // Saved before the switch: with no look, and with a look of its own.
+        let old = r#"{"format":"softpresenter-screens","version":1,"screens":[
+            {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e01","name":"Main","output":"window"},
+            {"id":"6f0e1c52-8d1e-4d39-9f38-1a2b3c4d5e02","name":"Stream","output":{"ndi":"Church"},
+             "look":{"slides":true,"media":false,"props":true,"messages":true,"announcements":true,
+                     "color":{"r":0,"g":0,"b":0,"a":255},"mask":[0.0,0.0,0.0,0.0]}}]}"#;
+        let screens = from_json(old).expect("an old file opens");
+        assert!(screens.iter().all(|screen| screen.look.voxlive), "both show the captions, as before");
+        assert!(!screens[1].look.media, "and keep what they said");
+        // A new screen shows them, and writes nothing of it.
+        let mut stream = Screen::new("Stream".to_owned(), Output::Ndi("Church".to_owned()));
+        assert!(stream.look.voxlive && stream.look.is_default());
+        assert!(!serde_json::to_string(&stream).unwrap().contains("voxlive"), "on is not written");
+        // Switched off: written, read back, and a look of its own, so the screens are told it.
+        stream.look.voxlive = false;
+        assert!(!stream.look.is_default(), "sent to the screens as a look of its own");
+        let text = to_json(std::slice::from_ref(&stream));
+        assert!(text.contains("\"voxlive\": false"), "{text}");
+        assert_eq!(from_json(&text), Ok(vec![stream.clone()]));
+        // Show Everything switches it back on, with the layers.
+        assert!(!stream.look.shows_everything(), "a screen without the captions is changed");
+        assert!(stream.look.everything().voxlive && stream.look.everything().shows_everything());
+    }
+
+    #[test]
+    fn voxlives_live_display_is_wanted_only_while_a_screen_going_out_would_show_the_captions() {
+        let main = Screen::new("Main".to_owned(), Output::Window);
+        let stream = Screen {
+            look: Look { voxlive: false, ..Look::default() },
+            ..Screen::new(
+                "Stream".to_owned(),
+                Output::DeckLink(DeckLinkOut {
+                    device: "DeckLink Mini Monitor".to_owned(),
+                    id: Some(7),
+                    mode: "1080i59.94".to_owned(),
+                    keyer: Keyer::Off,
+                }),
+            )
+        };
+        assert!(voxlive_wanted(&[main.clone(), stream.clone()], &[]), "the room shows them");
+        assert!(shows_voxlive(&main) && !shows_voxlive(&stream));
+        let room_off = Screen { look: Look { voxlive: false, ..Look::default() }, ..main.clone() };
+        assert!(!voxlive_wanted(&[room_off.clone(), stream.clone()], &[]), "no screen shows them");
+        // A screen that would show them but goes nowhere: switched off, or set to go nowhere.
+        let switched_off = Screen { on: false, ..main.clone() };
+        assert!(!voxlive_wanted(&[switched_off.clone(), stream.clone()], &[]));
+        let nowhere = Screen { output: Output::Off, ..main.clone() };
+        assert!(!voxlive_wanted(&[nowhere, stream.clone()], &[]));
+        // ...unless a stage screen going out shows a picture of it.
+        assert!(voxlive_wanted(&[switched_off.clone(), stream.clone()], &[switched_off.id]));
+        assert!(!voxlive_wanted(&[room_off.clone(), stream.clone()], &[room_off.id]), "not if it leaves them out");
+        // One without the slides, a key (its fill decides) and a stage screen never want them.
+        let no_slides = Screen { look: Look { slides: false, ..Look::default() }, ..main.clone() };
+        let key = Screen { look: Look { key_of: Some(stream.id), ..Look::default() }, ..main.clone() };
+        let stage = Screen::stage("Stage".to_owned(), Output::Window);
+        assert!(!voxlive_wanted(&[no_slides, key, stage, stream], &[]));
     }
 
     #[test]

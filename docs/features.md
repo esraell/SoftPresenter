@@ -2237,6 +2237,23 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - Each audience screen has a look: which layers it shows (slides, media, props, messages; a
   lobby screen might show only the media), its colour where nothing is drawn, and how much of
   each edge to cover for a screen that cuts them off.
+- **VoxLive captions, per screen.** While VoxLive is connected and has screens, each audience
+  screen's look has a line of its own under the layers in the Screens window: VoxLive captions,
+  On or Off, with a sentence saying what it does ("On: this screen shows the captions while
+  VoxLive is live." or "Off: while captions are live elsewhere, this screen shows nothing in
+  place of the slide."; the line keeps the room of the longer of the two, so switching moves
+  nothing). It is on for every screen until
+  switched off, screens saved before it included, and is kept with the screen's look; Show
+  Everything switches it back on with the layers, and Settings › Screens' Details say "no
+  VoxLive captions" beside the layers. Off (a stream that carries the songs and the Bible, say),
+  while VoxLive's captions are on screen that screen shows nothing on the slide layer, as if it
+  alone were cleared, going there with the transition a clear has; its media, props, messages and
+  announcements are as ever, and once a verse or anything else is put up it shows that as usual.
+  Switched while the captions are up, it changes at once. NDI and DeckLink outputs (fill and key
+  too) send nothing of the captions, and a stage screen's picture of such a screen shows what it
+  shows. A stage screen has no switch: it shows the words of the slide on screen, and the captions
+  have none. `sp screen SCREEN voxlive on|off` (or `screen set SCREEN voxlive=on|off`) sets it,
+  and `sp screens` says it.
 - A font is opened the first time a slide uses it, once for the screens, the thumbnails and the
   editor together; fonts no slide uses are never opened. A large font costs memory only for the
   letters used: on a Mac the emoji font and the other large fonts the computer comes with are
@@ -2642,9 +2659,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   screens in place of what was there (a verse, a song); clicking the verse brings it back. The
   **VoxLive tab** beside Timers, Messages and the rest (in the right column, so on the Bible page
   too) has the same screens as cards, each with Show (On screen while it shows). A screen's live display, which can start a paid
-  translation, is opened only on the real screens; thumbnails and the editor show its free test
-  pattern. Once shown, it keeps running for 15 minutes after it leaves the screens, so going back
-  to the captions from a verse is at once, with no reload.
+  translation, is opened only on the real screens, and only while a screen going out shows the
+  captions (an audience screen whose VoxLive captions are on, or one a stage screen going out
+  shows a picture of): with every screen's switch off, it isn't opened at all, and it opens at once
+  when one is switched on while the captions are up. Thumbnails and the editor show its free test
+  pattern. Once shown, it keeps running for 15 minutes after it leaves the screens (a screen's
+  switch turned off counts as leaving them), so going back to the captions from a verse is at
+  once, with no reload. A slide of your own with a web page box showing a VoxLive screen's live
+  display counts as VoxLive's captions too.
 
 ## Remote Control
 - **Settings › Phone remote** is four cards in the look of the rest of Settings, every hint a

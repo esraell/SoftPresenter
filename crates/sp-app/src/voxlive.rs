@@ -134,6 +134,15 @@ pub struct View {
     pub look: Option<LookEdit>,
 }
 
+impl View {
+    /// True while VoxLive is connected and has screens to show (the VoxLive item has slides):
+    /// each audience screen's switch for VoxLive's captions is offered then. A moment out of
+    /// reach keeps the screens last found, so the switch doesn't come and go with the Wi-Fi.
+    pub fn captions_offered(&self) -> bool {
+        self.screens.iter().any(|screen| !screen.url.is_empty())
+    }
+}
+
 /// A VoxLive screen's look, open to change: what VoxLive has, what is being made of it, and a
 /// preview of it drawn by VoxLive's own display page in its preview mode (no connection, free).
 pub struct LookEdit {

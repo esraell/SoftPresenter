@@ -170,7 +170,13 @@ pub fn refusal(role: Role, args: &[String]) -> Option<String> {
 /// A command's words as its handler goes on to read them, where a handler takes words out
 /// before it looks at the rest: `song … --library NAME …` is carried out as `song …` without
 /// that pair (as many times as it is there), so `song --library X import FILE` is an import.
+/// And where it reads them another way: `screen SCREEN voxlive on|off` is carried out as `screen
+/// set SCREEN voxlive=on|off`, through the very function the handler uses
+/// (`screen_cli::short_form`), so it is weighed as that `screen set`.
 fn as_carried_out(args: &[String]) -> Vec<String> {
+    if let Some(set) = crate::screen_cli::short_form(args) {
+        return set;
+    }
     let mut args = args.to_vec();
     if args.first().is_some_and(|w| w.eq_ignore_ascii_case("song")) {
         while let Some(at) = args.iter().position(|w| w == "--library") {
@@ -427,6 +433,27 @@ mod tests {
 
     fn refused(line: &str) -> bool {
         refusal(Role::Control, &words(line)).is_some()
+    }
+
+    #[test]
+    fn a_screens_voxlive_captions_are_switched_from_the_page_as_its_other_looks_are() {
+        // As `screen set` takes any screen-look setting from the page.
+        assert!(!refused("screen set Stream voxlive=off"));
+        assert!(!refused("screen Stream voxlive off"));
+        assert!(!refused("screen 2 voxlive on"));
+        let one = vec!["screen".to_owned(), "Live Stream".to_owned(), "voxlive".to_owned(), "on".to_owned()];
+        assert_eq!(refusal(Role::Control, &one), None);
+        // The short way carries nothing more: a name holding another setting isn't the short way,
+        // and is refused as a sub-command the page can't use; and what `screen set` would refuse
+        // (sending over NDI) is refused through it too.
+        assert!(refused("screen Front output=ndi:Church voxlive on"));
+        assert!(refused("screen output=ndi:Church voxlive on"));
+        assert!(refused("screen set Front output=ndi:Church voxlive=on"));
+        assert_eq!(
+            as_carried_out(&words("screen Stream voxlive off")),
+            words("screen set Stream voxlive=off"),
+            "weighed as the handler carries it out"
+        );
     }
 
     #[test]

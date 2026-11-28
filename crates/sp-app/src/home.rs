@@ -6845,6 +6845,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                 }
             });
             ui.add_space(4.0);
+            let captions_offered = state.voxlive.captions_offered();
             let look = &mut state.screens[index].look;
             let before = *look;
             ui.horizontal(|ui| {
@@ -6856,6 +6857,12 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                 ui.checkbox(&mut look.messages, t("screens.look.messages", "Messages"));
                 ui.checkbox(&mut look.announcements, t("screens.look.announcements", "Announcements"));
             });
+            // VoxLive's captions, a line of its own under the layers, while VoxLive is connected
+            // and has screens.
+            if captions_offered {
+                ui.add_space(4.0);
+                voxlive_row(ui, &mut look.voxlive, index);
+            }
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(t("screens.look.colour", "Colour")).color(TEXT_DIM)).on_hover_text(t(
@@ -6915,6 +6922,44 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
     // The Install NDI window, from a screen sent over NDI where NDI isn't installed.
     crate::ndi_download::window::window(ui.ctx(), &mut state.ndi_download, crate::ndi_download::Place::Screens);
     commands
+}
+
+/// The words under a screen's VoxLive captions switch, as it is now.
+fn voxlive_words(on: bool) -> &'static str {
+    if on {
+        t("screens.look.voxlive.on", "On: this screen shows the captions while VoxLive is live.")
+    } else {
+        t(
+            "screens.look.voxlive.off",
+            "Off: while captions are live elsewhere, this screen shows nothing in place of the slide.",
+        )
+    }
+}
+
+/// The size of the words under the VoxLive captions switch.
+const VOXLIVE_WORDS: f32 = 11.5;
+
+/// A screen's VoxLive captions switch, under its layers in the Screens window (the design's
+/// drawing, 28 November): "VoxLive captions" with the On/Off key, and under them what it does
+/// now, in a line of its own. That line keeps the room of the longer of its two sentences, so
+/// switching moves nothing below it.
+fn voxlive_row(ui: &mut egui::Ui, on: &mut bool, index: usize) {
+    use crate::studio::TEXT_DIM;
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(t("screens.look.voxlive", "VoxLive captions")).color(TEXT_DIM));
+        ui.add_space(8.0);
+        let (rect, _) = ui.allocate_exact_size(settings::parts::on_off_size(ui), egui::Sense::hover());
+        if settings::parts::on_off(ui, rect, ui.scope_id().with(("screen voxlive", index)), *on).clicked() {
+            *on = !*on;
+        }
+    });
+    let width = ui.available_width();
+    let font = egui::FontId::proportional(VOXLIVE_WORDS);
+    let laid = |on: bool| ui.painter().layout(voxlive_words(on).to_owned(), font.clone(), TEXT_DIM, width);
+    let (shown, other) = (laid(*on), laid(!*on));
+    let height = shown.size().y.max(other.size().y);
+    let (place, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    ui.painter().galley(place.min, shown, TEXT_DIM);
 }
 
 /// Says which of a song's fonts this computer does not have, and offers a place to look for
@@ -16600,6 +16645,166 @@ mod tests {
             assert_eq!(state.screens, screens);
         }
         assert_eq!(output_label(&screens[2].output, &[]), "Gone   (disconnected)");
+    }
+
+    /// Each piece of words a frame drew: its text, where, and how many lines it took.
+    fn words_with_lines(output: &egui::FullOutput) -> Vec<(String, Rect, usize)> {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, Rect, usize)>) {
+            match shape {
+                egui::Shape::Text(text) => into.push((
+                    text.galley.text().to_owned(),
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                    text.galley.rows.len(),
+                )),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                _ => {}
+            }
+        }
+        let mut into = Vec::new();
+        output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut into));
+        into
+    }
+
+    /// Draws the Screens window `width` points wide, two frames (the second with every size
+    /// known), the frames after it with each of `steps`' events, and gives what the last drew.
+    fn screens_window(
+        ctx: &egui::Context,
+        state: &mut HomeState,
+        width: f32,
+        steps: Vec<Vec<Event>>,
+    ) -> Vec<(String, Rect, usize)> {
+        let mut words = Vec::new();
+        for events in [Vec::new(), Vec::new()].into_iter().chain(steps) {
+            let raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 1400.0))),
+                events,
+                ..RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| {
+                screens_ui(ui, state, true);
+            });
+            words = words_with_lines(&output);
+            output.drop_without_applying_deltas();
+        }
+        words
+    }
+
+    /// A stream screen and the room's, and VoxLive connected with one screen (a fake: its
+    /// address is never opened).
+    fn with_voxlive() -> HomeState {
+        let mut state = HomeState {
+            settings_open: true,
+            screens: vec![
+                Screen::new("Room".to_owned(), Output::Window),
+                Screen::new("Stream".to_owned(), Output::Ndi("Church".to_owned())),
+                Screen::stage("Stage".to_owned(), Output::Window),
+            ],
+            ..HomeState::default()
+        };
+        state.voxlive.screens = vec![crate::voxlive::Screen {
+            id: "abc2345".to_owned(),
+            name: "Spanish".to_owned(),
+            url: "https://voxlive.app/listen/grace/screen/abc2345".to_owned(),
+            ..Default::default()
+        }];
+        state
+    }
+
+    #[test]
+    fn a_screens_voxlive_captions_switch_shows_only_with_voxlive_screens_and_never_on_a_stage_screen() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let ctx = crate::studio::tests::styled();
+            let shown = |words: &[(String, Rect, usize)]| words.iter().any(|(text, ..)| text == "VoxLive captions");
+            let mut state = with_voxlive();
+            state.screen_selected = 1;
+            let words = screens_window(&ctx, &mut state, 1100.0, Vec::new());
+            assert!(shown(&words), "an audience screen, with VoxLive's screens");
+            let on = "On: this screen shows the captions while VoxLive is live.";
+            assert!(words.iter().any(|(text, ..)| text == on), "what it does now");
+            state.screen_selected = 2;
+            assert!(!shown(&screens_window(&ctx, &mut state, 1100.0, Vec::new())), "a stage screen");
+            state.screen_selected = 1;
+            state.voxlive.screens.clear();
+            assert!(!shown(&screens_window(&ctx, &mut state, 1100.0, Vec::new())), "VoxLive not connected");
+            assert!(!state.screens_changed, "looking changes nothing");
+        });
+    }
+
+    #[test]
+    fn a_click_on_a_screens_voxlive_captions_key_switches_them_off_and_on() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let ctx = crate::studio::tests::styled();
+            let mut state = with_voxlive();
+            state.screen_selected = 1;
+            let key_of = |words: &[(String, Rect, usize)], word: &str| {
+                let label = words.iter().find(|(text, ..)| text == "VoxLive captions").expect("the switch").1;
+                words
+                    .iter()
+                    .filter(|(text, rect, _)| text == word && rect.left() > label.right())
+                    .min_by(|a, b| {
+                        (a.1.center().y - label.center().y).abs().total_cmp(&(b.1.center().y - label.center().y).abs())
+                    })
+                    .map(|(_, rect, _)| rect.center())
+                    .expect("its key")
+            };
+            let click = |at: egui::Pos2| {
+                let press = |pressed| Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                };
+                vec![vec![Event::PointerMoved(at)], vec![press(true)], vec![press(false)], Vec::new()]
+            };
+            let words = screens_window(&ctx, &mut state, 1100.0, Vec::new());
+            let words = screens_window(&ctx, &mut state, 1100.0, click(key_of(&words, "On")));
+            assert!(!state.screens[1].look.voxlive && state.screens_changed, "switched off, and saved");
+            assert!(state.screens[0].look.voxlive && state.screens[2].look.voxlive, "that screen alone");
+            let off = "Off: while captions are live elsewhere, this screen shows nothing in place of the slide.";
+            assert!(words.iter().any(|(text, ..)| text == off), "it says what it does now");
+            state.screens_changed = false;
+            let words = screens_window(&ctx, &mut state, 1100.0, click(key_of(&words, "Off")));
+            assert!(state.screens[1].look.voxlive && state.screens_changed, "and on again");
+            assert!(words.iter().any(|(text, ..)| text.starts_with("On: ")));
+        });
+    }
+
+    #[test]
+    fn switching_a_screens_voxlive_captions_moves_nothing_and_says_it_in_one_line_at_1100_in_every_language() {
+        use crate::i18n::Language;
+        for language in Language::ALL {
+            crate::i18n::with_language(language, || {
+                let colour = t("screens.look.colour", "Colour");
+                let sentences = [voxlive_words(true), voxlive_words(false)];
+                for (width, scale) in [(1100.0, 1.0), (1100.0, 2.0), (780.0, 1.0), (640.0, 1.0)] {
+                    let said = format!("{language:?} at {width} wide, {scale}x");
+                    let ctx = crate::studio::tests::styled();
+                    ctx.set_pixels_per_point(scale);
+                    let mut below = Vec::new();
+                    for on in [true, false] {
+                        let mut state = with_voxlive();
+                        state.screen_selected = 1;
+                        state.screens[1].look.voxlive = on;
+                        let words = screens_window(&ctx, &mut state, width, Vec::new());
+                        let (_, sentence, lines) = words
+                            .iter()
+                            .find(|(text, ..)| text == sentences[usize::from(!on)])
+                            .unwrap_or_else(|| panic!("{said}: the sentence isn't drawn"))
+                            .clone();
+                        let (_, place, _) = words
+                            .iter()
+                            .find(|(text, ..)| text == colour)
+                            .unwrap_or_else(|| panic!("{said}: Colour isn't drawn"));
+                        assert!(place.top() >= sentence.bottom(), "{said}: Colour is below the sentence");
+                        below.push(place.top());
+                        if width >= 1100.0 {
+                            assert_eq!(lines, 1, "{said}: {:?} takes {lines} lines", sentences[usize::from(!on)]);
+                        }
+                    }
+                    assert_eq!(below[0], below[1], "{said}: switching moves what is below it");
+                }
+            });
+        }
     }
 
     #[test]

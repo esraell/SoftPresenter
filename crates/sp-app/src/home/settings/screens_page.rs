@@ -447,6 +447,11 @@ fn technical(screen: &Screen, state: &HomeState) -> Vec<String> {
         0 => t("settings.screens.tech.no_layers", "no layers").to_owned(),
         _ => shown.join(", "),
     });
+    // VoxLive's captions left out: a choice made for this screen (a stream), said beside its
+    // layers, outside their count.
+    if !look.voxlive {
+        parts.push(t("settings.screens.tech.no_voxlive", "no VoxLive captions").to_owned());
+    }
     if look.mask.iter().any(|edge| *edge > 0.0) {
         let edges: Vec<String> = look.mask.iter().map(|edge| format!("{}", edge.round() as i32)).collect();
         parts.push(tf("settings.screens.tech.edges", "edges {edges}", &[("edges", &edges.join("\u{b7}"))]));
@@ -859,6 +864,21 @@ mod tests {
         let words = drawn(&mut state, &show, 1100.0, vec![]);
         assert!(words.iter().any(|(said, _)| said.starts_with("Solid \u{b7} ")), "a solid screen's look");
         assert!(words.iter().any(|(said, _)| said == "3DTV \u{b7} not plugged in"));
+    }
+
+    #[test]
+    fn details_say_a_screen_leaves_voxlives_captions_out_beside_its_layers() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let mut state = state();
+            let screen = Screen::new("Stream".to_owned(), Output::Window);
+            let line = |screen: &Screen, state: &HomeState| technical(screen, state)[1].clone();
+            assert!(!line(&screen, &state).contains("VoxLive"), "{}", line(&screen, &state));
+            let stream =
+                Screen { look: crate::screens::Look { voxlive: false, ..crate::screens::Look::default() }, ..screen };
+            state.screens.push(stream.clone());
+            let said = line(&stream, &state);
+            assert!(said.ends_with("every layer \u{b7} no VoxLive captions"), "outside the layers' count: {said}");
+        });
     }
 
     #[test]

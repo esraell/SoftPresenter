@@ -1316,6 +1316,8 @@ Screens and settings
                                background=solid|see-through alpha=straight|premultiplied
                                key=SCREEN|none (shows that screen's key: white where solid)
                                sound=on|off (an NDI screen sends what the app plays; on)
+                               voxlive=on|off (off: nothing in place of VoxLive's captions)
+  screen SCREEN voxlive on|off the same, the short way
   screen delete SCREEN --yes
   settings                     the choices kept between runs
   groups                       each group's colour, and the letter key that jumps to it
@@ -2530,6 +2532,9 @@ impl crate::App {
                 if let Some(background) = crate::screens::background_words(&state.screens, at) {
                     line.push_str(&format!("; {background}"));
                 }
+                if screen.kind == crate::screens::Kind::Audience && !screen.look.voxlive {
+                    line.push_str("; no VoxLive captions");
+                }
                 if matches!(screen.output, crate::screens::Output::Ndi(_)) && !screen.sound {
                     line.push_str("; no sound");
                 }
@@ -2570,6 +2575,9 @@ impl crate::App {
                     "background": if see_through.is_some() { "see-through" } else { "solid" },
                     "alpha": see_through.map(crate::screens::Alpha::name),
                     "key_of": key_of,
+                    // Whether it shows VoxLive's captions while they are on screen (an audience
+                    // screen's switch; a stage screen never does).
+                    "voxlive": audience.then_some(screen.look.voxlive),
                     "sound": matches!(screen.output, crate::screens::Output::Ndi(_)).then_some(screen.sound),
                     "rate": matches!(screen.output, crate::screens::Output::Ndi(_)).then(|| screen.rate.name()),
                     "key_trouble": trouble(at),

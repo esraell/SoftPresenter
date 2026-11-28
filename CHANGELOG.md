@@ -13,6 +13,7 @@ Settings and playlists that couldn't be saved are tried again.
 - **Install NDI where it is needed.** A screen sent over NDI, an NDI Source box in the Edit view and the setup's Screens step each have an Install NDI… key that opens the same window when NDI isn't installed.
 - **NDI updates.** The NDI card says which NDI is installed, and Check for Updates asks NDI's server whether its download has changed. When it has, the card says a newer NDI may be available, and Install Update brings it in right there in the row, with a bar and Cancel. Screens already sent over NDI keep working and use the new NDI from the next start.
 - **Remove NDI.** Remove… on the NDI card takes away the NDI that SoftPresenter installed, after asking. On Windows it opens NDI's own uninstaller.
+- **VoxLive captions per screen.** Each audience screen can now leave VoxLive's captions out, so a stream that carries the songs and the Bible never sends them: in the Screens window, switch VoxLive captions off under that screen's layers (it shows while VoxLive is connected), or use `sp screen NAME voxlive off`. While captions are up, that screen shows nothing in place of the slide, as if it alone were cleared; its media, props and messages stay, and it shows the next verse or slide as usual. Switching it while captions are up changes the screen at once. Every screen shows the captions until it is switched off, and while no screen going out shows them, VoxLive's live display isn't opened at all.
 
 ### Better
 

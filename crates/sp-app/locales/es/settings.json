@@ -202,6 +202,7 @@
   "settings.screens.tech.premultiplied": "Transparente, premultiplicado",
   "settings.screens.tech.every_layer": "todas las capas",
   "settings.screens.tech.no_layers": "ninguna capa",
+  "settings.screens.tech.no_voxlive": "sin subtítulos de VoxLive",
   "settings.screens.tech.edges": "bordes {edges}",
   "settings.screens.tech.colour": "color {hex}",
   "settings.updates.label": "Actualizaciones",

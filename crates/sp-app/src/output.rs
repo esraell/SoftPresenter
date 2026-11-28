@@ -74,6 +74,10 @@ pub struct Frame {
     /// frame, so it goes on and off with the slide's own transition; only the audience screens
     /// draw it ([`drawn_slide`]).
     pub end_mark: Option<f32>,
+    /// The slide on screen shows VoxLive's live captions (one of the VoxLive item's slides): an
+    /// audience screen whose look leaves them out shows nothing on the slide layer meanwhile
+    /// ([`slide_shown`]).
+    pub voxlive: bool,
 }
 
 impl Frame {
@@ -175,6 +179,15 @@ fn builds_played(slide: &Slide, clock: sp_model::BuildClock) -> bool {
     let timed = |object: &sp_model::Object| object.build_in.is_some_and(|build| !build.on_click);
     (!slide.objects.iter().any(clicked) || clock.step >= slide.click_steps().len())
         && (clock.since_on.is_some() || !slide.objects.iter().any(timed))
+}
+
+/// Whether an audience screen with this look shows the slide of `frame`: when it shows the
+/// slides, unless the slide is VoxLive's captions and the screen leaves those out
+/// ([`crate::screens::Look::voxlive`]), as if the slide layer were cleared on it alone. Its other
+/// layers, and where the Announcements layer goes (which follows `look.slides` alone), are not
+/// this.
+pub(crate) fn slide_shown(look: &crate::screens::Look, frame: &Frame) -> bool {
+    look.slides && (look.voxlive || !frame.voxlive)
 }
 
 /// The copyright line over the slide on an audience screen (and the Program preview's picture
@@ -1709,6 +1722,7 @@ fn run(
             build_step: 0,
             words_hidden: false,
             end_mark: None,
+            voxlive: false,
         },
         targets: Vec::new(),
         fading: None,
@@ -2624,14 +2638,16 @@ impl Output {
         } else {
             Vec::new()
         };
-        // The copyright line goes with the slide's words.
-        under.extend(copyright_shown(self.overlay.copyright.as_deref(), look.slides, frame.words_hidden));
+        // The slide, unless the look leaves it out (its layer, or VoxLive's captions); the
+        // copyright line goes with its words.
+        let slide_shown = slide_shown(&look, frame);
+        under.extend(copyright_shown(self.overlay.copyright.as_deref(), slide_shown, frame.words_hidden));
         let over = crate::props::overlay(&under, message.as_ref()).map(Arc::new);
         // The slide as far as its builds have got, with its linked text filled in; in the
         // version that is on, when this screen's theme has it for the slide's kind; without its
         // words while they are hidden; with the end of a song's mark when it is due. (A stage
         // screen never gets here: no mark, as no copyright line.)
-        let slide = frame.slide.as_ref().filter(|_| look.slides).map(|slide| {
+        let slide = frame.slide.as_ref().filter(|_| slide_shown).map(|slide| {
             let clock = self.build_clock();
             drawn_slide(slide, &theme, frame.version, clock, &values, frame.words_hidden, frame.end_mark)
         });
@@ -2670,7 +2686,11 @@ impl Output {
         let look = self.look_of(id);
         let playing = Playing {
             behind: self.frame.video.is_some() || self.video_picture.is_some(),
-            in_boxes: !self.frame.slide_video.is_empty() || !self.frame.ndi.is_empty(),
+            // The boxes are on the slide (or its layout): a screen that doesn't show it now (its
+            // layer left out, or VoxLive's captions while it leaves them out) doesn't change
+            // with them, so a live display's pictures aren't drawn again for it.
+            in_boxes: (!self.frame.slide_video.is_empty() || !self.frame.ndi.is_empty())
+                && slide_shown(&look, &self.frame),
             announced: self
                 .announcement
                 .as_ref()
@@ -4873,6 +4893,7 @@ mod tests {
             build_step: show.build_step(),
             words_hidden: show.words_hidden(),
             end_mark: None,
+            voxlive: false,
         }
     }
 
@@ -4905,6 +4926,87 @@ mod tests {
         let next = going_on(&hidden, &frame_of(&show, push));
         assert!(next.new_slide, "{next:?}");
         assert_eq!(next.look, push);
+    }
+
+    /// A show of a song and the VoxLive item made from a fake VoxLive screen (its address is
+    /// never opened here), and the frame the app sends for it as it stands: with VoxLive's
+    /// flag as `App::voxlive_on_screen` sets it, and the transition `refresh_output` gives.
+    fn voxlive_show() -> (sp_engine::Show, impl Fn(&sp_engine::Show) -> Frame) {
+        let fake = crate::voxlive::Screen {
+            id: "abc2345".to_owned(),
+            name: "Spanish".to_owned(),
+            language: "es".to_owned(),
+            mode: "captions".to_owned(),
+            url: "https://voxlive.app/listen/grace/screen/abc2345".to_owned(),
+            ..Default::default()
+        };
+        let song = sp_model::parse_song_text("Psalm", "The first verse\n\nThe second verse\n");
+        let show = sp_engine::Show::new(vec![Arc::new(song), Arc::new(crate::voxlive::item(&[fake]))]);
+        let usual = sp_model::Transition::of(sp_model::TransitionKind::Dissolve);
+        let frame = move |show: &sp_engine::Show| Frame {
+            voxlive: show.live().is_some_and(|at| at.presentation == 1)
+                || show.live_slide().is_some_and(|(_, slide)| crate::shows_voxlive_display(slide)),
+            ..frame_of(show, crate::slide_transition(show, usual))
+        };
+        (show, frame)
+    }
+
+    #[test]
+    fn a_screen_without_voxlives_captions_shows_no_slide_while_they_are_up_and_the_verse_again_after() {
+        use crate::screens::Look;
+        use sp_engine::{Command, Layer, SlideRef};
+        let (mut show, frame) = voxlive_show();
+        let room = Look::default();
+        let stream = Look { voxlive: false, ..Look::default() };
+        // A verse: both show it.
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        let verse = frame(&show);
+        assert!(!verse.voxlive);
+        assert!(slide_shown(&room, &verse) && slide_shown(&stream, &verse), "both show the verse");
+        // The captions: the room shows them, the stream nothing on the slide layer.
+        show.apply(Command::GoTo(SlideRef { presentation: 1, slide: 0 }));
+        let captions = frame(&show);
+        assert!(captions.voxlive && captions.slide.is_some());
+        assert!(slide_shown(&room, &captions), "the room shows the captions");
+        assert!(!slide_shown(&stream, &captions), "the stream shows nothing in place of them");
+        // ...nor the copyright line that goes with a slide's words.
+        let line = Some("\u{201c}Psalm\u{201d}  \u{b7}  A. Writer");
+        assert!(copyright_shown(line, slide_shown(&stream, &captions), false).is_none());
+        // It goes from the verse to nothing as a clear would: the same transition, a new slide.
+        let (mut cleared_show, _) = voxlive_show();
+        cleared_show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        cleared_show.apply(Command::Clear(Layer::Slides));
+        let cleared = frame(&cleared_show);
+        assert!(cleared.slide.is_none());
+        let to_captions = going_on(&verse, &captions);
+        assert!(to_captions.new_slide, "{to_captions:?}");
+        assert_eq!(to_captions.look, going_on(&verse, &cleared).look, "as a clear goes");
+        // Back to a verse: both show it, by the verse's own way on.
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 1 }));
+        let back = frame(&show);
+        assert!(!back.voxlive);
+        assert!(slide_shown(&room, &back) && slide_shown(&stream, &back), "both show the verse again");
+        assert!(going_on(&captions, &back).new_slide);
+        // A screen that leaves the slide layer out shows neither, whatever its switch.
+        let lobby = Look { slides: false, ..Look::default() };
+        assert!(!slide_shown(&lobby, &verse) && !slide_shown(&lobby, &captions));
+    }
+
+    #[test]
+    fn switching_a_screens_voxlive_captions_while_they_are_up_takes_effect_at_once() {
+        use sp_engine::{Command, SlideRef};
+        let (mut show, frame) = voxlive_show();
+        show.apply(Command::GoTo(SlideRef { presentation: 1, slide: 0 }));
+        let captions = frame(&show);
+        // The same frame: only the look changes, as Settings or `sp` switch it. The screens read
+        // the look at every drawing, and a new look draws every screen at once
+        // (`OutputMsg::Looks` with `Redraw`), so it needs nothing more than the look itself.
+        let mut look = crate::screens::Look::default();
+        assert!(slide_shown(&look, &captions));
+        look.voxlive = false;
+        assert!(!slide_shown(&look, &captions), "switched off: gone");
+        look.voxlive = true;
+        assert!(slide_shown(&look, &captions), "switched on: back");
     }
 
     #[test]

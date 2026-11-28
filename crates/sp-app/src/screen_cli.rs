@@ -16,6 +16,29 @@ fn on_off(key: &str, value: &str) -> Result<bool, String> {
     }
 }
 
+/// `screen SCREEN voxlive on|off`, the short way to switch a screen's VoxLive captions, as the
+/// `screen set` it is carried out as: `screen set SCREEN voxlive=on|off`. `None` for anything
+/// else: a sub-command (`add`, `set`, `delete`) where the screen would be, no screen named, or a
+/// screen named with a word holding `=` (which `screen set` would read as another setting, so
+/// the short way never carries more than the one). The remote page's policy reads a command
+/// through this too (`remote::policy`), so it weighs exactly what is carried out.
+pub(crate) fn short_form(args: &[String]) -> Option<Vec<String>> {
+    let [first, name @ .., switch, value] = args else { return None };
+    let sub = name.first()?.to_lowercase();
+    let value = value.to_lowercase();
+    let short = first.eq_ignore_ascii_case("screen")
+        && !["add", "set", "delete"].contains(&sub.as_str())
+        && switch.eq_ignore_ascii_case("voxlive")
+        && (value == "on" || value == "off")
+        && !name.iter().any(|word| word.contains('='));
+    short.then(|| {
+        let mut set = vec![first.clone(), "set".to_owned()];
+        set.extend(name.iter().cloned());
+        set.push(format!("voxlive={value}"));
+        set
+    })
+}
+
 /// Where a screen goes, as typed: `display NAME`, `window`, `ndi NAME`, `decklink NAME|NUMBER`,
 /// `automatic` or `off`. A DeckLink output is one of `found`'s, by its name or its number in
 /// `sp decklink`; `current` is the output the screen has, whose format is kept when it names
@@ -175,9 +198,12 @@ fn weigh_background(
 }
 
 impl crate::App {
-    /// `screen add|set|delete …`.
+    /// `screen add|set|delete …`, and `screen SCREEN voxlive on|off` (see [`short_form`]).
     pub(crate) fn ctl_screen(&mut self, args: &[String]) -> Result<Reply, String> {
-        let usage = "screen add audience|stage NAME [on display NAME|window|ndi NAME|decklink NAME|automatic] | screen set SCREEN key=value… | screen delete SCREEN --yes";
+        let usage = "screen add audience|stage NAME [on display NAME|window|ndi NAME|decklink NAME|automatic] | screen set SCREEN key=value… | screen SCREEN voxlive on|off | screen delete SCREEN --yes";
+        if let Some(set) = short_form(args) {
+            return self.screen_set(&set[2..]);
+        }
         let words = &args[2.min(args.len())..];
         match args.get(1).map(|w| w.to_lowercase()).as_deref() {
             Some("add") => self.screen_add(words),
@@ -241,11 +267,11 @@ impl crate::App {
         Ok(Reply::done(format!("Added the {} screen {name}, on {said}.", if stage { "stage" } else { "audience" })))
     }
 
-    /// `screen set SCREEN key=value…`: name, output, kind, layers, color, edges, theme, layout,
-    /// background, alpha, key.
+    /// `screen set SCREEN key=value…`: name, output, kind, layers, voxlive, color, edges, theme,
+    /// layout, background, alpha, key.
     fn screen_set(&mut self, words: &[String]) -> Result<Reply, String> {
         let usage = "screen set SCREEN name=… output=display:NAME|window|ndi:NAME|decklink:NAME|automatic|off mode=FORMAT keyer=off|external|internal kind=audience|stage \
-                     layers=slides,media,props,messages,announcements color=#RRGGBB edges=LEFT,TOP,RIGHT,BOTTOM theme=THEME|main layout=STAGE-LAYOUT \
+                     layers=slides,media,props,messages,announcements voxlive=on|off color=#RRGGBB edges=LEFT,TOP,RIGHT,BOTTOM theme=THEME|main layout=STAGE-LAYOUT \
                      background=solid|see-through alpha=straight|premultiplied key=SCREEN|none sound=on|off rate=29.97|30|59.94|60|25|50";
         let at = words.iter().position(|w| w.contains('=')).filter(|at| *at > 0).ok_or(usage)?;
         let theme_names: Vec<(sp_model::Uuid, String)> = self.themes.iter().map(|t| (t.id, t.name.clone())).collect();
@@ -261,6 +287,7 @@ impl crate::App {
         // Solid or see-through, the alpha and the keyer are weighed together once all are read.
         let (mut background, mut alpha): (Option<bool>, Option<crate::screens::Alpha>) = (None, None);
         let mut keyer_given = None;
+        let mut voxlive_given = false;
         for setting in &words[at..] {
             let (key, value) = setting.split_once('=').ok_or(usage)?;
             match key.to_lowercase().as_str() {
@@ -410,6 +437,18 @@ impl crate::App {
                     screen.look.announcements = has("announcements");
                     said.push(format!("shows {}", wanted.join(", ")));
                 }
+                "voxlive" => {
+                    screen.look.voxlive = on_off(key, value)?;
+                    said.push(
+                        if screen.look.voxlive {
+                            "shows VoxLive's captions while they are on screen"
+                        } else {
+                            "shows nothing in place of VoxLive's captions while they are on screen"
+                        }
+                        .to_owned(),
+                    );
+                    voxlive_given = true;
+                }
                 "color" | "colour" => {
                     screen.look.color = crate::slide_cli::parse_color(value)
                         .ok_or_else(|| format!("{value} isn't a colour: #RRGGBB, #RRGGBBAA or a colour's name."))?;
@@ -452,6 +491,13 @@ impl crate::App {
         said.extend(weigh_background(&mut screen, keyer_given, background, alpha)?);
         if (background == Some(true) || screen.look.key_of.is_some()) && screen.kind != Kind::Audience {
             return Err(format!("{} is a stage screen; only an audience screen is see-through or a key.", screen.name));
+        }
+        // A stage screen shows the words on screen, never VoxLive's captions.
+        if voxlive_given && screen.kind != Kind::Audience {
+            return Err(format!(
+                "{} is a stage screen, which never shows VoxLive's captions; the switch is for an audience screen.",
+                screen.name
+            ));
         }
         if background == Some(true) && screen.look.key_of.is_some() {
             said.push("(a key shows its screen's key, not a background of its own)".to_owned());
@@ -788,6 +834,40 @@ mod tests {
         }
         screen.look.see_through = see_through;
         screen
+    }
+
+    fn args(line: &str) -> Vec<String> {
+        line.split_whitespace().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn the_short_way_to_switch_voxlives_captions_is_one_screen_set_with_one_setting() {
+        let short = |line: &str| short_form(&args(line)).map(|set| set.join(" "));
+        assert_eq!(short("screen Stream voxlive off").as_deref(), Some("screen set Stream voxlive=off"));
+        assert_eq!(short("screen 2 VoxLive ON").as_deref(), Some("screen set 2 voxlive=on"));
+        assert_eq!(short("screen Live Stream voxlive off").as_deref(), Some("screen set Live Stream voxlive=off"));
+        // A name sent as one word, spaces and all (the remote page sends its words so).
+        let one = vec!["screen".to_owned(), "Live Stream".to_owned(), "voxlive".to_owned(), "on".to_owned()];
+        assert_eq!(
+            short_form(&one),
+            Some(vec!["screen".into(), "set".into(), "Live Stream".into(), "voxlive=on".into()])
+        );
+        // Anything else is left as it is: a sub-command, no screen, another value, or a name
+        // holding a setting (`screen set` would read it as one).
+        for line in [
+            "screen set Stream voxlive off",
+            "screen add audience voxlive on",
+            "screen delete voxlive on",
+            "screen voxlive off",
+            "screen Stream voxlive maybe",
+            "screen Stream voxlive=off",
+            "screen Front output=ndi:Church voxlive on",
+            "screen output=ndi:Church voxlive on",
+            "screens Stream voxlive off",
+            "screen Stream sound off",
+        ] {
+            assert_eq!(short(line), None, "{line}");
+        }
     }
 
     #[test]
