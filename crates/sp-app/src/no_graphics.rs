@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn each_language_says_the_whole_message_in_its_own_words() {
         let in_english = english(|| Failure::Refused("x".to_owned()).words(System::Mac(Some(11))));
-        for language in [Language::Spanish, Language::Russian, Language::Ukrainian] {
+        for language in [Language::Spanish, Language::Russian, Language::Ukrainian, Language::German] {
             with_language(language, || {
                 for system in [System::Mac(Some(11)), System::Mac(Some(13)), System::Windows, System::Linux] {
                     for failure in [Failure::NoDevice, Failure::Refused("x".to_owned())] {

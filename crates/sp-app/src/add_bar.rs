@@ -563,7 +563,7 @@ mod tests {
     /// The toolbar's words in each language: there in every table, each on one line.
     #[test]
     fn the_toolbars_words_are_in_every_language() {
-        for language in [Language::Spanish, Language::Russian, Language::Ukrainian] {
+        for language in [Language::Spanish, Language::Russian, Language::Ukrainian, Language::German] {
             let lacking: Vec<String> = crate::i18n::missing(language)
                 .into_iter()
                 .filter(|(key, _)| key.starts_with("editor.add."))

@@ -16763,7 +16763,7 @@ mod tests {
             }
         }
         use crate::i18n::Language;
-        for language in [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian] {
+        for language in Language::ALL {
             crate::i18n::with_language(language, || {
                 for select in [false, true] {
                     let (show, mut state) = song_open(&[("Verse 1", 1)], 0);

@@ -9,9 +9,6 @@
   "reports.see.about": "Der nächste Bericht, so wie er jetzt aussieht. Das ist alles: Nichts anderes wird mit ihm gesendet.",
   "reports.see.making": "Wird erstellt…",
   "reports.copy": "Kopieren",
-  "reports.setup.title": "Anonyme Berichte",
-  "reports.setup.note": "Eingeschaltet, solange du sie nicht ausschaltest. Du kannst das später unter Einstellungen › Info ändern.",
-  "reports.setup.note_off": "Ausgeschaltet, solange du sie nicht einschaltest. Wenn du sie einschaltest, hilfst du uns, Probleme zu finden und zu beheben. Du kannst das später unter Einstellungen › Info ändern.",
   "reports.privacy.read": "Datenschutzseite lesen",
   "reports.card": "Anonyme Berichte",
   "reports.card.about": "Wie die App läuft – nie, was du zeigst",
@@ -23,5 +20,9 @@
   "reports.privacy.about": "Was gesendet wird, was nie gesendet wird, wohin es geht und wie lange es aufbewahrt wird",
   "reports.turned_off": "Anonyme Berichte sind ausgeschaltet. Es wurde nichts gesendet.",
   "reports.turn_off": "Ausschalten",
-  "reports.keep_on": "Eingeschaltet lassen"
+  "reports.keep_on": "Eingeschaltet lassen",
+  "reports.setup.line": "Anonym: Geschwindigkeiten und Abstürze. Nie deine Lieder, den Bibeltext, Dateinamen oder irgendetwas über dich.",
+  "reports.setup.line_off": "Aus, bis du sie einschaltest; sie helfen uns, Probleme zu beheben. Nie deine Lieder, den Bibeltext, Dateinamen oder irgendetwas über dich.",
+  "reports.setup.fold": "Was die Berichte senden",
+  "reports.setup.fold.about": "Anonyme Berichte: die Art des Computers, Geschwindigkeiten und Abstürze. Der nächste Bericht, so wie er jetzt aussieht. Das ist alles: Nichts anderes wird mit ihm gesendet. Ändern kannst du das später unter Einstellungen › Info."
 }

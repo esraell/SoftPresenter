@@ -1,5 +1,5 @@
 {
-  "_note": "German (du, lower case; German capitalisation; „…“ for quotation marks), not yet reviewed by a German speaker. The glossary is in docs/translating.md. Confirmation sheets and small windows: deleting a song, media or a theme, New Song (its example keeps the group names [Verse 1] and [Chorus], which the group keys know), missing fonts, what a template is used for, and a few notices said from home.rs.",
+  "_note": "German (du, lower case; German capitalisation; „…“ for quotation marks), not yet reviewed by a German speaker. The glossary is in docs/translating.md. Confirmation sheets and small windows: deleting a song, media or a theme, New Song (its example names the parts as the Group menu does in German: [Strophe 1], [Refrain]), missing fonts, what a template is used for, and a few notices said from home.rs.",
   "dialogs.delete": "Löschen",
   "dialogs.delete_song": "{title} löschen?",
   "dialogs.delete_songs": "{n} Lieder löschen?",
@@ -23,7 +23,7 @@
   "dialogs.new_song.theme": "Design",
   "dialogs.new_song.main_theme": "Hauptdesign",
   "dialogs.new_song.words": "Text (optional)",
-  "dialogs.new_song.words.example": "[Verse 1]\nDie Zeilen der ersten Folie\n\nDie nächste Folie\n\n[Chorus]\n…",
+  "dialogs.new_song.words.example": "[Strophe 1]\nDie Zeilen der ersten Folie\n\nDie nächste Folie\n\n[Refrain]\n…",
   "dialogs.new_song.syntax": "Eine Zeile in eckigen Klammern beginnt einen Teil; eine Leerzeile beginnt eine neue Folie; -- vor einer Zeile beginnt ihre Übersetzung.",
   "dialogs.new_song.create": "Erstellen",
   "dialogs.new_song.cancel": "Abbrechen",
@@ -36,5 +36,16 @@
   "dialogs.live_menu.app_made": "Der Vers oder die Untertitel auf den Bildschirmen haben kein Menü.",
   "dialogs.live_menu.none": "Bringe eine Folie auf die Bildschirme, um ihr Menü zu öffnen.",
   "dialogs.media.follows_folder": "Die Medienliste {name} folgt einem Ordner: Nimm die Datei aus dem Ordner heraus.",
-  "dialogs.already_running": "SoftPresenter läuft schon oder wird gerade beendet: Warte einen Moment, und wenn du sein Fenster dann immer noch nicht siehst, beende es im Task-Manager."
+  "dialogs.already_running": "SoftPresenter läuft schon oder wird gerade beendet: Warte einen Moment, und wenn du sein Fenster dann immer noch nicht siehst, beende es im Task-Manager.",
+  "dialogs.no_graphics.title": "SoftPresenter kann nicht starten",
+  "dialogs.no_graphics.none": "Mit der Grafik dieses Computers kann SoftPresenter nicht laufen. Es wurde kein Grafikgerät gefunden, das SoftPresenter nutzen kann.",
+  "dialogs.no_graphics.refused": "Mit der Grafik dieses Computers kann SoftPresenter nicht laufen. Die Grafik hat einen Teil verweigert, den SoftPresenter zum Zeichnen braucht: {name}.",
+  "dialogs.no_graphics.mac": "Ein macOS-Update kann helfen: Systemeinstellungen › Allgemein › Softwareupdate. Ist dieser Mac schon auf dem neuesten Stand, ist seine Grafik zu alt für SoftPresenter.",
+  "dialogs.no_graphics.mac_before_13": "Ein macOS-Update kann helfen: Systemeinstellungen › Softwareupdate. Ist dieser Mac schon auf dem neuesten Stand, ist seine Grafik zu alt für SoftPresenter.",
+  "dialogs.no_graphics.windows": "Ein neuerer Grafiktreiber kann helfen: Hol dir den neuesten vom Hersteller des Computers oder von Intel, AMD oder NVIDIA. Ist er schon der neueste, ist die Grafik dieses Computers zu alt für SoftPresenter.",
+  "dialogs.no_graphics.linux": "Neuere Grafiktreiber können helfen (Mesa oder die des Grafikherstellers). Sind sie schon die neuesten, ist die Grafik dieses Computers zu alt für SoftPresenter.",
+  "dialogs.no_graphics.tell": "Wenn es deiner Meinung nach funktionieren sollte, sag uns, welcher Computer das ist: {address}",
+  "dialogs.no_graphics.tell_name": "Wenn es deiner Meinung nach funktionieren sollte, sag uns, welcher Computer das ist, und nenne den Namen oben: {address}",
+  "dialogs.no_graphics.quit": "Beenden",
+  "dialogs.no_graphics.report": "Melden…"
 }

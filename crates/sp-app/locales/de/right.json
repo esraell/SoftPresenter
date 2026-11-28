@@ -1,7 +1,7 @@
 {
   "_note": "German (du, lower case; German capitalisation; „…“ for quotation marks), not yet reviewed by a German speaker. The glossary is in docs/translating.md. The right column: the preview, the layer keys (set in capitals, 10 letters at most; their .short forms where the usual word is longer), Clear All and the tool tabs.",
   "right.clear_all": "Alles ausblenden",
-  "right.clear_all.hint": "Alles ausblenden: alles von den Bildschirmen nehmen (Esc)",
+  "right.clear_all.hint": "Alles ausblenden: alles von den Bildschirmen nehmen",
   "right.layer.slide": "Folie",
   "right.layer.slide.clear": "Folie ausblenden: den Text von den Bildschirmen nehmen",
   "right.layer.media": "Medien",

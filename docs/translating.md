@@ -408,8 +408,9 @@ speaker**: `"_note"` at the top of each German file says so.
   Editor (nine letters at most); the layer keys have short forms where the word is longer than ten
   letters (Nachr., Ankünd.); a button's words are chosen short, since nothing in a control wraps.
 - **Never translated:** product names (SoftPresenter, NDI, DeckLink, VoxLive, Canva, TimelyChurch,
-  Worship Leader App, CCLI, Claude, ChatGPT, AirPlay, FFmpeg…), `sp` and its commands, file
-  names, and the group names in examples (`[Verse 1]`, `[Chorus]`).
+  Worship Leader App, CCLI, Claude, ChatGPT, AirPlay, FFmpeg…), `sp` and its commands, and file
+  names. The New Song example names the parts as the Group menu does in German (`[Strophe 1]`,
+  `[Refrain]`).
 
 Glossary (the main window's tables, and every table after them, use these words):
 
@@ -527,6 +528,11 @@ Glossary (the main window's tables, and every table after them, use these words)
 | Settings › Slides (and the old name Settings › General) | Einstellungen › Folien |
 | Set up SoftPresenter › Languages | SoftPresenter einrichten › Sprachen |
 | a notice's Clear All (empties the notices list, nothing to do with the screens) | Alle entfernen |
+| Quick Help (the top bar's ?) | Schnellhilfe |
+| Hide the words (the background stays) | Text verbergen (the readout: Text verborgen) |
+| Key layout · Standard · Like SoftProjector | Tastenbelegung (short: Belegung) · Standard · Wie SoftProjector |
+| the end of a song's mark | Zeichen am Liedende (its sign: Symbol) |
+| during the service (what a key does) | im Gottesdienst |
 
 ## Checking
 
