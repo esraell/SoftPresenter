@@ -49,6 +49,39 @@ pub fn set_own_folder(folder: PathBuf) {
     let _ = OWN_FOLDER.set(folder);
 }
 
+/// Whether a runtime in the app's own folder is the one the app put there: yes, no, or (only
+/// when it may not wait) not known yet.
+pub type OwnCheck = Box<dyn Fn(&Path, bool) -> Option<bool> + Send + Sync>;
+
+static OWN_CHECK: OnceLock<OwnCheck> = OnceLock::new();
+
+/// Gives the check a runtime in the app's own folder must pass each time before it counts or
+/// is opened: that folder is the user's data, which other programs and a syncing service can
+/// write to, so what is in it is never taken on trust. The check is told whether it may wait
+/// (when the runtime is about to be opened, on NDI's own thread) or must answer at once (when
+/// the window only asks whether NDI is here). A runtime that doesn't pass is as if it weren't
+/// there. Only the first call counts.
+pub fn set_own_check(check: OwnCheck) {
+    let _ = OWN_CHECK.set(check);
+}
+
+/// The first of `places` that is a file and, where it is in the app's own folder, passes the
+/// check.
+fn first_trusted<'a>(
+    places: &'a [PathBuf],
+    own: Option<&Path>,
+    check: Option<&OwnCheck>,
+    may_wait: bool,
+) -> Option<&'a PathBuf> {
+    places.iter().find(|path| {
+        path.is_file()
+            && match (own, check) {
+                (Some(own), Some(check)) if path.starts_with(own) => check(path, may_wait) == Some(true),
+                _ => true,
+            }
+    })
+}
+
 /// The file the runtime was opened from, once it has been. It stays open until the app quits.
 pub fn opened_from() -> Option<&'static Path> {
     RUNTIME.get().map(|runtime| runtime.path.as_path())
@@ -263,7 +296,7 @@ fn ndi_tools_runtimes(applications: &std::path::Path, name: &str) -> Vec<PathBuf
 }
 
 pub fn locate() -> Option<PathBuf> {
-    places().into_iter().find(|path| path.is_file())
+    first_trusted(&places(), OWN_FOLDER.get().map(PathBuf::as_path), OWN_CHECK.get(), false).cloned()
 }
 
 /// Where the runtime may be, in the order to try: the folder NDI's own variable names, the copy
@@ -379,12 +412,13 @@ mod places_tests {
 
 /// Opens the first runtime found in `places` and starts it.
 fn open(places: &[PathBuf]) -> Result<Runtime, String> {
-    let Some(path) = places.iter().find(|path| path.is_file()) else {
+    let Some(path) = first_trusted(places, OWN_FOLDER.get().map(PathBuf::as_path), OWN_CHECK.get(), true) else {
         return Err(NOT_INSTALLED.to_owned());
     };
     // SAFETY: the file is NDI's runtime, found where NDI installs it, where the operator's
     // NDI_RUNTIME_DIR_V6 points, or in the app's own folder where the app put it, taken unchanged
-    // from NDI's own download once the operator accepted NDI's licence; opening it runs only its own
+    // from NDI's own download once the operator accepted NDI's licence, and checked just now to
+    // be that file still (`set_own_check`: NDI's signature on a Mac, its noted hash on Linux); opening it runs only its own
     // set-up, which NDI documents as safe to do on any thread.
     let library = unsafe { Library::new(path) }
         .map_err(|e| format!("The NDI runtime at {} could not be opened: {e}", path.display()))?;
@@ -827,6 +861,41 @@ mod tests {
         if std::env::var_os("SOFTPRESENTER_HIDE_NDI").is_none() {
             assert!(places().contains(&PathBuf::from("/softpresenter-test/NDI").join(RUNTIME_NAME)));
         }
+    }
+
+    #[test]
+    fn a_runtime_in_the_apps_own_folder_counts_only_when_it_passes_the_check() {
+        let folder = std::env::temp_dir().join(format!("softpresenter-ndi-trusted-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let (own, system) = (folder.join("own"), folder.join("system"));
+        for place in [&own, &system] {
+            std::fs::create_dir_all(place).unwrap();
+            std::fs::write(place.join("libndi"), b"a stand-in").unwrap();
+        }
+        let places = vec![own.join("libndi"), system.join("libndi")];
+        let says = |answer: Option<bool>| -> OwnCheck { Box::new(move |_: &Path, _: bool| answer) };
+        let first = |check: Option<&OwnCheck>, may_wait| first_trusted(&places, Some(&own), check, may_wait).cloned();
+        // Passed: the app's own comes first, as before.
+        assert_eq!(first(Some(&says(Some(true))), true), Some(places[0].clone()));
+        // Refused, or not known yet: it is as if it weren't there, and the next place is taken.
+        assert_eq!(first(Some(&says(Some(false))), true), Some(places[1].clone()));
+        assert_eq!(first(Some(&says(None)), false), Some(places[1].clone()));
+        // Refused with nothing else on the computer: NDI isn't installed.
+        assert_eq!(first_trusted(&places[..1], Some(&own), Some(&says(Some(false))), true), None);
+        // The check is asked only of the app's own folder, and is told whether it may wait.
+        let asked = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let noting: OwnCheck = {
+            let asked = asked.clone();
+            Box::new(move |path: &Path, may_wait: bool| {
+                asked.lock().unwrap().push((path.to_path_buf(), may_wait));
+                Some(false)
+            })
+        };
+        assert_eq!(first(Some(&noting), true), Some(places[1].clone()));
+        assert_eq!(*asked.lock().unwrap(), [(places[0].clone(), true)]);
+        // With no check given (a system that keeps nothing there), nothing changes.
+        assert_eq!(first(None, false), Some(places[0].clone()));
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

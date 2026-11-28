@@ -48,6 +48,7 @@ pub mod check;
 pub mod mac;
 pub mod row;
 pub mod sdk;
+pub mod trust;
 pub mod window;
 pub mod windows;
 
@@ -188,6 +189,10 @@ pub struct Installed {
     /// NDI's licence has changed. Empty for an install from before it was noted.
     #[serde(default)]
     pub licence: String,
+    /// The SHA-256 of the runtime file as it was installed (as hexadecimal), which the file
+    /// must still have each time before it is used ([`trust`]).
+    #[serde(default)]
+    pub runtime: String,
 }
 
 /// The runtime the app installed in `folder`, if there is one.
@@ -1158,13 +1163,21 @@ fn install(
         Taken::Sdk(contents) => sdk::install(&ready.download, contents, std::env::consts::ARCH, &next, cancel),
         Taken::Package(contents) => mac::install(contents, &next),
     };
-    let installed = Installed {
+    let mut installed = Installed {
         version: ready.version().unwrap_or("").to_owned(),
         downloaded: chrono::Local::now().format("%Y-%m-%d").to_string(),
         marks: ready.marks.clone(),
         licence: licence_mark(ready.licence()),
+        runtime: String::new(),
     };
     let moved = unpacked
+        .and_then(|()| {
+            // The hash of the runtime as it was unpacked, to hold the file to from now on.
+            let runtime = RUNTIME_FILES.iter().map(|name| next.join(name)).find(|file| file.is_file());
+            let runtime = runtime.ok_or_else(|| Problem::Damaged("the runtime wasn't unpacked".to_owned()))?;
+            installed.runtime = trust::file_mark(&runtime).map_err(Problem::disk)?;
+            Ok(())
+        })
         .and_then(|()| serde_json::to_vec_pretty(&installed).map_err(|e| Problem::Disk(e.to_string())))
         .and_then(|note| sdk::write_whole(&next, INFO_FILE, &note))
         .and_then(|()| if in_use { Ok(()) } else { move_in(folder).map(|_| ()) });

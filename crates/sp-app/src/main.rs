@@ -14333,6 +14333,8 @@ fn main() -> ExitCode {
     {
         ndi_download::settle(&folder);
         sp_ndi::set_own_folder(folder);
+        // What is in that folder is checked each time before it is used (`trust`).
+        sp_ndi::set_own_check(Box::new(ndi_download::trust::check));
     }
     // Picture objects on slides are read from the app's Images folder.
     sp_render::set_picture_loader(images::load);

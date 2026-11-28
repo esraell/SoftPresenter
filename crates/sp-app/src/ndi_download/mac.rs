@@ -172,6 +172,23 @@ pub fn library_for(head: &[u8], processor: &str) -> bool {
     }
 }
 
+/// Whether macOS finds `library`'s code signature whole (`codesign --verify --strict`) and it is
+/// NDI's team's: asked when the library is installed, and again each time before it is loaded.
+pub fn signed_by_ndi(codesign: &Path, library: &Path) -> Result<(), String> {
+    let ask =
+        |words: &[&str]| Command::new(codesign).args(words).arg(library).env_clear().stdin(Stdio::null()).output();
+    let whole = ask(&["--verify", "--strict"]).map_err(|e| format!("codesign could not be run: {e}"))?;
+    if !whole.status.success() {
+        return Err("its code signature is not whole".to_owned());
+    }
+    let about = ask(&["-dv"]).map_err(|e| format!("codesign could not be run: {e}"))?;
+    let said = String::from_utf8_lossy(&about.stderr);
+    match library_team(&said) {
+        Some(TEAM) => Ok(()),
+        other => Err(format!("it is signed by team {}, not NDI's", other.unwrap_or("none"))),
+    }
+}
+
 /// The plain files named `name` under `folder`, never following a link, looking no deeper than
 /// [`DEEPEST`] and at no more than [`MOST_ENTRIES`] entries.
 fn files_named(folder: &Path, name: &str) -> Result<Vec<PathBuf>, Problem> {

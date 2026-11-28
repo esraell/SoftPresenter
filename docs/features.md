@@ -1949,6 +1949,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     is unpacked and checked beside the old one and only then takes its place: at once when NDI
     isn't in use, or else the next time SoftPresenter starts, so live NDI screens keep working.
     A failed update leaves the installed NDI as it was, and says so.
+  - **Checked each time it is used.** The NDI in SoftPresenter's own folder is never taken on
+    trust: that folder is in the library, which other programs and a syncing service can write
+    to. Each time before it counts as installed or is opened, a Mac asks macOS whether the
+    library's code signature is whole and NDI's (`codesign`), and Linux, whose NDI library
+    isn't signed, compares the file's SHA-256 with the one noted when it was installed. A
+    library that doesn't pass is as if it weren't there: NDI "isn't installed", the log says
+    why, and Install NDI puts a good one in its place. The answer is kept while the file's size
+    and date stay the same, and is found on a thread of its own, never the window's.
   NDI screens that found no NDI start at once after an install, without a restart.
 - **DeckLink outputs** (SoftPresenter for Blackmagic Design DeckLink). With Blackmagic's driver,
   Desktop Video 16.0 or later, installed, each output the card offers is a choice for any
