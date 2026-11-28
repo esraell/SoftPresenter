@@ -1454,6 +1454,14 @@ impl BiblePage {
         self.held[self.showing].slides.clone()
     }
 
+    /// The slides of the passage asked for among those the page last made for the presentation
+    /// at `presentation`, when that is one of its two places: a verse among its chapter's, or all
+    /// of them (see `place_passage` in `main.rs`).
+    pub fn asked_slides(&self, presentation: usize) -> Option<std::ops::Range<usize>> {
+        let place = self.slots?.iter().position(|slot| *slot == presentation)?;
+        Some(self.held[place].slides.clone())
+    }
+
     /// The place of the passage asked for's slides among those of the presentation `deck` at
     /// `presentation`, when that is one of the page's places and the slides are some of the
     /// passage's chapter's: to ring them.
@@ -2394,8 +2402,14 @@ impl HomeState {
     /// view), Next puts the passage's first verse on, the one asked for, rather than whatever came
     /// after the slide on screen last, and Previous does nothing: going back puts no new words on
     /// screen (the owner's rules, 2026-11-28); otherwise the show steps, on from the slide on
-    /// screen or the verse cleared.
+    /// screen or the verse cleared. While a passage just made waits to go into its place, nothing
+    /// (`Stay`).
     pub fn bible_step(&self, show: &Show, forward: bool) -> crate::running::Do {
+        // A passage just made still waits to go into its place (`sp playlist go`, then `sp next`
+        // before the window draws): nothing steps from the cursor the place held before.
+        if self.bible.pending.is_some() {
+            return crate::running::Do::Stay(crate::running::End::Slide { last: forward });
+        }
         let showing = show.live().is_some();
         if let Some(said) = crate::running::held_for_enter(self.picked_word(show), showing) {
             return said;
@@ -14780,7 +14794,8 @@ mod tests {
             show.apply(command);
         }
         if let Some((slot, passage)) = state.bible.pending.take() {
-            crate::place_passage(show, slot, passage);
+            let asked = state.bible.asked_slides(slot);
+            crate::place_passage(show, slot, passage, asked);
             if let Some(slide) = state.bible.go_live.take() {
                 show.apply(Command::GoTo(SlideRef { presentation: slot, slide }));
             }

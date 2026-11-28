@@ -1643,22 +1643,29 @@ fn home_key_command(
 }
 
 /// Puts a Bible passage just made into its place among the show's presentations (one of the Bible
-/// view's two, never the one on screen). The slide last on screen there, kept so Next goes on from
-/// it after a clear (the show's cursor), may be a verse of what the place held before:
-/// - the same chapter made again (the same title and as many slides: a verse longer at either end,
-///   other options or translations, the same passage opened again) keeps it where it was, by its
-///   place, so Next goes on from the verse cleared and its grey outline stays;
-/// - another passage's slides are all made anew, so `replace_presentation_following`, which keeps
-///   the cursor only on the same slide, lets go of it. Otherwise it would stay at the same place
-///   in the new passage, on a verse never shown, and Space or a clicker would go on from there.
+/// view's two, never the one on screen), `asked` the slides of the passage asked for among those
+/// made (`BiblePage::asked_slides`). The slide last on screen there, kept so Next goes on from it
+/// after a clear (the show's cursor), may be a verse of what the place held before:
+/// - the same passage made again, or made longer (the same chapter's slides, the same title and
+///   as many, with the verse cleared among the verses now asked for: a verse longer at either
+///   end, other options or translations, the same passage opened again) keeps it where it was, by
+///   its place, so Next goes on from the verse cleared and its grey outline stays;
+/// - another passage, another verse of the same chapter included, lets go of it: its slides are
+///   all made anew, so `replace_presentation_following`, which keeps the cursor only on the same
+///   slide, drops it. Otherwise it would stay at the same place in the new passage, and Space or a
+///   clicker would go on from there rather than show the verse looked up.
 ///
 /// Either way a cursor in another presentation (a song on its second chorus) keeps its place.
-fn place_passage(show: &mut Show, slot: usize, passage: sp_model::Presentation) {
+fn place_passage(show: &mut Show, slot: usize, passage: sp_model::Presentation, asked: Option<std::ops::Range<usize>>) {
     let same_chapter = show
         .presentations()
         .get(slot)
         .is_some_and(|was| was.title == passage.title && was.slide_count() == passage.slide_count());
-    if same_chapter {
+    let cleared_asked = show
+        .cursor()
+        .filter(|cursor| cursor.presentation == slot)
+        .is_some_and(|cursor| asked.as_ref().is_some_and(|asked| asked.contains(&cursor.slide)));
+    if same_chapter && cleared_asked {
         show.replace_presentation(slot, Arc::new(passage));
     } else {
         show.replace_presentation_following(slot, Arc::new(passage));
@@ -5552,7 +5559,8 @@ impl App {
         if count == 0 {
             return None;
         }
-        place_passage(&mut self.show, slot, passage);
+        let asked = state.bible.asked_slides(slot);
+        place_passage(&mut self.show, slot, passage, asked);
         Some(sp_engine::SlideRef { presentation: slot, slide: if last { count - 1 } else { 0 } })
     }
 
@@ -14053,7 +14061,8 @@ impl ApplicationHandler<AppEvent> for App {
                 // A Bible passage just looked up goes into its slot. It is never the slot on
                 // screen, so the output is untouched.
                 if let Some((slot, passage)) = self.running.as_mut().and_then(|r| r.home_state.bible.pending.take()) {
-                    place_passage(&mut self.show, slot, passage);
+                    let asked = self.running.as_ref().and_then(|r| r.home_state.bible.asked_slides(slot));
+                    place_passage(&mut self.show, slot, passage, asked);
                     // A slide of a playlist's passage clicked goes on screen once the passage is in
                     // its place. (A verse double-clicked in the Bible view goes on by Enter, below.)
                     let go_live = self.running.as_mut().and_then(|r| r.home_state.bible.go_live.take());
@@ -16368,7 +16377,8 @@ mod tests {
             }
             // A passage just looked up goes into its place.
             if let Some((slot, passage)) = self.state.bible.pending.take() {
-                place_passage(&mut self.show, slot, passage);
+                let asked = self.state.bible.asked_slides(slot);
+                place_passage(&mut self.show, slot, passage, asked);
             }
             // Show Selected typed in the find box or Scripture Lookup: Enter, once what it opened
             // is in the show, as `window_event` does after the frame.
@@ -18131,6 +18141,79 @@ mod tests {
             keyboard.draw();
             assert_eq!(live_name(&keyboard).as_deref(), Some("От Иоанна 3:17"), "{how}: Space went on");
         }
+    }
+
+    #[test]
+    fn another_verse_of_the_same_chapter_after_a_clear_is_what_space_shows() {
+        // John 3:16 shown and cleared, then John 3:20 looked up: typed and shown after the typing
+        // pause, or typed with Return and its pick lost to another view. The same chapter's slides,
+        // but not the passage cleared made longer: Space puts John 3:20 on, never John 3:17.
+        for how in ["pause", "lose pick"] {
+            let mut keyboard = verse_shown_then_cleared(key_table::KeyStyle::SoftPresenter);
+            keyboard.state.bible.lookup = "John 3:20".to_owned();
+            if how == "pause" {
+                let at = keyboard.time;
+                keyboard.state.bible.typed_at = Some(at);
+                for _ in 0..5 {
+                    keyboard.draw();
+                }
+            } else {
+                keyboard.state.bible.focus_lookup = true;
+                keyboard.draw();
+                keyboard.press(Key::Named(NamedKey::Enter));
+                keyboard.draw();
+                keyboard.state.view_request = Some(0);
+                keyboard.draw();
+                keyboard.state.view_request = Some(2);
+                keyboard.draw();
+            }
+            assert_eq!((keyboard.live(), picked_at(&keyboard)), (None, None), "{how}");
+            assert_eq!(keyboard.state.bible.shown, "От Иоанна 3:20", "{how}");
+            assert_eq!(keyboard.show.cursor(), None, "{how}: John 3:16's place is let go of");
+            keyboard.press(Key::Named(NamedKey::Space));
+            keyboard.draw();
+            assert_eq!(live_name(&keyboard).as_deref(), Some("От Иоанна 3:20"), "{how}: the verse looked up");
+        }
+        // John 3:16 and then 3:17 shown, 3:17 cleared, then the passage a verse longer (›): the
+        // verse cleared is among the verses asked for, so Space goes on to John 3:18.
+        let mut keyboard = verse_shown_then_cleared(key_table::KeyStyle::SoftPresenter);
+        let slot = bible_place(&keyboard).unwrap();
+        keyboard.press(Key::Named(NamedKey::Space));
+        keyboard.draw();
+        assert_eq!(live_name(&keyboard).as_deref(), Some("От Иоанна 3:17"));
+        keyboard.act(KeyAction::ClearSlide);
+        keyboard.draw();
+        keyboard.state.bible.step(true, None);
+        keyboard.draw();
+        assert_eq!(keyboard.state.bible.shown, "От Иоанна 3:16-17");
+        assert_eq!(keyboard.show.cursor(), Some(sp_engine::SlideRef { presentation: slot, slide: 16 }), "kept");
+        keyboard.press(Key::Named(NamedKey::Space));
+        keyboard.draw();
+        assert_eq!(live_name(&keyboard).as_deref(), Some("От Иоанна 3:18"));
+    }
+
+    #[test]
+    fn next_waits_while_a_passage_made_waits_for_its_place() {
+        // John 3:16 shown and cleared, then another passage made but not yet in its place (as
+        // `sp playlist go` leaves it until the window draws): Next and Previous put nothing on,
+        // rather than going on from the cursor the place held before.
+        let mut keyboard = verse_shown_then_cleared(key_table::KeyStyle::SoftPresenter);
+        keyboard.state.bible.open_kept("Romans 8:28".to_owned(), None, None);
+        assert!(keyboard.state.bible.pending.is_some(), "waiting for its place");
+        for forward in [true, false] {
+            assert_eq!(
+                keyboard.state.bible_step(&keyboard.show, forward),
+                running::Do::Stay(running::End::Slide { last: forward })
+            );
+        }
+        keyboard.draw();
+        assert!(keyboard.state.bible.pending.is_none(), "in its place once drawn");
+        let slot = bible_place(&keyboard).unwrap();
+        assert_eq!(
+            keyboard.state.bible_step(&keyboard.show, true),
+            running::Do::Show(Command::GoTo(sp_engine::SlideRef { presentation: slot, slide: 27 })),
+            "then Next shows the verse looked up"
+        );
     }
 
     #[test]

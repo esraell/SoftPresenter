@@ -3581,7 +3581,8 @@ impl crate::App {
         let Some((slot, passage)) = found else {
             return Err(message.unwrap_or_else(|| format!("Could not look up {reference}.")));
         };
-        crate::place_passage(&mut self.show, slot, passage);
+        let asked = self.running.as_ref().and_then(|running| running.home_state.bible.asked_slides(slot));
+        crate::place_passage(&mut self.show, slot, passage, asked);
         if let Some(into) = add_to {
             let list = self.playlist_at_for_cli(into.as_deref())?;
             let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;

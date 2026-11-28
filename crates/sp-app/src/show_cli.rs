@@ -136,7 +136,8 @@ impl crate::App {
             return Err(message.unwrap_or_else(|| format!("Could not open {title}.")));
         };
         let (count, shown) = (passage.slide_count(), passage.title.clone());
-        crate::place_passage(&mut self.show, slot, passage);
+        let asked = running.home_state.bible.asked_slides(slot);
+        crate::place_passage(&mut self.show, slot, passage, asked);
         if !(1..=count).contains(&number) {
             return Err(format!("{shown} has {count} slides; there is no slide {number}."));
         }
