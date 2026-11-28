@@ -1369,10 +1369,14 @@ impl BiblePage {
         let Ok(range) = sp_bible::parse_reference_in(&self.shown, &lead.info.language) else { return };
         let Some(page) = self.page_bible_for(range.start.book) else { return };
         let there = crate::bible::renumber(range, lead.info.numbering, page.info.numbering, &in_use);
-        // A verse a Shift-click runs from, counted in another numbering, is let go of.
+        // A verse a Shift-click runs from, counted in another numbering, is let go of. With none
+        // known yet (the session's first lookup) it was counted as this one: the verse clicked
+        // just now, numbered as the keypad and the lists number it.
         if self.list_numbering != Some(page.info.numbering) {
+            if self.list_numbering.is_some() {
+                self.list_from = None;
+            }
             self.list_numbering = Some(page.info.numbering);
-            self.list_from = None;
         }
         if (there.start.book, there.start.chapter) != (self.list_book, self.list_chapter) {
             (self.list_book, self.list_chapter) = (there.start.book, there.start.chapter);
@@ -10778,6 +10782,34 @@ mod tests {
         }
     }
 
+    /// A Shift-click on a row of the Bible view's lists (on screen already), the app taking what
+    /// it looked up after each frame. Returns the commands the frames gave.
+    fn shift_click_list_row(
+        ctx: &egui::Context,
+        show: &mut Show,
+        state: &mut HomeState,
+        row: impl std::hash::Hash + std::fmt::Debug,
+        time: f64,
+    ) -> Vec<Command> {
+        let at = ctx.read_response(crate::bible::list_row_id(row)).expect("drawn").rect.center();
+        let press = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::SHIFT,
+        };
+        let mut commands = Vec::new();
+        for (events, when) in [
+            (vec![Event::ModifiersChanged(Modifiers::SHIFT), Event::PointerMoved(at)], time),
+            (vec![press(true)], time + 0.05),
+            (vec![press(false)], time + 0.1),
+            (vec![Event::ModifiersChanged(Modifiers::NONE)], time + 0.15),
+        ] {
+            commands.extend(frame_then_app(ctx, show, state, events, when));
+        }
+        commands
+    }
+
     #[test]
     fn a_shift_click_after_a_verse_still_takes_the_passage_and_puts_nothing_on() {
         for books in [BookPicker::Keypad, BookPicker::Lists] {
@@ -10785,26 +10817,41 @@ mod tests {
             // The chapter looked up first, as in a service: the lists then know its numbering.
             click_list_row(&ctx, &mut show, &mut state, ("chapter", 3u16), 0.5);
             click_list_row(&ctx, &mut show, &mut state, ("verse", 2u16), 1.0);
-            let at = ctx.read_response(crate::bible::list_row_id(("verse", 4u16))).expect("drawn").rect.center();
-            let press = |pressed| Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: Modifiers::SHIFT,
-            };
-            let mut commands = Vec::new();
-            for (events, time) in [
-                (vec![Event::ModifiersChanged(Modifiers::SHIFT), Event::PointerMoved(at)], 2.0),
-                (vec![press(true)], 2.05),
-                (vec![press(false)], 2.1),
-                (vec![Event::ModifiersChanged(Modifiers::NONE)], 2.15),
-            ] {
-                commands.extend(frame_then_app(&ctx, &mut show, &mut state, events, time));
-            }
+            let commands = shift_click_list_row(&ctx, &mut show, &mut state, ("verse", 4u16), 2.0);
             assert_eq!(state.bible.shown, "От Иоанна 3:2-4", "{books:?}");
             assert!(!goes_on_screen(&commands), "{commands:?}");
             assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "the song stays on screen");
         }
+    }
+
+    #[test]
+    fn the_first_verse_clicked_in_a_session_is_where_a_shift_click_runs_from() {
+        // Nothing looked up yet: the first click is on a verse, then a Shift-click on another.
+        // The first lookup used to let go of the verse just clicked (no numbering was known
+        // yet), so the Shift-click took its own verse alone.
+        for (books, computer) in [
+            (BookPicker::Keypad, None),
+            (BookPicker::Lists, None),
+            (BookPicker::Keypad, Some("ru-RU")),
+            (BookPicker::Lists, Some("ru-RU")),
+        ] {
+            let (ctx, mut show, mut state) = bible_view_at(books, "JOH", 3);
+            if let Some(computer) = computer {
+                state.bible.system_language = crate::system_language::SystemLanguage::answered(computer);
+            }
+            assert_eq!(state.bible.list_numbering, None, "nothing looked up yet");
+            click_list_row(&ctx, &mut show, &mut state, ("verse", 2u16), 1.0);
+            let commands = shift_click_list_row(&ctx, &mut show, &mut state, ("verse", 4u16), 2.0);
+            assert_eq!(state.bible.shown, "От Иоанна 3:2-4", "{books:?} {computer:?}");
+            assert!(!goes_on_screen(&commands), "{commands:?}");
+        }
+        // In a psalm the two numberings count differently: on an English computer the keypad
+        // counts as the King James Version does, and the passage is made in the Synodal's.
+        let (ctx, mut show, mut state) = bible_view_at(BookPicker::Lists, "PSA", 51);
+        click_list_row(&ctx, &mut show, &mut state, ("verse", 2u16), 1.0);
+        shift_click_list_row(&ctx, &mut show, &mut state, ("verse", 4u16), 2.0);
+        assert_eq!(state.bible.lookup, "Psalm 51:2-4", "the verses clicked, as the page counts them");
+        assert_eq!(state.bible.shown, "Псалтирь 50:4-6");
     }
 
     #[test]
