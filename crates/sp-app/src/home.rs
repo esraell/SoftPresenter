@@ -12557,9 +12557,19 @@ mod tests {
         assert!(matches!(state.removed.as_slice(), [crate::removed::Removed::StageLayout { at: 0, .. }]));
     }
 
-    /// Where the home window, drawn once more at `time`, puts `words` (an object tool over the
-    /// canvas, say).
+    /// Where the home window, drawn once more at `time`, puts `words`; or, for one of the Add
+    /// toolbar's keys over the canvas ("Add Text", "Web Page", "NDI Source", "AirPlay"), the
+    /// middle of that key, whether the toolbar shows its names or, where they don't fit, its
+    /// pictures.
     fn home_place(ctx: &egui::Context, show: &Show, state: &mut HomeState, words: &str, time: f64) -> egui::Pos2 {
+        use crate::add_bar::Kind;
+        let tool = match words {
+            "Add Text" => Some(Kind::Text),
+            "Web Page" => Some(Kind::Web),
+            "NDI Source" => Some(Kind::Ndi),
+            "AirPlay" => Some(Kind::Mirror),
+            _ => None,
+        };
         let raw = RawInput {
             screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
             time: Some(time),
@@ -12568,7 +12578,14 @@ mod tests {
         let output = ctx.run_ui(raw, |ui| {
             home_ui(ui, show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
         });
-        let at = crate::studio::tests::place_of(&output, words).expect(words);
+        let at = match tool {
+            Some(kind) => {
+                let drawn = ctx.data(|data| data.get_temp::<crate::add_bar::Drawn>(crate::add_bar::well_id()));
+                let keys = drawn.map(|drawn| drawn.keys).unwrap_or_default();
+                keys.iter().find(|(have, _)| *have == kind).map(|(_, key)| key.center()).expect(words)
+            }
+            None => crate::studio::tests::place_of(&output, words).expect(words),
+        };
         output.drop_without_applying_deltas();
         at
     }
