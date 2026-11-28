@@ -446,7 +446,8 @@ fn technical(screen: &Screen, state: &HomeState) -> Vec<String> {
         (look.messages, t("screens.look.messages", "Messages")),
         (look.announcements, t("screens.look.announcements", "Announcements")),
     ];
-    let shown: Vec<String> = layers.iter().filter(|(on, _)| *on).map(|(_, name)| name.to_lowercase()).collect();
+    let shown: Vec<String> =
+        layers.iter().filter(|(on, _)| *on).map(|(_, name)| crate::i18n::in_a_list(name)).collect();
     parts.push(match shown.len() {
         5 => t("settings.screens.tech.every_layer", "every layer").to_owned(),
         0 => t("settings.screens.tech.no_layers", "no layers").to_owned(),

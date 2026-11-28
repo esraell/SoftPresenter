@@ -599,6 +599,13 @@ pub fn number_format(language: Language) -> serde_json::Value {
     })
 }
 
+/// A word that stands alone with a capital (a layer's name, "Slides") as it reads inside a list
+/// in a sentence: in lower case ("slides, media"), but in German, whose nouns keep their capitals
+/// ("Folien, Medien").
+pub fn in_a_list(word: &str) -> String {
+    if current() == Language::German { word.to_owned() } else { word.to_lowercase() }
+}
+
 /// A whole number as the current language writes it: 13,613 in English, 13.613 in Spanish and
 /// German, 13 613 (a no-break space) in Russian and Ukrainian.
 pub fn count(n: u64) -> String {
@@ -942,6 +949,13 @@ mod tests {
     }
 
     #[test]
+    fn a_word_in_a_list_is_in_lower_case_but_a_german_noun_keeps_its_capital() {
+        assert_eq!(with_language(Language::English, || in_a_list("Slides")), "slides");
+        assert_eq!(with_language(Language::Spanish, || in_a_list("Diapositivas")), "diapositivas");
+        assert_eq!(with_language(Language::German, || in_a_list("Folien")), "Folien");
+    }
+
+    #[test]
     fn the_choice_follows_the_computer_until_one_is_made() {
         // Without touching the real setting (other tests run beside this one), the rule itself.
         assert_eq!(Language::from_tag("es-ES"), Some(Language::Spanish));
@@ -1074,7 +1088,7 @@ mod tests {
     const UKRAINIAN_DONE: &[&str] = SPANISH_DONE;
     // German joins an area at a time, as its tables are written; from then on a string wrapped
     // without its German fails here as well.
-    const GERMAN_DONE: &[&str] = &["topbar", "left", "right", "slides", "dock", "keys", "media"];
+    const GERMAN_DONE: &[&str] = &["topbar", "left", "right", "slides", "dock", "keys", "media", "screens", "remote"];
 
     /// What `language` lacks in the areas `done` lists, as "key (English)".
     fn lacking_in(language: Language, done: &[&str]) -> Vec<String> {
