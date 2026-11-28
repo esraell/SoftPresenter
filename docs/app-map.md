@@ -208,7 +208,7 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   order, Rename (which retypes the name in the Objects list), Duplicate and Delete (their names where the three fit one line, else all three as picture keys: `object_keys_named`), Undo, Redo, Reset to theme), and Animation (how an object comes on and
   goes off; not on a theme's template or a stage layout). Several objects of different kinds
   have Box and Animation only, under a line saying how many and what. With nothing picked the
-  column has a plain heading (SLIDE, PROP, THEME SLIDE, LAYOUT); under SLIDE are the slide's own Label, Template and Go to Next (`slide_panel`; its notes are the footer's Slide Notes). Every row is a caption in small
+  column has a plain heading (SLIDE, PROP, THEME SLIDE, LAYOUT); under SLIDE are the group the slide is in, with Change… (the song's groups to choose from, asked of the app as `SlideRequest::Group`, a step of the Edit view's Undo), and the slide's own Label, Template and Go to Next (`slide_panel`; its notes are the footer's Slide Notes). Every row is a caption in small
   capitals in a column at the left (`row`), then its controls: separate keys (`square_key`,
   `word_key`), numbers, menus, and colours as a row of swatches that always fits one line, ending
   in a well for any colour (`swatch_row`). A row that belongs to a switch on the same tab

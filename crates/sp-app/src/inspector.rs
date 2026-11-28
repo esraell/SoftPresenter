@@ -1117,7 +1117,9 @@ fn tab_style(ui: &mut egui::Ui) {
 /// Notes). A prop has none of these.
 fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     let of_song = state.edit_kind() == Some(crate::home::EditKind::Slides);
+    let mut state_request = None;
     let templates = state.song_templates.clone();
+    let group = state.edited_slide_group.clone();
     let Some(draft) = state.editing.as_mut() else { return };
     if !of_song {
         return nothing_selected(ui);
@@ -1127,9 +1129,56 @@ fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
         t("slides.menu.label", "Label"),
         t("slides.menu.template", "Template"),
         t("inspector.row.go_next", "Go to Next"),
+        t("slides.menu.group", "Group"),
     ];
     let column = caption_column(ui, &captions);
     let room = control_room(column);
+    // Group: the group the slide is in, with its colour, and Change…, which opens the groups
+    // to choose from. The groups are the song's, not the slide's, so the change is asked of
+    // the app as the slide's own Group menu asks it, and is a step of the Edit view's Undo.
+    if let Some((name, colour)) = group {
+        let mut chosen = None;
+        row(ui, column, captions[3], |ui| {
+            let change = t("inspector.slide.group.change", "Change\u{2026}");
+            let key_wide = crate::studio::flat_button_width(ui, &[change], &word_key_font(), 13.0);
+            let (dot, _) = ui.allocate_exact_size(vec2(10.0, KEY), Sense::hover());
+            ui.painter().circle_filled(dot.center(), 4.5, crate::home::group_dot_colour(colour));
+            let said = if name.is_empty() { t("slides.menu.label.none", "None") } else { name.as_str() };
+            let words = egui::RichText::new(said).size(13.0).color(INK);
+            let name_room = vec2(room - 10.0 - key_wide - 2.0 * BETWEEN, KEY);
+            ui.allocate_ui_with_layout(name_room, Layout::left_to_right(Align::Center), |ui| {
+                ui.add(egui::Label::new(words).truncate()).on_hover_text(said);
+            });
+            let key = word_key(ui, change, false, true).on_hover_text(t(
+                "inspector.slide.group.hint",
+                "This slide and the slides after it in its group become the group you choose",
+            ));
+            egui::Popup::menu(&key).show(|ui| {
+                let title = t("inspector.slide.group.title", "This slide\u{2019}s group");
+                ui.label(egui::RichText::new(title).size(11.5).color(DIM));
+                ui.separator();
+                // The names every Group menu offers, in the language set, and the slide's own when
+                // it is another; the group it is in is ticked, named in whichever language.
+                let names: Vec<&str> = crate::home::group_names().collect();
+                let own = (!name.is_empty() && !names.iter().any(|have| sp_model::same_part(&name, have)))
+                    .then_some(name.as_str());
+                egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                    for offered in own.into_iter().chain(names.iter().copied()) {
+                        let now = sp_model::same_part(&name, offered);
+                        if ui.add(egui::Button::selectable(now, offered)).clicked() {
+                            if !now {
+                                chosen = Some(offered.to_owned());
+                            }
+                            ui.close();
+                        }
+                    }
+                });
+            });
+        });
+        if let Some(name) = chosen {
+            state_request = Some((draft.at, crate::home::SlideRequest::Group(vec![draft.at.slide], name)));
+        }
+    }
     let before = (draft.slide.label.clone(), draft.slide.template, draft.slide.advance);
     let (mut label, mut template, mut advance) = before.clone();
     row(ui, column, captions[0], |ui| {
@@ -1202,6 +1251,9 @@ fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
         (draft.slide.label, draft.slide.template, draft.slide.advance) = (label, template, advance);
     }
     nothing_selected(ui);
+    if state_request.is_some() {
+        state.slide_request = state_request;
+    }
 }
 
 /// True for a picture object whose file is a video, which plays in its box.

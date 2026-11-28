@@ -704,6 +704,10 @@ pub struct HomeState {
     pub version_asks: Vec<crate::versions::Ask>,
     /// The templates of the theme songs use, by id and name, for a slide's Template menu.
     pub song_templates: Vec<(sp_model::Uuid, String)>,
+    /// The group the song's slide open in the Edit view is in, by its name and colour, for the
+    /// inspector's Group row: set before the inspector is drawn (the group is the song's, not
+    /// the slide's, so the draft doesn't have it).
+    pub edited_slide_group: Option<(String, Rgba)>,
     /// The template being renamed in the Theme Editor, and its name as typed so far.
     pub renaming_template: Option<(usize, String)>,
     /// Each theme's two layouts as boxes, for the pictures in the theme picker.
@@ -2165,6 +2169,7 @@ impl Default for HomeState {
             version_switch: crate::versions::Switch::default(),
             version_asks: Vec::new(),
             song_templates: Vec::new(),
+            edited_slide_group: None,
             renaming_template: None,
             theme_layouts: Vec::new(),
             bible_layout: 0,
@@ -3688,7 +3693,12 @@ fn edit_view(
 
     crate::studio::round_corners(ui, crate::studio::column_panel(left.response.rect, Column::Left));
 
-    // Right: the inspector, the whole height of the column.
+    // Right: the inspector, the whole height of the column. It says which group the slide is in.
+    state.edited_slide_group =
+        state.editing.as_ref().filter(|_| state.edit_kind() == Some(EditKind::Slides)).and_then(|draft| {
+            let song = show.presentations().get(draft.at.presentation)?;
+            song.slide(draft.at.slide).map(|(group, _)| (group.name.clone(), group.color))
+        });
     let mut leave = false;
     crate::studio::edit_column(ui, state, |ui, state| {
         leave = crate::inspector::inspector(ui, state, theme);
@@ -5356,8 +5366,13 @@ const GROUP_NAMES: [(&str, &str); 19] = [
 /// The group names the Group menu offers, in the language set. A group takes the name in the
 /// language it was given in and keeps it (it is the church's from then on, so `sp` prints it as
 /// saved): the groups of songs you already have keep their names.
-fn group_names() -> impl Iterator<Item = &'static str> {
+pub fn group_names() -> impl Iterator<Item = &'static str> {
     GROUP_NAMES.into_iter().map(|(key, english)| crate::i18n::tg(key, english))
+}
+
+/// The colour of a group's dot, as the slides' strips draw it.
+pub fn group_dot_colour(colour: Rgba) -> Color32 {
+    slides::dot_colour(colour)
 }
 
 /// The name of the one group a new song made with no words has: "Verse 1" in the language set.
@@ -15318,6 +15333,52 @@ mod tests {
             *time += 0.1;
             frame_events(ctx, show, state, events, *time);
         }
+    }
+
+    #[test]
+    fn the_slide_panels_group_row_says_the_group_and_change_asks_for_another_as_one_undo_step() {
+        // The second slide of Verse 1, nothing picked: the right side is the slide's panel.
+        let (show, mut state) = song_open(&[("Verse 1", 2), ("Chorus", 1)], 1);
+        let (ctx, mut time) = (egui::Context::default(), 0.0);
+        let frame = |state: &mut HomeState, time: f64| {
+            let raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+                time: Some(time),
+                ..RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| {
+                home_ui(ui, &show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+            });
+            let places = ["Change\u{2026}", "This slide\u{2019}s group", "Bridge", "Verse 1"]
+                .map(|words| crate::studio::tests::place_on_top(&output, words));
+            output.drop_without_applying_deltas();
+            places
+        };
+        let [change, title, ..] = frame(&mut state, time);
+        assert_eq!(state.edited_slide_group.as_ref().map(|(name, _)| name.as_str()), Some("Verse 1"));
+        assert!(title.is_none(), "the groups to choose from are closed until Change\u{2026} is clicked");
+        click_at(&ctx, &show, &mut state, change.expect("Change\u{2026} is on the Group row"), &mut time);
+        time += 0.1;
+        let [_, title, bridge, _] = frame(&mut state, time);
+        assert!(title.is_some(), "the menu says whose group it changes");
+        assert!(state.slide_request.is_none(), "nothing is asked until a group is chosen");
+        click_at(&ctx, &show, &mut state, bridge.expect("Bridge is offered"), &mut time);
+        // Asked of the app as the slide's own Group menu asks it: this slide starts the group.
+        let at = SlideRef { presentation: 0, slide: 1 };
+        assert_eq!(state.slide_request.take(), Some((at, SlideRequest::Group(vec![1], "Bridge".to_owned()))));
+        // What the app does with it: the song as changed, kept for Undo, the step noted in the
+        // Edit view's order (`App::handle_slide_request`, `App::note_song_step`).
+        let song = &show.presentations()[0];
+        let changed = song.with_group_over(&[1], "Bridge").expect("the slide is there");
+        let names: Vec<&str> = changed.groups.iter().map(|group| group.name.as_str()).collect();
+        assert_eq!(names, ["Verse 1", "Bridge", "Chorus"]);
+        assert_eq!(changed.slide(1).map(|(_, slide)| slide.id), song.slide(1).map(|(_, slide)| slide.id));
+        state.edit_steps.push(EditStep::Song);
+        // Undo in the editor takes that step back before any earlier change to the slide.
+        time += 0.1;
+        frame_events(&ctx, &show, &mut state, pressed(Key::Z, Modifiers::COMMAND), time);
+        assert_eq!(state.song_undo, Some(false), "Undo asks the app to put the song's groups back");
+        assert_eq!(state.edit_redo, [EditStep::Song], "and Redo can change the group again");
     }
 
     #[test]

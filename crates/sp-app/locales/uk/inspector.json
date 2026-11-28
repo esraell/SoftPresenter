@@ -281,5 +281,8 @@
   "inspector.tab.video": "Відео",
   "inspector.kind.video": "відео",
   "inspector.row.file": "Файл",
-  "inspector.video.plays": "Відтворюється з початку, поки слайд на екрані."
+  "inspector.video.plays": "Відтворюється з початку, поки слайд на екрані.",
+  "inspector.slide.group.change": "Змінити…",
+  "inspector.slide.group.title": "Частина цього слайда",
+  "inspector.slide.group.hint": "Цей слайд і наступні за ним у його частині стануть частиною, яку ви виберете"
 }

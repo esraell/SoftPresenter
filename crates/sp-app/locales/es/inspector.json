@@ -278,5 +278,8 @@
   "inspector.tab.video": "Vídeo",
   "inspector.kind.video": "vídeo",
   "inspector.row.file": "Archivo",
-  "inspector.video.plays": "Se reproduce desde el principio mientras la diapositiva está en pantalla."
+  "inspector.video.plays": "Se reproduce desde el principio mientras la diapositiva está en pantalla.",
+  "inspector.slide.group.change": "Cambiar…",
+  "inspector.slide.group.title": "Grupo de esta diapositiva",
+  "inspector.slide.group.hint": "Esta diapositiva y las que la siguen en su grupo pasan al grupo que elijas"
 }

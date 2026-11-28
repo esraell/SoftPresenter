@@ -1670,7 +1670,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   foot of the Text tab. A shape's tab has a menu to change which shape it is. In a template, a
   text box's tab has Holds: which of a slide's words it takes (the main language, the
   translation, a reference). With nothing picked on a song's slide, the column
-  shows the slide's own Label, Template and Go to Next. A picture's or a video's tab names its
+  shows the group the slide is in, with its colour and Change… (which opens the groups to choose
+  from: the slide and the slides after it in its group become that group, as with Group in the
+  slide's own menu, and Undo takes it back), then the slide's own Label, Template and Go to
+  Next. A picture's or a video's tab names its
   file. On the Box tab of a box that shows a picture (a picture, video, web page, NDI source,
   AirPlay or screen), the colour is called Behind: it shows in the bars beside the picture and
   while it hasn't arrived. With several objects picked, a row is there only if it applies to
