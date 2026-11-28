@@ -2328,6 +2328,19 @@ impl HomeState {
         (in_view && there.is_some_and(|(_, slide)| slide.enabled) && !moved_on && show.live() != Some(at)).then_some(at)
     }
 
+    /// The verse of the Bible view's passage that was on screen until the slides were cleared,
+    /// outlined grey, while nothing is on screen and no verse is picked: where the arrows move a
+    /// pick from, putting nothing on (the owner's rule, 2026-11-28; see `bible_pick_keys` and
+    /// `pick_key_press` in `main.rs`).
+    pub fn cleared_verse(&self, show: &Show) -> Option<SlideRef> {
+        if !self.bible_view_now() || self.edit_kind().is_some() || show.live().is_some() || self.pick(show).is_some() {
+            return None;
+        }
+        let slot = self.bible.slots.map(|slots| slots[self.bible.showing])?;
+        let count = show.presentations().get(slot).map_or(0, |passage| passage.slide_count());
+        show.cursor().filter(|at| at.presentation == slot && at.slide < count)
+    }
+
     /// What the slide picked is, for the refusal's cue that says Enter puts it on screen.
     pub fn picked_word(&self, show: &Show) -> Option<&'static str> {
         self.pick(show)?;
@@ -8283,9 +8296,11 @@ fn target_menu(
 /// `running::move_pick`) and never put it on screen; Enter does. On the page, where the verses
 /// run down, ↓ is as → and ↑ as ←, by the owner's rules (`running::pick_key`, 2026-11-22): with a
 /// verse picked and nothing on screen they move the pick to the verse below or above; with
-/// something on screen they go on with it, as → and ← do (Enter takes the pick). With neither,
-/// both pick the passage's first verse. Not while something is typed, under a menu, the Options
-/// or the list of keys, or with a search's verses listed in place of the slides.
+/// something on screen they go on with it, as → and ← do (Enter takes the pick). With nothing on
+/// screen after a clear, they pick the verse below or above the one cleared (outlined grey;
+/// `HomeState::cleared_verse`). With none of these, both pick the passage's first verse. Not
+/// while something is typed, under a menu, the Options or the list of keys, or with a search's
+/// verses listed in place of the slides.
 fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
     let free = !ui.ctx().text_edit_focused()
         && !state.typing_in_find()
@@ -8314,7 +8329,8 @@ fn bible_pick_keys(ui: &egui::Ui, show: &Show, state: &mut HomeState, commands: 
     let Some(slot) = state.bible.slots.map(|slots| slots[state.bible.showing]) else { return };
     let count = show.presentations().get(slot).map_or(0, |passage| passage.slide_count());
     let picked = state.pick(show).filter(|at| at.presentation == slot).map(|at| at.slide);
-    let live = show.live().filter(|at| at.presentation == slot).map(|at| at.slide);
+    // The verse on screen, or the one cleared, which the pick moves on from.
+    let live = show.live().or(state.cleared_verse(show)).filter(|at| at.presentation == slot).map(|at| at.slide);
     // With neither, the passage's first verse, among its chapter's slides when they were made.
     let first = state.bible.passage_slides().start;
     let moved = match (picked, live) {

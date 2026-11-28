@@ -1647,13 +1647,30 @@ fn home_key_command(
 /// nothing is on screen (so Page Down, a clicker's forward, puts the picked slide up); any key
 /// doing Previous moves it back (Page Up, a clicker's back, too). A key set to anything else does
 /// that, so Space set to Clear All clears, never putting the pick on screen.
-fn pick_key_for(key: &Pressed, action: KeyAction, picked: bool, showing: bool, editing: bool) -> running::PickKey {
+///
+/// With no slide picked, nothing on screen and a verse of the Bible view's passage cleared
+/// (`cleared`: `HomeState::cleared_verse`), → and ← themselves, while they do Next and Previous,
+/// pick the verse after or before the one cleared, putting nothing on (the owner's rule,
+/// 2026-11-28); Enter puts it on. Space, Page Down and Page Up, which clickers send, and any other
+/// key doing Next or Previous, still go on from the verse cleared, as Next does.
+fn pick_key_for(
+    key: &Pressed,
+    action: KeyAction,
+    picked: bool,
+    cleared: bool,
+    showing: bool,
+    editing: bool,
+) -> running::PickKey {
     let (next, previous) = (action == KeyAction::Next, action == KeyAction::Previous);
     if !next && !previous {
         return running::PickKey::Pass;
     }
-    // → by what the window says it is: the number pad's 6 with Num Lock off is → too.
+    // → and ← by what the window says they are: the number pad's 6 and 4 with Num Lock off too.
     let right = next && matches!(key.logical, Key::Named(NamedKey::ArrowRight));
+    let left = previous && matches!(key.logical, Key::Named(NamedKey::ArrowLeft));
+    if !picked && cleared && !showing && !editing && (right || left) {
+        return running::PickKey::Move(right);
+    }
     running::pick_key(next && !right, right, previous, picked, showing, editing)
 }
 
@@ -1663,9 +1680,11 @@ fn pick_key_for(key: &Pressed, action: KeyAction, picked: bool, showing: bool, e
 /// Enter takes it (`App::enter_key`).
 fn pick_key_press(show: &Show, state: &mut home::HomeState, key: &Pressed, action: KeyAction) -> running::PickKey {
     let picked = state.pick(show);
-    let decided = pick_key_for(key, action, picked.is_some(), show.live().is_some(), state.edit_kind().is_some());
-    if let (running::PickKey::Move(forward), Some(at)) = (decided, picked) {
-        let bible = state.picked.as_ref().is_some_and(|picked| picked.passage.is_some());
+    let cleared = state.cleared_verse(show);
+    let editing = state.edit_kind().is_some();
+    let decided = pick_key_for(key, action, picked.is_some(), cleared.is_some(), show.live().is_some(), editing);
+    if let (running::PickKey::Move(forward), Some(at)) = (decided, picked.or(cleared)) {
+        let bible = cleared.is_some() || state.picked.as_ref().is_some_and(|picked| picked.passage.is_some());
         let order = show.presentations().get(at.presentation).map(|song| song.order()).unwrap_or_default();
         if let Some(slide) = running::pick_beside(&order, at.slide, forward) {
             state.set_pick(show, sp_engine::SlideRef { presentation: at.presentation, slide }, bible);
@@ -16102,7 +16121,7 @@ mod tests {
             (Key::Named(NamedKey::Space), Key::Named(NamedKey::ArrowRight), Key::Named(NamedKey::ArrowLeft));
         // A slide picked and nothing on screen: as before the table, Space takes it and the arrows
         // move it.
-        let picked = |key: &Key, action| pick_key_for(&us(key), action, true, false, false);
+        let picked = |key: &Key, action| pick_key_for(&us(key), action, true, false, false, false);
         assert_eq!(picked(&space, KeyAction::Next), PickKey::TakeIt);
         assert_eq!(picked(&right, KeyAction::Next), PickKey::Move(true));
         assert_eq!(picked(&left, KeyAction::Previous), PickKey::Move(false));
@@ -16113,7 +16132,7 @@ mod tests {
         assert_eq!(picked(&Key::Named(NamedKey::PageUp), KeyAction::Previous), PickKey::Move(false));
         // → with Num Lock off on the number pad is → too.
         let pad_right = Pressed::at(Key::Named(NamedKey::ArrowRight), winit::keyboard::KeyCode::Numpad6);
-        assert_eq!(pick_key_for(&pad_right, KeyAction::Next, true, false, false), PickKey::Move(true));
+        assert_eq!(pick_key_for(&pad_right, KeyAction::Next, true, false, false, false), PickKey::Move(true));
         // A key set to anything else does that, never touching the pick: Space set to Clear All
         // clears, putting nothing on screen.
         assert_eq!(picked(&space, KeyAction::ClearAll), PickKey::Pass);
@@ -16124,9 +16143,23 @@ mod tests {
         assert_eq!(picked(&right, KeyAction::Previous), PickKey::Move(false));
         assert_eq!(picked(&Key::Named(NamedKey::End), KeyAction::Next), PickKey::TakeIt);
         // With something on screen, or in the Edit view, the keys run the show as ever.
-        assert_eq!(pick_key_for(&us(&space), KeyAction::Next, true, true, false), PickKey::Pass);
-        assert_eq!(pick_key_for(&us(&space), KeyAction::Next, true, false, true), PickKey::Pass);
-        assert_eq!(pick_key_for(&us(&space), KeyAction::Next, false, false, false), PickKey::Pass);
+        assert_eq!(pick_key_for(&us(&space), KeyAction::Next, true, false, true, false), PickKey::Pass);
+        assert_eq!(pick_key_for(&us(&space), KeyAction::Next, true, false, false, true), PickKey::Pass);
+        assert_eq!(pick_key_for(&us(&space), KeyAction::Next, false, false, false, false), PickKey::Pass);
+        // Nothing picked, nothing on screen, a verse of the Bible view's passage cleared: → and ←
+        // doing Next and Previous move a pick from it; Space, Page Down, Page Up and any other key
+        // still go on from it, as Next and Previous do. On screen, or editing, as ever.
+        let cleared = |key: &Key, action| pick_key_for(&us(key), action, false, true, false, false);
+        assert_eq!(cleared(&right, KeyAction::Next), PickKey::Move(true));
+        assert_eq!(cleared(&left, KeyAction::Previous), PickKey::Move(false));
+        assert_eq!(pick_key_for(&pad_right, KeyAction::Next, false, true, false, false), PickKey::Move(true));
+        assert_eq!(cleared(&space, KeyAction::Next), PickKey::Pass);
+        assert_eq!(cleared(&Key::Named(NamedKey::PageDown), KeyAction::Next), PickKey::Pass);
+        assert_eq!(cleared(&Key::Named(NamedKey::PageUp), KeyAction::Previous), PickKey::Pass);
+        assert_eq!(cleared(&left, KeyAction::Next), PickKey::Pass, "← set to Next is Next");
+        assert_eq!(cleared(&right, KeyAction::ClearAll), PickKey::Pass);
+        assert_eq!(pick_key_for(&us(&right), KeyAction::Next, false, true, true, false), PickKey::Pass);
+        assert_eq!(pick_key_for(&us(&right), KeyAction::Next, false, true, false, true), PickKey::Pass);
     }
 
     /// A bundle's songs, taken in as an import takes them: one the library has already (or
@@ -17725,6 +17758,96 @@ mod tests {
         assert_eq!((keyboard.live(), pick(&keyboard)), (None, Some((0, 0))), "← moved it back");
         keyboard.press(Key::Named(NamedKey::Space));
         assert_eq!(keyboard.live(), Some((0, 0)), "Space put it up");
+    }
+
+    /// The Bible view in this key layout with John 3:16 looked up (Return in Scripture Lookup),
+    /// put on screen by Enter, then the slides cleared: nothing on screen, John 3:16 outlined grey
+    /// as the slide last on screen, and nothing picked.
+    fn verse_shown_then_cleared(style: key_table::KeyStyle) -> Keyboard {
+        let mut state = home::HomeState { bible_open: true, ..home::HomeState::default() };
+        state.keys.set_style(style);
+        state.bible.lookup = "John 3:16".to_owned();
+        state.bible.focus_lookup = true;
+        let mut keyboard = Keyboard::new(state);
+        keyboard.draw();
+        keyboard.press(Key::Named(NamedKey::Enter));
+        keyboard.draw();
+        let slot = bible_place(&keyboard).expect("a place for passages");
+        keyboard.press(Key::Named(NamedKey::Enter));
+        keyboard.draw();
+        assert_eq!(keyboard.live(), Some((slot, 15)), "{style:?}: John 3:16 on screen");
+        keyboard.act(KeyAction::ClearSlide);
+        keyboard.draw();
+        assert_eq!(keyboard.live(), None, "cleared");
+        assert_eq!(keyboard.show.cursor(), Some(sp_engine::SlideRef { presentation: slot, slide: 15 }));
+        assert_eq!(keyboard.state.pick(&keyboard.show), None, "nothing picked");
+        keyboard
+    }
+
+    /// The slide picked, as (presentation, slide).
+    fn picked_at(keyboard: &Keyboard) -> Option<(usize, usize)> {
+        keyboard.state.pick(&keyboard.show).map(|at| (at.presentation, at.slide))
+    }
+
+    #[test]
+    fn after_a_clear_in_the_bible_view_the_arrows_move_the_pick_and_enter_puts_it_on() {
+        for style in [key_table::KeyStyle::SoftPresenter, key_table::KeyStyle::SoftProjector] {
+            let mut keyboard = verse_shown_then_cleared(style);
+            let slot = bible_place(&keyboard).unwrap();
+            // → picks the verse after the one cleared, ← the one before; nothing goes on.
+            keyboard.press(Key::Named(NamedKey::ArrowRight));
+            assert_eq!((keyboard.live(), picked_at(&keyboard)), (None, Some((slot, 16))), "{style:?}");
+            keyboard.press(Key::Named(NamedKey::ArrowRight));
+            assert_eq!((keyboard.live(), picked_at(&keyboard)), (None, Some((slot, 17))), "{style:?}");
+            keyboard.press(Key::Named(NamedKey::ArrowLeft));
+            assert_eq!((keyboard.live(), picked_at(&keyboard)), (None, Some((slot, 16))), "{style:?}");
+            // Enter puts the verse picked on.
+            keyboard.press(Key::Named(NamedKey::Enter));
+            keyboard.draw();
+            assert_eq!(keyboard.live(), Some((slot, 16)), "{style:?}: Enter put it on");
+            // With a verse on screen, → and ← go on and back with it, as ever.
+            keyboard.press(Key::Named(NamedKey::ArrowRight));
+            keyboard.draw();
+            assert_eq!(keyboard.live(), Some((slot, 17)), "{style:?}: → went on");
+            keyboard.press(Key::Named(NamedKey::ArrowLeft));
+            keyboard.draw();
+            assert_eq!(keyboard.live(), Some((slot, 16)), "{style:?}: ← went back");
+            // Cleared again: ← picks the verse before the one cleared.
+            keyboard.act(KeyAction::ClearSlide);
+            keyboard.draw();
+            keyboard.press(Key::Named(NamedKey::ArrowLeft));
+            assert_eq!((keyboard.live(), picked_at(&keyboard)), (None, Some((slot, 15))), "{style:?}");
+        }
+    }
+
+    #[test]
+    fn after_a_clear_in_the_bible_view_space_and_the_clickers_keys_still_go_on() {
+        // Space and Page Down (a clicker's forward) put the verse after the one cleared on, Page
+        // Up (its back) the one before, as Next and Previous do.
+        for style in [key_table::KeyStyle::SoftPresenter, key_table::KeyStyle::SoftProjector] {
+            for (key, then) in [(NamedKey::Space, 16), (NamedKey::PageDown, 16), (NamedKey::PageUp, 14)] {
+                let mut keyboard = verse_shown_then_cleared(style);
+                let slot = bible_place(&keyboard).unwrap();
+                keyboard.press(Key::Named(key));
+                assert_eq!(keyboard.live(), Some((slot, then)), "{style:?} {key:?}");
+            }
+        }
+        // ↓ and ↑, on the page, pick the verse below and above the one cleared.
+        let mut keyboard = verse_shown_then_cleared(key_table::KeyStyle::SoftPresenter);
+        let slot = bible_place(&keyboard).unwrap();
+        keyboard.press(Key::Named(NamedKey::ArrowDown));
+        keyboard.draw();
+        assert_eq!((keyboard.live(), picked_at(&keyboard)), (None, Some((slot, 16))), "↓ picked the verse below");
+        for _ in 0..2 {
+            keyboard.press(Key::Named(NamedKey::ArrowUp));
+            keyboard.draw();
+        }
+        assert_eq!((keyboard.live(), picked_at(&keyboard)), (None, Some((slot, 14))), "↑ twice: the verse above");
+        // A song's slide cleared in the Service view: → goes on with the song, as ever.
+        let mut service = Keyboard::new(home::HomeState::default());
+        service.act(KeyAction::ClearSlide);
+        service.press(Key::Named(NamedKey::ArrowRight));
+        assert_eq!(service.live(), Some((0, 1)), "Alpha's next slide");
     }
 
     #[test]
