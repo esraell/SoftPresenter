@@ -987,13 +987,27 @@ fn page_text(ui: &egui::Ui, text: &str, under: bool, width: f32, note: Option<&s
     ui.fonts_mut(|fonts| fonts.layout_job(job))
 }
 
-/// The words at the foot of the page when every verse of the chapter has a slide.
-fn page_note() -> &'static str {
+/// The words at the foot of the page when every verse of the chapter has a slide; set to a
+/// double-click (`double`, Settings › Keys), what a double-click does.
+fn page_note(double: bool) -> &'static str {
+    if double {
+        return t(
+            "biblepage.note.page.double",
+            "Double-click a verse to put it on screen; then one click shows another. Space and the arrows go on through the chapter.",
+        );
+    }
     t("biblepage.note.page", "Click a verse to put it on screen. Space and the arrows go on through the chapter.")
 }
 
-/// The words at the foot of the page when not every verse of the chapter has a slide.
-fn passage_note() -> &'static str {
+/// The words at the foot of the page when not every verse of the chapter has a slide; set to a
+/// double-click (`double`), what a double-click does.
+fn passage_note(double: bool) -> &'static str {
+    if double {
+        return t(
+            "biblepage.note.passage.double",
+            "Double-click the passage to put it on screen; a verse outside it is looked up instead.",
+        );
+    }
     t("biblepage.note.passage", "Click the passage to put it on screen; a verse outside it is looked up instead.")
 }
 
@@ -1020,7 +1034,7 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
     let picked = state.pick(show).filter(|at| Some(at.presentation) == held).map(|at| at.slide);
     let on_screen = live_range(show, &mut state.bible);
     let chapter = state.bible.page.chapter;
-    let mut clicked: Option<(VerseRef, Option<usize>)> = None;
+    let mut clicked: Option<(VerseRef, Option<usize>, bool, egui::Id)> = None;
     let shift = ui.input(|input| input.modifiers.shift);
     let follow_pick = state.pick_scroll > 0;
     let mut followed = false;
@@ -1028,6 +1042,7 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
     let follow_live = live_seen != state.bible.page_live_seen;
     state.bible.page_live_seen = live_seen;
     let note_height = 72.0;
+    let double_mode = state.slide_click() == crate::key_table::SlideClick::Double;
     egui::ScrollArea::vertical().id_salt("bible page").auto_shrink([false, false]).show_viewport(ui, |ui, viewport| {
         let cache = &state.bible.page;
         ui.set_height(cache.height + note_height);
@@ -1080,7 +1095,7 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
                 painter.galley(pos2(text_left, y), page_text(ui, under, true, text_width, note), under_ink);
             }
             if response.clicked() {
-                clicked = Some((line.verse, line.slide));
+                clicked = Some((line.verse, line.slide, response.double_clicked(), response.id));
             }
         }
         // The verse picked (after a lookup, ↑ or ↓) or the verse on screen kept in sight.
@@ -1100,7 +1115,7 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         }
         if !cache.lines.is_empty() {
             let note = Rect::from_min_size(origin + vec2(PAD_X, cache.height + 18.0), vec2(width - 2.0 * PAD_X, 40.0));
-            let words = if cache.every_verse { page_note() } else { passage_note() };
+            let words = if cache.every_verse { page_note(double_mode) } else { passage_note(double_mode) };
             let galley = ui.fonts_mut(|fonts| {
                 fonts.layout(words.to_owned(), FontId::proportional(13.0), TEXT_FAINT, note.width())
             });
@@ -1113,13 +1128,29 @@ pub fn page_view(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
         state.pick_scroll -= 1;
         ui.ctx().request_repaint();
     }
-    let Some((verse, slide)) = clicked else { return };
+    let Some((verse, slide, double, id)) = clicked else { return };
+    // A double-click counts only when its first click was on this same verse (see
+    // `key_table::slide_click_does`).
+    let within = ui.ctx().options(|options| options.input_options.max_double_click_delay);
+    let same = state.second_click_on(id, ui.input(|input| input.time), within);
     match (slide, held) {
         // A verse with a slide: its slide on screen, as a click on the slide does. The passage
-        // stays as it is.
+        // stays as it is. Set to a double-click (Settings › Keys), a click on a verse of a
+        // passage not on screen picks its slide for Enter, and a double-click puts it on.
         (Some(slide), Some(slot)) => {
             state.picked = None;
-            commands.push(Command::GoTo(SlideRef { presentation: slot, slide }));
+            let here = SlideRef { presentation: slot, slide };
+            let live_item = show.live().is_some_and(|at| at.presentation == slot);
+            let here_live = show.live() == Some(here);
+            match crate::key_table::slide_click_does(state.slide_click(), live_item, double, same, here_live) {
+                crate::key_table::ClickDoes::Show => commands.push(Command::GoTo(here)),
+                crate::key_table::ClickDoes::Pick => {
+                    state.set_pick(show, here, true);
+                    // It is in view: the page stays where it is.
+                    state.pick_scroll = 0;
+                }
+                crate::key_table::ClickDoes::Nothing => {}
+            }
         }
         // A verse with none: looked up, and picked for Enter.
         _ => {

@@ -16477,6 +16477,92 @@ mod tests {
                 self.draw();
             }
         }
+
+        /// A double-click at `at`: over it and down, up, down, up, a frame each, the two clicks
+        /// a fifth of a second apart (under the toolkit's 0.3 s).
+        fn double_click(&mut self, at: egui::Pos2) {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            self.waiting.extend([egui::Event::PointerMoved(at), button(true)]);
+            self.draw();
+            for pressed in [false, true, false] {
+                self.waiting.push(button(pressed));
+                self.draw();
+            }
+        }
+
+        /// A moment with nothing done, so the next click is a click of its own.
+        fn pause(&mut self) {
+            self.time += 1.0;
+            self.draw();
+        }
+
+        /// Where to click a slide's picture, as the window last drew it.
+        fn slide_at(&self, presentation: usize, slide: usize) -> egui::Pos2 {
+            let here = sp_engine::SlideRef { presentation, slide };
+            let rect = self.state.slide_rects.iter().find(|(at, _)| *at == here).map(|(_, rect)| *rect).expect("drawn");
+            egui::pos2(rect.center().x, rect.min.y + rect.height() * 0.3)
+        }
+    }
+
+    /// Alpha and Beta in the playlist in front, listed (`alpha_and_beta_listed`), Alpha's item
+    /// open and its first slide on screen; `set` changes the state first.
+    fn listed_keyboard(set: impl FnOnce(&mut home::HomeState)) -> Keyboard {
+        let mut state = alpha_and_beta_listed();
+        state.services.chosen = Some(0);
+        set(&mut state);
+        let mut keyboard = Keyboard::new(state);
+        keyboard.draw();
+        keyboard
+    }
+
+    #[test]
+    fn set_to_a_double_click_a_click_in_another_item_picks_and_enter_or_a_double_click_shows() {
+        let mut keyboard = listed_keyboard(|state| state.choose_slide_click(key_table::SlideClick::Double));
+        // One click on Beta's chorus: picked for Enter, its item opened; Alpha stays on screen.
+        keyboard.click(keyboard.slide_at(1, 2));
+        assert_eq!(keyboard.live(), Some((0, 0)), "Alpha stays on screen");
+        assert_eq!(keyboard.state.pick(&keyboard.show), Some(sp_engine::SlideRef { presentation: 1, slide: 2 }));
+        assert_eq!(keyboard.state.services.chosen, Some(1), "its item is the open one");
+        // Enter puts it on screen.
+        keyboard.press(Key::Named(NamedKey::Enter));
+        assert_eq!(keyboard.live(), Some((1, 2)), "the slide picked");
+        // In Beta, on screen now, one click puts a slide on screen.
+        keyboard.pause();
+        keyboard.click(keyboard.slide_at(1, 0));
+        assert_eq!(keyboard.live(), Some((1, 0)), "one click within the item on screen");
+        // A double-click on Alpha's second slide puts it on screen, its item opened.
+        keyboard.pause();
+        keyboard.double_click(keyboard.slide_at(0, 1));
+        assert_eq!(keyboard.live(), Some((0, 1)), "a double-click");
+        assert_eq!(keyboard.state.services.chosen, Some(0));
+        assert!(keyboard.state.pick(&keyboard.show).is_none(), "the pick went on screen");
+        // Space goes on from it, as from any slide on screen.
+        keyboard.pause();
+        keyboard.press(Key::Named(NamedKey::Space));
+        assert_eq!(keyboard.live(), Some((0, 2)));
+    }
+
+    #[test]
+    fn one_click_puts_any_slide_on_screen_as_before_and_like_softprojector_starts_at_a_double_click() {
+        // One click, as before: a click on Beta's slide puts it on screen.
+        let mut keyboard = listed_keyboard(|_| {});
+        assert_eq!(keyboard.state.slide_click(), key_table::SlideClick::One, "Standard\u{2019}s default");
+        keyboard.click(keyboard.slide_at(1, 1));
+        assert_eq!(keyboard.live(), Some((1, 1)));
+        // Like SoftProjector, not chosen otherwise: a click on another item's slide only picks.
+        let mut keyboard = listed_keyboard(|state| state.keys.set_style(key_table::KeyStyle::SoftProjector));
+        keyboard.click(keyboard.slide_at(1, 1));
+        assert_eq!(keyboard.live(), Some((0, 0)), "picked, not shown");
+        assert_eq!(keyboard.state.pick(&keyboard.show), Some(sp_engine::SlideRef { presentation: 1, slide: 1 }));
+        // F5, SoftProjector's Show, puts it up, as Enter does.
+        keyboard.f_keys = true;
+        keyboard.press(Key::Named(NamedKey::F5));
+        assert_eq!(keyboard.live(), Some((1, 1)));
     }
 
     /// The find box open with these words typed, and drawn with the keyboard.
@@ -17124,7 +17210,7 @@ mod tests {
     fn f3_takes_nothing_when_the_open_item_has_moved_on_from_the_one_picked() {
         // Alpha's item clicked, so open and picked; then Beta's item becomes the open one while
         // the pick stays on Alpha, unlit. F3 takes nothing out: Alpha is neither open nor lit.
-        for how in ["a click on Beta's slide", "Next carrying on into Beta"] {
+        for how in ["a double-click on Beta's slide", "Next carrying on into Beta"] {
             let mut keyboard = in_softprojector_style(alpha_and_beta_listed());
             open_and_pick(&mut keyboard.state, 0);
             keyboard.draw();
@@ -17136,7 +17222,8 @@ mod tests {
             } else {
                 let beta = sp_engine::SlideRef { presentation: 1, slide: 1 };
                 let at = keyboard.state.slide_rects.iter().find(|(at, _)| *at == beta).map(|(_, rect)| rect.center());
-                keyboard.click(at.expect("Beta's second slide drawn"));
+                // In SoftProjector's layout a double-click puts a slide of another item on screen.
+                keyboard.double_click(at.expect("Beta's second slide drawn"));
                 assert_eq!(keyboard.live(), Some((1, 1)), "{how}: Beta's second slide on screen");
             }
             let (open, picked) = (keyboard.state.services.chosen, keyboard.state.item_picks.places.clone());

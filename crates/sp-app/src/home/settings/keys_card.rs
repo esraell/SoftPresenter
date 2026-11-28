@@ -8,6 +8,9 @@
 //!   called in `main.rs`), by their place on the keyboard.
 //! - The first line is the Key layout switch, Standard or Like SoftProjector, with a line saying
 //!   what the layout is. Choosing the other layout sets every row; the keys added stay.
+//! - Under it, drawn the same way, Show a slide with: One Click or A Double-Click
+//!   (`key_table::SlideClick`). Until the person chooses, the lit half is the layout's (a
+//!   double-click with Like SoftProjector); once they choose, it stays.
 //! - Each row has the key's cap, a chooser of one width, and a place for a note: a changed row's
 //!   default, or that the key was added, with a × to take it out.
 //! - Nothing here changes size when a choice changes: where the window is too narrow for a
@@ -21,7 +24,7 @@ use super::parts;
 use crate::home::HomeState;
 use crate::i18n::{t, tf, tk};
 use crate::icons::{self, Icon};
-use crate::key_table::{ActionGroup, KeyAction, KeyStyle, KeyTable, Pressed, Refusal, ShowKey, rows};
+use crate::key_table::{ActionGroup, KeyAction, KeyStyle, KeyTable, Pressed, Refusal, ShowKey, SlideClick, rows};
 use crate::studio::{
     Flat, LINE, SELECTED, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, even_switch, fixed_semibold, flat_button, icon_key,
     paint_flat, paint_spaced, semibold, spaced, widest,
@@ -281,6 +284,7 @@ pub fn keys_card(ui: &mut egui::Ui, state: &mut HomeState) {
         |ui| {
             head(ui, state, f_keys, &mut asked);
             layout_line(ui, state, f_keys, &mut asked);
+            click_row(ui, state, &mut asked);
             let chooser = chooser_width(ui);
             table_head(ui, state, f_keys);
             // A chooser's list is as tall as its 22 lines where the window has the room. The
@@ -322,6 +326,11 @@ pub fn keys_card(ui: &mut egui::Ui, state: &mut HomeState) {
     {
         state.keys.set_style(style);
     }
+    // A half clicked is the person's choice, the one already lit too: it stays, whatever the
+    // key layout is set to later.
+    if let Some(click) = asked.click {
+        state.choose_slide_click(click);
+    }
     if let Some((key, action)) = asked.set {
         state.keys.set(key, action);
     }
@@ -361,6 +370,7 @@ struct Asked {
     add_key: Option<Rect>,
     reset: bool,
     style: Option<KeyStyle>,
+    click: Option<SlideClick>,
     set: Option<(ShowKey, KeyAction)>,
     remove: Option<ShowKey>,
 }
@@ -438,57 +448,141 @@ fn head(ui: &mut egui::Ui, state: &HomeState, f_keys: bool, asked: &mut Asked) {
 }
 
 /// The Key layout line: its caption in the key's column, the switch of two halves, and a line
-/// saying what the layout chosen is, which keeps the room of the longer of the two; beside the
-/// switch, or under it where the window leaves it too little room there.
+/// saying what the layout chosen is (`switch_row`).
 fn layout_line(ui: &mut egui::Ui, state: &HomeState, f_keys: bool, asked: &mut Asked) {
-    let width = ui.available_width();
-    let font = FontId::proportional(12.0);
-    let line_left = KEY_COLUMN + BETWEEN + SWITCH + BETWEEN;
-    let beside = width - line_left >= 220.0;
-    let room = if beside { width - line_left } else { width };
-    let line_of = |ui: &egui::Ui, style| {
-        parts::lines(ui, style_line(style, !f_keys), font.clone(), TEXT_FAINT, room, LINE_HEIGHT)
-    };
-    // Two lines' room at least, and as much as the longer layout's line takes.
-    let line_room = [KeyStyle::SoftPresenter, KeyStyle::SoftProjector]
-        .into_iter()
-        .map(|style| line_of(ui, style).size().y)
-        .fold(2.0 * LINE_HEIGHT, f32::max);
-    let first = if beside { line_room.max(30.0) } else { 30.0 };
-    let (place, _) = ui.allocate_exact_size(vec2(width, first), Sense::hover());
-    let middle = place.center().y;
     // The language's usual words, or its short form where they are too long for the column.
     let (key, english) = tk("settings.keys.style.caption", "Key layout");
     let caption = crate::studio::within(ui, key, english, fixed_semibold(CAPS), CAPS_SPACING, KEY_COLUMN, true);
-    paint_spaced(
-        ui,
-        pos2(place.min.x, middle),
-        Align2::LEFT_CENTER,
-        &caption,
-        fixed_semibold(CAPS),
-        TEXT_DIM,
-        CAPS_SPACING,
-    );
-    let track = Rect::from_min_size(pos2(place.min.x + KEY_COLUMN + BETWEEN, middle - 15.0), vec2(SWITCH, 30.0));
     let halves = [
         t("settings.keys.style.softpresenter", "Standard"),
         t("settings.keys.style.softprojector", "Like SoftProjector"),
     ];
     let styles = [KeyStyle::SoftPresenter, KeyStyle::SoftProjector];
+    let lines = styles.map(|style| style_line(style, !f_keys));
     let chosen = styles.iter().position(|style| *style == state.keys.style);
-    let clicked = even_switch(ui, "key layout", track, &halves, &[], chosen, FontId::proportional(12.5));
-    if let Some(at) = clicked {
+    let row = Row { salt: "key layout", caption: vec![caption], halves: &halves, hints: &[], lines: &lines };
+    if let Some(at) = switch_row(ui, &row, chosen) {
         asked.style = Some(styles[at]);
     }
-    let line = line_of(ui, state.keys.style);
-    if beside {
-        ui.painter().galley(pos2(place.min.x + line_left, middle - line.size().y / 2.0), line, TEXT_FAINT);
-    } else {
-        ui.add_space(6.0);
-        let (under, _) = ui.allocate_exact_size(vec2(width, line_room), Sense::hover());
-        ui.painter().galley(pos2(under.min.x, under.center().y - line.size().y / 2.0), line, TEXT_FAINT);
+}
+
+/// What the sentence beside Show a slide with says for each choice.
+pub fn click_line(click: SlideClick) -> &'static str {
+    match click {
+        SlideClick::One => t("settings.keys.click.line.one", "A click on any slide puts it on screen."),
+        SlideClick::Double => t(
+            "settings.keys.click.line.double",
+            "As in SoftProjector. Within the item already on screen, one click still shows.",
+        ),
+    }
+}
+
+/// What each half of Show a slide with says under the pointer.
+pub fn click_hint(click: SlideClick) -> &'static str {
+    match click {
+        SlideClick::One => t("settings.keys.click.hint.one", "A click on any slide puts it on screen."),
+        SlideClick::Double => t(
+            "settings.keys.click.hint.double",
+            "A double-click puts a slide on screen. Within the item already on screen, one click does.",
+        ),
+    }
+}
+
+/// The caption of Show a slide with, in the key's column: on as many lines as it needs there,
+/// a word never broken, or the language's short form where a word is wider than the column.
+pub fn click_caption(ui: &egui::Ui) -> Vec<String> {
+    let (key, english) = tk("settings.keys.click.caption", "Show a slide with");
+    let font = fixed_semibold(CAPS);
+    let wide = |words: &str| spaced(ui, words, font.clone(), TEXT_DIM, CAPS_SPACING).size().x;
+    let wrap = |words: &str| -> Vec<String> {
+        let mut lines: Vec<String> = Vec::new();
+        for word in words.to_uppercase().split_whitespace() {
+            match lines.last_mut() {
+                Some(line) if wide(&format!("{line} {word}")) <= KEY_COLUMN => {
+                    line.push(' ');
+                    line.push_str(word);
+                }
+                _ => lines.push(word.to_owned()),
+            }
+        }
+        lines
+    };
+    let usual = wrap(t(key, english));
+    if usual.iter().all(|line| wide(line) <= KEY_COLUMN) {
+        return usual;
+    }
+    wrap(crate::i18n::ts(key, english))
+}
+
+/// The Show a slide with line, under Key layout and drawn as it is (`switch_row`): One Click or
+/// A Double-Click, the one chosen lit (until the person chooses, the key layout's), and a line
+/// saying what it does.
+fn click_row(ui: &mut egui::Ui, state: &HomeState, asked: &mut Asked) {
+    let clicks = [SlideClick::One, SlideClick::Double];
+    let halves = [t("settings.keys.click.one", "One Click"), t("settings.keys.click.double", "A Double-Click")];
+    let hints = clicks.map(click_hint);
+    let lines = clicks.map(click_line);
+    let chosen = clicks.iter().position(|click| *click == state.slide_click());
+    let row = Row { salt: "slide click", caption: click_caption(ui), halves: &halves, hints: &hints, lines: &lines };
+    if let Some(at) = switch_row(ui, &row, chosen) {
+        asked.click = Some(clicks[at]);
+    }
+}
+
+/// A line of the card with a switch of two halves: its caption, on a line or more.
+struct Row<'a> {
+    salt: &'static str,
+    caption: Vec<String>,
+    halves: &'a [&'a str],
+    hints: &'a [&'a str],
+    /// What each choice is, in a line beside the switch.
+    lines: &'a [&'a str],
+}
+
+/// A line with a switch: its caption in the key's column, the switch of two halves, and a line
+/// saying what the choice made is, which keeps the room of the longest; beside the switch, or
+/// under it where the window leaves it too little room there. Returns the half clicked.
+fn switch_row(ui: &mut egui::Ui, row: &Row, chosen: Option<usize>) -> Option<usize> {
+    let width = ui.available_width();
+    let font = FontId::proportional(12.0);
+    let line_left = KEY_COLUMN + BETWEEN + SWITCH + BETWEEN;
+    let beside = width - line_left >= 220.0;
+    let room = if beside { width - line_left } else { width };
+    let line_of = |ui: &egui::Ui, words: &str| parts::lines(ui, words, font.clone(), TEXT_FAINT, room, LINE_HEIGHT);
+    // Two lines' room at least, and as much as the longest line takes.
+    let line_room = row.lines.iter().map(|words| line_of(ui, words).size().y).fold(2.0 * LINE_HEIGHT, f32::max);
+    // A caption on more than one line keeps its lines' room.
+    let caption_line = CAPS + 3.0;
+    let caption_room = caption_line * row.caption.len() as f32;
+    let first = if beside { line_room.max(30.0) } else { 30.0f32 }.max(caption_room);
+    let (place, _) = ui.allocate_exact_size(vec2(width, first), Sense::hover());
+    let middle = place.center().y;
+    for (at, words) in row.caption.iter().enumerate() {
+        let y = middle - caption_room / 2.0 + caption_line * (at as f32 + 0.5);
+        paint_spaced(
+            ui,
+            pos2(place.min.x, y),
+            Align2::LEFT_CENTER,
+            words,
+            fixed_semibold(CAPS),
+            TEXT_DIM,
+            CAPS_SPACING,
+        );
+    }
+    let track = Rect::from_min_size(pos2(place.min.x + KEY_COLUMN + BETWEEN, middle - 15.0), vec2(SWITCH, 30.0));
+    let clicked = even_switch(ui, row.salt, track, row.halves, row.hints, chosen, FontId::proportional(12.5));
+    if let Some(words) = chosen.and_then(|at| row.lines.get(at)) {
+        let line = line_of(ui, words);
+        if beside {
+            ui.painter().galley(pos2(place.min.x + line_left, middle - line.size().y / 2.0), line, TEXT_FAINT);
+        } else {
+            ui.add_space(6.0);
+            let (under, _) = ui.allocate_exact_size(vec2(width, line_room), Sense::hover());
+            ui.painter().galley(pos2(under.min.x, under.center().y - line.size().y / 2.0), line, TEXT_FAINT);
+        }
     }
     ui.add_space(12.0);
+    clicked
 }
 
 /// How wide every chooser is: what the longest action's name needs in the language set, with
@@ -969,6 +1063,49 @@ mod tests {
     }
 
     #[test]
+    fn show_a_slide_with_follows_the_layout_until_a_half_is_clicked_and_then_stays() {
+        let ctx = crate::studio::tests::styled();
+        let show = Show::new(Vec::new());
+        let mut state = state_on(true);
+        let (words, _) = page(&ctx, &mut state, 1280.0);
+        for wanted in ["One Click", "A Double-Click", "A click on any slide puts it on screen."] {
+            assert!(shown(&words, wanted), "{wanted}");
+        }
+        // Its caption, in the key's column, on as many lines as it takes there.
+        let (layout, head) = (place(&words, "KEY LAYOUT"), place(&words, "KEY"));
+        let caption: Vec<String> = words
+            .iter()
+            .filter(|(_, rect)| {
+                (rect.min.x - layout.min.x).abs() <= 1.0 && rect.min.y > layout.max.y && rect.max.y < head.min.y
+            })
+            .map(|(have, _)| have.clone())
+            .collect();
+        assert_eq!(caption.join(" "), "SHOW A SLIDE WITH", "{caption:?}");
+        // Not chosen: the layout's, a double-click with Like SoftProjector.
+        assert!(click(&ctx, &mut state, &show, "Like SoftProjector"));
+        assert_eq!(state.slide_click(), SlideClick::Double);
+        let (words, _) = page(&ctx, &mut state, 1280.0);
+        let double = "As in SoftProjector. Within the item already on screen, one click still shows.";
+        assert!(shown(&words, double) && !shown(&words, "A click on any slide puts it on screen."));
+        assert!(click(&ctx, &mut state, &show, "Standard"));
+        assert_eq!(state.slide_click(), SlideClick::One);
+        // A half clicked is a choice, the lit one too: it stays when the layout changes.
+        assert!(click(&ctx, &mut state, &show, "One Click"), "the lit half");
+        assert!(click(&ctx, &mut state, &show, "Like SoftProjector"));
+        assert_eq!(state.slide_click(), SlideClick::One, "chosen, it stays");
+        assert!(click(&ctx, &mut state, &show, "A Double-Click"));
+        assert!(click(&ctx, &mut state, &show, "Standard"));
+        assert_eq!(state.slide_click(), SlideClick::Double);
+        assert_eq!(state.prefs().slide_click, "double", "kept with the preferences");
+        // Each half says what it does under the pointer.
+        assert_eq!(click_hint(SlideClick::One), "A click on any slide puts it on screen.");
+        assert_eq!(
+            click_hint(SlideClick::Double),
+            "A double-click puts a slide on screen. Within the item already on screen, one click does."
+        );
+    }
+
+    #[test]
     fn the_style_line_says_what_each_style_does_on_and_off_a_mac() {
         let lines = [
             (KeyStyle::SoftPresenter, false, "Esc and F1 clear everything; F2 to F6 clear one layer each."),
@@ -1168,6 +1305,24 @@ mod tests {
                     wide <= KEY_COLUMN,
                     "{language:?} at {scale}: {caption} is {wide} wide, the column {KEY_COLUMN}"
                 );
+                // Show a slide with, on its lines: each fits, and there are three at most.
+                let mut lines = Vec::new();
+                for _ in 0..2 {
+                    let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| {
+                        lines = click_caption(ui)
+                            .into_iter()
+                            .map(|line| {
+                                let wide = spaced(ui, &line, fixed_semibold(CAPS), TEXT_DIM, CAPS_SPACING).size().x;
+                                (line, wide)
+                            })
+                            .collect();
+                    });
+                    drawn.drop_without_applying_deltas();
+                }
+                assert!((1..=3).contains(&lines.len()), "{language:?} at {scale}: {lines:?}");
+                for (line, wide) in &lines {
+                    assert!(*wide <= KEY_COLUMN, "{language:?} at {scale}: {line} is {wide} wide");
+                }
             });
         }
     }
@@ -1288,6 +1443,11 @@ mod tests {
                     for style in [KeyStyle::SoftPresenter, KeyStyle::SoftProjector] {
                         changing.push(style_line(style, !f_keys).to_owned());
                     }
+                    for click in [SlideClick::One, SlideClick::Double] {
+                        changing.push(click_line(click).to_owned());
+                    }
+                    // Chosen, so the layout's switch alone changes with the layout.
+                    state.choose_slide_click(SlideClick::One);
                     changing.push(default_words(KeyAction::ClearAll));
                     changing.push(default_words(KeyAction::HideWords));
                     changing.push(t("settings.keys.add", "Add a Key\u{2026}").to_owned());
@@ -1330,6 +1490,19 @@ mod tests {
                         (line(&standard.0, KeyStyle::SoftPresenter), line(&softprojector.0, KeyStyle::SoftProjector));
                     assert!((one.center().y - other.center().y).abs() <= 1.5, "{said}: the style\u{2019}s line");
                     assert!((one.min.x - other.min.x).abs() <= 0.5, "{said}: the style\u{2019}s line");
+                    // Show a slide with the other way: only its lit half moves, and its line keeps
+                    // its place.
+                    state.choose_slide_click(SlideClick::Double);
+                    let double = page(&ctx, &mut state, width);
+                    assert_eq!(still(&double.0), still(&softprojector.0), "{said}: the click moved words");
+                    let (was, now) = (only(&softprojector.1, &double.1), only(&double.1, &softprojector.1));
+                    assert_eq!((was.len(), now.len()), (1, 1), "{said}: only the lit half moves: {was:?} {now:?}");
+                    let click_place = |words: &[(String, Rect)], click| place(words, click_line(click));
+                    let (one, other) =
+                        (click_place(&softprojector.0, SlideClick::One), click_place(&double.0, SlideClick::Double));
+                    assert!((one.center().y - other.center().y).abs() <= 1.5, "{said}: the click\u{2019}s line");
+                    assert!((one.min.x - other.min.x).abs() <= 0.5, "{said}: the click\u{2019}s line");
+                    state.choose_slide_click(SlideClick::One);
                     // A row changed: its note comes, and nothing else moves.
                     state.keys.set(ShowKey::Escape, KeyAction::ClearSlide);
                     let changed = page(&ctx, &mut state, width);

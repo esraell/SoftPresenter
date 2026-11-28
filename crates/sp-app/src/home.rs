@@ -400,6 +400,14 @@ pub struct HomeState {
     pub keys_on_buttons: bool,
     /// What each key that runs the show does (Settings › Keys; kept with the preferences).
     pub keys: crate::key_table::KeyTable,
+    /// What puts a slide on screen with the pointer, once the person has chosen (Settings › Keys'
+    /// Show a slide with; kept with the preferences); none until then, when it follows the key
+    /// layout ([`HomeState::slide_click`]).
+    pub slide_click_chosen: Option<crate::key_table::SlideClick>,
+    /// The slide a plain click last landed on (its tile's or its verse's id), and when: a
+    /// double-click counts only when its first click was on the slide its second is on
+    /// ([`HomeState::second_click_on`]).
+    pub slide_clicked: Option<(egui::Id, f64)>,
     /// Show Selected or Add to Playlist, from an F row pressed while the find box or Scripture
     /// Lookup has the keyboard (`typed_key` in `main.rs`), for that field to carry out on what is
     /// typed as it next draws: its Return (the find box's Command-Return, for Add), then Enter
@@ -2100,6 +2108,8 @@ impl Default for HomeState {
             numbers: None,
             keys_on_buttons: false,
             keys: crate::key_table::KeyTable::default(),
+            slide_click_chosen: None,
+            slide_clicked: None,
             typed_key: None,
             enter_after: false,
             interface_size: crate::interface_size::InterfaceSize::Automatic,
@@ -2700,6 +2710,7 @@ impl HomeState {
             song_order: self.song_order.name().to_owned(),
             keys_on_buttons: self.keys_on_buttons,
             keys: self.keys.clone(),
+            slide_click: self.slide_click_chosen.map_or_else(String::new, |click| click.code().to_owned()),
             screens_details: self.screens_details,
             edit_backdrop: self.edit_backdrop.code().to_owned(),
             language: crate::i18n::choice().code().to_owned(),
@@ -2746,11 +2757,49 @@ impl HomeState {
         self.song_order = crate::kept::SongOrder::named(&prefs.song_order);
         self.keys_on_buttons = prefs.keys_on_buttons;
         self.keys = prefs.keys.clone();
+        self.slide_click_chosen = crate::key_table::SlideClick::from_code(&prefs.slide_click);
         self.screens_details = prefs.screens_details;
         self.edit_backdrop = EditBackdrop::from_code(&prefs.edit_backdrop);
         crate::i18n::set_choice(crate::i18n::Choice::from_code(&prefs.language));
         self.import_as = prefs.import_as.clone();
         self.interface_size = crate::interface_size::InterfaceSize::from_code(&prefs.interface_size);
+    }
+
+    /// What puts a slide on screen with the pointer (Settings › Keys' Show a slide with): the
+    /// person's choice, or until they choose, the key layout's (a double-click with Like
+    /// SoftProjector, one click with Standard).
+    pub fn slide_click(&self) -> crate::key_table::SlideClick {
+        self.slide_click_chosen.unwrap_or_else(|| self.keys.style.slide_click())
+    }
+
+    /// Notes a plain click on the slide `id` at `time`, and says whether it was on that same
+    /// slide within the toolkit's double-click time (`within`) before, as the first click of a
+    /// double-click is; this slide clicked longer ago doesn't count, so a first click on
+    /// something else (a gap, a bar) never makes it one.
+    pub fn second_click_on(&mut self, id: egui::Id, time: f64, within: f64) -> bool {
+        let same = self.slide_clicked.is_some_and(|(was, at)| was == id && (0.0..within).contains(&(time - at)));
+        self.slide_clicked = Some((id, time));
+        same
+    }
+
+    /// The person chooses what puts a slide on screen (Settings › Keys): it stays, whatever the
+    /// key layout is set to later.
+    pub fn choose_slide_click(&mut self, click: crate::key_table::SlideClick) {
+        self.slide_click_chosen = Some(click);
+    }
+
+    /// Coming from SoftProjector (`true`) or not, as the first-time setup asks: the key layout
+    /// becomes Like SoftProjector (or Standard), and what puts a slide on screen goes back to
+    /// following it, a double-click (or one click), until the person chooses in Settings › Keys.
+    /// The layout is set only when it changes, so rows changed by hand in it stay.
+    #[cfg_attr(not(test), allow(dead_code))] // The first-time setup's question calls it.
+    pub fn set_coming_from_softprojector(&mut self, coming: bool) {
+        let style =
+            if coming { crate::key_table::KeyStyle::SoftProjector } else { crate::key_table::KeyStyle::SoftPresenter };
+        if self.keys.style != style {
+            self.keys.set_style(style);
+        }
+        self.slide_click_chosen = None;
     }
 
     /// How long a new picture takes to fade in on the output; zero when slides cut.
@@ -15663,6 +15712,115 @@ mod tests {
         assert_eq!(state.pick(&show), Some(SlideRef { presentation: now, slide: 0 }));
     }
 
+    /// John 3:16-18 looked up in the Bible view, a slide a verse among its chapter's, set to put
+    /// a slide on screen with a double-click (Settings › Keys), Alpha on screen; in `view`.
+    fn looked_up_for_a_double_click(ctx: &egui::Context, view: BibleView) -> (Show, HomeState) {
+        let enter = Event::Key {
+            key: Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        };
+        let mut show = service_with_bible_places();
+        let mut state = HomeState { library_search: Some(("jn 3:16-18".to_owned(), 0)), ..HomeState::default() };
+        state.bible.slots = Some([2, 3]);
+        state.bible.view = view;
+        state.choose_slide_click(crate::key_table::SlideClick::Double);
+        frame_then_app(ctx, &mut show, &mut state, vec![], 0.0);
+        frame_then_app(ctx, &mut show, &mut state, vec![enter], 0.1);
+        for at in 0..12 {
+            frame_then_app(ctx, &mut show, &mut state, vec![], 0.2 + f64::from(at) * 0.005);
+        }
+        (show, state)
+    }
+
+    #[test]
+    fn set_to_a_double_click_a_verse_on_the_page_is_picked_by_a_click_and_put_on_by_a_double_click() {
+        let ctx = egui::Context::default();
+        let (mut show, mut state) = looked_up_for_a_double_click(&ctx, BibleView::Page);
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        let alpha = Some(SlideRef { presentation: 0, slide: 0 });
+        // One click on John 3:17, not on screen: picked for Enter, nothing goes on.
+        let commands = click_id(&ctx, &mut show, &mut state, page_verse(17), 0.5);
+        assert!(!goes_on_screen(&commands), "{commands:?}");
+        assert_eq!(show.live(), alpha, "Alpha stays on screen");
+        let seventeen = SlideRef { presentation: slot, slide: 16 };
+        assert_eq!(state.pick(&show), Some(seventeen));
+        assert_eq!(state.pick_scroll, 0, "it is in view: the page stays");
+        // Enter would put it on screen, as for any verse picked.
+        assert_eq!(
+            crate::running::enter(&[], crate::running::Listed::Bible, state.pick(&show)),
+            Some(crate::running::Do::Show(Command::GoTo(seventeen)))
+        );
+        // The second click of a double-click on it: on screen.
+        let commands = click_id(&ctx, &mut show, &mut state, page_verse(17), 0.7);
+        assert_eq!(commands, vec![Command::GoTo(seventeen)]);
+        assert_eq!(show.live(), Some(seventeen));
+        // The passage is on screen now: one click on another of its verses shows it (the page
+        // has followed verse 17 into sight: 16 and 17 are the verses in view).
+        let sixteen = SlideRef { presentation: slot, slide: 15 };
+        let commands = click_id(&ctx, &mut show, &mut state, page_verse(16), 2.0);
+        assert_eq!(commands, vec![Command::GoTo(sixteen)]);
+        assert_eq!(show.live(), Some(sixteen));
+        // Set to one click, a verse goes on with one click again.
+        state.choose_slide_click(crate::key_table::SlideClick::One);
+        let commands = click_id(&ctx, &mut show, &mut state, page_verse(17), 4.0);
+        assert_eq!(commands, vec![Command::GoTo(seventeen)]);
+    }
+
+    #[test]
+    fn set_to_a_double_click_a_slide_of_the_bible_views_passage_is_picked_by_a_click_and_put_on_by_a_double_click() {
+        let ctx = egui::Context::default();
+        let (mut show, mut state) = looked_up_for_a_double_click(&ctx, BibleView::Slides);
+        let slot = state.bible.slots.map(|slots| slots[state.bible.showing]).unwrap();
+        let alpha = Some(SlideRef { presentation: 0, slide: 0 });
+        let second = SlideRef { presentation: slot, slide: state.bible.passage_slides().start + 1 };
+        let at =
+            state.slide_rects.iter().find(|(here, _)| *here == second).map(|(_, rect)| rect.center()).expect("drawn");
+        let button = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut click = |time: f64| {
+            let mut commands = frame_then_app(&ctx, &mut show, &mut state, vec![Event::PointerMoved(at)], time);
+            commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![button(true)], time + 0.03));
+            commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![button(false)], time + 0.06));
+            (commands, show.live(), state.pick(&show))
+        };
+        // One click: picked, nothing on screen.
+        let (commands, live, picked) = click(0.5);
+        assert!(!goes_on_screen(&commands), "{commands:?}");
+        assert_eq!((live, picked), (alpha, Some(second)));
+        // The second click of a double-click on the same slide: on screen.
+        let (commands, live, _) = click(0.6);
+        assert_eq!(commands, vec![Command::GoTo(second)]);
+        assert_eq!(live, Some(second));
+        // A double-click on the slide on screen: its first click is a click in the passage on
+        // screen, as ever; its second asks for nothing.
+        let (commands, _, _) = click(2.0);
+        assert_eq!(commands, vec![Command::GoTo(second)]);
+        let (commands, live, _) = click(2.1);
+        assert!(commands.is_empty(), "{commands:?}");
+        assert_eq!(live, Some(second));
+        // In the passage on screen one click puts another slide on screen.
+        let first = SlideRef { slide: second.slide - 1, ..second };
+        let at =
+            state.slide_rects.iter().find(|(here, _)| *here == first).map(|(_, rect)| rect.center()).expect("drawn");
+        let button = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut commands = frame_then_app(&ctx, &mut show, &mut state, vec![Event::PointerMoved(at)], 3.0);
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![button(true)], 3.03));
+        commands.extend(frame_then_app(&ctx, &mut show, &mut state, vec![button(false)], 3.06));
+        assert_eq!(commands, vec![Command::GoTo(first)]);
+    }
+
     #[test]
     fn the_page_draws_only_the_verses_in_view_of_a_long_chapter() {
         let ctx = egui::Context::default();
@@ -16044,6 +16202,64 @@ mod tests {
         // A preferences file from before the table: SoftPresenter's style, nothing changed.
         fresh.apply_prefs(&crate::service::Prefs::default());
         assert_eq!(fresh.keys, KeyTable::default());
+    }
+
+    #[test]
+    fn a_second_click_counts_only_on_the_slide_clicked_a_moment_before() {
+        let mut state = HomeState::default();
+        let (one, two) = (egui::Id::unique("one"), egui::Id::unique("two"));
+        assert!(!state.second_click_on(one, 1.0, 0.3), "nothing clicked before");
+        assert!(state.second_click_on(one, 1.2, 0.3), "the same slide a moment before");
+        assert!(!state.second_click_on(two, 1.3, 0.3), "another slide");
+        assert!(!state.second_click_on(one, 1.4, 0.3), "the click before was on another slide");
+        // Clicked long ago: a first click on something else (a gap, a bar) came between.
+        assert!(!state.second_click_on(one, 5.0, 0.3));
+    }
+
+    #[test]
+    fn what_puts_a_slide_on_screen_follows_the_key_layout_until_chosen_and_is_kept_between_starts() {
+        use crate::key_table::{KeyAction, KeyStyle, ShowKey, SlideClick};
+        let mut state = HomeState::default();
+        assert_eq!(state.slide_click(), SlideClick::One, "Standard: one click");
+        state.keys.set_style(KeyStyle::SoftProjector);
+        assert_eq!(state.slide_click(), SlideClick::Double, "Like SoftProjector: a double-click");
+        // Not chosen: nothing is saved, so it goes on following the layout.
+        let saved = state.prefs();
+        assert_eq!(saved.slide_click, "");
+        assert!(!serde_json::to_string(&saved).unwrap().contains("slide_click"));
+        // Chosen: it stays, whatever the layout, and is kept between starts.
+        state.choose_slide_click(SlideClick::One);
+        state.keys.set_style(KeyStyle::SoftPresenter);
+        state.keys.set_style(KeyStyle::SoftProjector);
+        assert_eq!(state.slide_click(), SlideClick::One);
+        let file = serde_json::to_string(&state.prefs()).unwrap();
+        let read: crate::service::Prefs = serde_json::from_str(&file).unwrap();
+        let mut again = HomeState::default();
+        again.apply_prefs(&read);
+        assert_eq!((again.keys.style, again.slide_click()), (KeyStyle::SoftProjector, SlideClick::One));
+        assert_eq!(again.prefs().slide_click, "one");
+        // A file from before the choice, or with a newer copy's word: it follows the layout.
+        let old: crate::service::Prefs = serde_json::from_str(r#"{"keys": {"style": "softprojector"}}"#).unwrap();
+        let mut from_old = HomeState::default();
+        from_old.apply_prefs(&old);
+        assert_eq!(from_old.slide_click(), SlideClick::Double);
+        let newer: crate::service::Prefs = serde_json::from_str(r#"{"columns": 3, "slide_click": "triple"}"#).unwrap();
+        from_old.apply_prefs(&newer);
+        assert_eq!((from_old.columns, from_old.slide_click()), (3, SlideClick::One));
+        // Coming from SoftProjector, as the first-time setup asks: the layout, and a double-click
+        // as its default.
+        let mut setup = HomeState::default();
+        setup.choose_slide_click(SlideClick::One);
+        setup.set_coming_from_softprojector(true);
+        assert_eq!((setup.keys.style, setup.slide_click()), (KeyStyle::SoftProjector, SlideClick::Double));
+        assert_eq!(setup.prefs().slide_click, "", "the layout\u{2019}s default, not a choice");
+        // Asked again: the layout is not set again, so a row changed in it stays.
+        setup.keys.set(ShowKey::Space, KeyAction::Previous);
+        setup.set_coming_from_softprojector(true);
+        assert_eq!(setup.keys.action(ShowKey::Space), KeyAction::Previous);
+        // Not coming from it: Standard, and one click.
+        setup.set_coming_from_softprojector(false);
+        assert_eq!((setup.keys.style, setup.slide_click()), (KeyStyle::SoftPresenter, SlideClick::One));
     }
 
     #[test]

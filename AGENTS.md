@@ -274,8 +274,11 @@ process, and nextest gives each test a process of its own). One test alone:
   named a key layout after it (26 November 2026): Settings › Keys' Key layout is Standard or
   Like SoftProjector, for the people coming from it, who look for it by name. The interface
   may name SoftProjector only for that layout (the switch, the line beside it and Reset to
-  Defaults' hints, in every language) and where the importers say what they read; the docs and
-  the changelog may name it only where they describe that layout or an import. SoftProjector
+  Defaults' hints, in every language), for the line beside Show a slide with's A Double-Click
+  under it (the owner's choice, 27 November 2026: a double-click as SoftProjector has it) and
+  where the importers say what they read; the docs and
+  the changelog may name it only where they describe that layout (Show a slide with, which
+  follows it, too) or an import. SoftProjector
   is an open-source program (GPL-3.0), not one of the products the rule above
   keeps out, and none of its code, wording or artwork is used. A third, agreed by the owner on 2026-11-24: `softpresenter-mirror`
   (`crates/sp-mirror`), the separate program that receives an iPhone, iPad or Mac screen,

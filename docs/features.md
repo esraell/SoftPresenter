@@ -65,7 +65,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   goes in the list (the log keeps it).
 - Songs shown as a grid of slides, a words-only view or a table (number, group, words, notes),
   with a size slider. Click a slide, or use the [keys](../README.md#keys), to put it on the
-  audience screen. A slide in the grid is its picture with a strip under it: its number, its
+  audience screen. Set to A Double-Click (Settings › Keys' Show a slide with), a click on a slide
+  of the song, passage or presentation on screen still puts it on, but a click on a slide of
+  anything else only picks it for Enter, and a double-click (both clicks on that slide) puts it
+  on; a double-click on the slide on screen does nothing more. A playlist's Bible passage that
+  isn't on screen opens its item with a click and goes on with a double-click. A slide in the grid is its picture with a strip under it: its number, its
   group's dot and name (heavier on the group's first slide), small tags for a hot key, a time
   after which it goes on, actions, a transition of its own or being switched off, then a pencil
   (the editor) and ⋯ (its menu, as a right-click). The slide on screen has an orange ring and
@@ -1171,6 +1175,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     words and leave the background up, F1 clears everything, F2 and F3 add to and take out of
     the playlist, F4 shows again, F5 shows what is picked, F6 and F7 go to Bible and Service.
     Choosing the other layout sets every row; clicking the one already chosen does nothing.
+  - **Show a slide with**, under Key layout and drawn the same way, is One Click or A
+    Double-Click, with a line saying what the choice does ("A click on any slide puts it on
+    screen." or "As in SoftProjector. Within the item already on screen, one click still
+    shows."). Until a half is clicked it follows the key layout: A Double-Click with Like
+    SoftProjector, One Click with Standard. A half clicked, the one already lit too, is a choice
+    that stays whatever the layout is set to later; it is kept with the preferences
+    (`slide_click`, `one` or `double`, written only once chosen). Keys, the phone remote and
+    `sp` work the same either way.
     **Reset to Defaults**, in the card's head, goes back to the layout chosen; it is greyed
     while nothing differs.
   - **Add a Key…**, beside Reset to Defaults, adds any other key by its place on the keyboard
@@ -1331,7 +1343,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   the passage's verses bright, the rest of the chapter dimmer, the verse on screen tinted orange
   and the verse picked for Enter in a well with a ring. A click on a verse that has a slide (any
   verse of the chapter, with a slide a verse; the passage, made into one slide) puts that slide
-  on screen, as a click on the slide does, and the passage stays as it is; a click on a verse
+  on screen, as a click on the slide does, and the passage stays as it is (set to A Double-Click
+  in Settings › Keys, while the passage isn't on screen a click picks the verse's slide for
+  Enter, a double-click puts it on, and the note at the page's foot says so); a click on a verse
   with none looks that verse up (Shift: the passage from the verse clicked before) and picks it,
   without putting anything on screen. Only the verses in view are drawn, so the longest psalm
   costs no more than a short chapter. **Slides** shows the slides as the Bible theme draws them,

@@ -920,6 +920,11 @@ pub struct Prefs {
     /// from it. A file from before the table: SoftPresenter's style, nothing changed.
     #[serde(default)]
     pub keys: crate::key_table::KeyTable,
+    /// What puts a slide on screen with the pointer (Settings › Keys' Show a slide with): `one`
+    /// or `double`; empty (the default, and a file from before the choice) until the person
+    /// chooses, when it follows the key layout (`KeyStyle::slide_click`). Saved only once chosen.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub slide_click: String,
     /// True when Settings › Screens adds a technical line to every screen's card (Details).
     #[serde(default)]
     pub screens_details: bool,
@@ -1002,6 +1007,7 @@ impl Default for Prefs {
             song_order: "listed".to_owned(),
             keys_on_buttons: false,
             keys: crate::key_table::KeyTable::default(),
+            slide_click: String::new(),
             screens_details: false,
             edit_backdrop: String::new(),
             language: String::new(),

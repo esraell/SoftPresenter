@@ -26,6 +26,8 @@
   "biblepage.history.clear": "Borrar el historial",
   "biblepage.note.page": "Haz clic en un versículo para ponerlo en pantalla. Espacio y las flechas siguen por el capítulo.",
   "biblepage.note.passage": "Haz clic en el pasaje para ponerlo en pantalla; un versículo fuera de él se busca en su lugar.",
+  "biblepage.note.page.double": "Haz doble clic en un versículo para ponerlo en pantalla; después, un clic muestra otro. Espacio y las flechas siguen por el capítulo.",
+  "biblepage.note.passage.double": "Haz doble clic en el pasaje para ponerlo en pantalla; un versículo fuera de él se busca en su lugar.",
   "biblepage.found.verses": ["{n} versículo", "{n} versículos"],
   "biblepage.found.close": "Cerrar",
   "biblepage.found.close.hint": "Volver al pasaje",

@@ -15,6 +15,7 @@ use sp_model::{Presentation, Uuid};
 
 use super::*;
 use crate::i18n::{t, tf, tk, tn};
+use crate::key_table::{ClickDoes, slide_click_does};
 use crate::outside::Waiting;
 use crate::service::{Item, SavedPassage};
 use crate::studio::{
@@ -560,6 +561,32 @@ impl SlideDeck {
             state.live_item = self.item;
         }
     }
+
+    /// Picks a slide of the deck for Enter, as a click does when set to a double-click (Settings
+    /// › Keys): its song is chosen and its item opened, as when it goes on screen, but nothing
+    /// goes on screen. It is in view already, so the view stays where it is.
+    fn pick_slide(&self, show: &Show, state: &mut HomeState, here: SlideRef, commands: &mut Vec<Command>) {
+        let bible = state.bible_view_now();
+        if !bible && show.selected() != here.presentation && !commands.contains(&Command::Select(here.presentation)) {
+            commands.push(Command::Select(here.presentation));
+        }
+        if self.item.is_some() {
+            state.services.chosen = self.item;
+        }
+        state.set_pick(show, here, bible);
+        state.pick_scroll = 0;
+    }
+}
+
+/// What a plain click on a slide's tile does (`response`, just clicked), by Settings › Keys'
+/// Show a slide with (`key_table::slide_click_does`): `live_item` is whether a slide of its song
+/// or passage is on screen, `here_live` whether this one is. A double-click counts only when its
+/// first click was on this same tile a moment before, which every plain click notes
+/// ([`HomeState::second_click_on`]).
+fn click_does(state: &mut HomeState, response: &egui::Response, live_item: bool, here_live: bool) -> ClickDoes {
+    let within = response.ctx.options(|options| options.input_options.max_double_click_delay);
+    let same = state.second_click_on(response.id, response.ctx.input(|input| input.time), within);
+    slide_click_does(state.slide_click(), live_item, response.double_clicked(), same, here_live)
 }
 
 /// What the middle of the Service view shows: the playlist in front, every item of it, when the
@@ -1387,6 +1414,10 @@ fn draw_slides(
                         state.pending_edit = Some((here, slide_with_media(slide, Some(item.id))));
                     }
                 }
+                // What a plain click does, by Settings › Keys' Show a slide with: puts the slide on
+                // screen, picks it for Enter, or nothing more (`slide_click_does`).
+                let plain = response.clicked() && !(mods.command || mods.shift);
+                let does = plain.then(|| click_does(state, &response, live.is_some(), live == Some(index)));
                 // A click on a slide takes over from one picked by the keys.
                 if response.clicked() {
                     state.picked = None;
@@ -1402,30 +1433,41 @@ fn draw_slides(
                     state.picked_slides.clear();
                     // Delete no longer means the songs or media last picked out.
                     state.picking = Picking::Nothing;
-                    // Under an arrangement, the song goes to that place in the order sung.
-                    match entry.step {
-                        Some(step) => {
-                            commands.push(Command::GoToStep { presentation: which, step });
-                            if deck.item.is_some() {
-                                state.services.chosen = deck.item;
-                                state.live_item = deck.item;
+                    match does {
+                        // Under an arrangement, the song goes to that place in the order sung.
+                        Some(ClickDoes::Show) => match entry.step {
+                            Some(step) => {
+                                commands.push(Command::GoToStep { presentation: which, step });
+                                if deck.item.is_some() {
+                                    state.services.chosen = deck.item;
+                                    state.live_item = deck.item;
+                                }
                             }
-                        }
-                        None => deck.show_slide(show, state, index, commands),
+                            None => deck.show_slide(show, state, index, commands),
+                        },
+                        Some(ClickDoes::Pick) => deck.pick_slide(show, state, here, commands),
+                        Some(ClickDoes::Nothing) | None => {}
                     }
                 }
                 if response.secondary_clicked() {
                     state.selected_slide = Some(here);
                 }
             }
-            // A playlist's Bible passage: a click puts the slide on screen, and that is all.
+            // A playlist's Bible passage: a click puts the slide on screen, and that is all. Set to
+            // a double-click, a click on one not on screen opens its item only (its slides are
+            // not among the show's yet, to be picked), and a double-click puts the slide on.
             None => {
                 if response.clicked() {
+                    let does = click_does(state, &response, live.is_some(), live == Some(index));
                     state.picked = None;
                     state.selected_slide = None;
                     state.picked_slides.clear();
                     state.picking = Picking::Nothing;
-                    deck.show_slide(show, state, index, commands);
+                    match does {
+                        ClickDoes::Show => deck.show_slide(show, state, index, commands),
+                        ClickDoes::Pick if deck.item.is_some() => state.services.chosen = deck.item,
+                        ClickDoes::Pick | ClickDoes::Nothing => {}
+                    }
                 }
             }
         }
@@ -3588,6 +3630,127 @@ mod tests {
         let asked = click(&ctx, &show, &mut state, tile.center() - vec2(0.0, STRIP), &mut time);
         assert!(asked.contains(&Command::GoTo(SlideRef { presentation: 1, slide: 1 })), "{asked:?}");
         assert_eq!(state.services.chosen, Some(1));
+    }
+
+    /// One frame at `time`, then what it asked for carried out, as the app does. Returns what it
+    /// asked for.
+    fn frame_applied(
+        ctx: &egui::Context,
+        show: &mut Show,
+        state: &mut HomeState,
+        events: Vec<Event>,
+        time: f64,
+    ) -> Vec<Command> {
+        let mut at = time - 0.1;
+        let asked = run(ctx, show, state, events, &mut at);
+        for command in &asked {
+            show.apply(*command);
+        }
+        asked
+    }
+
+    /// Down and up at `at`, at `time` and a little after, each a frame carried out by the app.
+    fn press_and_release(
+        ctx: &egui::Context,
+        show: &mut Show,
+        state: &mut HomeState,
+        at: egui::Pos2,
+        time: f64,
+    ) -> Vec<Command> {
+        let button = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let mut asked = frame_applied(ctx, show, state, vec![Event::PointerMoved(at), button(true)], time);
+        asked.extend(frame_applied(ctx, show, state, vec![button(false)], time + 0.03));
+        asked
+    }
+
+    #[test]
+    fn set_to_a_double_click_the_slide_on_screen_double_clicked_adds_nothing_and_slides_moved_between_clicks_only_pick()
+    {
+        let (mut show, mut state) = playlist(&[("Alpha", 3), ("Beta", 12)]);
+        state.choose_slide_click(crate::key_table::SlideClick::Double);
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        let ctx = egui::Context::default();
+        frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.0);
+        frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.1);
+        // A double-click on the slide on screen: its first click is a click in the item on
+        // screen (it brings back words hidden, as ever); its second asks for nothing.
+        let alpha = rect_of(&state, 0, 0).center() - vec2(0.0, STRIP);
+        let first = press_and_release(&ctx, &mut show, &mut state, alpha, 0.5);
+        assert_eq!(first, vec![Command::GoTo(SlideRef { presentation: 0, slide: 0 })]);
+        let second = press_and_release(&ctx, &mut show, &mut state, alpha, 0.6);
+        assert!(second.is_empty(), "{second:?}");
+        // A double-click whose slides moved under the pointer between its clicks (here the
+        // number of slides a row changed; on a computer, the column still scrolling): its
+        // second click lands on another slide, which it only picks.
+        let beta = SlideRef { presentation: 1, slide: 1 };
+        let at = rect_of(&state, 1, 1).center() - vec2(0.0, STRIP);
+        let asked = press_and_release(&ctx, &mut show, &mut state, at, 2.0);
+        assert!(!went_live(&asked), "{asked:?}");
+        assert_eq!(state.pick(&show), Some(beta), "the first click picks Beta's second slide");
+        let under =
+            |state: &HomeState| state.slide_rects.iter().find(|(_, rect)| rect.contains(at)).map(|(here, _)| *here);
+        let mut moved = None;
+        let ways: [fn(&mut HomeState); 4] = [
+            |state| state.slide_view = SlideView::Table,
+            |state| state.slide_view = SlideView::Easy,
+            |state| state.columns = 2,
+            |state| state.columns = 7,
+        ];
+        for way in ways {
+            let (view, columns) = (state.slide_view, state.columns);
+            way(&mut state);
+            frame_applied(&ctx, &mut show, &mut state, Vec::new(), 2.05);
+            if let Some(other) = under(&state).filter(|other| *other != beta && other.presentation == 1) {
+                moved = Some(other);
+                break;
+            }
+            (state.slide_view, state.columns) = (view, columns);
+        }
+        let other = moved.expect("another of Beta\u{2019}s slides under the pointer");
+        let asked = press_and_release(&ctx, &mut show, &mut state, at, 2.1);
+        assert!(!went_live(&asked), "{asked:?}");
+        assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "Alpha stays on screen");
+        assert_eq!(state.pick(&show), Some(other), "the slide it landed on is picked, and only picked");
+        // A third click straight after is a triple-click, which counts as one click: it stays
+        // picked. A double-click of its own on it puts it on screen.
+        let asked = press_and_release(&ctx, &mut show, &mut state, at, 2.2);
+        assert!(!went_live(&asked), "{asked:?}");
+        assert_eq!(state.pick(&show), Some(other));
+        press_and_release(&ctx, &mut show, &mut state, at, 3.0);
+        let asked = press_and_release(&ctx, &mut show, &mut state, at, 3.1);
+        assert!(asked.contains(&Command::GoTo(other)), "{asked:?}");
+        assert_eq!(show.live(), Some(other));
+    }
+
+    #[test]
+    fn set_to_a_double_click_a_playlists_passage_not_on_screen_opens_with_a_click_and_goes_on_with_a_double_click() {
+        let (mut show, mut state) = playlist(&[("Alpha", 1)]);
+        state.choose_slide_click(crate::key_table::SlideClick::Double);
+        let slots = [show.add_presentation(song("", 0)), show.add_presentation(song("", 0))];
+        state.bible.slots = Some(slots);
+        let saved = SavedPassage { lookup: "John 3:16-18".to_owned(), ..state.bible.settings() };
+        state.services.add(Item::Passage(saved));
+        state.services.chosen = Some(0);
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        let ctx = egui::Context::default();
+        frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.0);
+        frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.1);
+        let alpha = rect_of(&state, 0, 0);
+        let second = alpha.center() + vec2(alpha.width() + GAP_X, alpha.height() + INSET + ITEM_BAR + INSET);
+        // One click: the passage's item opens; nothing is looked up or goes on screen.
+        let asked = press_and_release(&ctx, &mut show, &mut state, second, 0.5);
+        assert!(!went_live(&asked), "{asked:?}");
+        assert!(state.bible.pending.is_none() && state.bible.go_live.is_none(), "nothing looked up");
+        assert_eq!(state.services.chosen, Some(1), "its item is the open one");
+        // The second click of a double-click: looked up, that verse to go on screen.
+        press_and_release(&ctx, &mut show, &mut state, second, 0.6);
+        assert_eq!(state.bible.go_live, Some(1), "the second verse");
+        assert!(state.bible.pending.is_some());
     }
 
     #[test]

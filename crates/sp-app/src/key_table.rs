@@ -878,6 +878,78 @@ pub enum KeyStyle {
     SoftProjector,
 }
 
+impl KeyStyle {
+    /// How a slide is put on screen with this layout until the person chooses (Settings › Keys'
+    /// Show a slide with): a double-click with SoftProjector's, as that program has it; one click
+    /// with Standard.
+    pub fn slide_click(self) -> SlideClick {
+        match self {
+            KeyStyle::SoftPresenter => SlideClick::One,
+            KeyStyle::SoftProjector => SlideClick::Double,
+        }
+    }
+}
+
+/// What puts a slide on screen with the pointer (Settings › Keys' Show a slide with).
+///
+/// - `One`: a click on any slide puts it on screen.
+/// - `Double`: a click on a slide of the item on screen (any slide of the song or passage up)
+///   puts it on screen, so the song is gone through with one click; a click on a slide of any
+///   other item only picks it, for Enter, and a double-click (both clicks on that slide) puts it
+///   on screen. Keys, the phone remote and `sp` are the same either way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlideClick {
+    One,
+    Double,
+}
+
+impl SlideClick {
+    /// Its name in the preferences file.
+    pub fn code(self) -> &'static str {
+        match self {
+            SlideClick::One => "one",
+            SlideClick::Double => "double",
+        }
+    }
+
+    /// The choice a name in the preferences file stands for: none for an empty name (the
+    /// default, which follows the key layout) or one this copy doesn't know.
+    pub fn from_code(code: &str) -> Option<SlideClick> {
+        match code {
+            "one" => Some(SlideClick::One),
+            "double" => Some(SlideClick::Double),
+            _ => None,
+        }
+    }
+}
+
+/// What a plain click (no Shift or Command) on a slide does under `click`: `live_item` is
+/// whether a slide of its song or passage is on screen; `double` whether the click is the second
+/// of a double-click, and `same` whether its first click was on this very slide (a double-click
+/// is two quick clicks at one place, and the slides may have scrolled under the pointer between
+/// them); `here_live` whether this slide is on screen.
+pub fn slide_click_does(click: SlideClick, live_item: bool, double: bool, same: bool, here_live: bool) -> ClickDoes {
+    match click {
+        SlideClick::One => ClickDoes::Show,
+        // In the item on screen one click shows, so the first click of a double-click has shown
+        // the slide already: the second adds nothing, or, landed on another slide, only picks.
+        SlideClick::Double if live_item && double && same && here_live => ClickDoes::Nothing,
+        SlideClick::Double if live_item && double && !same => ClickDoes::Pick,
+        SlideClick::Double if live_item => ClickDoes::Show,
+        SlideClick::Double if double && same => ClickDoes::Show,
+        SlideClick::Double => ClickDoes::Pick,
+    }
+}
+
+/// What a click on a slide does: puts it on screen, as one click always did; picks it, for
+/// Enter or a double-click; or nothing more.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClickDoes {
+    Show,
+    Pick,
+    Nothing,
+}
+
 /// What every show key does: the style chosen; the rows changed from it and the keys added, by
 /// name (key name → action name), kept as words so that a name this copy doesn't know is passed
 /// over; and the keys added, newest first, by name (saved only when there are some, so a table
@@ -1200,6 +1272,38 @@ mod tests {
         let caps: Vec<String> = with_language(Language::English, || rows(false).iter().map(|key| key.cap()).collect());
         assert_eq!(caps, ["Esc", "Space", "\u{2192}", "\u{2190}", "Page Down", "Page Up", "Home", "End", "."]);
         assert_eq!((ShowKey::F7.cap(), ShowKey::F12.cap()), ("F7".to_owned(), "F12".to_owned()));
+    }
+
+    #[test]
+    fn a_click_on_a_slide_shows_picks_or_does_nothing_by_the_setting() {
+        use ClickDoes::{Nothing, Pick, Show};
+        use SlideClick::{Double, One};
+        // One click: every click shows, as before, a double-click's second too.
+        for (live_item, double, same, here_live) in [
+            (false, false, false, false),
+            (true, false, false, false),
+            (true, true, true, true),
+            (false, true, false, false),
+        ] {
+            assert_eq!(slide_click_does(One, live_item, double, same, here_live), Show);
+        }
+        // A double-click: in the item on screen one click shows; the second click of a
+        // double-click on the slide it showed adds nothing, and on another slide only picks.
+        assert_eq!(slide_click_does(Double, true, false, false, false), Show);
+        assert_eq!(slide_click_does(Double, true, true, true, true), Nothing);
+        assert_eq!(slide_click_does(Double, true, true, false, false), Pick);
+        // In any other item one click picks; a double-click shows only when both clicks were on
+        // the same slide.
+        assert_eq!(slide_click_does(Double, false, false, false, false), Pick);
+        assert_eq!(slide_click_does(Double, false, true, true, false), Show);
+        assert_eq!(slide_click_does(Double, false, true, false, false), Pick);
+        // Each layout's own, and the names kept in the preferences.
+        assert_eq!((KeyStyle::SoftPresenter.slide_click(), KeyStyle::SoftProjector.slide_click()), (One, Double));
+        for click in [One, Double] {
+            assert_eq!(SlideClick::from_code(click.code()), Some(click));
+        }
+        assert_eq!(SlideClick::from_code(""), None, "not chosen: it follows the layout");
+        assert_eq!(SlideClick::from_code("triple"), None, "a newer copy's name is passed over");
     }
 
     #[test]
