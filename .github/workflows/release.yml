@@ -209,44 +209,11 @@ jobs:
       # The app on Windows keeps its own copy of FFmpeg, and copies the one beside it only when
       # the two programs have the SHA-256s it was built with (crates/sp-app/src/ffmpeg_fetch.rs);
       # otherwise it downloads them. So the package carries exactly that build: the zip the
-      # project published, checked against that file's size and SHA-256s, put where
-      # windows-package.sh finds it already built.
+      # project published, checked against that file's size and SHA-256s, in
+      # target/ffmpeg-windows-published, where windows-package.sh takes it from (it runs the same
+      # script again, which checks the zip kept here and needs no network).
       - name: The project's FFmpeg for Windows, as the app expects it
-        run: |
-          src=crates/sp-app/src/ffmpeg_fetch.rs
-          url=$(grep -oE 'https://github\.com/[^"]+\.zip' "$src" | head -1)
-          size=$(sed -n 's/^pub const SIZE: u64 = \([0-9_]*\);.*/\1/p' "$src" | tr -d _)
-          zip_sha=$(sed -n 's/^pub const SHA256: &str = "\([0-9a-f]*\)";.*/\1/p' "$src")
-          ffmpeg_sha=$(sed -n 's/^pub const FFMPEG_SHA256: &str = "\([0-9a-f]*\)";.*/\1/p' "$src")
-          ffprobe_sha=$(sed -n 's/^pub const FFPROBE_SHA256: &str = "\([0-9a-f]*\)";.*/\1/p' "$src")
-          version=$(sed -n 's/^VERSION=\([0-9.]*\)$/\1/p' scripts/build-ffmpeg.sh)
-          for value in "$url" "$size" "$zip_sha" "$ffmpeg_sha" "$ffprobe_sha" "$version"; do
-            if [ -z "$value" ]; then echo "::error::couldn't read FFmpeg's address, size or SHA-256s from $src"; exit 1; fi
-          done
-          work="$RUNNER_TEMP/ffmpeg-windows"
-          rm -rf "$work"; mkdir -p "$work"
-          curl -fsSL -o "$work/ffmpeg.zip" "$url"
-          have_size=$(wc -c <"$work/ffmpeg.zip" | tr -d ' ')
-          have_sha=$(shasum -a 256 "$work/ffmpeg.zip" | cut -d' ' -f1)
-          if [ "$have_size" != "$size" ] || [ "$have_sha" != "$zip_sha" ]; then
-            echo "::error title=FFmpeg for Windows::$url is $have_size bytes with SHA-256 $have_sha; expected $size bytes, $zip_sha"
-            exit 1
-          fi
-          unzip -q "$work/ffmpeg.zip" -d "$work/unpacked"
-          out=target/ffmpeg-windows
-          rm -rf "$out"; mkdir -p "$out/bin"
-          cp "$work/unpacked/ffmpeg/ffmpeg.exe" "$work/unpacked/ffmpeg/ffprobe.exe" "$out/bin/"
-          chmod 755 "$out/bin/ffmpeg.exe" "$out/bin/ffprobe.exe"
-          cp "$work/unpacked/ffmpeg/COPYING.LGPLv2.1" "$work/unpacked/ffmpeg/LICENSE.md" "$work/unpacked/ffmpeg/SOURCE.txt" "$out/"
-          echo "$version" >"$out/VERSION"
-          for pair in "ffmpeg.exe=$ffmpeg_sha" "ffprobe.exe=$ffprobe_sha"; do
-            have=$(shasum -a 256 "$out/bin/${pair%%=*}" | cut -d' ' -f1)
-            if [ "$have" != "${pair#*=}" ]; then
-              echo "::error title=FFmpeg for Windows::${pair%%=*} has SHA-256 $have; the app expects ${pair#*=}"
-              exit 1
-            fi
-          done
-          echo "FFmpeg $version for Windows, as published: $url"
+        run: scripts/ffmpeg-windows-published.sh
       - name: Build the Windows package
         run: scripts/windows-package.sh
       - name: Check and name the zip
@@ -257,7 +224,7 @@ jobs:
             exit 1
           fi
           for program in ffmpeg.exe ffprobe.exe; do
-            cmp "$folder/$program" "target/ffmpeg-windows/bin/$program"
+            cmp "$folder/$program" "target/ffmpeg-windows-published/bin/$program"
           done
           mkdir -p dist
           zip="dist/SoftPresenter-$SOFTPRESENTER_RELEASE_VERSION-windows.zip"

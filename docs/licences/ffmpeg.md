@@ -56,9 +56,15 @@ What the LGPL asks, and how the app meets it:
 
 ## In the Windows package
 
-`scripts/windows-package.sh` builds the same FFmpeg 9.0.2 for 64-bit Windows with
-`scripts/build-ffmpeg.sh windows`, cross-compiling on a Mac with the mingw-w64 toolchain, from
-the same source file and checksum. `ffmpeg.exe` and `ffprobe.exe` sit beside `SoftPresenter.exe`
+`scripts/build-ffmpeg.sh windows` builds the same FFmpeg 9.0.2 for 64-bit Windows,
+cross-compiling on a Mac with the mingw-w64 toolchain, from the same source file and checksum;
+that build is published once, as the zip below. `scripts/windows-package.sh` takes the programs
+from that published zip (`scripts/ffmpeg-windows-published.sh`, which checks the zip's size and
+SHA-256 and the programs' SHA-256s against `crates/sp-app/src/ffmpeg_fetch.rs`), so the package
+carries exactly the build the app checks for, and it stops if they differ.
+(`SP_FFMPEG_LOCAL=1` builds FFmpeg on the spot instead, for when the zip can't be reached; the
+app doesn't take that build from beside it, and fetches the zip at its first start.)
+`ffmpeg.exe` and `ffprobe.exe` sit beside `SoftPresenter.exe`
 (which runs its own copy in the user's folder first, below), and the zip's `Licences` folder
 holds `COPYING.LGPLv2.1`, `FFmpeg-LICENSE.md` and `FFmpeg-SOURCE.txt` (the exact source, checksum
 and configuration).

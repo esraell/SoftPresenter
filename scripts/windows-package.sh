@@ -4,11 +4,21 @@
 #   scripts/windows-package.sh
 #
 # It cross-builds the program for 64-bit Windows (the mingw-w64 toolchain, Homebrew's
-# x86_64-w64-mingw32-gcc, and the Rust target x86_64-pc-windows-gnu), builds the LGPL FFmpeg
-# for Windows (scripts/build-ffmpeg.sh windows), and gathers them with the sample backgrounds,
-# the licences and a READ ME into a folder that unzips anywhere and runs from where it is.
-# Nothing is installed on the computer building it. The program is built with this computer's
-# home folder shortened to "~", and the script stops if any file of the package still has it.
+# x86_64-w64-mingw32-gcc, and the Rust target x86_64-pc-windows-gnu), takes the project's own
+# LGPL FFmpeg for Windows as its release publishes it (scripts/ffmpeg-windows-published.sh), and
+# gathers them with the sample backgrounds, the licences and a READ ME into a folder that unzips
+# anywhere and runs from where it is. Nothing is installed on the computer building it. The
+# program is built with this computer's home folder shortened to "~", and the script stops if
+# any file of the package still has it.
+#
+# The FFmpeg must be exactly that build: the app copies the FFmpeg beside it only when the two
+# programs have the SHA-256s it was built with (crates/sp-app/src/ffmpeg_fetch.rs), and otherwise
+# downloads it at its first start. The script stops if the package's programs have any other.
+#
+#   SP_FFMPEG_LOCAL=1 scripts/windows-package.sh
+#
+# builds FFmpeg here instead (scripts/build-ffmpeg.sh windows), for when the published zip can't
+# be reached. That build has other SHA-256s, so the app doesn't use it, and the script says so.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -18,6 +28,18 @@ version=${SOFTPRESENTER_RELEASE_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' C
 target=x86_64-pc-windows-gnu
 root=target/windows-package
 folder=$root/SoftPresenter-Windows
+
+# FFmpeg first, so a zip that can't be had stops the build in seconds, not after the program.
+if [ "${SP_FFMPEG_LOCAL:-}" = 1 ]; then
+    scripts/build-ffmpeg.sh windows
+    ffmpeg=target/ffmpeg-windows
+else
+    if ! scripts/ffmpeg-windows-published.sh; then
+        echo "error: the project's FFmpeg for Windows couldn't be had (above). SP_FFMPEG_LOCAL=1 builds one here instead, which the app won't use: it downloads its own at its first start." >&2
+        exit 1
+    fi
+    ffmpeg=target/ffmpeg-windows-published
+fi
 
 # The program is built in a folder of its own outside the home folder. The import libraries the
 # linker makes for Windows' DLLs are named after the folder they are made in, and those names stay
@@ -32,21 +54,20 @@ if [ "$(stat -f %u "$build")" != "$(id -u)" ]; then
     exit 1
 fi
 RUSTFLAGS="--remap-path-prefix=$HOME=~" CARGO_TARGET_DIR="$build" cargo build --release --target "$target" -p sp-app
-scripts/build-ffmpeg.sh windows
 
 rm -rf "$folder" "$root/SoftPresenter-Windows.zip"
 mkdir -p "$folder/Backgrounds" "$folder/Licences"
 # The program's own name for itself isn't relied on; it is called what people will see.
 cp "$build/$target/release/softpresenter.exe" "$folder/SoftPresenter.exe"
-cp target/ffmpeg-windows/bin/ffmpeg.exe target/ffmpeg-windows/bin/ffprobe.exe "$folder/"
+cp "$ffmpeg/bin/ffmpeg.exe" "$ffmpeg/bin/ffprobe.exe" "$folder/"
 cp assets/backgrounds/*.jpg assets/backgrounds/*.mp4 "$folder/Backgrounds/"
 
 # The licences: the app's own, the notices, and those of what ships beside it.
 cp LICENSE "$folder/Licences/SoftPresenter-GPL-3.0.txt"
 cp NOTICE.md ADDITIONAL-PERMISSION.md "$folder/Licences/"
-cp target/ffmpeg-windows/COPYING.LGPLv2.1 target/ffmpeg-windows/LICENSE.md "$folder/Licences/"
-mv "$folder/Licences/LICENSE.md" "$folder/Licences/FFmpeg-LICENSE.md"
-cp target/ffmpeg-windows/SOURCE.txt "$folder/Licences/FFmpeg-SOURCE.txt"
+cp "$ffmpeg/COPYING.LGPLv2.1" "$folder/Licences/COPYING.LGPLv2.1"
+cp "$ffmpeg/LICENSE.md" "$folder/Licences/FFmpeg-LICENSE.md"
+cp "$ffmpeg/SOURCE.txt" "$folder/Licences/FFmpeg-SOURCE.txt"
 cp crates/sp-render/fonts/OFL.txt "$folder/Licences/SoftPresenterSans-OFL.txt"
 cp crates/sp-render/fonts/AUTHORS.txt "$folder/Licences/SoftPresenterSans-AUTHORS.txt"
 cp assets/backgrounds/README.md "$folder/Licences/Backgrounds-CC0.md"
@@ -116,6 +137,23 @@ for file in SoftPresenter.exe ffmpeg.exe ffprobe.exe; do
     echo "home folder in $file: $count"
     if [ "$count" != 0 ]; then
         echo "error: $file has a folder of this computer written into it" >&2
+        exit 1
+    fi
+done
+
+# The FFmpeg beside the program must be the app's own, or the app never uses it (above).
+src=crates/sp-app/src/ffmpeg_fetch.rs
+ffmpeg_sha=$(sed -n 's/^pub const FFMPEG_SHA256: &str = "\([0-9a-f]*\)";.*/\1/p' "$src")
+ffprobe_sha=$(sed -n 's/^pub const FFPROBE_SHA256: &str = "\([0-9a-f]*\)";.*/\1/p' "$src")
+for pair in "ffmpeg.exe=$ffmpeg_sha" "ffprobe.exe=$ffprobe_sha"; do
+    file=${pair%%=*}
+    have=$(shasum -a 256 "$folder/$file" | cut -d' ' -f1)
+    if [ -n "${pair#*=}" ] && [ "$have" = "${pair#*=}" ]; then
+        echo "$file: the app's own FFmpeg (SHA-256 $have)"
+    elif [ "${SP_FFMPEG_LOCAL:-}" = 1 ]; then
+        echo "warning: $file was built here (SP_FFMPEG_LOCAL=1), with SHA-256 $have, not the app's own (${pair#*=}). SoftPresenter won't use it: at its first start on each computer it downloads its own (23 MB, over the internet)." >&2
+    else
+        echo "error: $file in the package has SHA-256 $have; the app expects ${pair#*=} ($src)" >&2
         exit 1
     fi
 done

@@ -167,7 +167,9 @@ For a Windows 10 or 11 (64-bit) package, built on a Mac with `brew install mingw
 
 It leaves `target/windows-package/SoftPresenter-Windows.zip`: `SoftPresenter.exe`, the LGPL
 FFmpeg for Windows (`ffmpeg.exe`, `ffprobe.exe`), the sample backgrounds, the licences and a
-READ ME. The program isn't signed yet, so Windows asks the first time ("More info", then "Run
+READ ME. The FFmpeg is the project's own build, downloaded from its release and checked against
+the SHA-256s the app expects (`SP_FFMPEG_LOCAL=1` builds it from source instead, but the app
+then fetches its own the first time it starts). The program isn't signed yet, so Windows asks the first time ("More info", then "Run
 anyway").
 
 **On Windows** (10 or 11, 64-bit), download `SoftPresenter-<version>-windows.zip` from the

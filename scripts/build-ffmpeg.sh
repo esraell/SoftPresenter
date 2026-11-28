@@ -26,7 +26,10 @@
 # x86_64-w64-mingw32-gcc): ffmpeg.exe and ffprobe.exe in target/ffmpeg-windows/bin, linked
 # statically so they need nothing but Windows itself. They can decode on the graphics chip
 # through Direct3D 11 or DXVA2 where the codec allows. FFmpeg's x86 assembly is used if nasm is
-# installed, and left out (slower) if not. scripts/windows-package.sh puts the programs in the zip.
+# installed, and left out (slower) if not. This build is published once, as the zip that
+# crates/sp-app/src/ffmpeg_fetch.rs names, and scripts/windows-package.sh takes the programs from
+# that zip (scripts/ffmpeg-windows-published.sh), the build the app checks for; it puts these in
+# its package only with SP_FFMPEG_LOCAL=1.
 #
 #   scripts/build-ffmpeg.sh linux
 #
