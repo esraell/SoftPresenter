@@ -23,7 +23,7 @@
   "dialogs.new_song.theme": "Tema",
   "dialogs.new_song.main_theme": "Tema principal",
   "dialogs.new_song.words": "Letra (opcional)",
-  "dialogs.new_song.words.example": "[Verse 1]\nLas líneas de la primera diapositiva\n\nLa diapositiva siguiente\n\n[Chorus]\n…",
+  "dialogs.new_song.words.example": "[Estrofa 1]\nLas líneas de la primera diapositiva\n\nLa diapositiva siguiente\n\n[Coro]\n…",
   "dialogs.new_song.syntax": "Una línea entre corchetes empieza un grupo; una línea en blanco empieza una diapositiva nueva; -- antes de una línea empieza su traducción.",
   "dialogs.new_song.create": "Crear",
   "dialogs.new_song.cancel": "Cancelar",

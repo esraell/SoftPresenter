@@ -8409,17 +8409,19 @@ impl App {
         let id = Uuid::new_v4();
         // The words given, made into slides as an imported song's are (a lyric file pasted in
         // gives its sections and details, and a song with a verse and a chorus sings the chorus
-        // after each verse); with none, one empty slide in a first verse.
+        // after each verse); with none, one empty slide in a first verse, named in the language
+        // set ("Verse 1", «Куплет 1»).
         let mut parsed = sp_model::import_song_text(&title, &asked.words);
         parsed.name_chorus_after(&home::chorus_after_name());
         let copyright = parsed.copyright.clone();
         let (groups, arrangements, arrangement) = if parsed.slide_count() > 0 {
             (parsed.groups, parsed.arrangements, parsed.arrangement)
         } else {
+            let first = home::first_group_name();
             let empty = sp_model::Group {
                 id: Uuid::new_v4(),
-                name: "Verse 1".to_owned(),
-                color: sp_model::group_color("Verse 1"),
+                name: first.to_owned(),
+                color: sp_model::group_color(first),
                 slides: vec![Slide::new(vec![sp_model::Object::text(sp_model::Role::primary(), "")])],
             };
             (vec![empty], Vec::new(), None)

@@ -3040,11 +3040,12 @@ fn slide_menu(
     }
     ui.separator();
     // Where a group starts: this slide and the rest of its group take the name (several picked:
-    // just they become the group). The group it is in now is ticked.
+    // just they become the group), in the language set. The group it is in now is ticked, named
+    // in whichever language: "Verse 1" ticks «Куплет 1».
     let group_now = presentation.slide(index).map(|(group, _)| group.name.clone()).unwrap_or_default();
     ui.menu_button(t("slides.menu.group", "Group"), |ui| {
-        for name in GROUP_NAMES {
-            if ui.add(egui::Button::selectable(group_now.eq_ignore_ascii_case(name), name)).clicked() {
+        for name in group_names() {
+            if ui.add(egui::Button::selectable(sp_model::same_part(&group_now, name), name)).clicked() {
                 state.slide_request = Some((here, SlideRequest::Group(these.clone(), name.to_owned())));
                 ui.close();
             }
@@ -3187,9 +3188,9 @@ fn slide_menu(
             ui.close();
         }
         ui.separator();
-        for name in SLIDE_LABELS {
-            let on = slide.label.as_deref() == Some(name);
-            if ui.add(egui::Button::selectable(on, name)).clicked() {
+        for label in SLIDE_LABELS {
+            let name = crate::i18n::tg(label.0, label.1);
+            if ui.add(egui::Button::selectable(label_is(slide.label.as_deref(), label), name)).clicked() {
                 state.slide_request = edited(&|one| Slide { label: Some(name.to_owned()), ..one.clone() });
                 ui.close();
             }
@@ -3225,6 +3226,12 @@ fn slide_menu(
             }
         });
     }
+}
+
+/// Whether a slide's label is this one of the Label menu's, given in any language: a slide
+/// labelled "Repeat" has «Повтор» ticked in Russian.
+fn label_is(label: Option<&str>, offered: (&'static str, &'static str)) -> bool {
+    label.is_some_and(|label| crate::i18n::every_wording(offered).any(|said| said == label))
 }
 
 #[cfg(test)]
@@ -3311,6 +3318,87 @@ mod tests {
             output.drop_without_applying_deltas();
         }
         state.slide_request.take().map(|(_, request)| request)
+    }
+
+    /// Opens `menu` in a slide's menu opened on `here`, clicks `words` in it, and returns what it
+    /// asked for.
+    fn slide_submenu_click(
+        show: &Show,
+        state: &mut HomeState,
+        here: SlideRef,
+        menu: &str,
+        words: &str,
+    ) -> Option<SlideRequest> {
+        use crate::studio::tests::{click_frames, drawn, place_of, place_on_top, styled};
+        let ctx = styled();
+        let song = show.presentations()[here.presentation].clone();
+        let slide = song.slide(here.slide).map(|(_, slide)| slide.clone()).expect("a slide");
+        let output = drawn(&ctx, vec![], |ui| slide_menu(ui, show, state, &song, here, &slide));
+        let at = place_of(&output, menu).unwrap_or_else(|| panic!("{menu} is offered"));
+        output.drop_without_applying_deltas();
+        for events in click_frames(at, egui::PointerButton::Primary) {
+            drawn(&ctx, events, |ui| slide_menu(ui, show, state, &song, here, &slide)).drop_without_applying_deltas();
+        }
+        // A menu is drawn from its second frame, once it knows its size.
+        drawn(&ctx, vec![], |ui| slide_menu(ui, show, state, &song, here, &slide)).drop_without_applying_deltas();
+        let output = drawn(&ctx, vec![], |ui| slide_menu(ui, show, state, &song, here, &slide));
+        let at = place_on_top(&output, words).unwrap_or_else(|| panic!("{words} is offered in {menu}"));
+        output.drop_without_applying_deltas();
+        for events in click_frames(at, egui::PointerButton::Primary) {
+            drawn(&ctx, events, |ui| slide_menu(ui, show, state, &song, here, &slide)).drop_without_applying_deltas();
+        }
+        state.slide_request.take().map(|(_, request)| request)
+    }
+
+    #[test]
+    fn the_group_and_label_menus_offer_their_names_in_the_language_set() {
+        use crate::i18n::{Language, with_language};
+        // A song you already have, its parts named in English.
+        let song = Arc::new(parse_song_text("Song", "[Verse 1]\nOne\n\nTwo\n\n[Chorus]\nThree\n"));
+        let show = Show::new(vec![song.clone()]);
+        let mut state = HomeState::default();
+        let second = SlideRef { presentation: 0, slide: 1 };
+        // In Russian the second slide starts «Припев 2», in Russian.
+        let asked =
+            with_language(Language::Russian, || slide_submenu_click(&show, &mut state, second, "Часть", "Припев 2"));
+        let Some(SlideRequest::Group(slides, name)) = asked else { panic!("asked {asked:?}") };
+        assert_eq!((slides.as_slice(), name.as_str()), ([1].as_slice(), "Припев 2"));
+        let grouped = song.with_group_over(&slides, &name).expect("grouped");
+        // Only that slide's group is named: the others keep their English names.
+        let names: Vec<&str> = grouped.groups.iter().map(|group| group.name.as_str()).collect();
+        assert_eq!(names, ["Verse 1", "Припев 2", "Chorus"]);
+        assert_eq!(grouped.groups[1].color, sp_model::group_color("Chorus 2"));
+        assert_eq!(sp_model::key_for_group(&grouped.groups[1].name), Some('X'), "the key of Chorus 2");
+        // In English the menu is as it was.
+        let asked = slide_submenu_click(&show, &mut state, second, "Group", "Bridge");
+        assert_eq!(asked, Some(SlideRequest::Group(vec![1], "Bridge".to_owned())));
+        // A label is given in the language set too.
+        let labelled = |request: Option<SlideRequest>| match request {
+            Some(SlideRequest::Edit(edits)) => edits.into_iter().map(|(_, slide)| slide.label).collect::<Vec<_>>(),
+            other => panic!("asked {other:?}"),
+        };
+        let asked =
+            with_language(Language::Ukrainian, || slide_submenu_click(&show, &mut state, second, "Мітка", "Повтор"));
+        assert_eq!(labelled(asked), [Some("Повтор".to_owned())]);
+        let asked = with_language(Language::Spanish, || {
+            slide_submenu_click(&show, &mut state, second, "Etiqueta", "Diapositiva en blanco")
+        });
+        assert_eq!(labelled(asked), [Some("Diapositiva en blanco".to_owned())]);
+        let asked = slide_submenu_click(&show, &mut state, second, "Label", "Spoken Word");
+        assert_eq!(labelled(asked), [Some("Spoken Word".to_owned())]);
+    }
+
+    #[test]
+    fn a_label_given_in_any_language_is_ticked_in_every_language() {
+        let [blank, _, repeat, _] = SLIDE_LABELS;
+        for label in ["Repeat", "Repetir", "Повтор"] {
+            assert!(label_is(Some(label), repeat), "{label}");
+            assert!(!label_is(Some(label), blank), "{label}");
+        }
+        assert!(label_is(Some("Пустой слайд"), blank));
+        assert!(label_is(Some("Порожній слайд"), blank));
+        assert!(!label_is(Some("Repeat twice"), repeat), "a label of the church's own is none of them");
+        assert!(!label_is(None, repeat));
     }
 
     #[test]

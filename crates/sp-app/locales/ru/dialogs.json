@@ -23,7 +23,7 @@
   "dialogs.new_song.theme": "Тема",
   "dialogs.new_song.main_theme": "Основная тема",
   "dialogs.new_song.words": "Слова (необязательно)",
-  "dialogs.new_song.words.example": "[Verse 1]\nСтроки первого слайда\n\nСледующий слайд\n\n[Chorus]\n…",
+  "dialogs.new_song.words.example": "[Куплет 1]\nСтроки первого слайда\n\nСледующий слайд\n\n[Припев]\n…",
   "dialogs.new_song.syntax": "Строка в квадратных скобках начинает часть; пустая строка начинает новый слайд; -- перед строкой начинает её перевод.",
   "dialogs.new_song.create": "Создать",
   "dialogs.new_song.cancel": "Отмена",

@@ -5414,31 +5414,53 @@ pub enum SongRequest {
     Delete,
 }
 
-/// The group names a slide's Group menu offers.
-const GROUP_NAMES: [&str; 19] = [
-    "Verse 1",
-    "Verse 2",
-    "Verse 3",
-    "Verse 4",
-    "Verse 5",
-    "Verse 6",
-    "Chorus",
-    "Chorus 2",
-    "Chorus 3",
-    "Chorus 4",
-    "Bridge",
-    "Bridge 2",
-    "Bridge 3",
-    "Pre-chorus",
-    "Tag",
-    "Intro",
-    "Ending",
-    "Outro",
-    "Interlude",
+/// The group names a slide's Group menu, and Insert Group in Edit Words, offer: each a key and
+/// its English, said in the language set ([`group_names`]). Each name, in each language, starts
+/// with a word the group keys and colours know (`sp_model::group_name_in_english`), so «Куплет 2»
+/// jumps with S and is coloured as "Verse 2" is.
+const GROUP_NAMES: [(&str, &str); 19] = [
+    tk("slides.group.verse_1", "Verse 1"),
+    tk("slides.group.verse_2", "Verse 2"),
+    tk("slides.group.verse_3", "Verse 3"),
+    tk("slides.group.verse_4", "Verse 4"),
+    tk("slides.group.verse_5", "Verse 5"),
+    tk("slides.group.verse_6", "Verse 6"),
+    tk("slides.group.chorus", "Chorus"),
+    tk("slides.group.chorus_2", "Chorus 2"),
+    tk("slides.group.chorus_3", "Chorus 3"),
+    tk("slides.group.chorus_4", "Chorus 4"),
+    tk("slides.group.bridge", "Bridge"),
+    tk("slides.group.bridge_2", "Bridge 2"),
+    tk("slides.group.bridge_3", "Bridge 3"),
+    tk("slides.group.prechorus", "Pre-chorus"),
+    tk("slides.group.tag", "Tag"),
+    tk("slides.group.intro", "Intro"),
+    tk("slides.group.ending", "Ending"),
+    tk("slides.group.outro", "Outro"),
+    tk("slides.group.interlude", "Interlude"),
 ];
 
-/// The labels a slide's Label menu offers.
-const SLIDE_LABELS: [&str; 4] = ["Blank Slide", "Instrumental", "Repeat", "Spoken Word"];
+/// The group names the Group menu offers, in the language set. A group takes the name in the
+/// language it was given in and keeps it (it is the church's from then on, so `sp` prints it as
+/// saved): the groups of songs you already have keep their names.
+fn group_names() -> impl Iterator<Item = &'static str> {
+    GROUP_NAMES.into_iter().map(|(key, english)| crate::i18n::tg(key, english))
+}
+
+/// The name of the one group a new song made with no words has: "Verse 1" in the language set.
+pub fn first_group_name() -> &'static str {
+    let (key, english) = GROUP_NAMES[0];
+    crate::i18n::tg(key, english)
+}
+
+/// The labels a slide's Label menu offers, each a key and its English, said in the language set;
+/// a slide keeps its label in the language it was given in.
+const SLIDE_LABELS: [(&str, &str); 4] = [
+    tk("slides.label.blank", "Blank Slide"),
+    tk("slides.label.instrumental", "Instrumental"),
+    tk("slides.label.repeat", "Repeat"),
+    tk("slides.label.spoken", "Spoken Word"),
+];
 
 /// What an object is called in the Objects list: the name it was given, or, until it is given
 /// one (a box still has the name the app gave it, "Text 2" or "Texto 2" in whichever language it
@@ -5495,7 +5517,7 @@ fn reflow_editor(ui: &mut egui::Ui, title: &str, state: &mut HomeState) {
                     text.insert_str(at, what);
                 };
                 ui.menu_button(t("edit.words.insert_group", "Insert Group"), |ui| {
-                    for name in GROUP_NAMES {
+                    for name in group_names() {
                         if ui.button(name).clicked() {
                             insert(&format!("\n[{name}]\n"));
                             ui.close();
@@ -17527,5 +17549,95 @@ mod tests {
         let (_, asked) = frame(&ctx, &show, None);
         assert!(asked > 0, "visible thumbnails should be requested");
         assert!(asked < 80, "asked for {asked} thumbnails of 400");
+    }
+
+    #[test]
+    fn the_group_menu_names_the_parts_in_the_language_set_and_each_has_its_key_and_colour() {
+        use crate::i18n::{Language, with_language};
+        // Every language the app speaks (German too, once it has its words): each name the menu
+        // offers is the part its English is, with the same key and colour.
+        for language in Language::ALL {
+            let names: Vec<&str> = with_language(language, || group_names().collect());
+            assert_eq!(names.len(), GROUP_NAMES.len());
+            for ((_, english), name) in GROUP_NAMES.iter().zip(&names) {
+                assert!(sp_model::same_part(name, english), "{language:?}: {name} is the part {english} is");
+                // The same kind for Chorus after each verse: a verse, a chorus, a pre-chorus or other.
+                assert_eq!(sp_model::part_of(name), sp_model::part_of(english), "{language:?}: {name}");
+                assert_eq!(sp_model::key_for_group(name), sp_model::key_for_group(english), "{language:?}: {name}");
+                assert_eq!(sp_model::group_color(name), sp_model::group_color(english), "{language:?}: {name}");
+            }
+            let mut distinct = names.clone();
+            distinct.sort_unstable();
+            distinct.dedup();
+            assert_eq!(distinct.len(), names.len(), "{language:?} names two parts the same: {names:?}");
+            // A new song with no words starts with the first verse, in the same language.
+            assert_eq!(with_language(language, first_group_name), names[0]);
+        }
+        let in_language = |language| with_language(language, || group_names().collect::<Vec<_>>());
+        assert_eq!(in_language(Language::English), GROUP_NAMES.map(|(_, english)| english), "English is as it was");
+        assert_eq!(
+            in_language(Language::Russian),
+            [
+                "Куплет 1",
+                "Куплет 2",
+                "Куплет 3",
+                "Куплет 4",
+                "Куплет 5",
+                "Куплет 6",
+                "Припев",
+                "Припев 2",
+                "Припев 3",
+                "Припев 4",
+                "Мост",
+                "Мост 2",
+                "Мост 3",
+                "Предприпев",
+                "Тег",
+                "Вступление",
+                "Окончание",
+                "Кода",
+                "Проигрыш",
+            ]
+        );
+        let ukrainian = in_language(Language::Ukrainian);
+        assert_eq!(
+            [ukrainian[0], ukrainian[6], ukrainian[10], ukrainian[13], ukrainian[18]],
+            ["Куплет 1", "Приспів", "Міст", "Передприспів", "Програш"]
+        );
+        let spanish = in_language(Language::Spanish);
+        assert_eq!(
+            [spanish[0], spanish[6], spanish[10], spanish[13], spanish[16], spanish[17], spanish[18]],
+            ["Estrofa 1", "Coro", "Puente", "Precoro", "Final", "Coda", "Interludio"]
+        );
+        // The Group menu's key on «Куплет 2»: S, as for "Verse 2".
+        assert_eq!(sp_model::key_for_group(ukrainian[1]), Some('S'));
+        // The New Song sheet's example names its parts as the menu does, in each language.
+        let example = "[Verse 1]\nThe first slide's lines\n\nThe next slide\n\n[Chorus]\n\u{2026}";
+        let examples = crate::i18n::every_wording(("dialogs.new_song.words.example", example));
+        for (language, shown) in Language::ALL.into_iter().zip(examples) {
+            let song = parse_song_text("Example", shown);
+            let parts: Vec<&str> = song.groups.iter().map(|group| group.name.as_str()).collect();
+            let menu = with_language(language, || group_names().collect::<Vec<_>>());
+            assert_eq!(parts, [menu[0], menu[6]], "{language:?}");
+        }
+    }
+
+    #[test]
+    fn a_group_named_in_another_language_keeps_its_name() {
+        use crate::i18n::{Language, with_language};
+        // A song you already have, named in English and in Russian: shown in Ukrainian, nothing
+        // in it is renamed, and the Group menu ticks the part each slide is in.
+        let song = parse_song_text("Song", "[Verse 1]\nOne\n\n[Припев]\nTwo\n\n[Pre-chorus]\nThree\n");
+        let names = with_language(Language::Ukrainian, || group_names().collect::<Vec<_>>());
+        let ticked =
+            |group: &str| names.iter().filter(|name| sp_model::same_part(group, name)).copied().collect::<Vec<_>>();
+        assert_eq!(ticked("Verse 1"), ["Куплет 1"]);
+        assert_eq!(ticked("Припев"), ["Приспів"]);
+        assert_eq!(ticked("Pre-chorus"), ["Передприспів"]);
+        assert_eq!(ticked("Sermon"), Vec::<&str>::new(), "a group of its own name ticks nothing");
+        assert_eq!(
+            song.groups.iter().map(|group| group.name.as_str()).collect::<Vec<_>>(),
+            ["Verse 1", "Припев", "Pre-chorus"]
+        );
     }
 }

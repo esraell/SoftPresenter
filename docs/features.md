@@ -73,7 +73,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - In the Service view, ↑ and ↓ open the song above or below in the song list (with Shift, picking
   out the songs on the way), or the item above or below in a playlist (passing over headers);
   ← → and Space go on moving the slides.
-- Groups (Verse 1, Chorus, Bridge…) with a dot in the group's colour and one-key jumps.
+- Groups (Verse 1, Chorus, Bridge…) with a dot in the group's colour and one-key jumps. A
+  part named in Spanish, Russian or Ukrainian ("Estrofa 2", «Куплет 2», «Приспів») has the key
+  and colour of its English name.
 - **Renaming in place** (a playlist, a library, a song's title, a header or placeholder, a
   theme, a template, a stage layout, a group, an object, a message, a prop, a macro, an audio
   playlist or track): the name stays as it was shown, in the same letters and colour on the
@@ -919,6 +921,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   or Usual: the song's, else the one under the slides, named as "Usual (Dissolve, 0.4 s)"), Media (a picture or video, or None), Hot Key (a letter or digit that puts the slide on screen, shown on its
   picture; or None), Go to Next (after a number of seconds, shown on its picture; or None), Disable, Template (one of
   the theme's, or "Usual (the theme picks)").
+  Group and Label offer their names in the language SoftPresenter is set to (in Russian
+  Куплет 1, Припев, Мост…; in Spanish Estrofa 1, Coro, Puente…), and a slide takes the name in
+  that language; groups and labels already named keep their names as written. The group ticked
+  is the part the slide is in, whatever language its name is in ("Verse 1" ticks Куплет 1), and
+  so is the label. Insert Group in Edit Words offers the same names, and a new song made with no
+  words starts with Verse 1 in that language.
   With several slides of the song picked, the clicked one among them, Group, Media,
   Transition, Go to Next, Hot Key, Label, Disable, Template, Paste Style, Cut, Copy,
   Duplicate and Delete act on all of them, each in one step for Undo (Group makes just them the

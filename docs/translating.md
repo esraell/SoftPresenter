@@ -27,7 +27,13 @@ ui.on_hover_text(t("left.new_song", "New song"))
 - Write the English exactly as the window shows it, in Title Case where the app uses it. The
   other languages use sentence case in their tables.
 - Never join pieces in code ("Added " + n + " songs"): write a whole sentence with placeholders.
-- A string that is only content (a song's name, a group's name, a file) is not wrapped.
+- A string that is only content (a song's name, a group's name, a file) is not wrapped. The
+  names the app offers for a church to give and keep (the Group menu's song parts, the Label
+  menu's labels, "Arrangement 2") are wrapped with `tg`: said in the language set, then saved
+  as the church's own, so `sp` and the log print them as saved. A song part's name
+  (`slides.group.*`) must start with a word `sp_model`'s `PART_WORDS` knows for that part, then
+  its number, so its group key and colour are found; add the word there if it is new (a test
+  checks every language's names).
 - `t` needs literals (`&'static str`) for both arguments. For a table of words kept before they
   are drawn, make each pair with `tk("key", "English")` (it is only the two together, so the
   scan below still finds them) and hand it on to `t` or `ts`.

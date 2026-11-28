@@ -75,8 +75,9 @@ pub const GROUP_KEYS: [(char, &[&str]); 17] = [
 
 /// The words churches name a song's parts with in the app's languages (Russian, Ukrainian,
 /// Spanish), and the ones SoftProjector's songs name them with (German and Czech too), each
-/// with the English the group keys and colours know.
-const PART_WORDS: [(&str, &str); 38] = [
+/// with the English the group keys and colours know. Every name the app's Group menu offers, in
+/// each language, starts with one of these (or is English).
+const PART_WORDS: [(&str, &str); 41] = [
     ("куплет", "verse"),
     ("estrofa", "verse"),
     ("verso", "verse"),
@@ -115,6 +116,9 @@ const PART_WORDS: [(&str, &str); 38] = [
     ("konec", "ending"),
     ("кода", "outro"),
     ("coda", "outro"),
+    ("проигрыш", "interlude"),
+    ("програш", "interlude"),
+    ("interludio", "interlude"),
 ];
 
 /// A group's name as the group keys and colours know it: lower case, and in English when a
@@ -129,6 +133,22 @@ pub fn group_name_in_english(name: &str) -> String {
         Some((_, english)) => format!("{english} {}", rest.trim()),
         None => lower,
     }
+}
+
+/// Whether two group names name the same part of a song, in whichever language or spelling:
+/// "Verse 1" and «Куплет 1», "Pre-chorus" and «Предприпев», "chorus" and "Chorus". A group with
+/// no name is no part.
+pub fn same_part(a: &str, b: &str) -> bool {
+    let part = |name: &str| {
+        let english = group_name_in_english(name);
+        // "Pre-chorus" and "pre chorus" are the part "prechorus" names (the one P jumps to).
+        match english.strip_prefix("pre-chorus").or_else(|| english.strip_prefix("pre chorus")) {
+            Some(rest) => format!("prechorus{rest}"),
+            None => english,
+        }
+    };
+    let a = part(a);
+    !a.is_empty() && a == part(b)
 }
 
 /// The group names a key jumps to, in lower case; empty for a key that jumps nowhere.
@@ -271,6 +291,25 @@ mod tests {
         assert_eq!(key_for_group("Refrain"), Some('C'));
         assert_eq!(key_for_group("Úvod"), Some('I'));
         assert_eq!(key_for_group("Závěr"), Some('E'));
+    }
+
+    #[test]
+    fn the_same_part_in_any_language_or_spelling() {
+        assert!(same_part("Verse 1", "Куплет 1"));
+        assert!(same_part("verse 1", "Verse 1"));
+        assert!(same_part("Куплет 2", "Estrofa 2"));
+        assert!(same_part("Pre-chorus", "Предприпев"));
+        assert!(same_part("Pre chorus", "Precoro"));
+        assert!(same_part("Interlude", "Проигрыш"));
+        assert!(same_part("Interludio", "Програш"));
+        assert!(!same_part("Verse", "Verse 1"), "a verse without a number is another group");
+        assert!(!same_part("Ending", "Outro"));
+        assert!(!same_part("", ""), "a group with no name is no part");
+        // English names are as they were: the group keys and colours know them unchanged.
+        assert_eq!(group_name_in_english("Interlude"), "interlude");
+        assert_eq!(group_name_in_english("Pre-chorus"), "pre-chorus");
+        assert_eq!(group_color("Проигрыш"), group_color("Interlude"));
+        assert_eq!(key_for_group("Проигрыш"), None, "Interlude has no key, in any language");
     }
 
     #[test]
