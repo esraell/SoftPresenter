@@ -1909,7 +1909,16 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   where the setup lives. Settings › Set up SoftPresenter… opens it again, as a sheet over the
   window with the answers as they stand (the languages, where they were never asked, are those of
   the Bibles the Bible page shows; the recommended songbooks are marked but none is ticked);
-  closing it, or going through it with Continue and no answer changed, changes nothing. In a pre-release (a version with
+  closing it, or going through it with Continue and no answer changed, leaves the languages, the
+  Bibles, the screens and the keys as they were (songs left ticked in Settings › Song files'
+  search still come in with Bring In and Continue; an answer of No to "Coming from
+  SoftProjector?" that differs from how things stand switches to the Standard keys and turns the
+  end mark off). A later step clicked along the top takes the step's choices as its key does.
+  Escape closes an open menu first, and the setup only when none is open. A Bible the setup
+  asked for that doesn't download leaves the Bible page's rows as they were (the row below is
+  emptied for one translation only once its Bible is here), a notice says so, and Ready's Bibles
+  line says it in amber with Try Again; while one is on its way the line ends "downloading".
+  Languages skipped with none ever kept shows on Ready as not chosen yet, unticked. In a pre-release (a version with
   a part after its three numbers, such as 0.9.0-dev.16) the welcome says so in a small card
   under the language: "This is a pre-release (0.9.0-dev.16)", then "Things may still change: the
   core of how SoftPresenter works and looks will stay, and bugs will be fixed in the versions

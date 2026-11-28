@@ -24,7 +24,7 @@ use crate::home::HomeState;
 use crate::i18n::t;
 use crate::studio::{CARD, Flat, HOVER, LINE, READY, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 
-pub use bibles::place_downloaded;
+pub use bibles::{bible_failed_words, place_downloaded};
 
 /// The system the setup speaks of: what it asks permission for, what its menus are, what the
 /// computer is called. A value rather than a build switch, so each system's words can be tried
@@ -302,6 +302,8 @@ pub fn setup_ui_in(ctx: &egui::Context, show: &Show, state: &mut HomeState, comm
     }
     let again = setup.again();
     let mut open = true;
+    // Escape closes a menu that is open (On top, Below, the app's language) and nothing more.
+    let menu_open = egui::Popup::is_any_open(ctx);
     let screen = ctx.content_rect().size();
     let size = card_size(screen, again);
     let margin = card_margin(again);
@@ -365,7 +367,7 @@ pub fn setup_ui_in(ctx: &egui::Context, show: &Show, state: &mut HomeState, comm
         let foot = Rect::from_min_size(pos2(top.x, top.y + inner.y - FOOT), vec2(inner.x, FOOT));
         match foot_keys(ui, foot, &setup, state, show) {
             Some(Pressed::Leave) => open = false,
-            Some(Pressed::Back) => go(&mut setup, state, step.at().saturating_sub(1)),
+            Some(Pressed::Back) => go(&mut setup, state, step.at().saturating_sub(1), env, ui.ctx()),
             Some(Pressed::Skip) => {
                 if !setup.skipped.contains(&step) {
                     setup.skipped.push(step);
@@ -398,10 +400,10 @@ pub fn setup_ui_in(ctx: &egui::Context, show: &Show, state: &mut HomeState, comm
             Some(Pressed::On) | None => {}
         }
         if let Some(to) = go_to {
-            go(&mut setup, state, to);
+            go(&mut setup, state, to, env, ui.ctx());
         }
     });
-    if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+    if !menu_open && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         open = false;
     }
     if open {
@@ -425,15 +427,14 @@ pub fn fit(ctx: &egui::Context) -> Fit {
     ctx.data(|data| data.get_temp::<Fit>(fit_id()).unwrap_or_default())
 }
 
-/// Goes to another step from the steps along the top, a Change key or Back. Going on from
-/// Languages this way takes its answer, as Continue does, and needs one language chosen.
-fn go(setup: &mut Setup, state: &mut HomeState, to: usize) {
+/// Goes to another step from the steps along the top, a Change key or Back. Going on to a
+/// later step this way takes this step's choices, as its own key does (the languages kept,
+/// the songbooks and songs ticked brought in, the Bibles given to the Bible page), so nothing
+/// chosen is dropped unsaid; Languages needs one language chosen. Going back takes nothing.
+fn go(setup: &mut Setup, state: &mut HomeState, to: usize, env: &Env, ctx: &egui::Context) {
     let to = to.min(STEPS.len() - 1);
-    if setup.step == Step::Languages && to > Step::Languages.at() {
-        if setup.languages.is_empty() {
-            return;
-        }
-        languages::passed(setup, state);
+    if to > setup.step.at() && !passed(setup, state, env, ctx) {
+        return;
     }
     setup.step = STEPS[to];
     setup.seen = setup.seen.max(to);
@@ -813,11 +814,11 @@ fn from_softprojector_words(system: System) -> &'static str {
     match system {
         System::Mac => t(
             "setup.from.line.mac",
-            "Yes keeps SoftProjector\u{2019}s Esc, which hides the words and leaves the background up, and its * * * under a song\u{2019}s last slide. Both can be changed in Settings \u{203a} Keys and Settings \u{203a} Slides.",
+            "Yes keeps SoftProjector\u{2019}s Esc, which hides the words and leaves the background up, and its *\u{a0}*\u{a0}* under a song\u{2019}s last slide. Both can be changed in Settings \u{203a} Keys and Settings \u{203a} Slides.",
         ),
         System::Windows | System::Linux => t(
             "setup.from.line",
-            "Yes keeps SoftProjector\u{2019}s keys (Esc hides the words, F5 shows, F2 adds to the playlist) and its * * * under a song\u{2019}s last slide. Both can be changed in Settings \u{203a} Keys and Settings \u{203a} Slides.",
+            "Yes keeps SoftProjector\u{2019}s keys (Esc hides the words, F5 shows, F2 adds to the playlist) and its *\u{a0}*\u{a0}* under a song\u{2019}s last slide. Both can be changed in Settings \u{203a} Keys and Settings \u{203a} Slides.",
         ),
     }
 }

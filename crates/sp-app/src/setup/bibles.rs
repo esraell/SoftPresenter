@@ -233,52 +233,122 @@ fn set_row(bible: &mut BiblePage, row: usize, at: usize) {
 /// The step was passed with Continue: the Bible page's rows take the choice. One on this
 /// computer goes to its row now; one to download starts downloading (where Bibles can be) and
 /// takes its row once it is here, the row keeping what it has until then. No Bible below
-/// leaves one translation.
+/// leaves one translation, once the one on top is there.
 pub fn passed(setup: &mut Setup, state: &mut HomeState, env: &Env, ctx: &egui::Context) {
-    let choice = &setup.bibles;
+    let choice = setup.bibles.clone();
     let bible = &mut state.bible;
+    let mut start = Vec::new();
+    apply(&choice, bible, env.bibles_download, &mut |offered| start.push(offered));
+    for offered in start {
+        let ctx = ctx.clone();
+        bible.downloads.start(offered.id, offered.checksum, move || ctx.request_repaint());
+    }
+}
+
+/// Gives the Bible page the choice (see [`passed`]); `start` is told each Bible to download.
+pub fn apply(
+    choice: &Choice,
+    bible: &mut BiblePage,
+    download: bool,
+    start: &mut dyn FnMut(&'static crate::bible::Offered),
+) {
     bible.wanted.clear();
+    bible.wanted_failed.clear();
+    bible.wanted_alone = false;
+    let mut top_waits = false;
     for (row, id) in [(0, choice.top.clone()), (1, choice.below.clone())] {
         match id {
             Some(id) => match bible.shelf.position(&id) {
                 Some(at) => set_row(bible, row, at),
                 None => {
-                    if env.bibles_download
-                        && let Some(offered) = crate::bible::OFFERED.iter().find(|offered| offered.id == id)
-                    {
-                        let ctx = ctx.clone();
-                        bible.downloads.start(offered.id, offered.checksum, move || ctx.request_repaint());
+                    if download && let Some(offered) = crate::bible::OFFERED.iter().find(|offered| offered.id == id) {
+                        start(offered);
                         bible.wanted.push((id, row));
+                        top_waits |= row == 0;
                     }
                 }
             },
-            None if row == 1 => {
-                if let Some(second) = bible.rows.get_mut(1)
-                    && second.bible.is_some()
-                {
-                    second.bible = None;
-                    bible.made_with.clear();
-                }
+            // One translation. While the one on top is still to come the row below stays, so a
+            // download that fails never leaves the Bible page with the wrong Bible alone.
+            None if row == 1 && top_waits => bible.wanted_alone = true,
+            None if row == 1 && choice.top.as_ref().is_some_and(|top| bible.shelf.position(top).is_some()) => {
+                empty_below(bible);
             }
             None => {}
         }
     }
 }
 
-/// A Bible the setup chose that has finished downloading takes its row; one whose download
-/// ended without it (the Bibles window says why) is waited for no longer.
-pub fn place_downloaded(bible: &mut BiblePage) {
-    if bible.wanted.is_empty() {
-        return;
+/// Empties the row below: one translation.
+fn empty_below(bible: &mut BiblePage) {
+    if let Some(second) = bible.rows.get_mut(1)
+        && second.bible.is_some()
+    {
+        second.bible = None;
+        bible.made_with.clear();
     }
+}
+
+/// A Bible's name as the Bibles offered have it, by its short name.
+fn offered_name(id: &str) -> String {
+    crate::bible::OFFERED.iter().find(|offered| offered.id == id).map_or_else(|| id.to_owned(), |o| o.name.to_owned())
+}
+
+/// A Bible the setup chose that has finished downloading takes its row (and, where one
+/// translation was chosen, the row below is emptied then). One whose download ended without it
+/// is waited for no longer and kept as failed: the rows stay as they were. The names of those
+/// that failed just now, for a notice.
+pub fn place_downloaded(bible: &mut BiblePage) -> Vec<String> {
+    if bible.wanted.is_empty() {
+        return Vec::new();
+    }
+    let mut failed = Vec::new();
     let wanted = std::mem::take(&mut bible.wanted);
     for (id, row) in wanted {
         match bible.shelf.position(&id) {
-            Some(at) => set_row(bible, row, at),
+            Some(at) => {
+                set_row(bible, row, at);
+                if row == 0 && std::mem::take(&mut bible.wanted_alone) {
+                    empty_below(bible);
+                }
+            }
             None if bible.downloads.is_busy(&id) => bible.wanted.push((id, row)),
-            None => {}
+            None => {
+                failed.push(offered_name(&id));
+                if row == 0 {
+                    bible.wanted_alone = false;
+                }
+                bible.wanted_failed.push((id, row));
+            }
         }
     }
+    failed
+}
+
+/// What the notice says when a Bible the setup asked for didn't download.
+pub fn bible_failed_words(name: &str) -> String {
+    tf(
+        "setup.bibles.failed",
+        "{name} couldn\u{2019}t be downloaded, so the Bible page keeps the Bibles it had. Try again in Settings \u{203a} Set up SoftPresenter\u{2026} or in the Bibles window.",
+        &[("name", name)],
+    )
+}
+
+/// Try Again on Ready: the Bibles whose download failed are asked for again.
+pub fn retry(state: &mut HomeState, ctx: &egui::Context) {
+    let bible = &mut state.bible;
+    for (id, row) in std::mem::take(&mut bible.wanted_failed) {
+        if let Some(offered) = crate::bible::OFFERED.iter().find(|offered| offered.id == id) {
+            let ctx = ctx.clone();
+            bible.downloads.start(offered.id, offered.checksum, move || ctx.request_repaint());
+            bible.wanted.push((id, row));
+        }
+    }
+}
+
+/// The names of the Bibles the setup asked for whose download failed.
+pub fn failed_names(state: &HomeState) -> Vec<String> {
+    state.bible.wanted_failed.iter().map(|(id, _)| offered_name(id)).collect()
 }
 
 /// What a row says under a Bible's name: its language, and whether it is on this computer or
@@ -313,9 +383,11 @@ pub fn names(state: &HomeState) -> Vec<String> {
     let bible = &state.bible;
     let mut out = Vec::new();
     for row in 0..2 {
-        let waiting = bible.wanted.iter().find(|(_, wanted)| *wanted == row).and_then(|(id, _)| {
-            crate::bible::OFFERED.iter().find(|offered| offered.id == id).map(|offered| offered.name.to_owned())
-        });
+        // One translation was chosen and is on its way: the row below goes once it is here.
+        if row == 1 && bible.wanted_alone {
+            continue;
+        }
+        let waiting = bible.wanted.iter().find(|(_, wanted)| *wanted == row).map(|(id, _)| offered_name(id));
         let stands = bible
             .rows
             .get(row)

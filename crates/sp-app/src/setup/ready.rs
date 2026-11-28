@@ -90,13 +90,26 @@ fn on_top_below(top: &str, below: &str) -> String {
     tf("setup.ready.on_top_below", "{top} on top, {below} below", &[("top", top), ("below", below)])
 }
 
-/// The Languages line: the two on screen, or the one.
-pub(super) fn languages_line(languages: &[String]) -> String {
-    match languages {
+/// The Languages line: the two on screen, or the one, ticked. `answered` false (the step was
+/// skipped, and the church's languages were never kept): a dash and that none is chosen yet,
+/// whatever the step had chosen to start with.
+pub(super) fn languages_line(languages: &[String], answered: bool) -> Line {
+    if !answered {
+        return Line {
+            words: t(
+                "setup.ready.no_languages",
+                "Not chosen yet. Songbooks and Bibles are recommended by the app\u{2019}s language until they are.",
+            )
+            .to_owned(),
+            mark: Mark::Dash,
+        };
+    }
+    let words = match languages {
         [] => language_own_name("en"),
         [one] => language_own_name(one),
         [top, below, ..] => on_top_below(&language_own_name(top), &language_own_name(below)),
-    }
+    };
+    Line { words, mark: Mark::Tick }
 }
 
 /// The Bibles line: the Bible page's translations as they stand (`names`, top first).
@@ -106,6 +119,28 @@ pub(super) fn bibles_line(names: &[String]) -> String {
         [one] => one.clone(),
         [top, below, ..] => on_top_below(top, below),
     }
+}
+
+/// The Bibles line as Ready shows it: the Bible page's translations, with "downloading" after
+/// them while one the setup asked for is on its way; or, when one didn't download, that in
+/// amber (the line then has Try Again).
+pub(super) fn bibles_ready_line(state: &HomeState) -> Line {
+    let failed = super::bibles::failed_names(state);
+    if !failed.is_empty() {
+        return Line {
+            words: tf(
+                "setup.ready.bible_failed",
+                "{names} didn\u{2019}t download. The Bible page keeps the Bibles it had.",
+                &[("names", &failed.join(", "))],
+            ),
+            mark: Mark::Care,
+        };
+    }
+    let mut words = bibles_line(&super::bibles::names(state));
+    if !state.bible.wanted.is_empty() {
+        words = tf("setup.ready.downloading", "{what} \u{b7} downloading", &[("what", &words)]);
+    }
+    Line { words, mark: Mark::Tick }
 }
 
 /// What a line of the list says, and how it is marked.
@@ -261,7 +296,7 @@ pub(super) fn keys_line(style: crate::key_table::KeyStyle, mark: bool) -> String
         crate::key_table::KeyStyle::SoftPresenter => t("setup.ready.keys.standard", "Standard keys"),
     };
     if mark {
-        tf("setup.ready.keys.mark", "{keys} \u{b7} * * * at a song\u{2019}s end", &[("keys", keys)])
+        tf("setup.ready.keys.mark", "{keys} \u{b7} *\u{a0}*\u{a0}* at a song\u{2019}s end", &[("keys", keys)])
     } else {
         keys.to_owned()
     }
@@ -271,8 +306,10 @@ pub(super) fn keys_line(style: crate::key_table::KeyStyle, mark: bool) -> String
 enum Key<'a> {
     /// Change (or Choose, for the line that warns), to a step.
     Go(&'a str, Step),
-    /// Try Again, for a download that failed.
+    /// Try Again, for a songbook's download that failed.
     Retry,
+    /// Try Again, for a Bible's download that failed.
+    RetryBibles,
     /// The reports' On/Off key.
     Switch(bool),
 }
@@ -298,6 +335,7 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env: &E
         crate::studio::flat_button_width(ui, &[change, choose, retry], &font, 12.0).max(switch).max(70.0).ceil();
     let mut go = None;
     let mut retry_now = false;
+    let mut retry_bibles = false;
     let mut switched = None;
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -305,11 +343,13 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env: &E
             ui.set_width(left);
             let songs = songs_line(state);
             let screens = screens_line(state);
+            let bibles = bibles_ready_line(state);
+            let answered = !state.church_languages.is_empty() || !setup.skipped.contains(&Step::Languages);
             let mut lines: Vec<(&str, Line, Key)> = vec![
                 (
                     t("setup.step.languages", "Languages"),
-                    Line { words: languages_line(&setup.languages), mark: Mark::Tick },
-                    Key::Go(change, Step::Languages),
+                    languages_line(&setup.languages, answered),
+                    Key::Go(if answered { change } else { choose }, Step::Languages),
                 ),
                 (
                     t("setup.step.songs", "Songs"),
@@ -318,8 +358,8 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env: &E
                 ),
                 (
                     t("setup.step.bibles", "Bibles"),
-                    Line { words: bibles_line(&super::bibles::names(state)), mark: Mark::Tick },
-                    Key::Go(change, Step::Bibles),
+                    bibles.clone(),
+                    if bibles.mark == Mark::Care { Key::RetryBibles } else { Key::Go(change, Step::Bibles) },
                 ),
                 (
                     t("setup.step.screens", "Screens"),
@@ -353,10 +393,10 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env: &E
                         true,
                     )
                     .clicked(),
-                    Key::Retry => crate::studio::flat_button(
+                    Key::Retry | Key::RetryBibles => crate::studio::flat_button(
                         ui,
                         rect,
-                        ui.scope_id().with("setup ready retry"),
+                        ui.scope_id().with(("setup ready retry", label)),
                         retry,
                         font.clone(),
                         Flat::Plain,
@@ -374,6 +414,7 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env: &E
                     match key {
                         Key::Go(_, step) => go = Some(step.at()),
                         Key::Retry => retry_now = true,
+                        Key::RetryBibles => retry_bibles = true,
                         Key::Switch(on) => switched = Some(!on),
                     }
                 }
@@ -388,6 +429,9 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env: &E
             super::small(ui, t("setup.ready.look", "How songs will look. Change the look in Edit \u{203a} Themes."), 2);
         });
     });
+    if retry_bibles {
+        super::bibles::retry(state, ui.ctx());
+    }
     if retry_now {
         // The songbooks ticked that aren't here are asked for again.
         state.free_songbooks.problem = None;

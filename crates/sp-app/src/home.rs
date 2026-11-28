@@ -891,6 +891,13 @@ pub struct BiblePage {
     /// Bibles the setup's Bibles step chose that were still to download, each with the row it
     /// is for (0 on top, 1 below): the row takes it once it is on the shelf (`setup::place_downloaded`).
     pub wanted: Vec<(String, usize)>,
+    /// The setup chose one translation whose Bible is still to download: the row below is
+    /// emptied only once that Bible has taken the top row, so a download that fails leaves the
+    /// Bible page as it was.
+    pub wanted_alone: bool,
+    /// Bibles the setup asked for whose download ended without them, each with its row: the
+    /// setup's Ready step says so, with Try Again.
+    pub wanted_failed: Vec<(String, usize)>,
     /// The two places among the show's presentations kept for Bible passages. A new passage
     /// goes into the one that is not on screen, so looking up the next verses never changes
     /// what the audience sees.
@@ -1000,6 +1007,8 @@ impl Default for BiblePage {
             template: None,
             downloads: crate::bible_store::Downloads::default(),
             wanted: Vec::new(),
+            wanted_alone: false,
+            wanted_failed: Vec::new(),
             slots: None,
             showing: 0,
             shown: String::new(),
@@ -2892,8 +2901,13 @@ fn home_view(
     {
         let bible = &mut state.bible;
         crate::bible::collect_downloads(&mut bible.options, &mut bible.shelf, &mut bible.downloads);
-        // One the setup chose takes its row once it is here.
-        crate::setup::place_downloaded(bible);
+    }
+    // One the setup chose takes its row once it is here; one that didn't come is said.
+    for name in crate::setup::place_downloaded(&mut state.bible) {
+        state.notices.trouble(crate::setup::bible_failed_words(&name));
+    }
+    {
+        let bible = &mut state.bible;
         if bible.options.manage_open {
             crate::bible::manage_bibles(ui.ctx(), &mut bible.options, &mut bible.shelf, &mut bible.downloads);
         }

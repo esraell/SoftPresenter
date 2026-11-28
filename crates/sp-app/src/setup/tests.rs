@@ -79,6 +79,23 @@ fn press(ctx: &egui::Context, state: &mut HomeState, env: &Env, words: &str) -> 
     })
 }
 
+/// Clicks at a place in the window.
+fn press_at(ctx: &egui::Context, state: &mut HomeState, env: &Env, at: egui::Pos2) {
+    let show = Show::new(Vec::new());
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    for events in [vec![egui::Event::PointerMoved(at)], vec![button(true)], vec![button(false)]] {
+        drawn(ctx, events, &mut |ui| {
+            let mut commands = Vec::new();
+            setup_ui_in(ui.ctx(), &show, state, &mut commands, env);
+        });
+    }
+}
+
 fn said(words: &[(String, Rect)], wanted: &str) -> bool {
     words.iter().any(|(text, _)| text.contains(wanted))
 }
@@ -287,7 +304,20 @@ fn skip_changes_nothing_and_ready_says_what_is_missing() {
         // No screen chosen is the one thing Ready warns about, with Choose; no songs says so.
         assert!(said(&words, "No screen chosen yet: slides won\u{2019}t show anywhere until one is."), "{words:?}");
         assert!(said(&words, "Choose") && said(&words, "None yet. Your own songs, or free songbooks"), "{words:?}");
+        // Languages, skipped with none kept, has Choose too: the first goes there, and the one
+        // on the Screens line to Screens.
         assert!(press(&ctx, &mut state, &env, "Choose"));
+        assert_eq!(step_of(&state), Step::Languages);
+        assert!(press(&ctx, &mut state, &env, "Ready"));
+        let words = draw(&ctx, &mut state, &env);
+        let line = place(&words, "No screen chosen yet").center().y;
+        let choose = words
+            .iter()
+            .filter(|(text, _)| text == "Choose")
+            .map(|(_, at)| at.center())
+            .min_by(|a, b| (a.y - line).abs().total_cmp(&(b.y - line).abs()))
+            .expect("the Screens line has Choose");
+        press_at(&ctx, &mut state, &env, choose);
         assert_eq!(step_of(&state), Step::Screens);
         // Back goes back a step, and a step along the top that was reached can be clicked.
         assert!(press(&ctx, &mut state, &env, "Back"));
@@ -443,8 +473,9 @@ fn bibles_reach_the_bible_page_only_with_continue_and_one_to_download_when_it_is
     assert!(state.bible.wanted.is_empty());
     // One whose download ended without it is waited for no longer, and the row stays.
     state.bible.wanted = vec![("never-came".to_owned(), 0)];
-    place_downloaded(&mut state.bible);
+    assert_eq!(place_downloaded(&mut state.bible), ["never-came"]);
     assert!(state.bible.wanted.is_empty());
+    state.bible.wanted_failed.clear();
     assert_eq!(state.bible.rows[0].bible, state.bible.shelf.position("kjv"));
     // Ready names the Bibles as they stand, top first.
     assert_eq!(bibles::names(&state).len(), 2);
@@ -700,6 +731,15 @@ fn ready_cases() -> Vec<ReadyCase> {
                 ..Default::default()
             });
             state.free_songbooks.known.busy.insert("pv3300", Some(38));
+        }),
+        // The longest Keys line, with the reports' longer line under it.
+        ("SoftProjector\u{2019}s keys and the end mark", Some(standing(false)), |state| {
+            state.keys.set_style(crate::key_table::KeyStyle::SoftProjector);
+            state.end_mark = true;
+        }),
+        ("a Bible failed to download", Some(standing(true)), |state| {
+            let offered = crate::bible::OFFERED.iter().find(|bible| state.bible.shelf.position(bible.id).is_none());
+            state.bible.wanted_failed = offered.map(|bible| (bible.id.to_owned(), 0)).into_iter().collect();
         }),
         ("no screen chosen", Some(standing(true)), |state| {
             for screen in &mut state.screens {
@@ -1060,7 +1100,7 @@ fn coming_from_softprojector_changes_the_keys_only_at_the_end_and_only_when_answ
         assert!(!state.end_mark);
         state.setup.as_mut().unwrap().step = Step::Ready;
         let ready = draw(&ctx, &mut state, &env);
-        assert!(said(&ready, "SoftProjector\u{2019}s keys \u{b7} * * * at a song\u{2019}s end"), "{ready:?}");
+        assert!(said(&ready, "SoftProjector\u{2019}s keys \u{b7} *\u{a0}*\u{a0}* at a song\u{2019}s end"), "{ready:?}");
         assert!(said(&ready, "Esc to hide the words"), "{ready:?}");
         assert!(press(&ctx, &mut state, &env, "Start Using SoftPresenter"));
         assert_eq!(state.keys.style, KeyStyle::SoftProjector);
@@ -1079,7 +1119,7 @@ fn coming_from_softprojector_changes_the_keys_only_at_the_end_and_only_when_answ
         state.setup = Some(Setup::opened_at("ready"));
         let ready = draw(&ctx, &mut state, &env);
         assert_eq!(state.setup.as_ref().unwrap().from_softprojector, Some(true));
-        assert!(said(&ready, "SoftProjector\u{2019}s keys") && !said(&ready, "* * *"), "{ready:?}");
+        assert!(said(&ready, "SoftProjector\u{2019}s keys") && !said(&ready, "*\u{a0}*\u{a0}*"), "{ready:?}");
         assert!(press(&ctx, &mut state, &env, "Start Using SoftPresenter"));
         assert_eq!(state.keys.style, KeyStyle::SoftProjector);
         assert!(!state.end_mark);
@@ -1134,5 +1174,207 @@ fn opened_again_and_continued_through_it_still_changes_nothing() {
         let choice = &state.setup.as_ref().unwrap().bibles;
         assert_eq!((choice.top.as_deref(), choice.below.as_deref()), (Some("kjv"), None));
         crate::songbooks::set_church_languages(&[]);
+    });
+}
+
+/// A Bible offered that isn't on this computer.
+fn to_download(state: &HomeState) -> &'static crate::bible::Offered {
+    crate::bible::OFFERED
+        .iter()
+        .find(|bible| state.bible.shelf.position(bible.id).is_none())
+        .expect("a Bible is offered that isn't here")
+}
+
+#[test]
+fn a_bible_that_fails_to_download_leaves_the_bible_page_as_it_was_and_says_so() {
+    with_language(Language::English, || {
+        let mut state = home("bible-fails");
+        let rows = state.bible.rows.clone();
+        assert!(rows[1].bible.is_some(), "the Bible page starts with two translations");
+        let offered = to_download(&state);
+        // A church with one language whose Bible is still to download: one translation chosen.
+        let mut choice = bibles::Choice::default();
+        choice.only(offered.id);
+        let mut started = Vec::new();
+        bibles::apply(&choice, &mut state.bible, true, &mut |bible| started.push(bible.id));
+        assert_eq!(started, [offered.id]);
+        // Nothing moves until it is here: both rows as they were, the row below too.
+        assert_eq!(state.bible.rows, rows);
+        assert!(state.bible.wanted_alone);
+        assert_eq!(state.bible.wanted, [(offered.id.to_owned(), 0)]);
+        // Ready says it is downloading, by its name alone (the row below goes when it comes).
+        let line = ready::bibles_ready_line(&state);
+        assert_eq!(line.words, format!("{} \u{b7} downloading", offered.name));
+        assert_eq!(line.mark, ready::Mark::Tick);
+        // The download ends without it (nothing is downloading it): the rows stay, its name
+        // comes back for the notice, and Ready says so in amber with Try Again.
+        let failed = place_downloaded(&mut state.bible);
+        assert_eq!(failed, [offered.name.to_owned()]);
+        assert_eq!(state.bible.rows, rows, "the Bible page keeps the Bibles it had");
+        assert!(state.bible.wanted.is_empty() && !state.bible.wanted_alone);
+        assert!(
+            bible_failed_words(offered.name).starts_with(&format!("{} couldn\u{2019}t be downloaded", offered.name))
+        );
+        assert!(place_downloaded(&mut state.bible).is_empty(), "said once");
+        let line = ready::bibles_ready_line(&state);
+        assert_eq!(line.mark, ready::Mark::Care);
+        assert_eq!(
+            line.words,
+            format!("{} didn\u{2019}t download. The Bible page keeps the Bibles it had.", offered.name)
+        );
+        let ctx = egui::Context::default();
+        let env = env(System::Windows);
+        state.setup = Some(Setup::opened_at("ready"));
+        let words = draw(&ctx, &mut state, &env);
+        assert!(said(&words, "didn\u{2019}t download") && said(&words, "Try Again"), "{words:?}");
+        // Choosing again in the step forgets the failure.
+        let mut choice = bibles::Choice::default();
+        choice.only("kjv");
+        bibles::apply(&choice, &mut state.bible, true, &mut |_| panic!("nothing to download"));
+        assert!(state.bible.wanted_failed.is_empty());
+        assert_eq!(state.bible.rows[0].bible, state.bible.shelf.position("kjv"));
+        assert_eq!(state.bible.rows[1].bible, None, "one on this computer leaves one translation at once");
+    });
+}
+
+#[test]
+fn one_translation_empties_the_row_below_once_its_bible_is_here() {
+    let mut state = home("bible-arrives");
+    let web = state.bible.shelf.position("web").unwrap();
+    // As if World English had been asked for alone and has just landed on the shelf.
+    state.bible.wanted = vec![("web".to_owned(), 0)];
+    state.bible.wanted_alone = true;
+    assert!(place_downloaded(&mut state.bible).is_empty());
+    assert_eq!(state.bible.rows[0].bible, Some(web));
+    assert_eq!(state.bible.rows[1].bible, None);
+    assert!(!state.bible.wanted_alone && state.bible.wanted_failed.is_empty());
+    // Two translations, the one below still to come: the top goes on now, the row below keeps
+    // what it had and is waited for.
+    let mut state = home("bible-below-waits");
+    let rows = state.bible.rows.clone();
+    let offered = to_download(&state);
+    let mut choice = bibles::Choice::default();
+    choice.top = Some("kjv".to_owned());
+    choice.below = Some(offered.id.to_owned());
+    bibles::apply(&choice, &mut state.bible, true, &mut |_| {});
+    assert_eq!(state.bible.rows[0].bible, state.bible.shelf.position("kjv"));
+    assert_eq!(state.bible.rows[1], rows[1]);
+    assert_eq!(state.bible.wanted, [(offered.id.to_owned(), 1)]);
+    assert!(!state.bible.wanted_alone);
+}
+
+#[test]
+fn a_step_clicked_along_the_top_takes_the_choices_as_the_key_does() {
+    with_language(Language::English, || {
+        let ctx = egui::Context::default();
+        let env = Env { bibles_download: false, ..env(System::Windows) };
+        // Every step has been reached, so each can be clicked along the top.
+        let mut state = home("top");
+        state.setup = Some(Setup::opened_at("ready"));
+        draw(&ctx, &mut state, &env);
+        assert!(press(&ctx, &mut state, &env, "Songs"));
+        // Going back took nothing.
+        assert!(state.free_songbooks.asks.is_empty());
+        draw(&ctx, &mut state, &env);
+        assert_eq!(state.setup.as_ref().unwrap().shared.ticked, ["christian-hymns"]);
+        // Bibles, clicked from Songs: the songbook ticked is asked for, as Continue asks.
+        assert!(press(&ctx, &mut state, &env, "Bibles"));
+        assert_eq!(step_of(&state), Step::Bibles);
+        assert_eq!(state.free_songbooks.asks, [crate::free_songbooks::Ask::Install("christian-hymns")]);
+        // Ready, clicked from Bibles: the Bible page has the choice (the King James alone).
+        let kjv = state.bible.shelf.position("kjv");
+        assert_ne!(state.bible.rows[0].bible, kjv);
+        assert!(press(&ctx, &mut state, &env, "Ready"));
+        assert_eq!(step_of(&state), Step::Ready);
+        assert_eq!(state.bible.rows[0].bible, kjv);
+        // Languages with none chosen can't be left by the steps along the top either.
+        let mut state = home("top-languages");
+        state.setup = Some(Setup::opened_at("ready"));
+        draw(&ctx, &mut state, &env);
+        assert!(press(&ctx, &mut state, &env, "Languages"));
+        assert!(press(&ctx, &mut state, &env, "English"));
+        assert!(state.setup.as_ref().unwrap().languages.is_empty());
+        press(&ctx, &mut state, &env, "Songs");
+        assert_eq!(step_of(&state), Step::Languages);
+    });
+}
+
+#[test]
+fn ready_does_not_tick_languages_that_were_skipped_and_never_kept() {
+    with_language(Language::English, || {
+        let ctx = egui::Context::default();
+        let env = env(System::Mac);
+        let mut state = home("no-languages");
+        assert!(press(&ctx, &mut state, &env, "Get Started"));
+        for _ in 0..4 {
+            assert!(press(&ctx, &mut state, &env, "Skip"));
+        }
+        let words = draw(&ctx, &mut state, &env);
+        assert!(state.church_languages.is_empty());
+        assert!(
+            said(
+                &words,
+                "Not chosen yet. Songbooks and Bibles are recommended by the app\u{2019}s language until they are."
+            ),
+            "{words:?}"
+        );
+        let line = ready::languages_line(&["en".to_owned()], false);
+        assert_eq!(line.mark, ready::Mark::Dash);
+        // Answered, they are named and ticked.
+        let line = ready::languages_line(&["ru".to_owned(), "en".to_owned()], true);
+        assert_eq!((line.words.as_str(), line.mark), ("Русский on top, English below", ready::Mark::Tick));
+    });
+}
+
+#[test]
+fn escape_closes_an_open_menu_and_not_the_setup() {
+    with_language(Language::English, || {
+        let ctx = egui::Context::default();
+        let env = env(System::Mac);
+        let show = Show::new(Vec::new());
+        let escape = || egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut state = home("escape-menu");
+        state.setup = Some(Setup::opened_at("languages"));
+        draw(&ctx, &mut state, &env);
+        state.setup.as_mut().unwrap().languages = vec!["en".to_owned(), "ru".to_owned()];
+        draw(&ctx, &mut state, &env);
+        // Open On top's menu (its box shows the language on top), then press Escape.
+        let boxes: Vec<Rect> =
+            draw(&ctx, &mut state, &env).into_iter().filter(|(text, _)| text == "English").map(|(_, at)| at).collect();
+        let menu = boxes.iter().copied().max_by(|a, b| a.min.x.total_cmp(&b.min.x)).expect("On top shows English");
+        let press_at = |pressed| egui::Event::PointerButton {
+            pos: menu.center(),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for events in
+            [vec![egui::Event::PointerMoved(menu.center())], vec![press_at(true)], vec![press_at(false)], vec![]]
+        {
+            drawn(&ctx, events, &mut |ui| {
+                let mut commands = Vec::new();
+                setup_ui_in(ui.ctx(), &show, &mut state, &mut commands, &env);
+            });
+        }
+        assert!(egui::Popup::is_any_open(&ctx), "the menu is open");
+        drawn(&ctx, vec![escape()], &mut |ui| {
+            let mut commands = Vec::new();
+            setup_ui_in(ui.ctx(), &show, &mut state, &mut commands, &env);
+        });
+        assert!(state.setup.is_some(), "Escape closed the menu, not the setup");
+        // With no menu open, Escape closes the setup.
+        draw(&ctx, &mut state, &env);
+        assert!(!egui::Popup::is_any_open(&ctx));
+        drawn(&ctx, vec![escape()], &mut |ui| {
+            let mut commands = Vec::new();
+            setup_ui_in(ui.ctx(), &show, &mut state, &mut commands, &env);
+        });
+        assert!(state.setup.is_none());
     });
 }
