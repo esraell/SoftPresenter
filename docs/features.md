@@ -1906,7 +1906,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   its version (asked of the runtime itself), or, in amber, that an update may be out. Its page
   has one row that keeps its height and its key's width: **Install NDI**; "NDI 6.1.1 is
   installed." with **Check for Updates** and when it was last checked; "A newer NDI may be
-  available. You have 6.1.1." with an amber **Install Update**; then Where it's used (a key
+  available. You have 6.1.1." with an amber **Install Update** (the row keeps room for its
+  longest state's lines in the language set, so it never changes height); then Where it's used (a key
   to Screens), Remove NDI (**Remove…**, which asks first) and NDI's trademark line. A screen
   sent over NDI, an NDI Source box in the inspector and the setup's Screens step each have
   **Install NDI…** while NDI isn't installed, opening the same window.
@@ -1919,7 +1920,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     Cancel, a failure, and a finished install all delete the download. A failure says why at
     its step, with Try Again: no internet connection; a network that checks secure connections
     (a certificate the computer doesn't trust); a full disk; a download that isn't what NDI
-    usually sends; on Windows, NDI's installer closed before it finished.
+    usually sends; on Windows, NDI's installer closed before it finished. What fits none of
+    those is said as what it is: NDI's server not answering as it should, a download with no
+    NDI for this processor, a disk that couldn't be written. What is said once (cancelled,
+    updated, removed) shows under the card's rows. With one display the setup's Screens step
+    has no Identify row, and so no Install NDI… key; NDI is then installed from Settings.
   - **Linux:** the download is NDI's SDK for Linux (68 MB in November 2026). NDI's licence
     from inside it is shown whole, in a box that scrolls and takes the keyboard. Only Accept
     installs anything: NDI's runtime for the computer's processor (64-bit Intel or AMD; 64-bit
@@ -1936,7 +1941,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     signed it, and opens it as it is; NDI's installer shows NDI's licence and Windows asks for
     an administrator's permission (SoftPresenter never asks for a password). The window waits
     for it, with Stop Waiting. Remove… opens NDI's own uninstaller the same way, and only for
-    an NDI that NDI's runtime installer put there, never NDI Tools.
+    an NDI that NDI's runtime installer put there, never NDI Tools. **It waits while anything
+    is on screen:** NDI's installer resets the computer's network settings, which would cut
+    NDI, a stream or the phone remote, so while a slide or a video is on screen the keys that
+    would open it (Install NDI, Install Update, Try Again, and the window's Download) are
+    greyed, with "Something is on screen" and the reason beside them, and an update whose
+    download finishes meanwhile opens NDI's installer only once the screens are clear.
   - **Updates.** NDI publishes no list of versions, so Check for Updates (and, at most once a
     day, opening the card; never in the background) asks NDI's server only what it says of
     its download: when it was last changed, the mark that changes with its contents, and its

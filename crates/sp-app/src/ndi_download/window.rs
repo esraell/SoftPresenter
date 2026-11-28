@@ -33,6 +33,8 @@ struct FootKey {
     words: &'static str,
     main: bool,
     asks: Asked,
+    /// Greyed because something is on screen (Windows): it says so under the pointer.
+    held: bool,
 }
 
 /// What a key of the window asks for, done once the drawing is over.
@@ -52,7 +54,7 @@ fn step_at(stage: &Stage, steps: usize) -> isize {
         Stage::Idle | Stage::About | Stage::Removing => -1,
         Stage::Fetching => 0,
         Stage::Licence(_) => 1,
-        Stage::Installing => last,
+        Stage::Installing | Stage::Held(_) => last,
         Stage::Done { .. } => last + 1,
         Stage::Failed { step, .. } => match step {
             Step::Download => 0,
@@ -73,26 +75,45 @@ fn step_names() -> Vec<&'static str> {
 }
 
 /// The keys of a step's foot, left to right.
-fn foot_keys(stage: &Stage) -> Vec<FootKey> {
-    let cancel = FootKey { words: t("integrations.ndi.key.cancel", "Cancel"), main: false, asks: Asked::Cancel };
+fn foot_keys(stage: &Stage, held: bool) -> Vec<FootKey> {
+    let cancel =
+        FootKey { words: t("integrations.ndi.key.cancel", "Cancel"), main: false, asks: Asked::Cancel, held: false };
     match stage {
         Stage::About => vec![
             cancel,
-            FootKey { words: t("integrations.ndi.key.download", "Download"), main: true, asks: Asked::Begin },
+            FootKey { words: t("integrations.ndi.key.download", "Download"), main: true, asks: Asked::Begin, held },
         ],
-        Stage::Fetching => vec![cancel],
+        Stage::Fetching | Stage::Held(_) => vec![cancel],
         Stage::Licence(_) => {
-            vec![cancel, FootKey { words: t("integrations.ndi.key.accept", "Accept"), main: true, asks: Asked::Accept }]
+            vec![
+                cancel,
+                FootKey {
+                    words: t("integrations.ndi.key.accept", "Accept"),
+                    main: true,
+                    asks: Asked::Accept,
+                    held: false,
+                },
+            ]
         }
         Stage::Installing if way().installer() => {
-            vec![FootKey { words: t("integrations.ndi.key.stop", "Stop Waiting"), main: false, asks: Asked::Cancel }]
+            vec![FootKey {
+                words: t("integrations.ndi.key.stop", "Stop Waiting"),
+                main: false,
+                asks: Asked::Cancel,
+                held: false,
+            }]
         }
         Stage::Done { .. } => {
-            vec![FootKey { words: t("integrations.ndi.key.done", "Done"), main: true, asks: Asked::Finish }]
+            vec![FootKey {
+                words: t("integrations.ndi.key.done", "Done"),
+                main: true,
+                asks: Asked::Finish,
+                held: false,
+            }]
         }
         Stage::Failed { .. } => vec![
-            FootKey { words: t("integrations.ndi.key.close", "Close"), main: false, asks: Asked::Cancel },
-            FootKey { words: t("integrations.ndi.key.again", "Try Again"), main: true, asks: Asked::Begin },
+            FootKey { words: t("integrations.ndi.key.close", "Close"), main: false, asks: Asked::Cancel, held: false },
+            FootKey { words: t("integrations.ndi.key.again", "Try Again"), main: true, asks: Asked::Begin, held },
         ],
         Stage::Installing | Stage::Idle | Stage::Removing => Vec::new(),
     }
@@ -142,11 +163,11 @@ pub fn window(ctx: &egui::Context, download: &mut NdiDownload, place: Place) {
     }
     let screen = ctx.content_rect();
     let sheet = Rect::from_center_size(screen.center(), SIZE);
-    let keys = foot_keys(&download.stage);
+    let keys = foot_keys(&download.stage, download.held());
     let mut asked = None;
     let mut hide = ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape));
     if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter)) {
-        asked = keys.iter().find(|key| key.main).map(|key| key.asks);
+        asked = keys.iter().find(|key| key.main && !key.held).map(|key| key.asks);
     }
     let area = egui::Area::new(egui::Id::unique("install ndi"))
         .order(egui::Order::Foreground)
@@ -196,9 +217,11 @@ pub fn window(ctx: &egui::Context, download: &mut NdiDownload, place: Place) {
             let wide = crate::studio::widest(ui, &[key.words], &font) + 26.0;
             let at = Rect::from_min_size(pos2(right - wide, inner.max.y - 30.0), vec2(wide, 30.0));
             let look = if key.main { Flat::Main } else { Flat::Plain };
-            if flat_button(ui, at, ui.scope_id().with(("install ndi key", index)), key.words, font, look, true)
-                .clicked()
-            {
+            let id = ui.scope_id().with(("install ndi key", index));
+            let pressed = flat_button(ui, at, id, key.words, font, look, !key.held);
+            // Greyed, never live and refusing: the reason is under the pointer.
+            let pressed = if key.held { pressed.on_hover_text(super::row::on_screen_words()) } else { pressed };
+            if pressed.clicked() && !key.held {
                 asked = Some(key.asks);
             }
             right = at.min.x - 8.0;
@@ -309,6 +332,21 @@ fn step_body(ui: &mut egui::Ui, body: Rect, download: &mut NdiDownload) {
                 ui.painter().circle_filled(pos2(place.min.x + 6.0, place.min.y + 9.0), 3.0, SELECTED);
                 ui.painter().galley(pos2(place.min.x + 18.0, place.min.y), words, TEXT_DIM);
             }
+            // On Windows with something on screen: why Download is greyed, in amber, at the
+            // step's foot.
+            if download.held() {
+                let words = ui.painter().layout(
+                    super::row::held_words().to_owned(),
+                    FontId::proportional(13.0),
+                    CARE,
+                    body.width(),
+                );
+                ui.painter().galley(pos2(body.min.x, body.max.y - words.size().y), words, CARE);
+            }
+        }
+        Stage::Held(_) => {
+            lead(ui, super::row::downloaded_words(), TEXT);
+            ui.add(egui::Label::new(egui::RichText::new(super::row::held_words()).size(13.0).color(CARE)).wrap());
         }
         Stage::Fetching => {
             let shared = &download.shared;
@@ -719,7 +757,26 @@ mod tests {
             // Its parts fit in it, the keys' row included.
             const { assert!(HEAD + STEPS + BODY + 30.0 + SIDE <= SIZE.y) };
             // A step with no key keeps the keys' row: the body is as tall at every step.
-            assert!(foot_keys(&Stage::Installing).len() <= 1);
+            assert!(foot_keys(&Stage::Installing, false).len() <= 1);
+        });
+    }
+
+    #[test]
+    fn on_windows_with_something_on_screen_download_is_greyed_and_says_why() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let mut download = fresh("held");
+            download.as_installer = Some(true);
+            download.set_on_screen(true);
+            let words = drawn(&mut download, &[]);
+            assert!(has(&words, "Install it when nothing is on screen."), "{words:?}");
+            assert!(foot_keys(&download.stage, download.held()).iter().any(|key| key.main && key.held));
+            // Enter, Download's key, does nothing while it is greyed.
+            drawn(&mut download, &[Key::Enter]);
+            assert!(matches!(download.stage, Stage::About), "nothing is downloaded");
+            // The screens clear: Download works.
+            download.set_on_screen(false);
+            assert!(!has(&drawn(&mut download, &[]), "Install it when nothing is on screen."));
+            assert!(foot_keys(&download.stage, download.held()).iter().all(|key| !key.held));
         });
     }
 }

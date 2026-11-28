@@ -9859,6 +9859,8 @@ impl App {
         };
         // NDI downloaded or removed in the app (Linux): looked for again at once, and the
         // screens that found no NDI are started again (below).
+        // (On Windows NDI's installer waits while anything is on screen: it is told each frame.)
+        running.home_state.ndi_download.set_on_screen(self.show.anything_live());
         running.home_state.ndi_download.poll();
         if running.home_state.ndi_download.take_changed() {
             running.ndi_checked = None;

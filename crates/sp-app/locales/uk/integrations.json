@@ -441,5 +441,8 @@
   "integrations.ndi.state.installed.unversioned": "Встановлено",
   "integrations.ndi.what": "Надсилає екран мережею і виводить камеру на слайд",
   "integrations.ndi.card.about": "Відео мережею: екрани назовні, камери всередину",
-  "integrations.ndi.row.hint": "Встановити NDI, перевірити, чи немає новішого, або видалити його"
+  "integrations.ndi.row.hint": "Встановити NDI, перевірити, чи немає новішого, або видалити його",
+  "integrations.ndi.held": "Інсталятор NDI скидає мережеві налаштування цього компʼютера. Встановлюйте його, коли на екранах нічого немає.",
+  "integrations.ndi.held.key": "Щось на екрані",
+  "integrations.ndi.downloaded": "NDI завантажено."
 }

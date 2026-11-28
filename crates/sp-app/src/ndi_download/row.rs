@@ -139,8 +139,44 @@ fn key_wordings() -> [&'static str; 6] {
     ]
 }
 
-/// How the row stands: `found` says whether NDI is on this computer.
+/// Why NDI isn't installed on Windows while anything is on screen.
+pub fn held_words() -> &'static str {
+    t(
+        "integrations.ndi.held",
+        "NDI\u{2019}s installer resets this computer\u{2019}s network settings. Install it when nothing is on screen.",
+    )
+}
+
+/// What a greyed key says under it, and as its hover.
+pub fn on_screen_words() -> &'static str {
+    t("integrations.ndi.held.key", "Something is on screen")
+}
+
+/// "NDI is downloaded.": NDI's installer waits for the screens to clear.
+pub fn downloaded_words() -> &'static str {
+    t("integrations.ndi.downloaded", "NDI is downloaded.")
+}
+
+/// How the row stands: `found` says whether NDI is on this computer. On Windows, while
+/// anything is on screen, the keys that would open NDI's installer (Install NDI, Install
+/// Update, Try Again) are greyed, never live and refusing, and the line under says why.
 pub fn row(download: &mut NdiDownload, found: bool) -> Row {
+    let mut row = standing(download, found);
+    let [install, _, update, _, _, again] = key_wordings();
+    if download.held() && row.act.is_some() && [install, update, again].contains(&row.key) {
+        row.under = held_words().to_owned();
+        row.act = None;
+    }
+    row
+}
+
+/// True for a row whose key is greyed because something is on screen.
+fn is_held(row: &Row) -> bool {
+    row.act.is_none() && row.under == held_words()
+}
+
+/// The row as it would stand with nothing on screen.
+fn standing(download: &mut NdiDownload, found: bool) -> Row {
     let [install, check, update_key, show, cancel, again] = key_wordings();
     let version = download.version();
     let plain = |line: String, under: String, key, act| Row { line, under, key, amber: false, act, bar: None };
@@ -182,7 +218,7 @@ pub fn row(download: &mut NdiDownload, found: bool) -> Row {
             }
         }
         Stage::Installing if download.update => {
-            if way().installer() {
+            if download.installer() {
                 plain(
                     t("integrations.ndi.installer", "NDI\u{2019}s installer is open. Follow its steps.").to_owned(),
                     t("integrations.ndi.installer.row", "Windows asks for an administrator\u{2019}s permission.")
@@ -212,14 +248,17 @@ pub fn row(download: &mut NdiDownload, found: bool) -> Row {
             act: Some(Act::Update),
             bar: None,
         },
-        Stage::Fetching | Stage::Licence(_) | Stage::Installing | Stage::Failed { .. } => busy(),
+        Stage::Held(_) if download.update => {
+            plain(downloaded_words().to_owned(), held_words().to_owned(), cancel, Some(Act::Cancel))
+        }
+        Stage::Fetching | Stage::Licence(_) | Stage::Held(_) | Stage::Installing | Stage::Failed { .. } => busy(),
         Stage::Removing => {
             plain(t("integrations.ndi.removing", "Removing NDI\u{2026}").to_owned(), String::new(), check, None)
         }
         Stage::Idle | Stage::About | Stage::Done { .. } => {
             let waiting = download.waiting().is_some();
             if !found && !waiting {
-                let under = if way().installer() {
+                let under = if download.installer() {
                     t(
                         "integrations.ndi.none.installer",
                         "SoftPresenter downloads NDI\u{2019}s own installer and opens it.",
@@ -276,6 +315,68 @@ pub fn row(download: &mut NdiDownload, found: bool) -> Row {
             plain(installed_line(version.as_deref()), under, check, Some(Act::Check))
         }
     }
+}
+
+/// Every note the row can show (its line, and the line under it), as long as each gets, for
+/// working out the room the row keeps: the row never changes height as its state does.
+fn every_note(version: &str) -> Vec<String> {
+    let both = |line: &str, under: &str| format!("{line}\n{under}");
+    let version_words = [("version", version)];
+    let installed = installed_line(Some(version));
+    let time = [("time", "12:00")];
+    let none = t("integrations.ndi.none", "NDI isn\u{2019}t installed on this computer.");
+    let newer = tf("integrations.ndi.newer", "A newer NDI may be available. You have {version}.", &version_words);
+    let mut notes = vec![
+        both(none, t("integrations.ndi.none.own", "SoftPresenter downloads it and keeps it in its own folder.")),
+        both(
+            none,
+            t("integrations.ndi.none.installer", "SoftPresenter downloads NDI\u{2019}s own installer and opens it."),
+        ),
+        both(none, held_words()),
+        both(&installed, t("integrations.ndi.not_checked", "Not checked yet")),
+        both(&installed, &tf("integrations.ndi.checked_at", "Checked at {time}. No newer NDI was found.", &time)),
+        both(&installed, &tf("integrations.ndi.updated_at", "Updated at {time}.", &time)),
+        both(
+            &installed,
+            t("integrations.ndi.next_start", "Screens sent over NDI use it the next time SoftPresenter starts."),
+        ),
+        both(&newer, held_words()),
+        both(
+            t("integrations.ndi.installer", "NDI\u{2019}s installer is open. Follow its steps."),
+            t("integrations.ndi.installer.row", "Windows asks for an administrator\u{2019}s permission."),
+        ),
+        both(downloaded_words(), held_words()),
+        both(
+            t("integrations.ndi.busy", "NDI is being installed\u{2026}"),
+            t("integrations.ndi.busy.under", "Its window is open."),
+        ),
+    ];
+    let still = tf("integrations.ndi.still", "NDI {version} is still installed.", &version_words);
+    for problem in [
+        Problem::Offline,
+        Problem::Blocked,
+        Problem::DiskFull,
+        Problem::Network(String::new()),
+        Problem::Closed,
+        Problem::Damaged(String::new()),
+        Problem::NoRuntime(std::env::consts::ARCH.to_owned()),
+    ] {
+        notes.push(both(&failed_line(&problem, true), &still));
+        notes.push(both(&failed_line(&problem, true), held_words()));
+    }
+    notes
+}
+
+/// How many lines the row's note keeps room for, `room` wide: those of its longest state, in
+/// the language set, and never fewer than what it shows now.
+fn kept_lines(ui: &egui::Ui, room: f32, version: &str, now: &str) -> usize {
+    every_note(version)
+        .iter()
+        .map(String::as_str)
+        .chain([now])
+        .map(|note| parts::note_lines(ui, note, room))
+        .max()
+        .unwrap_or(2)
 }
 
 /// What is said once, under the card's rows, after something ended.
@@ -367,7 +468,18 @@ pub fn rows(ui: &mut egui::Ui, download: &mut NdiDownload, found: bool) -> bool 
     let width = ui.available_width();
     let beside = parts::room_beside_keys(ui, width, &[key]) >= parts::LABEL_ROOM;
     let note = if now.under.is_empty() { now.line.clone() } else { format!("{}\n{}", now.line, now.under) };
-    let (clicked, words) = parts::keys_row_keeping(ui, "ndi", "NDI", (&note, 2), &[key], beside);
+    let room = parts::keys_row_note_room(ui, width, &[key], beside);
+    // (A version as long as any, where none is known yet, so the room doesn't change when it is.)
+    let version = download.version().unwrap_or_else(|| "6.10.10".to_owned());
+    let kept = kept_lines(ui, room, &version, &note);
+    let (clicked, words) = parts::keys_row_keeping(ui, "ndi", "NDI", (&note, kept), &[key], beside);
+    // A key greyed because something is on screen says so under it.
+    if is_held(&now) && beside {
+        let font = egui::FontId::proportional(11.0);
+        let under = parts::words(ui, on_screen_words(), font, crate::studio::TEXT_FAINT, 0.0, f32::INFINITY);
+        let at = pos2(words.min.x + width - under.size().x, words.center().y + 15.0 + 2.0);
+        ui.painter().galley(at, under, crate::studio::TEXT_FAINT);
+    }
     // An update's bar: a thin line along the foot of the row's words, in room the row has.
     if let Some(part) = now.bar {
         let track = Rect::from_min_size(pos2(words.min.x, words.max.y + 4.0), vec2(words.width(), 4.0));
@@ -684,5 +796,135 @@ mod tests {
             assert_eq!(download.shown_in(), Some(Place::Settings));
             assert!(matches!(download.stage, Stage::About), "at its first step: nothing is downloaded yet");
         });
+    }
+
+    #[test]
+    fn on_windows_the_keys_that_install_are_greyed_while_anything_is_on_screen() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let held = "NDI\u{2019}s installer resets this computer\u{2019}s network settings. Install it when nothing is on screen.";
+            // Not installed, a newer one, an update that failed: greyed, with the reason.
+            let mut download = fresh("held");
+            download.as_installer = Some(true);
+            download.set_on_screen(true);
+            let now = row(&mut download, false);
+            assert_eq!((now.key, now.act, now.under.as_str()), ("Install NDI", None, held));
+            assert!(is_held(&now));
+            download.installed = installed("6.1.1");
+            download.checked = Some(Some(Checked { at: 1, newer: true, marks: Marks::default() }));
+            let now = row(&mut download, true);
+            assert_eq!((now.key, now.act, now.under.as_str()), ("Install Update", None, held));
+            download.update = true;
+            download.stage = Stage::Failed { problem: Problem::Offline, step: Step::Download };
+            let now = row(&mut download, true);
+            assert_eq!((now.key, now.act, now.under.as_str()), ("Try Again", None, held));
+            // Greyed keys do nothing if something asks all the same.
+            download.update(|| {});
+            assert!(matches!(download.stage, Stage::Failed { .. }), "no download starts");
+            download.stage = Stage::Idle;
+            download.update = false;
+            download.begin(|| {});
+            assert!(matches!(download.stage, Stage::Idle), "no download starts");
+            // Checking for a newer one is never held, and the screens clearing brings the key back.
+            download.checked = Some(None);
+            assert_eq!(row(&mut download, true).act, Some(Act::Check));
+            download.checked = Some(Some(Checked { at: 1, newer: true, marks: Marks::default() }));
+            download.set_on_screen(false);
+            let now = row(&mut download, true);
+            assert_eq!((now.key, now.act, now.under.as_str()), ("Install Update", Some(Act::Update), ""));
+            // On a Mac and Linux, which install into the app's own folder, nothing is held.
+            let mut own = fresh("not-held");
+            own.as_installer = Some(false);
+            own.set_on_screen(true);
+            assert_eq!(row(&mut own, false).act, Some(Act::Open));
+        });
+    }
+
+    #[test]
+    fn an_update_downloaded_while_something_is_on_screen_waits_for_the_screens_to_clear() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let mut download = fresh("waits");
+            download.as_installer = Some(true);
+            download.installed = installed("6.1.1");
+            download.update = true;
+            download.stage = Stage::Fetching;
+            // Something goes on screen while it downloads; the download finishes.
+            download.set_on_screen(true);
+            let ready = super::super::Ready {
+                download: std::path::PathBuf::from("/nonexistent/NDI 6 Runtime.exe"),
+                taken: super::super::Taken::Installer,
+                marks: Marks::default(),
+            };
+            download.fetched(ready);
+            assert!(matches!(download.stage, Stage::Held(_)), "NDI's installer is not opened");
+            let now = row(&mut download, true);
+            assert_eq!(now.line, "NDI is downloaded.");
+            assert!(now.under.starts_with("NDI\u{2019}s installer resets this computer\u{2019}s network settings."));
+            assert_eq!((now.key, now.act), ("Cancel", Some(Act::Cancel)));
+            // It stays so for as long as something is on screen.
+            download.poll();
+            assert!(matches!(download.stage, Stage::Held(_)));
+            // The screens clear: only now is NDI's installer opened.
+            download.set_on_screen(false);
+            download.poll();
+            assert!(matches!(download.stage, Stage::Installing));
+        });
+    }
+
+    #[test]
+    fn the_row_is_one_height_in_every_state_in_every_language() {
+        use crate::i18n::Language;
+        for language in Language::ALL {
+            crate::i18n::with_language(language, || {
+                for width in [520.0, 700.0, 824.0] {
+                    let ctx = egui::Context::default();
+                    let height = |download: &mut NdiDownload, found: bool| {
+                        let mut tall = 0.0;
+                        let mut drawn = ctx.run_ui(egui::RawInput::default(), |ui| {
+                            ui.set_width(width);
+                            super::rows(ui, download, found);
+                            tall = ui.min_rect().height();
+                        });
+                        drawn.textures_delta.clear();
+                        tall
+                    };
+                    let mut heights = Vec::new();
+                    let mut download = fresh("one-height");
+                    download.installed = installed("6.1.1");
+                    heights.push(("installed", height(&mut download, true)));
+                    download.checked = Some(Some(Checked { at: 1, newer: true, marks: Marks::default() }));
+                    heights.push(("newer", height(&mut download, true)));
+                    download.update = true;
+                    download.stage = Stage::Fetching;
+                    download.shared.total.store(68_000_000, Ordering::Relaxed);
+                    download.shared.done.store(30_600_000, Ordering::Relaxed);
+                    heights.push(("updating", height(&mut download, true)));
+                    download.stage = Stage::Installing;
+                    heights.push(("installing", height(&mut download, true)));
+                    for problem in [
+                        Problem::Offline,
+                        Problem::Blocked,
+                        Problem::DiskFull,
+                        Problem::Damaged(String::new()),
+                        Problem::Network(String::new()),
+                        Problem::Closed,
+                    ] {
+                        download.stage = Stage::Failed { problem, step: Step::Download };
+                        heights.push(("failed", height(&mut download, true)));
+                    }
+                    // Windows, with something on screen.
+                    download.as_installer = Some(true);
+                    download.set_on_screen(true);
+                    heights.push(("failed, held", height(&mut download, true)));
+                    download.stage = Stage::Idle;
+                    download.update = false;
+                    heights.push(("newer, held", height(&mut download, true)));
+                    let first = heights[0].1;
+                    assert!(
+                        heights.iter().all(|(_, tall)| (tall - first).abs() < 0.5),
+                        "{language:?} at {width}: {heights:?}"
+                    );
+                }
+            });
+        }
     }
 }

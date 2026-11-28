@@ -18,6 +18,7 @@ Settings and playlists that couldn't be saved are tried again.
 
 - **NDI trouble in plain words.** When NDI can't be downloaded, SoftPresenter says whether there is no internet, the network blocked the secure connection, the disk is full or the download wasn't what NDI usually sends, with Try Again.
 - **NDI is checked before it is used.** The NDI that SoftPresenter keeps in its own folder is checked each time before it is used, so a file put there by anything else is never run; SoftPresenter then says NDI isn't installed, and Install NDI puts it right.
+- **NDI on Windows waits for clear screens.** NDI's own installer resets a PC's network settings, so on Windows the keys that install or update NDI are greyed while anything is on screen, and say so.
 
 ### Fixed
 

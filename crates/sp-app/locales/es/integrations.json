@@ -462,5 +462,8 @@
   "integrations.ndi.state.installed.unversioned": "Instalado",
   "integrations.ndi.what": "Envía una pantalla por la red y trae una cámara a una diapositiva",
   "integrations.ndi.card.about": "Vídeo por la red: pantallas que salen, cámaras que entran",
-  "integrations.ndi.row.hint": "Instala NDI, busca uno más nuevo o quítalo"
+  "integrations.ndi.row.hint": "Instala NDI, busca uno más nuevo o quítalo",
+  "integrations.ndi.held": "El instalador de NDI restablece los ajustes de red de este ordenador. Instálalo cuando no haya nada en pantalla.",
+  "integrations.ndi.held.key": "Hay algo en pantalla",
+  "integrations.ndi.downloaded": "NDI está descargado."
 }
