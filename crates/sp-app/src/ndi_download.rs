@@ -139,10 +139,12 @@ fn source() -> &'static (String, Way, bool) {
         // Testing aid: SOFTPRESENTER_NDI_SDK_URL=<address> downloads NDI's SDK for Linux from
         // there instead of NDI's server (plain http only from this computer), and installs the
         // Linux way on any system, so a test copy can go the whole way through with a made-up
-        // SDK. Only for a copy with a data folder of its own.
+        // SDK. Only for a copy with a data folder of its own, and only for an address on this
+        // computer (http://127.0.0.1 or http://localhost); with any other the switch is ignored.
         let own_data = std::env::var_os("SOFTPRESENTER_DATA").is_some_and(|folder| !folder.is_empty());
         match std::env::var("SOFTPRESENTER_NDI_SDK_URL") {
-            Ok(address) if own_data && !address.is_empty() => (address, Way::Sdk, true),
+            // (Only a server on this computer: a test copy never asks anywhere else.)
+            Ok(address) if own_data && on_this_computer(&address) => (address, Way::Sdk, true),
             _ => {
                 let way = if cfg!(target_os = "macos") {
                     Way::Package
