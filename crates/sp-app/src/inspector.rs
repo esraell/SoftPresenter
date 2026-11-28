@@ -1418,11 +1418,18 @@ fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
             let (dot, _) = ui.allocate_exact_size(vec2(10.0, KEY), Sense::hover());
             ui.painter().circle_filled(dot.center(), 4.5, crate::home::group_dot_colour(colour));
             let said = if name.is_empty() { t("slides.menu.label.none", "None") } else { name.as_str() };
-            let words = egui::RichText::new(said).size(13.0).color(INK);
+            // The name has all the room there is, so Change… stands at the row's right end; a
+            // name too long for it is cut short, and said whole under the pointer.
             let name_room = vec2(room - 10.0 - key_wide - 2.0 * BETWEEN, KEY);
-            ui.allocate_ui_with_layout(name_room, Layout::left_to_right(Align::Center), |ui| {
-                ui.add(egui::Label::new(words).truncate()).on_hover_text(said);
-            });
+            let (place, over) = ui.allocate_exact_size(name_room, Sense::hover());
+            let mut job = egui::text::LayoutJob::simple_singleline(said.to_owned(), FontId::proportional(13.0), INK);
+            job.wrap = egui::text::TextWrapping::truncate_at_width(place.width());
+            let words = ui.ctx().fonts_mut(|fonts| fonts.layout_job(job));
+            let cut = words.elided;
+            ui.painter().galley(pos2(place.min.x, place.center().y - words.size().y / 2.0), words, INK);
+            if cut {
+                over.on_hover_text(said);
+            }
             let key = word_key(ui, change, false, true).on_hover_text(t(
                 "inspector.slide.group.hint",
                 "This slide and the slides after it in its group become the group you choose",
@@ -4266,6 +4273,38 @@ mod tests {
                 }
             }
         });
+    }
+
+    #[test]
+    fn the_slide_panels_group_row_keeps_its_name_and_change_apart_inside_the_column_in_every_language() {
+        let theme = Theme::builtin();
+        for language in LANGUAGES {
+            crate::i18n::with_language(language, || {
+                for name in ["Chorus", "A group with a name far too long for the row it is on"] {
+                    let mut state = editing_text(InspectorTab::Own, false, false);
+                    if let Some(draft) = state.editing.as_mut() {
+                        draft.select_only(None);
+                    }
+                    state.edited_slide_group = Some((name.to_owned(), Rgba { r: 200, g: 80, b: 180, a: 255 }));
+                    let words = word_rects(&mut state, &theme);
+                    let change = t("inspector.slide.group.change", "Change\u{2026}");
+                    let key = words.iter().find(|(said, _)| said == change).map(|(_, place)| *place);
+                    let key = key.unwrap_or_else(|| panic!("{language:?}: {change} in {words:?}"));
+                    // Change… ends inside the column, at its right; the name, cut short where
+                    // it is long, ends before it.
+                    assert!(key.max.x <= PANEL_WIDTH + 0.5, "{language:?}: {key:?}");
+                    assert!(key.min.x > PANEL_WIDTH / 2.0, "{language:?}: Change… is at the row's right: {key:?}");
+                    let said = words.iter().find(|(said, place)| {
+                        said.starts_with(&name[..5]) && (place.center().y - key.center().y).abs() < 12.0
+                    });
+                    let (_, said) = said.unwrap_or_else(|| panic!("{language:?}: {name} in {words:?}"));
+                    assert!(said.max.x <= key.min.x, "{language:?} {name}: {said:?} runs into {key:?}");
+                    for control in keys_drawn(&mut state, &theme) {
+                        assert!(control.max.x <= PANEL_WIDTH + 0.5, "{language:?}: {control:?} is past the column");
+                    }
+                }
+            });
+        }
     }
 
     #[test]
