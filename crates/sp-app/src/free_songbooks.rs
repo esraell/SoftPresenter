@@ -832,6 +832,12 @@ impl Picked {
         }
     }
 
+    /// Opened again from Settings: the recommended ones are marked but none is ticked unasked.
+    pub fn leave_unticked(&mut self) {
+        self.ticked.clear();
+        self.touched = true;
+    }
+
     /// What is to be installed once the step is passed: nothing unless it was left with
     /// Continue, and nothing installed or on its way already.
     pub fn to_install(&self, known: &Known) -> Vec<&'static str> {

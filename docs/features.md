@@ -1899,7 +1899,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   nothing, so it has only the second fold. Its words fit the system: no Mac names or menus
   off a Mac. A step left with Skip or Back changes nothing, and Skip Setup (or Escape) says
   where the setup lives. Settings › Set up SoftPresenter… opens it again, as a sheet over the
-  window with the answers as they stand; closing it there changes nothing. In a pre-release (a version with
+  window with the answers as they stand (the languages, where they were never asked, are those of
+  the Bibles the Bible page shows; the recommended songbooks are marked but none is ticked);
+  closing it, or going through it with Continue and no answer changed, changes nothing. In a pre-release (a version with
   a part after its three numbers, such as 0.9.0-dev.16) the welcome says so in a small card
   under the language: "This is a pre-release (0.9.0-dev.16)", then "Things may still change: the
   core of how SoftPresenter works and looks will stay, and bugs will be fixed in the versions

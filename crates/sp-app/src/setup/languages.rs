@@ -10,19 +10,22 @@ use crate::home::HomeState;
 use crate::i18n::{t, tf, tn};
 use crate::studio::{CARD, HOVER, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 
-/// The languages the step starts with: the church's as they were answered before (`kept`),
-/// else those of the computer's preferred languages (`computer`, as the system writes them)
-/// that the step offers, its own first, else English.
-pub fn starting(kept: &[String], computer: &[String]) -> Vec<String> {
+/// The languages the step starts with: the church's as they were answered before (`kept`);
+/// else, opened again, those of the Bibles the Bible page shows (`standing`, top first); else
+/// those of the computer's preferred languages (`computer`, as the system writes them); each
+/// only where the step offers it, and English when none is.
+pub fn starting(kept: &[String], standing: &[String], computer: &[String]) -> Vec<String> {
     let offered = |code: &str| LANGUAGES.contains(&code);
     let mut out: Vec<String> = Vec::new();
-    let from: Vec<String> = if kept.is_empty() {
+    let from: Vec<String> = if !kept.is_empty() {
+        kept.to_vec()
+    } else if standing.iter().any(|code| offered(code)) {
+        standing.to_vec()
+    } else {
         computer
             .iter()
             .map(|tag| tag.trim().split(['-', '_', '.', '@']).next().unwrap_or("").to_ascii_lowercase())
             .collect()
-    } else {
-        kept.to_vec()
     };
     for code in from {
         if offered(&code) && !out.contains(&code) {
@@ -37,13 +40,18 @@ pub fn starting(kept: &[String], computer: &[String]) -> Vec<String> {
 
 /// The step was passed (Continue, or a step further on clicked): the church's languages are
 /// kept, the recommendations everywhere follow them, and the Bibles step starts from the
-/// recommended Bible of each.
+/// recommended Bible of each. Opened again and passed with the languages it opened with,
+/// nothing is kept anew and the Bibles chosen stay as they stand.
 pub fn passed(setup: &mut Setup, state: &mut HomeState) {
+    if setup.again() && setup.languages == setup.languages_opened {
+        return;
+    }
     if state.church_languages != setup.languages {
         state.church_languages.clone_from(&setup.languages);
         crate::songbooks::set_church_languages(&state.church_languages);
     }
     setup.bibles.follow_languages(state, &setup.languages);
+    setup.languages_opened.clone_from(&setup.languages);
 }
 
 /// How many free songs there are to start with in a language: its free songbooks' songs.

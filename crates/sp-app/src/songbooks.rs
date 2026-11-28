@@ -174,6 +174,12 @@ impl Picked {
         }
     }
 
+    /// Opened again from Settings: the recommended ones are marked but none is ticked unasked.
+    pub fn leave_unticked(&mut self) {
+        self.ticked.clear();
+        self.touched = true;
+    }
+
     /// What is to download when the setup closes: nothing unless the step was left with Continue,
     /// nothing while the source can't be reached (the step shows nothing ticked then; Settings
     /// downloads later), and nothing on this computer already.

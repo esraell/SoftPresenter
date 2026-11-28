@@ -306,10 +306,10 @@ fn skip_changes_nothing_and_ready_says_what_is_missing() {
 fn the_languages_choose_what_is_recommended() {
     // The computer's languages start chosen, those the step offers; kept answers come back.
     let tags = |tags: &[&str]| tags.iter().map(|tag| (*tag).to_owned()).collect::<Vec<String>>();
-    assert_eq!(languages::starting(&[], &tags(&["ru-RU", "en-US", "de-DE"])), ["ru", "en"]);
-    assert_eq!(languages::starting(&[], &tags(&["cs-CZ"])), ["en"]);
-    assert_eq!(languages::starting(&[], &[]), ["en"]);
-    assert_eq!(languages::starting(&tags(&["uk", "ru"]), &tags(&["en-US"])), ["uk", "ru"]);
+    assert_eq!(languages::starting(&[], &[], &tags(&["ru-RU", "en-US", "de-DE"])), ["ru", "en"]);
+    assert_eq!(languages::starting(&[], &[], &tags(&["cs-CZ"])), ["en"]);
+    assert_eq!(languages::starting(&[], &[], &[]), ["en"]);
+    assert_eq!(languages::starting(&tags(&["uk", "ru"]), &tags(&["en"]), &tags(&["en-US"])), ["uk", "ru"]);
     // The song catalog: the church's languages, not the app's own.
     let church = tags(&["ru", "uk"]);
     assert_eq!(crate::songbooks::recommended_for(&church), ["ru", "uk"]);
@@ -1087,5 +1087,52 @@ fn coming_from_softprojector_changes_the_keys_only_at_the_end_and_only_when_answ
         let mut state = home("from-mac");
         let mac = draw(&ctx, &mut state, &Env { system: System::Mac, ..env.clone() });
         assert!(said(&mac, "Yes keeps SoftProjector\u{2019}s Esc, which hides the words") && !said(&mac, "F5"));
+    });
+}
+
+#[test]
+fn opened_again_and_continued_through_it_still_changes_nothing() {
+    with_language(Language::English, || {
+        let ctx = egui::Context::default();
+        let env = env(System::Mac);
+        // Someone with the Synodal on top and the King James below, on an English computer,
+        // who was never asked their church's languages.
+        let mut state = home("again-continue");
+        state.setup_done = true;
+        let before = state.prefs();
+        let rows = state.bible.rows.clone();
+        let (style, mark) = (state.keys.style, state.end_mark);
+        state.setup = Some(Setup::new());
+        draw(&ctx, &mut state, &env);
+        // Their languages are those of the Bibles they show, top first.
+        assert_eq!(state.setup.as_ref().unwrap().languages, ["ru", "en"]);
+        assert_eq!(languages::starting(&[], &["ru".to_owned(), "en".to_owned()], &["en-US".to_owned()]), ["ru", "en"]);
+        for step in [Step::Welcome, Step::Languages, Step::Songs, Step::Bibles, Step::Screens] {
+            assert_eq!(step_of(&state), step);
+            let words = draw(&ctx, &mut state, &env);
+            if step == Step::Songs {
+                // Recommended is said, but nothing is ticked for them.
+                assert!(said(&words, "Recommended"));
+                assert!(state.setup.as_ref().unwrap().shared.ticked.is_empty());
+            }
+            assert!(press(&ctx, &mut state, &env, "Continue"), "{step:?}");
+        }
+        assert_eq!(step_of(&state), Step::Ready);
+        assert!(press(&ctx, &mut state, &env, "Start Using SoftPresenter"));
+        assert!(state.setup.is_none());
+        assert_eq!(state.prefs(), before, "the preferences are as they were");
+        assert_eq!(state.bible.rows, rows);
+        assert!(state.free_songbooks.asks.is_empty() && state.songbooks.asks.is_empty());
+        assert!(state.find_songs.asks.is_empty() && state.bible.wanted.is_empty());
+        assert_eq!((state.keys.style, state.end_mark), (style, mark));
+        // Changing the languages there is asking: the Bibles then follow them.
+        state.setup = Some(Setup::opened_at("languages"));
+        draw(&ctx, &mut state, &env);
+        assert!(press(&ctx, &mut state, &env, "Русский"));
+        assert!(press(&ctx, &mut state, &env, "Continue"));
+        assert_eq!(state.church_languages, ["en"]);
+        let choice = &state.setup.as_ref().unwrap().bibles;
+        assert_eq!((choice.top.as_deref(), choice.below.as_deref()), (Some("kjv"), None));
+        crate::songbooks::set_church_languages(&[]);
     });
 }

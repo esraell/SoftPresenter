@@ -292,6 +292,21 @@ pub fn row_words(bible: &Entry) -> String {
     }
 }
 
+/// The languages of the Bibles the Bible page's first two rows show, top first, each once.
+pub fn languages_standing(state: &HomeState) -> Vec<String> {
+    let bible = &state.bible;
+    let mut out: Vec<String> = Vec::new();
+    for row in bible.rows.iter().take(2) {
+        if let Some(shelved) = row.bible.and_then(|at| bible.shelf.bibles.get(at)) {
+            let code = code_of(&shelved.language);
+            if !out.contains(&code) {
+                out.push(code);
+            }
+        }
+    }
+    out
+}
+
 /// The names of the Bibles the Bible page shows, top first, as Ready says them: its rows as
 /// they stand, a row waiting for a download named by what it waits for.
 pub fn names(state: &HomeState) -> Vec<String> {

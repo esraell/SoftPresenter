@@ -133,6 +133,9 @@ pub struct Setup {
     from_softprojector: Option<bool>,
     /// Whether the keys were SoftProjector's when the setup opened.
     softprojector_was: bool,
+    /// The languages the Languages step opened with: opened again, passing it with them
+    /// unchanged keeps nothing new and leaves the Bibles chosen alone.
+    languages_opened: Vec<String>,
 }
 
 impl Setup {
@@ -152,6 +155,7 @@ impl Setup {
             reports: None,
             from_softprojector: None,
             softprojector_was: false,
+            languages_opened: Vec::new(),
         }
     }
 
@@ -280,7 +284,15 @@ pub fn setup_ui_in(ctx: &egui::Context, show: &Show, state: &mut HomeState, comm
     // The first drawing: whether it is a first start, and the answers as things stand.
     if setup.again.is_none() {
         setup.again = Some(state.setup_done);
-        setup.languages = languages::starting(&state.church_languages, &env.computer_languages);
+        // Opened again by someone never asked their languages: those of the Bibles they show.
+        let standing = if state.setup_done { bibles::languages_standing(state) } else { Vec::new() };
+        setup.languages = languages::starting(&state.church_languages, &standing, &env.computer_languages);
+        setup.languages_opened.clone_from(&setup.languages);
+        if state.setup_done {
+            // Their songbooks are theirs to choose: the recommended ones are marked, not ticked.
+            setup.free_songs.leave_unticked();
+            setup.shared.leave_unticked();
+        }
         setup.bibles = bibles::Choice::starting(state, &setup.languages, setup.again(), env.bibles_download);
         setup.softprojector_was = state.keys.style == crate::key_table::KeyStyle::SoftProjector;
         setup.from_softprojector = setup.again().then_some(setup.softprojector_was);
