@@ -12103,7 +12103,16 @@ mod tests {
                 let zoom = home_zoom(size, window);
                 let seen = frames(language, window, zoom, 6);
                 assert!(seen.iter().all(|frame| *frame == seen[0]), "{language:?} {size:?}: it flips: {seen:?}");
-                assert_eq!(seen[0].1, resized[0].1, "{language:?} {size:?}: the column's width in points");
+                // Under 100% the column falls on whole pixels of a zoom under 1, so its width in
+                // points may differ by up to one of them (202 pixels at 90% are 224.4 points);
+                // at 100% and above it is the same to the point.
+                let pixel = if zoom < 1.0 { 1.0 / zoom } else { 0.0 };
+                assert!(
+                    (seen[0].1 - resized[0].1).abs() <= pixel,
+                    "{language:?} {size:?}: the column's width in points, {} against {}",
+                    seen[0].1,
+                    resized[0].1
+                );
                 // As this size's own letters measure.
                 let names = with_language(language, || {
                     [t("edit.list.add", "Add"), t("edit.list.duplicate", "Duplicate"), t("edit.list.delete", "Delete")]
