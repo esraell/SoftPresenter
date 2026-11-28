@@ -1214,32 +1214,54 @@ mod tests {
 
     #[test]
     fn it_fits_its_size_in_every_language_and_every_state() {
-        // The app's own fonts, which every system draws with.
+        // The interface is drawn with each system's own font (SF on a Mac, Segoe UI on Windows,
+        // DejaVu Sans on Linux: `studio::load_fonts`), and `styled` loads this system's, so each
+        // system's run checks its own; the Mac, Linux and Windows checks all run it. Every
+        // language and state is looked at before the test fails, so one run lists them all.
         let ctx = crate::studio::tests::styled();
+        let mut problems = Vec::new();
         for language in crate::i18n::Language::ALL {
             crate::i18n::with_language(language, || {
                 ctx.run_ui(egui::RawInput::default(), |ui| {
                     let body = Rect::from_min_size(pos2(SIDE, HEAD), vec2(SIZE.x - 2.0 * SIDE, BODY));
                     let plan = plan_form(ui, body);
-                    assert!(plan.say.max.y <= body.max.y + 0.5, "{language:?}: the form overflows its body");
-                    assert!(plan.what.height() >= 44.0 && plan.how.height() >= 28.0, "{language:?}: boxes too small");
+                    if plan.say.max.y > body.max.y + 0.5 {
+                        problems.push(format!(
+                            "{language:?}: the form overflows its body by {}",
+                            plan.say.max.y - body.max.y
+                        ));
+                    }
+                    if plan.what.height() < 44.0 || plan.how.height() < 28.0 {
+                        problems.push(format!(
+                            "{language:?}: boxes too small ({}, {})",
+                            plan.what.height(),
+                            plan.how.height()
+                        ));
+                    }
                     // Each failure fits the two lines kept for it.
                     for why in [Why::Offline, Why::NoAnswer, Why::NotTaken, Why::TooMany, Why::TestCopy] {
                         let (words, _) = say_words(Phase::Failed(why)).unwrap();
                         let line =
                             ui.painter().layout(words.to_owned(), FontId::proportional(13.0), TEXT, body.width());
-                        assert!(line.size().y <= plan.say.height(), "{language:?} {why:?}: {words}");
+                        if line.size().y > plan.say.height() {
+                            problems.push(format!("{language:?} {why:?}: more than two lines: {words}"));
+                        }
                     }
-                    // The keys of each state fit one row.
+                    // The keys of each state fit one row, 8 points at least between the key at
+                    // the left and those at the right.
                     for phase in [Phase::Form, Phase::Failed(Why::Offline), Phase::Sent] {
                         let (left, right) = foot_keys(phase);
                         let all: f32 = left.iter().chain(&right).map(|key| key_width(ui, key.words) + 8.0).sum();
-                        assert!(all <= body.width() + 8.0, "{language:?} {phase:?}: the keys need {all}");
+                        if all > body.width() + 8.0 {
+                            problems
+                                .push(format!("{language:?} {phase:?}: the keys need {all} of {}", body.width() + 8.0));
+                        }
                     }
                 })
                 .drop_without_applying_deltas();
             });
         }
+        assert!(problems.is_empty(), "{problems:#?}");
         assert_eq!(HEAD + BODY + 14.0 + KEY + SIDE, SIZE.y);
     }
 

@@ -354,7 +354,7 @@
   "integrations.ask.failed.busy": "Не удалось отправить: сервер сейчас не принял запрос. Попробуйте через минуту. Написанное сохранено.",
   "integrations.ask.failed.test": "Не отправлено: тестовая копия ничего не отправляет. Написанное сохранено.",
   "integrations.ask.refused": "Укажите приложение или устройство и что оно должно делать",
-  "integrations.ask.issue": "Открыть обращение на GitHub ↗",
+  "integrations.ask.issue": "Обращение на GitHub ↗",
   "integrations.ask.cancel": "Отмена",
   "integrations.ask.send": "Отправить",
   "integrations.ask.again": "Повторить",
