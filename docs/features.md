@@ -1881,15 +1881,22 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   screen stood still meanwhile. A slide takes a few tens of milliseconds more there (a 5K slide
   of words, about 65 ms on that iMac), the log's `[gpu]` line says so, and the same fixed
   working memory means a slide too heavy for it is refused as too much to draw. Any other
-  graphics card, a Mac with Apple silicon and Linux draw as before. Intel's own graphics were
-  tried on a Mac mini of 2014 (Intel Iris, macOS 11.6): the app starts in one to three seconds and
-  rests at under 1% of a processor, a fade between slides draws about 70 pictures a second,
-  and one over a playing 1080p video about 15, with a third of the video's pictures dropped
-  meanwhile.
-- **Graphics that can't draw.** When no graphics device can be used, or the graphics refuse
-  one of the shaders SoftPresenter draws with, the start ends at once: the log's `[gpu]` line
-  names the graphics, the shader and what was said of it, and a message window says the app
-  can't start (the window itself has not been tried on a screen).
+  graphics card, a Mac with Apple silicon and Linux draw as before. Every Mac with
+  Intel's own graphics has the shaders that fill in the pixels built another way than other
+  Macs (`third_party/wgpu-hal/PROVENANCE.md`), because the compiler of an Intel Iris of 2014
+  takes none built the usual way. Only that one was tried, a Mac mini of 2014 (Intel Iris,
+  macOS 11.6), in test copies whose windows stay behind the others: the app starts and
+  answers in 0.7 to 3.3 seconds and rests at under 1% of a processor, a slide saved from its
+  screen is right, a fade between slides draws about 70 pictures a second, and one over a
+  playing video about 15, with a fifth to a third of the video's pictures dropped meanwhile.
+- **Graphics that can't draw.** When the graphics refuse one of the shaders SoftPresenter
+  draws with, the start ends at once (in a test, in under a second): the log's `[gpu]` line
+  names the graphics, the shader and what was said of it. When no graphics device can be made
+  at all, the log's `[gpu]` line says which graphics were tried, what each said and how long
+  it took; that has not been tried, and making the device can itself take seconds (13 on the
+  Mac mini above, before the fix). Either way a message window says the app can't start,
+  unless the copy is a test's, and the program ends when its OK is pressed. The window has not
+  been tried on a screen.
 - **NDI on Linux.** NDI Tools, which installs NDI's runtime on a Mac and on Windows, doesn't
   exist for Linux, so there, while NDI isn't installed, an NDI screen in the Screens window (and
   an NDI Source box in the inspector) has **Download NDI…** beside the ndi.video link. It

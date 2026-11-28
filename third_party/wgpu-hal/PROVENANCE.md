@@ -33,9 +33,12 @@ repository's settings say, and it is otherwise unchanged.
 - **`mod.rs`, `adapter.rs`:** `PrivateDisabilities` has a new field,
   `broken_workgroup_size_attribute`, true for every Metal device whose name starts with
   "Intel" (the test upstream's other Intel workarounds use). It is not found out by trying the
-  compiler: the two ways of saying the number are meant to be the same to Metal, so Intel
-  graphics whose compiler would have taken the attribute should lose nothing. That is an
-  expectation: only the Iris 5100 below was tried.
+  compiler, which upstream's proposed fix (pull request 10731) does at every start: the owner
+  chose, on 2026-11-28, that every Mac with Intel's own graphics builds its compute shaders
+  this way. Only the Iris 5100 below was tried. For the others it is an expectation that
+  nothing is lost: the two ways of saying the number are meant to be the same to Metal, and
+  until April 2026 (before wgpu's pull request 9327) wgpu said it in neither way, on any
+  Mac.
 - **`device.rs`:**
   - For such a device, shaders are written without the attribute (naga's
     `emit_workgroup_size_attribute`).
