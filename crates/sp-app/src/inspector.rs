@@ -299,11 +299,12 @@ fn align_mark(painter: &egui::Painter, cell: Rect, which: usize, ink: Color32) {
 }
 
 /// A place `width` wide and a key tall in a row, for a menu: one whose words are cut short may
-/// draw a hair wider than it is asked to be, and what follows it in the row stays where it
-/// should.
+/// draw a hair wider than it is asked to be. It is drawn in a layout of its own inside the
+/// place, which the row has already counted, so what follows it in the row stays where it should.
 fn fixed<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let (place, _) = ui.allocate_exact_size(vec2(width, KEY), Sense::hover());
-    ui.scope_builder(egui::UiBuilder::new().max_rect(place).layout(Layout::left_to_right(Align::Center)), add).inner
+    let mut inside = ui.new_child(egui::UiBuilder::new().max_rect(place).layout(Layout::left_to_right(Align::Center)));
+    add(&mut inside)
 }
 
 /// A tick box with a bold title, as each group of options starts with.
