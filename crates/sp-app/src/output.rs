@@ -2229,17 +2229,14 @@ fn run(
         } else {
             output.draw(new_picture);
         }
-        // A last slide drawn without the end of a song's mark, for want of room even at its
-        // smallest, in whichever drawing above found it (the windows', the Program preview's
-        // alone, the NDI pictures' alone): said once, of that slide. The renderer's note names
-        // the slide, and is withdrawn if the slide is then drawn with its mark.
-        if let Some(slide) = sp_render::take_end_mark_left_out()
+        // A last slide drawn without the end of a song's mark (or one of its two), in whichever
+        // drawing above found it (the windows', the Program preview's alone, the NDI pictures'
+        // alone): said once, of that slide, with why. The renderer's note names the slide, and
+        // is withdrawn if the slide is then drawn with every mark.
+        if let Some((slide, why)) = sp_render::take_end_mark_left_out()
             && output.end_mark_left_out != Some(slide)
         {
-            crate::applog::event(
-                "screens",
-                "the end of a song's mark was left out: no room under the words of the last slide, even at its smallest",
-            );
+            crate::applog::event("screens", end_mark_left_out_words(why));
             output.end_mark_left_out = Some(slide);
         }
         // A window whose X is to look different, and wasn't drawn just now, is shown again;
@@ -4854,6 +4851,18 @@ fn own_end_look_changed(was: &[(Uuid, Arc<Theme>)], now: &[(Uuid, Arc<Theme>)]) 
     now.iter().any(|(screen, now)| was.iter().any(|(have, was)| have == screen && only_end_look_differs(was, now)))
 }
 
+/// What the log says of a last slide drawn without the end of a song's mark (or one of its two).
+fn end_mark_left_out_words(why: sp_render::MarkLeftOut) -> &'static str {
+    match why {
+        sp_render::MarkLeftOut::NoRoom => {
+            "the end of a song's mark was left out: no room under the words of the last slide, even at its smallest"
+        }
+        sp_render::MarkLeftOut::OverTheOtherLanguage => {
+            "the end of a song's mark was left out under one language's words of the last slide, on purpose: it would lie over the other language's words beside them"
+        }
+    }
+}
+
 /// The theme a screen's slides are drawn with: its own, if it has one, or the one the slide
 /// came with (the main theme, or a song's own).
 fn screen_theme(themes: &[(Uuid, Arc<Theme>)], screen: Uuid, slide_theme: &Arc<Theme>) -> Arc<Theme> {
@@ -5084,6 +5093,17 @@ mod tests {
             "{texts:?}"
         );
         assert!(texts.iter().any(|(_, words)| words == "One"), "and the words: {texts:?}");
+    }
+
+    #[test]
+    fn the_log_says_why_the_end_mark_was_left_out() {
+        let (no_room, on_purpose) = (
+            end_mark_left_out_words(sp_render::MarkLeftOut::NoRoom),
+            end_mark_left_out_words(sp_render::MarkLeftOut::OverTheOtherLanguage),
+        );
+        assert!(no_room.contains("no room") && no_room.contains("even at its smallest"), "{no_room}");
+        assert!(on_purpose.contains("on purpose") && on_purpose.contains("other language"), "{on_purpose}");
+        assert!(!on_purpose.contains("no room"), "{on_purpose}");
     }
 
     #[test]

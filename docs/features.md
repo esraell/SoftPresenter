@@ -2586,9 +2586,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     - words side by side each have their mark under them, against the slide's floor: the
       other column is no floor to a mark that clears it across the slide;
     - words with the other language's beside them and reaching lower, where the mark would
-      lie, get none (left out, and logged);
-    - each mark is checked where it will be drawn, at its size and width, against the other
-      language's lines, and one that would lie over them is left out.
+      lie, get none: it is left out on purpose, and the log says so (`[screens] the end of a
+      song's mark was left out under one language's words of the last slide, on purpose…`);
+    - each mark is checked where it will be drawn, at its size and width, against the box
+      round the other language's lines, and one that would lie in it is left out, logged the
+      same way.
     The Last words only, and the bottom of the screen whichever Under says, keep one mark as
     it always was: in the look of the largest words on the slide (the main language's in the
     built-in theme, and wherever they are the larger), under the lowest. A slide in one

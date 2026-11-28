@@ -367,12 +367,20 @@ fn largest_and_lowest(words: &[Words]) -> Option<(Words, Words)> {
     Some((largest, lowest))
 }
 
+/// The room for the mark under the lowest words (`lowest`), down to `floor`, the least gap kept,
+/// and the size the theme wants it at beside the largest words (`sized`). Whether it fits and
+/// where it goes are both worked out from these, so they never disagree by a rounding: words
+/// that made room for the mark always get it.
+fn end_mark_room(sized: Laid, lowest: Laid, floor: f32, look: &sp_model::EndLook) -> (f32, f32) {
+    (floor - (lowest.bottom + sized.size * END_MARK_LEAST_GAP), sized.size * f32::from(look.size) / 100.0)
+}
+
 /// Whether the mark has room on the slide at the size the theme gives it: under the lowest
 /// words with the least gap, it ends no lower than `floor`.
 fn end_mark_fits(words: &[(usize, Laid, f32)], floor: f32, look: &sp_model::EndLook) -> bool {
     largest_and_lowest(words).is_some_and(|((_, sized, _), (_, lowest, _))| {
-        let size = sized.size * f32::from(look.size) / 100.0;
-        lowest.bottom + sized.size * END_MARK_LEAST_GAP + size <= floor
+        let (room, wanted) = end_mark_room(sized, lowest, floor, look);
+        room >= wanted
     })
 }
 
@@ -394,9 +402,8 @@ fn end_mark_fits(words: &[(usize, Laid, f32)], floor: f32, look: &sp_model::EndL
 /// isn't that much room: it never lies over the words, and never past `floor`.
 fn end_mark_place(words: &[(usize, Laid, f32)], floor: f32, look: &sp_model::EndLook) -> Option<(usize, EndMark)> {
     let ((largest, sized, sized_opacity), (_, lowest, lowest_opacity)) = largest_and_lowest(words)?;
-    let wanted = sized.size * f32::from(look.size) / 100.0;
-    // The room under the words, the least gap kept.
-    let room = floor - (lowest.bottom + sized.size * END_MARK_LEAST_GAP);
+    // The room under the words, the least gap kept, as `end_mark_fits` has it.
+    let (room, wanted) = end_mark_room(sized, lowest, floor, look);
     let size = if room >= wanted {
         wanted
     } else if room >= sized.size * END_MARK_LEAST {
@@ -590,9 +597,10 @@ fn end_mark_width(fonts: &mut Fonts, words: &BoxStyle, size: f32, mark: sp_model
 /// other's are no floor to a mark that clears them across the slide. Words with the other
 /// language's beside them and reaching lower, where the mark would lie, get none.
 ///
-/// Last, each mark is checked where it will be drawn, at its size and width, against every
-/// line of the other language's words: one that would lie over any of them is left out. A
-/// mark is never drawn over words.
+/// Last, each mark is checked where it will be drawn, at its size and width, against the box
+/// round the other language's lines (from the first line's top to the last line's bottom, as
+/// far across as the widest reaches): one that would lie in it is left out. A mark is never
+/// drawn over words.
 fn each_language_marks(
     fonts: &mut Fonts,
     places: &[Measured],
@@ -746,18 +754,29 @@ fn end_mark_shorter_box(
     enough.map(|cut| (b.at, cut))
 }
 
+/// Why a slide due the end of a song's mark was drawn without it (or without one of its two).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarkLeftOut {
+    /// There was no room for it under the words, even at its smallest.
+    NoRoom,
+    /// Under one language's words it would have lain over the other language's words beside
+    /// them, so it was left out on purpose.
+    OverTheOtherLanguage,
+}
+
 thread_local! {
-    /// The slide last drawn on this thread that was due the end of a song's mark and got none,
-    /// for want of room, until it is asked for ([`take_end_mark_left_out`]) or the same slide
-    /// is drawn with its mark.
-    static END_MARK_LEFT_OUT: std::cell::Cell<Option<sp_model::Uuid>> = const { std::cell::Cell::new(None) };
+    /// The slide last drawn on this thread that was due the end of a song's mark and got none
+    /// (or not every one), and why, until it is asked for ([`take_end_mark_left_out`]) or the
+    /// same slide is drawn with every mark.
+    static END_MARK_LEFT_OUT: std::cell::Cell<Option<(sp_model::Uuid, MarkLeftOut)>> =
+        const { std::cell::Cell::new(None) };
 }
 
 /// The slide (by its id) that was drawn on this thread since the last call due the end of a
-/// song's mark and without it, there being no room for it even at its smallest: for the app to
-/// say so in its log, once, of that slide, whichever drawing found it (a screen's, the Program
-/// preview's, an NDI picture's).
-pub fn take_end_mark_left_out() -> Option<sp_model::Uuid> {
+/// song's mark and without it (or one of its two), and why: for the app to say so in its log,
+/// once, of that slide, whichever drawing found it (a screen's, the Program preview's, an NDI
+/// picture's).
+pub fn take_end_mark_left_out() -> Option<(sp_model::Uuid, MarkLeftOut)> {
     END_MARK_LEFT_OUT.with(|left_out| left_out.replace(None))
 }
 
@@ -932,8 +951,8 @@ fn draw_objects(
     // under.
     let mut end_mark = None;
     let mut end_marks = Vec::new();
-    // Whether a mark was due under words that were drawn and left out.
-    let mut left_out = false;
+    // Whether a mark was due under words that were drawn and left out, and why (the first found).
+    let mut left_out = None;
     let mut draw_mark = |scene: &mut Scene, fonts: &mut Fonts, largest: usize, mark: EndMark| -> bool {
         let Some(template) = template else { return false };
         let Some(object) = slide.objects.get(largest) else { return false };
@@ -950,7 +969,9 @@ fn draw_objects(
             {
                 end_mark = Some(mark);
             }
-            left_out = !words.is_empty() && end_mark.is_none();
+            if !words.is_empty() && end_mark.is_none() {
+                left_out = Some(MarkLeftOut::NoRoom);
+            }
         }
         (Some(_), Some(MarkPlan::Each(languages))) => {
             for (n, language) in languages.iter().enumerate() {
@@ -959,27 +980,32 @@ fn draw_objects(
                 if theirs.is_empty() {
                     continue;
                 }
-                let placed = language.floor.and_then(|floor| end_mark_place(&theirs, floor, &theme.end_look));
-                match placed {
+                let Some(floor) = language.floor else {
+                    left_out.get_or_insert(MarkLeftOut::OverTheOtherLanguage);
+                    continue;
+                };
+                match end_mark_place(&theirs, floor, &theme.end_look) {
                     Some((largest, mark)) if draw_mark(scene, fonts, largest, mark) => {
                         if n == 0 {
                             end_mark = Some(mark);
                         }
                     }
-                    _ => left_out = true,
+                    _ => {
+                        left_out.get_or_insert(MarkLeftOut::NoRoom);
+                    }
                 }
             }
         }
         _ => {}
     }
-    // Due, with words to go under, and left out for want of room: the app's log says so, of
-    // this slide. Drawn with every mark after all (another theme's screen, another floor), it
-    // has nothing to say.
+    // Due, with words to go under, and left out: the app's log says so, and why, of this slide.
+    // Drawn with every mark after all (another theme's screen, another floor), it has nothing
+    // to say.
     if slide.end_mark.is_some() && !slide.words_hidden && !words.is_empty() {
         END_MARK_LEFT_OUT.with(|noted| {
-            if left_out {
-                noted.set(Some(slide.id));
-            } else if noted.get() == Some(slide.id) {
+            if let Some(why) = left_out {
+                noted.set(Some((slide.id, why)));
+            } else if noted.get().is_some_and(|(id, _)| id == slide.id) {
                 noted.set(None);
             }
         });
@@ -2987,7 +3013,7 @@ mod tests {
             assert!(on.end_mark.is_some_and(|mark| (mark.size - 0.4 * laid.size).abs() < 0.02), "{said}");
             let on = drawn_with_mark(&song, &theme, Some(least - 0.01));
             assert_eq!((on.end_mark, &on.words), (None, &off.words), "{said}");
-            assert_eq!(take_end_mark_left_out(), Some(song.id), "{said}: noted, of this slide");
+            assert_eq!(take_end_mark_left_out(), Some((song.id, MarkLeftOut::NoRoom)), "{said}: noted, of this slide");
             assert_eq!(take_end_mark_left_out(), None, "{said}: noted once");
             // Drawn again with room, before anyone asked: it has nothing to say any more.
             drawn_with_mark(&song, &theme, Some(least - 0.01));
@@ -3494,7 +3520,13 @@ mod tests {
                     assert!(bottom <= lower.top - 0.25 * upper.size + 0.01, "{gap}: {mark:?}");
                     assert!(take_end_mark_left_out().is_none(), "{gap}");
                 }
-                (None, []) => assert_eq!(take_end_mark_left_out(), Some(song.id), "{gap}: noted, of this slide"),
+                (None, []) => {
+                    assert_eq!(
+                        take_end_mark_left_out(),
+                        Some((song.id, MarkLeftOut::NoRoom)),
+                        "{gap}: noted, of this slide"
+                    );
+                }
                 (_, marks) => panic!("{gap}: {marks:?}"),
             }
         }
@@ -3550,7 +3582,7 @@ mod tests {
         let on = drawn_with_mark(&song, &theme, Some(FLOOR));
         assert_eq!(on.words, off.words, "nothing moves");
         assert_eq!(on.end_marks.iter().map(|(at, _)| *at).collect::<Vec<_>>(), [1], "the translation's only");
-        assert_eq!(take_end_mark_left_out(), Some(song.id));
+        assert_eq!(take_end_mark_left_out(), Some((song.id, MarkLeftOut::OverTheOtherLanguage)), "on purpose");
     }
 
     #[test]
@@ -3665,6 +3697,77 @@ mod tests {
         assert_eq!((two.1.len(), single.1.len()), (2, 1), "{two:?} {single:?}");
         assert_eq!(single, fresh(&one_language, &one));
         assert_ne!(draw(&mut fonts, &song, &lower).0[0], first.0[0], "a lower translation: less room made");
+    }
+
+    /// The built-in theme with its main language's box in the translation's look (64 high,
+    /// warm grey), at the box 120, 560, 1680 by 450, its words at its bottom.
+    fn low_translation_look() -> Theme {
+        let mut theme = Theme::builtin();
+        let look = theme.templates[0].style_for(&Role::translation()).cloned().expect("the translation's look");
+        for template in &mut theme.templates {
+            for main in template.boxes.iter_mut().filter(|style| style.role == Role::primary()) {
+                *main = BoxStyle {
+                    role: Role::primary(),
+                    rect: SlideRect { x: 120.0, y: 560.0, w: 1680.0, h: 450.0 },
+                    valign: VAlign::Bottom,
+                    ..look.clone()
+                };
+            }
+        }
+        theme
+    }
+
+    #[test]
+    fn words_that_make_room_for_the_mark_always_get_it() {
+        // At 40%, whether the mark fitted and where it went were worked out by sums that round
+        // apart: the words moved up to make room for it, and then no mark was drawn (and it was
+        // logged as left out). Two lines at the foot of their box, the floor close under them.
+        let forty = sp_model::EndLook { size: 40, ..Default::default() };
+        let theme = Theme { end_look: forty, ..low_translation_look() };
+        let song = slide("Uno\nDos", None);
+        let (_, before, _) = drawn_with_mark(&song, &theme, None).words[0];
+        assert!((before.bottom - 1010.0).abs() < 0.5, "{before:?}");
+        for floor in [1047.6, 1020.0] {
+            let on = drawn_with_mark(&song, &theme, Some(floor));
+            let (_, laid, _) = on.words[0];
+            assert!(laid.bottom < before.bottom, "{floor}: the words make room: {laid:?}");
+            let mark = on.end_mark.unwrap_or_else(|| panic!("{floor}: the words moved up and no mark: {laid:?}"));
+            assert!((mark.size - 0.4 * laid.size).abs() < 0.01 && mark.top + mark.size <= floor + 0.01, "{mark:?}");
+            assert_eq!(take_end_mark_left_out(), None, "{floor}");
+        }
+        // The same over many floors and sizes, in one language and two: words that move for a
+        // mark, or come out smaller, always have it.
+        let mut cases: Vec<(Slide, Theme, f32)> = Vec::new();
+        for step in 0..48 {
+            let floor = 1000.0 + step as f32 * 1.03;
+            cases.push((song.clone(), low_translation_look(), floor));
+            cases.push((slide(&lines(8), Some(&lines(3))), tall(Scaling::TextDown), floor));
+            // The translation a little lower each time under a main language's full box: the
+            // floor of the mark between the two moves by as much.
+            let mut lower = stacked_close(Scaling::TextDown);
+            for template in &mut lower.templates {
+                for look in template.boxes.iter_mut().filter(|style| style.role == Role::translation()) {
+                    look.rect.y += step as f32 * 1.03;
+                }
+            }
+            cases.push((slide(&lines(4), Some("Uno\nDos")), lower, FLOOR));
+        }
+        for (song, theme, floor) in cases {
+            let off = drawn_with_mark(&song, &theme, None);
+            for size in [40, 50, 80] {
+                let themed = Theme { end_look: sp_model::EndLook { size, ..Default::default() }, ..theme.clone() };
+                let on = drawn_with_mark(&song, &themed, Some(floor));
+                for ((at, now, _), (_, was, _)) in on.words.iter().zip(&off.words) {
+                    if now == was {
+                        continue;
+                    }
+                    let theirs =
+                        on.end_marks.iter().any(|(under, _)| main_words(&song, *under) == main_words(&song, *at));
+                    assert!(theirs, "{size}% at {floor}: the words of {at} moved ({was:?} to {now:?}) and got no mark");
+                }
+                let _ = take_end_mark_left_out();
+            }
+        }
     }
 
     #[test]

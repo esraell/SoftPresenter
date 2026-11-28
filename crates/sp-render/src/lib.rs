@@ -29,10 +29,10 @@ pub use pictures::{
     web_key,
 };
 pub use scene::{
-    Built, EditorBackdrop, Layers, Parts, ScreenPicture, build_layer_parts, build_layers, build_layers_for_editor,
-    build_overlay, build_scene, build_under, cross_fade, fade_cacheable, fit_rect, layout_objects, object_frame,
-    plain_black, scrolls, set_ndi_tag_words, set_web_stand_in, shade_empty_boxes, show_placeholders,
-    take_end_mark_left_out, transition, with_screen_pictures,
+    Built, EditorBackdrop, Layers, MarkLeftOut, Parts, ScreenPicture, build_layer_parts, build_layers,
+    build_layers_for_editor, build_overlay, build_scene, build_under, cross_fade, fade_cacheable, fit_rect,
+    layout_objects, object_frame, plain_black, scrolls, set_ndi_tag_words, set_web_stand_in, shade_empty_boxes,
+    show_placeholders, take_end_mark_left_out, transition, with_screen_pictures,
 };
 pub use see_through::{Solid, SolidPass, see_through_transition};
 pub use vello;
