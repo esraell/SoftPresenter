@@ -864,9 +864,28 @@ impl Checks {
             }
         }
         let mut status = self.lock();
+        // A download beginning (none was under way, or it was another version's) has not been
+        // cancelled, whatever was asked of the one before it.
+        let version_of = |fetch: &Option<Fetch>| match fetch {
+            Some(Fetch::Downloading { version, .. }) => Some(version.clone()),
+            _ => None,
+        };
+        if version_of(&fetch).is_some() && version_of(&status.fetch) != version_of(&fetch) {
+            self.cancel.store(false, Relaxed);
+        }
         let changed = status.fetch.as_ref().map(Fetch::shown) != fetch.as_ref().map(Fetch::shown);
         status.fetch = fetch;
         changed
+    }
+
+    /// The row's Cancel: asks the updater to stop the download under way. With none under way
+    /// (it ended, or failed, between the key being drawn and pressed) nothing is asked, so
+    /// nothing is left to cancel a later download.
+    fn ask_cancel(&self) {
+        let status = self.lock();
+        if matches!(status.fetch, Some(Fetch::Downloading { .. })) {
+            self.cancel.store(true, Relaxed);
+        }
     }
 
     /// What the notices are to be told now, if they haven't been: that a version is ready, or
@@ -1205,7 +1224,7 @@ fn draw_row(ui: &mut egui::Ui, state: &mut crate::home::HomeState, now: &Status,
                 install();
             }
         }
-        Act::Cancel => CHECKS.cancel.store(true, Relaxed),
+        Act::Cancel => CHECKS.ask_cancel(),
     }
     place
 }
@@ -1909,7 +1928,7 @@ mod tests {
         checks.report(Some(downloading(1_000_000)));
         assert!(!checks.cancel.load(Relaxed));
         // The row's Cancel: asked, and still asked while the updater reports more of it.
-        checks.cancel.store(true, Relaxed);
+        checks.ask_cancel();
         checks.report(Some(downloading(2_000_000)));
         assert!(checks.cancel.load(Relaxed), "the updater hasn't stopped yet");
         assert_eq!(checks.take_notice(), None);
@@ -1929,7 +1948,7 @@ mod tests {
         assert_eq!(checks.take_notice(), Some((said.to_owned(), false)));
         // Cancel pressed just as the download ended: it is ready, and nothing is left asked.
         checks.report(Some(downloading(3_000_000)));
-        checks.cancel.store(true, Relaxed);
+        checks.ask_cancel();
         assert!(checks.report(Some(Fetch::Ready { version: "0.9.1".to_owned() })));
         assert!(!checks.cancel.load(Relaxed));
     }
@@ -1963,6 +1982,39 @@ mod tests {
         // Nothing in hand any more: back to what the last check found.
         assert!(checks.report(None));
         assert_eq!(checks.status(), Status { checking: false, last: Some((Found::Newest, 1)), fetch: None });
+    }
+
+    #[test]
+    fn a_cancel_never_reaches_the_next_download() {
+        let checks = Checks::new();
+        let downloading = |version: &str, done| Fetch::Downloading { version: version.to_owned(), done, total: 9 };
+        // Nothing coming down: Cancel asks nothing.
+        checks.ask_cancel();
+        assert!(!checks.cancel.load(Relaxed));
+        checks.report(Some(Fetch::Ready { version: "0.9.1".to_owned() }));
+        checks.ask_cancel();
+        assert!(!checks.cancel.load(Relaxed), "a version ready is not a download to cancel");
+        // One coming down: asked, and still asked as more of the same download is reported.
+        checks.report(Some(downloading("0.9.2", 1)));
+        checks.ask_cancel();
+        checks.report(Some(downloading("0.9.2", 2)));
+        assert!(checks.cancel.load(Relaxed));
+        // An updater that never looked, and went on to the next version: that download begins
+        // with nothing asked of it.
+        checks.report(Some(downloading("0.9.3", 0)));
+        assert!(!checks.cancel.load(Relaxed), "the next version's download isn't cancelled");
+        // The same when the one before ended some other way, with the asking set behind its back.
+        checks.ask_cancel();
+        checks.report(None);
+        assert!(!checks.cancel.load(Relaxed));
+        checks.cancel.store(true, Relaxed);
+        checks.report(Some(downloading("0.9.3", 0)));
+        assert!(!checks.cancel.load(Relaxed), "a download beginning is never cancelled already");
+        // A check meanwhile leaves a cancel that was asked standing: the download is still
+        // under way, and still to be stopped.
+        checks.ask_cancel();
+        assert!(checks.begin());
+        assert!(checks.cancel.load(Relaxed));
     }
 
     #[test]
