@@ -706,6 +706,10 @@ pub(crate) fn recommended_words() -> &'static str {
 
 /// What a songbook's row says under its name, with Recommended after it.
 pub(crate) fn recommended_detail(detail: &str) -> String {
+    // A songbook whose size isn't known yet says nothing before it.
+    if detail.is_empty() {
+        return recommended_words().to_owned();
+    }
     format!("{detail} \u{b7} {}", recommended_words())
 }
 
