@@ -1115,8 +1115,11 @@ fn from_ndi(host: Option<&str>) -> bool {
 
 /// True for a plain http address on this computer, which only a test copy's stand-in may use.
 fn on_this_computer(address: &str) -> bool {
-    let host = address.strip_prefix("http://").and_then(|rest| rest.split(['/', ':']).next());
-    matches!(host, Some("127.0.0.1" | "localhost"))
+    // The address is read as the request will read it, so the host compared is the one that
+    // would be asked: a name before an `@` is a user's name, not the host.
+    let Ok(address) = address.parse::<ureq::http::Uri>() else { return false };
+    let named_user = address.authority().is_some_and(|authority| authority.as_str().contains('@'));
+    address.scheme_str() == Some("http") && !named_user && matches!(address.host(), Some("127.0.0.1" | "localhost"))
 }
 
 /// What asks NDI's server: HTTPS only (plain http only for a test copy's stand-in on this
@@ -1580,7 +1583,19 @@ mod tests {
         // Plain http, for a test copy's stand-in, only on this computer.
         assert!(on_this_computer("http://127.0.0.1:47811/sdk.tar.gz"));
         assert!(on_this_computer("http://localhost/sdk.tar.gz"));
-        for other in ["http://127.0.0.1.example.com/x", "http://example.com/x", "https://127.0.0.1/x"] {
+        for other in [
+            "http://127.0.0.1.example.com/x",
+            "http://example.com/x",
+            "https://127.0.0.1/x",
+            // What stands before an @ is a user's name: the host asked would be example.com.
+            "http://localhost:1@example.com/x",
+            "http://127.0.0.1@example.com/x",
+            "http://localhost@example.com:80/x",
+            "http://user@localhost/x",
+            "http://localhost.example.com/x",
+            "localhost/x",
+            "",
+        ] {
             assert!(!on_this_computer(other), "{other}");
         }
     }
