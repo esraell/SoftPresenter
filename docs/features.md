@@ -1685,6 +1685,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   box), bullets or numbers before its lines, and can scroll through its box like a ticker
   (left, right, up or down), from the dots on the Text tab's Words row (Lines: Breaks, Bullets,
   Scroll, Band, Covers).
+- **The editor's backdrop**: a small swatch key beside Grid chooses what the Edit view draws
+  behind the slide being edited: Checkered (the default: two dark greys in squares), As on
+  Screen (black), Light (a light grey) or The Media on Screen (the picture on the media layer
+  now, a video's still when it has one; greyed, saying No media is on screen, while there is
+  none, and Checkered is drawn until media is on again). It shows only where the slide is
+  see-through or plain black: a theme's own background colour or picture is drawn as on a
+  screen. It is a view of the editor only (the slide, the theme, the small pictures and the
+  screens are untouched), and is remembered on this computer.
 - **The Text tab fits one screen.** Its rows: Font with Weight beside it, Size, Style, Colour,
   Align, Effects, Spacing, Fitting, Words, Behind, Shows (and Holds in a template). What is set
   once opens from a key on its own row as a small panel laid over the rows under it (or over

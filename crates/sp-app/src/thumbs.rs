@@ -413,34 +413,37 @@ impl Thumbs {
     }
 
     /// Redraws the Edit view's large picture of the slide being edited and returns its texture.
+    /// `backdrop` is what shows where the slide is see-through or plain black (`None`: as on a
+    /// screen), and `media` the picture on the media layer, when the backdrop is that.
     pub fn canvas(
         &mut self,
         gpu: &Gpu,
         egui_renderer: &mut egui_wgpu::Renderer,
         slide: &Slide,
         theme: &Theme,
+        (backdrop, media): (Option<sp_render::EditorBackdrop>, Option<(&Picture, sp_model::ImageFit)>),
     ) -> Option<egui::TextureId> {
         // Large enough to stay sharp when the slide is zoomed in on a Retina screen.
         const W: u32 = 2560;
         const H: u32 = 1440;
         // Only here is an empty web page, NDI source or AirPlay box see-through.
         sp_render::shade_empty_boxes(true);
-        let built = build_layers(
-            &mut self.fonts,
-            &Layers {
-                media_fit: sp_model::ImageFit::Fill,
-                media: None,
-                slide: Some(slide),
-                overlay: None,
-                time: 0.0,
-                backdrop: None,
-                mask: [0.0; 4],
-                announcement: None,
-            },
-            theme,
-            W,
-            H,
-        );
+        let layers = Layers {
+            media_fit: media.map_or(sp_model::ImageFit::Fill, |(_, fit)| fit),
+            media: media.map(|(picture, _)| picture),
+            slide: Some(slide),
+            overlay: None,
+            time: 0.0,
+            backdrop: None,
+            mask: [0.0; 4],
+            announcement: None,
+        };
+        // Only the editor's picture goes over a backdrop: the screens and the small pictures
+        // are drawn as ever.
+        let built = match backdrop {
+            Some(backdrop) => sp_render::build_layers_for_editor(&mut self.fonts, &layers, theme, backdrop, W, H),
+            None => build_layers(&mut self.fonts, &layers, theme, W, H),
+        };
         sp_render::shade_empty_boxes(false);
         if self.canvas.is_none() {
             let texture = target_texture(&gpu.device, W, H);

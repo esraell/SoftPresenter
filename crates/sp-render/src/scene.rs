@@ -108,16 +108,86 @@ pub fn build_under(layers: &Layers, theme: &Theme, target_w: u32, target_h: u32)
     scene
 }
 
+/// What the Edit view draws behind the slide it is editing, in place of the black a screen has
+/// there: one colour, or a checker of two in squares `square` slide units a side. It shows only
+/// where the slide is see-through or plain black: a theme's own background colour (other than
+/// plain black) or picture is drawn over it, as on a screen.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EditorBackdrop {
+    Colour(Rgba),
+    Checker { square: f32, colours: [Rgba; 2] },
+}
+
+/// True when a theme's background colour is the plain black a screen is anyway (or it has
+/// none): the Edit view's backdrop shows through there.
+pub fn plain_black(background: Option<Rgba>) -> bool {
+    background.is_none_or(|colour| colour.a == 255 && (colour.r, colour.g, colour.b) == (0, 0, 0))
+}
+
+/// Draws every layer as [`build_layers`] does, for the Edit view's picture of the slide being
+/// edited: over `backdrop` in place of the black base, and without the theme's background
+/// colour where that is plain black. Nothing a screen draws goes through here.
+pub fn build_layers_for_editor(
+    fonts: &mut Fonts,
+    layers: &Layers,
+    theme: &Theme,
+    backdrop: EditorBackdrop,
+    target_w: u32,
+    target_h: u32,
+) -> Built {
+    let mut scene = Scene::new();
+    let whole = Rect::new(0.0, 0.0, f64::from(target_w), f64::from(target_h));
+    match backdrop {
+        EditorBackdrop::Colour(colour) => scene.fill(Fill::NonZero, Affine::IDENTITY, color(colour), None, &whole),
+        EditorBackdrop::Checker { square, colours } => {
+            scene.fill(Fill::NonZero, Affine::IDENTITY, color(colours[0]), None, &whole);
+            let (x, y, w, _) = fit_rect(target_w, target_h);
+            let to_target = Affine::translate((x, y)) * Affine::scale(w / f64::from(SLIDE_WIDTH));
+            let square = f64::from(square.max(8.0));
+            let across = (f64::from(SLIDE_WIDTH) / square).ceil() as usize;
+            let down = (f64::from(SLIDE_HEIGHT) / square).ceil() as usize;
+            let slide_area = Rect::new(0.0, 0.0, f64::from(SLIDE_WIDTH), f64::from(SLIDE_HEIGHT));
+            scene.push_clip_layer(Fill::NonZero, to_target, &slide_area);
+            // Every other square in the second colour, as one shape.
+            let mut squares = BezPath::new();
+            for row in 0..down {
+                for column in (row % 2..across).step_by(2) {
+                    let (left, top) = (column as f64 * square, row as f64 * square);
+                    squares.extend(Rect::new(left, top, left + square, top + square).path_elements(0.1));
+                }
+            }
+            scene.fill(Fill::NonZero, to_target, color(colours[1]), None, &squares);
+            scene.pop_layer();
+        }
+    }
+    paint_theme_and_media(&mut scene, layers, theme, !plain_black(theme.background), target_w, target_h);
+    let overflow = paint_over(&mut scene, fonts, layers, theme, target_w, target_h);
+    Built { scene, overflow }
+}
+
 /// The backdrop, the theme's colour under the media, and the media (or the theme's picture).
 fn paint_under(scene: &mut Scene, layers: &Layers, theme: &Theme, target_w: u32, target_h: u32) {
     let whole = Rect::new(0.0, 0.0, f64::from(target_w), f64::from(target_h));
     let backdrop = layers.backdrop.map_or(Color::BLACK, color);
     scene.fill(Fill::NonZero, Affine::IDENTITY, backdrop, None, &whole);
+    paint_theme_and_media(scene, layers, theme, true, target_w, target_h);
+}
+
+/// The theme's colour under the media (when `colour` says to draw it), and the media (or the
+/// theme's picture), over whatever the base is.
+fn paint_theme_and_media(
+    scene: &mut Scene,
+    layers: &Layers,
+    theme: &Theme,
+    colour: bool,
+    target_w: u32,
+    target_h: u32,
+) {
     let (x, y, w, _) = fit_rect(target_w, target_h);
     let to_target = Affine::translate((x, y)) * Affine::scale(w / f64::from(SLIDE_WIDTH));
 
     // The theme's background colour fills the slide, under the media. A cleared screen stays black.
-    if let (Some(background), Some(_)) = (theme.background, layers.slide) {
+    if let (Some(background), Some(_), true) = (theme.background, layers.slide, colour) {
         let slide_area = Rect::new(0.0, 0.0, f64::from(SLIDE_WIDTH), f64::from(SLIDE_HEIGHT));
         scene.fill(Fill::NonZero, to_target, color(background), None, &slide_area);
     }
@@ -1981,6 +2051,41 @@ mod tests {
 
     use super::*;
     use sp_model::Role;
+
+    #[test]
+    fn the_editors_backdrop_shows_only_through_no_background_or_plain_black() {
+        // No background colour, or the plain black a screen is anyway: the backdrop shows.
+        assert!(plain_black(None));
+        assert!(plain_black(Some(Rgba { r: 0, g: 0, b: 0, a: 255 })));
+        // A theme's own colour, even a dark one or a see-through black, is drawn as on screen.
+        assert!(!plain_black(Some(Rgba { r: 10, g: 20, b: 30, a: 255 })));
+        assert!(!plain_black(Some(Rgba { r: 0, g: 0, b: 1, a: 255 })));
+        assert!(!plain_black(Some(Rgba { r: 0, g: 0, b: 0, a: 128 })));
+        // The editor's picture draws the same words as a screen's, over either backdrop, and
+        // a screen's own scene is built without any of it.
+        let mut fonts = Fonts::new();
+        let theme = Theme::builtin();
+        let slide = slide("We lift our voices", None);
+        let layers = Layers {
+            media_fit: ImageFit::Fill,
+            media: None,
+            slide: Some(&slide),
+            overlay: None,
+            time: 0.0,
+            backdrop: None,
+            mask: [0.0; 4],
+            announcement: None,
+        };
+        let on_screen = build_layers(&mut fonts, &layers, &theme, 1920, 1080);
+        let greys = [Rgba { r: 28, g: 28, b: 28, a: 255 }, Rgba { r: 42, g: 42, b: 42, a: 255 }];
+        for backdrop in [
+            EditorBackdrop::Colour(Rgba { r: 0xb9, g: 0xb9, b: 0xb9, a: 255 }),
+            EditorBackdrop::Checker { square: 80.0, colours: greys },
+        ] {
+            let edited = build_layers_for_editor(&mut fonts, &layers, &theme, backdrop, 1920, 1080);
+            assert_eq!(edited.overflow, on_screen.overflow, "{backdrop:?}");
+        }
+    }
 
     fn slide(primary: &str, translation: Option<&str>) -> Slide {
         let mut boxes = vec![Object::text(Role::primary(), primary)];

@@ -105,5 +105,11 @@
   "edit.list.duplicate": "Дублювати",
   "edit.list.delete": "Видалити",
   "edit.why.one_layout": "Макет сцени завжди лишається хоча б один",
-  "edit.list.greyed": "{name}: {why}"
+  "edit.list.greyed": "{name}: {why}",
+  "edit.backdrop.checkered": "Клітинка",
+  "edit.backdrop.screen": "Як на екрані",
+  "edit.backdrop.light": "Світлий",
+  "edit.backdrop.media": "Медіа на екрані",
+  "edit.backdrop.media.none": "На екрані немає медіа",
+  "edit.backdrop.hint": "Підкладка: що видно за слайдом під час редагування. На екрани вона не потрапляє."
 }

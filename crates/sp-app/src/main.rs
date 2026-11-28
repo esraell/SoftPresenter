@@ -2571,6 +2571,8 @@ struct Running {
     /// The Edit view's picture of the slide being edited, and the words it was drawn from.
     canvas: Option<egui::TextureId>,
     canvas_for: Option<(sp_engine::SlideRef, Slide)>,
+    /// The backdrop that picture was drawn over, and the media picture, when it was that.
+    canvas_look: Option<(home::EditBackdrop, Option<sp_render::Picture>)>,
     /// What the line under the preview saying what Next will put on screen was last worked out
     /// from (see `refresh_next_line`).
     next_line_from: Option<NextLineFrom>,
@@ -3349,6 +3351,7 @@ impl App {
             next_repaint: None,
             canvas: None,
             canvas_for: None,
+            canvas_look: None,
             next_line_from: None,
             frames: 0,
             context,
@@ -10732,11 +10735,26 @@ impl App {
         // The theme of the song being edited, worked out before the window's state is borrowed.
         let editing_song = self.running.as_ref().and_then(|r| r.home_state.editing.as_ref()).map(|d| d.at.presentation);
         let song_theme = editing_song.map(|song| self.theme_of(song).clone());
+        let on_screens = self.media_on_screens.0.clone().map(|picture| (picture, self.media_on_screens.1));
         let Some(running) = self.running.as_mut() else {
             return;
         };
         let editing = running.home_state.editing.as_ref().map(|draft| (draft.at, draft.slide.clone()));
-        if editing == running.canvas_for {
+        // What shows behind the slide: the editor's backdrop, and for The Media on Screen the
+        // picture on the media layer now (a video's still, when it has one).
+        running.home_state.media_on_screen = on_screens.is_some();
+        let backdrop = running.home_state.edit_backdrop;
+        let media = on_screens.filter(|_| backdrop == home::EditBackdrop::Media);
+        let look = (backdrop, media.as_ref().map(|(picture, _)| picture.clone()));
+        let same_look = running.canvas_look.as_ref().is_some_and(|(was, picture)| {
+            *was == look.0
+                && match (picture, &look.1) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => a.same_as(b),
+                    _ => false,
+                }
+        });
+        if editing == running.canvas_for && same_look {
             return;
         }
         if let Some((at, slide)) = &editing {
@@ -10750,8 +10768,10 @@ impl App {
                 (None, Some(stage)) => stage,
                 (None, None) => song_theme.as_deref().unwrap_or(&self.theme),
             };
-            running.canvas = running.thumbs.canvas(&running.gpu, &mut running.egui_renderer, slide, theme);
+            let behind = (backdrop.drawn(media.is_some()), media.as_ref().map(|(picture, fit)| (picture, *fit)));
+            running.canvas = running.thumbs.canvas(&running.gpu, &mut running.egui_renderer, slide, theme, behind);
         }
+        running.canvas_look = Some(look);
         running.canvas_for = editing;
         running.home_window.request_redraw();
     }

@@ -923,6 +923,10 @@ pub struct Prefs {
     /// True when Settings › Screens adds a technical line to every screen's card (Details).
     #[serde(default)]
     pub screens_details: bool,
+    /// What the Edit view draws behind the slide being edited: `checkered` (the default),
+    /// `screen`, `light` or `media`.
+    #[serde(default)]
+    pub edit_backdrop: String,
     /// The language of the app's own words: `auto` (the computer's, the default), or `en`, `es`,
     /// `ru` or `uk`.
     #[serde(default)]
@@ -999,6 +1003,7 @@ impl Default for Prefs {
             keys_on_buttons: false,
             keys: crate::key_table::KeyTable::default(),
             screens_details: false,
+            edit_backdrop: String::new(),
             language: String::new(),
             import_as: std::collections::BTreeMap::new(),
             interface_size: String::new(),

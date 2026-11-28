@@ -185,7 +185,10 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   Move Up and Move Down) retypes the group's name in the strip; dragging moves a slide (and
   those picked out with it) to the ink line. The pictures are 224 wide, the props' and
   layouts' 204: the design's slides view sits 10 in from the column's sides, not 20.
-- **Canvas**: the Add toolbar over the slide (`add_bar.rs`, one list of kinds for every editor,
+- **Canvas**: beside Grid in its line, the backdrop's key (`home::backdrop_key`, `EditBackdrop`,
+  kept in the preferences as `edit_backdrop`): what shows behind the slide being edited where it
+  is see-through or plain black (Checkered, As on Screen, Light, The Media on Screen), drawn only
+  into the editor's own picture (`Thumbs::canvas`, `sp_render::build_layers_for_editor`). The Add toolbar over the slide (`add_bar.rs`, one list of kinds for every editor,
   `add_bar::kinds`): one rounded well, 34 tall, with a soft shadow and a thin line round it;
   in it the caption ADD, then a flat key per kind, 28 tall, its picture beside its name and as
   wide as they need, with a small ▾ after the name of those that open a choice under the key.

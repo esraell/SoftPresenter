@@ -105,5 +105,11 @@
   "edit.list.duplicate": "Дублировать",
   "edit.list.delete": "Удалить",
   "edit.why.one_layout": "Один макет сцены есть всегда",
-  "edit.list.greyed": "{name}: {why}"
+  "edit.list.greyed": "{name}: {why}",
+  "edit.backdrop.checkered": "Клетка",
+  "edit.backdrop.screen": "Как на экране",
+  "edit.backdrop.light": "Светлый",
+  "edit.backdrop.media": "Медиа на экране",
+  "edit.backdrop.media.none": "На экране нет медиа",
+  "edit.backdrop.hint": "Подложка: что видно за слайдом во время правки. На экраны она не попадает."
 }

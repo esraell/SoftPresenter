@@ -628,6 +628,10 @@ pub struct HomeState {
     pub edit_zoom: f32,
     pub edit_pan: egui::Vec2,
     pub edit_grid: bool,
+    /// What the Edit view draws behind the slide being edited (kept between runs), and whether
+    /// a picture is on the media layer now, for its last choice (set by the app).
+    pub edit_backdrop: EditBackdrop,
+    pub media_on_screen: bool,
     /// The stage layouts, and true when they have changed and are to be saved.
     pub stage_layouts: Vec<sp_model::ThemeTemplate>,
     pub stage_layouts_changed: bool,
@@ -2146,6 +2150,8 @@ impl Default for HomeState {
             edit_zoom: 0.0,
             edit_pan: egui::Vec2::ZERO,
             edit_grid: false,
+            edit_backdrop: EditBackdrop::default(),
+            media_on_screen: false,
             stage_layouts: crate::stage::builtin_layouts(),
             stage_layouts_changed: false,
             stage_editor_open: false,
@@ -2686,6 +2692,7 @@ impl HomeState {
             keys_on_buttons: self.keys_on_buttons,
             keys: self.keys.clone(),
             screens_details: self.screens_details,
+            edit_backdrop: self.edit_backdrop.code().to_owned(),
             language: crate::i18n::choice().code().to_owned(),
             import_as: self.import_as.clone(),
             interface_size: self.interface_size.code(),
@@ -2731,6 +2738,7 @@ impl HomeState {
         self.keys_on_buttons = prefs.keys_on_buttons;
         self.keys = prefs.keys.clone();
         self.screens_details = prefs.screens_details;
+        self.edit_backdrop = EditBackdrop::from_code(&prefs.edit_backdrop);
         crate::i18n::set_choice(crate::i18n::Choice::from_code(&prefs.language));
         self.import_as = prefs.import_as.clone();
         self.interface_size = crate::interface_size::InterfaceSize::from_code(&prefs.interface_size);
@@ -3878,6 +3886,7 @@ fn edit_view(
                     {
                         state.edit_grid = !state.edit_grid;
                     }
+                    backdrop_key(ui, state);
                 });
             });
         });
@@ -5489,6 +5498,121 @@ const GROUP_NAMES: [(&str, &str); 19] = [
 pub fn group_names() -> impl Iterator<Item = &'static str> {
     GROUP_NAMES.into_iter().map(|(key, english)| crate::i18n::tg(key, english))
 }
+
+/// What the Edit view draws behind the slide being edited, where the slide is see-through or
+/// plain black. A view of the editor only: the slide, its theme, the small pictures and the
+/// screens are as ever. A theme's own background colour or picture shows as on a screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EditBackdrop {
+    /// Two dark greys in squares, so see-through parts, shadows and outlines show.
+    #[default]
+    Checkered,
+    /// Black, as a screen has it.
+    AsOnScreen,
+    /// A light grey, for dark words and shadows.
+    Light,
+    /// The picture on the media layer now; Checkered while there is none.
+    Media,
+}
+
+impl EditBackdrop {
+    /// The four, in the order its menu offers them.
+    pub const ALL: [EditBackdrop; 4] =
+        [EditBackdrop::Checkered, EditBackdrop::AsOnScreen, EditBackdrop::Light, EditBackdrop::Media];
+    /// The checker's two greys, and the light grey.
+    pub const CHECKER: [Rgba; 2] =
+        [Rgba { r: 0x1c, g: 0x1c, b: 0x1c, a: 255 }, Rgba { r: 0x2a, g: 0x2a, b: 0x2a, a: 255 }];
+    pub const LIGHT: Rgba = Rgba { r: 0xb9, g: 0xb9, b: 0xb9, a: 255 };
+    /// The side of a checker square, in slide units: 28 points where the slide is drawn about
+    /// 670 points wide, as in a window of 1440 by 900.
+    pub const SQUARE: f32 = 80.0;
+
+    /// The word the preferences keep it by.
+    pub fn code(self) -> &'static str {
+        match self {
+            EditBackdrop::Checkered => "checkered",
+            EditBackdrop::AsOnScreen => "screen",
+            EditBackdrop::Light => "light",
+            EditBackdrop::Media => "media",
+        }
+    }
+
+    /// The backdrop kept as `code`; anything else (a file from before it) is Checkered.
+    pub fn from_code(code: &str) -> EditBackdrop {
+        EditBackdrop::ALL.into_iter().find(|backdrop| backdrop.code() == code).unwrap_or_default()
+    }
+
+    /// Its name in the menu, in the language set.
+    pub fn name(self) -> &'static str {
+        match self {
+            EditBackdrop::Checkered => t("edit.backdrop.checkered", "Checkered"),
+            EditBackdrop::AsOnScreen => t("edit.backdrop.screen", "As on Screen"),
+            EditBackdrop::Light => t("edit.backdrop.light", "Light"),
+            EditBackdrop::Media => t("edit.backdrop.media", "The Media on Screen"),
+        }
+    }
+
+    /// What the renderer draws for it behind the slide (`None`: black, as on a screen), given
+    /// whether a picture is on the media layer: without one, The Media on Screen is Checkered.
+    pub fn drawn(self, media: bool) -> Option<sp_render::EditorBackdrop> {
+        let checker = sp_render::EditorBackdrop::Checker { square: Self::SQUARE, colours: Self::CHECKER };
+        match self {
+            EditBackdrop::AsOnScreen => None,
+            EditBackdrop::Light => Some(sp_render::EditorBackdrop::Colour(Self::LIGHT)),
+            EditBackdrop::Checkered => Some(checker),
+            // The media itself is drawn behind the slide, over black as on a screen.
+            EditBackdrop::Media => (!media).then_some(checker),
+        }
+    }
+}
+
+/// The key beside Grid that says, as a small swatch, what shows behind the slide being edited,
+/// and opens the four choices, the one in use ticked. The Media on Screen is greyed, and says
+/// why, while no picture is on the media layer.
+fn backdrop_key(ui: &mut egui::Ui, state: &mut HomeState) {
+    let (cell, key) = ui.allocate_exact_size(vec2(BACKDROP_KEY, ui.spacing().interact_size.y), Sense::click());
+    crate::studio::paint_flat(ui.painter(), cell, 9.0, crate::studio::Flat::Plain, key.hovered());
+    let swatch = Rect::from_center_size(cell.center(), vec2(16.0, 12.0));
+    let painter = ui.painter().with_clip_rect(swatch);
+    match state.edit_backdrop.drawn(state.media_on_screen) {
+        None => {
+            painter.rect_filled(swatch, 2.0, Color32::BLACK);
+        }
+        Some(sp_render::EditorBackdrop::Colour(colour)) => {
+            painter.rect_filled(swatch, 2.0, color32(colour));
+        }
+        Some(sp_render::EditorBackdrop::Checker { colours, .. }) => {
+            painter.rect_filled(swatch, 2.0, color32(colours[0]));
+            // A lighter second grey than the slide's own, so the squares read at this size.
+            for (column, row) in [(0, 0), (2, 0), (1, 1), (3, 1), (0, 2), (2, 2)] {
+                let at = swatch.min + vec2(column as f32 * 4.0, row as f32 * 4.0);
+                painter.rect_filled(Rect::from_min_size(at, vec2(4.0, 4.0)), 0.0, Color32::from_gray(0x5a));
+            }
+        }
+    }
+    ui.painter().rect_stroke(swatch, 2.0, Stroke::new(1.0, crate::studio::LINE), egui::StrokeKind::Outside);
+    let hint =
+        t("edit.backdrop.hint", "Backdrop: what shows behind the slide while you edit. It never goes on the screens.");
+    key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, hint));
+    let key = key.on_hover_text(hint);
+    egui::Popup::menu(&key).show(|ui| {
+        for backdrop in EditBackdrop::ALL {
+            let can = backdrop != EditBackdrop::Media || state.media_on_screen;
+            let choice = egui::Button::selectable(state.edit_backdrop == backdrop, backdrop.name());
+            let why = t("edit.backdrop.media.none", "No media is on screen");
+            if ui.add_enabled(can, choice).on_disabled_hover_text(why).clicked() {
+                state.edit_backdrop = backdrop;
+                ui.close();
+            }
+            if !can {
+                ui.label(egui::RichText::new(why).size(11.0).color(crate::studio::TEXT_FAINT));
+            }
+        }
+    });
+}
+
+/// How wide the backdrop's key is.
+const BACKDROP_KEY: f32 = 34.0;
 
 /// The colour of a group's dot, as the slides' strips draw it.
 pub fn group_dot_colour(colour: Rgba) -> Color32 {
@@ -16197,6 +16321,102 @@ mod tests {
                 }
             });
         }
+    }
+
+    #[test]
+    fn the_editors_backdrop_is_checkered_until_another_is_chosen_and_is_kept() {
+        use sp_render::EditorBackdrop as Drawn;
+        // Checkered as it comes, and for a preferences file from before there was a choice.
+        assert_eq!(HomeState::default().edit_backdrop, EditBackdrop::Checkered);
+        assert_eq!(EditBackdrop::from_code(""), EditBackdrop::Checkered);
+        for backdrop in EditBackdrop::ALL {
+            assert_eq!(EditBackdrop::from_code(backdrop.code()), backdrop);
+        }
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let names = EditBackdrop::ALL.map(EditBackdrop::name);
+            assert_eq!(names, ["Checkered", "As on Screen", "Light", "The Media on Screen"]);
+        });
+        // What is drawn behind the slide: two dark greys in squares; black as on a screen;
+        // the light grey; and for The Media on Screen the media itself over black, or the
+        // checker while no media is on screen.
+        let checker = Drawn::Checker { square: EditBackdrop::SQUARE, colours: EditBackdrop::CHECKER };
+        for media in [false, true] {
+            assert_eq!(EditBackdrop::Checkered.drawn(media), Some(checker));
+            assert_eq!(EditBackdrop::AsOnScreen.drawn(media), None);
+            assert_eq!(
+                EditBackdrop::Light.drawn(media),
+                Some(Drawn::Colour(Rgba { r: 0xb9, g: 0xb9, b: 0xb9, a: 255 }))
+            );
+        }
+        assert_eq!(EditBackdrop::Media.drawn(false), Some(checker));
+        assert_eq!(EditBackdrop::Media.drawn(true), None);
+        // The choice is one of the small things kept between runs.
+        let mut state = HomeState { edit_backdrop: EditBackdrop::Light, ..HomeState::default() };
+        let prefs = state.prefs();
+        assert_eq!(prefs.edit_backdrop, "light");
+        state.edit_backdrop = EditBackdrop::Checkered;
+        state.apply_prefs(&prefs);
+        assert_eq!(state.edit_backdrop, EditBackdrop::Light);
+    }
+
+    #[test]
+    fn the_backdrop_key_beside_grid_opens_four_choices_and_media_is_greyed_with_none_on_screen() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let (show, mut state) = song_open(&[("Verse 1", 1)], 0);
+            let untouched = state.editing.as_ref().map(|draft| draft.slide.clone());
+            let (ctx, mut time) = (egui::Context::default(), 0.0);
+            frame_events(&ctx, &show, &mut state, Vec::new(), time);
+            let grid = home_place(&ctx, &show, &mut state, "Grid", time);
+            // The key is the 34-wide one on Grid's line, next to it.
+            let mut keys = Vec::new();
+            ctx.viewport(|viewport| {
+                for (_, rects) in viewport.prev_pass.widgets.layers() {
+                    keys.extend(rects.iter().filter(|widget| widget.sense.senses_click()).map(|widget| widget.rect));
+                }
+            });
+            let beside = |key: &Rect| {
+                (key.width() - BACKDROP_KEY).abs() < 0.01
+                    && key.y_range().contains(grid.y)
+                    && (key.center().x - grid.x).abs() < 80.0
+            };
+            let key = keys.into_iter().find(beside);
+            let key = key.expect("the backdrop's key beside Grid");
+            click_at(&ctx, &show, &mut state, key.center(), &mut time);
+            // Its four choices, top to bottom, and why the last can't be chosen.
+            let names = ["Checkered", "As on Screen", "Light", "The Media on Screen", "No media is on screen"];
+            let places = names.map(|words| home_place(&ctx, &show, &mut state, words, time));
+            for pair in places.windows(2) {
+                assert!(pair[0].y < pair[1].y, "{places:?}");
+            }
+            // The Media on Screen takes no click while no media is on screen.
+            click_at(&ctx, &show, &mut state, places[3], &mut time);
+            assert_eq!(state.edit_backdrop, EditBackdrop::Checkered);
+            // Light does. (A click anywhere in the menu closes it, so it is opened again.)
+            let raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+                time: Some(time),
+                ..RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| {
+                home_ui(ui, &show, &mut state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+            });
+            let open = crate::studio::tests::place_of(&output, "Light").is_some();
+            output.drop_without_applying_deltas();
+            if !open {
+                click_at(&ctx, &show, &mut state, key.center(), &mut time);
+            }
+            let light = home_place(&ctx, &show, &mut state, "Light", time);
+            click_at(&ctx, &show, &mut state, light, &mut time);
+            assert_eq!(state.edit_backdrop, EditBackdrop::Light);
+            // With media on screen, the last choice can be taken.
+            state.media_on_screen = true;
+            click_at(&ctx, &show, &mut state, key.center(), &mut time);
+            let media = home_place(&ctx, &show, &mut state, "The Media on Screen", time);
+            click_at(&ctx, &show, &mut state, media, &mut time);
+            assert_eq!(state.edit_backdrop, EditBackdrop::Media);
+            // The slide being edited is as it was: the backdrop is the editor's view only.
+            assert_eq!(state.editing.map(|draft| draft.slide), untouched);
+        });
     }
 
     #[test]

@@ -104,5 +104,11 @@
   "edit.list.duplicate": "Duplicar",
   "edit.list.delete": "Eliminar",
   "edit.why.one_layout": "Siempre hay un diseño del escenario",
-  "edit.list.greyed": "{name}: {why}"
+  "edit.list.greyed": "{name}: {why}",
+  "edit.backdrop.checkered": "Cuadros",
+  "edit.backdrop.screen": "Como en pantalla",
+  "edit.backdrop.light": "Claro",
+  "edit.backdrop.media": "El medio en pantalla",
+  "edit.backdrop.media.none": "No hay ningún medio en pantalla",
+  "edit.backdrop.hint": "Fondo: lo que se ve detrás de la diapositiva mientras editas. Nunca sale en las pantallas."
 }
