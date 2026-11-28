@@ -19,6 +19,7 @@
 
 use crate::i18n::t;
 use crate::outside::Waiting;
+use crate::quick_help::Hint;
 use crate::studio::{CARD, CARE, LINE, TEXT, TEXT_DIM, TEXT_FAINT};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde::Serialize;
@@ -640,7 +641,7 @@ pub fn button(ui: &mut egui::Ui, state: &mut crate::home::HomeState, rect: Rect,
         Look::New => t("notices.button.new", "New notices"),
         Look::Quiet => t("notices.title", "Notices"),
     };
-    let response = if open { response } else { response.on_hover_text(hint) };
+    let response = if open { response } else { response.hint(hint) };
     let frame = egui::Frame::new()
         .fill(LIST_FILL)
         .corner_radius(14.0)
@@ -681,7 +682,7 @@ fn list(ui: &mut egui::Ui, state: &mut crate::home::HomeState, form: &crate::clo
     let clearable = state.notices.clearable();
     let flat = crate::studio::Flat::Plain;
     if crate::studio::flat_button(ui, clear, list_id().with("clear"), clear_all, font, flat, clearable)
-        .on_hover_text(t("notices.clear_all.hint", "Empty the list (a question stays until it is answered)"))
+        .hint(t("notices.clear_all.hint", "Empty the list (a question stays until it is answered)"))
         .clicked()
     {
         state.notices.clear_all();
@@ -841,7 +842,7 @@ pub fn ask_strip(ui: &egui::Ui, state: &mut crate::home::HomeState, band: Rect, 
         main,
         true,
     )
-    .on_hover_text(t("notices.ask.reload.hint", "Take the file's version (SoftPresenter's changes to it go)"))
+    .hint(t("notices.ask.reload.hint", "Take the file's version (SoftPresenter's changes to it go)"))
     .clicked()
     {
         state.waiting_choice = Some((about, true));
@@ -856,7 +857,7 @@ pub fn ask_strip(ui: &egui::Ui, state: &mut crate::home::HomeState, band: Rect, 
         plain,
         true,
     )
-    .on_hover_text(t("notices.ask.keep_mine.hint", "Save SoftPresenter's version over the file"))
+    .hint(t("notices.ask.keep_mine.hint", "Save SoftPresenter's version over the file"))
     .clicked()
     {
         state.waiting_choice = Some((about, false));

@@ -8,6 +8,7 @@ use egui::{FontId, Rect, Sense, pos2, vec2};
 use super::{Request, View};
 use crate::home::settings::parts;
 use crate::i18n::{t, tf, tn};
+use crate::quick_help::Hint;
 use crate::studio::{CARE, Flat, TEXT_FAINT};
 
 /// How long ago a time in seconds since 1970 was, in words.
@@ -74,7 +75,9 @@ fn remote_card(ui: &mut egui::Ui, view: &mut View) {
             let words = if view.on { t("settings.on", "On") } else { t("settings.off", "Off") };
             let look = if view.on { Flat::On } else { Flat::Plain };
             // Greyed, taking no clicks, until there is a password, as before.
-            crate::studio::flat_button(ui, place, id, words, FontId::proportional(12.5), look, can_switch).clicked()
+            crate::studio::flat_button(ui, place, id, words, FontId::proportional(12.5), look, can_switch)
+                .hint(note)
+                .clicked()
         };
         let mut clicked = false;
         if can_switch {
@@ -134,7 +137,9 @@ fn address_row(ui: &mut egui::Ui, view: &View, address: &str) {
             tag(ui, Rect::from_min_size(place.min + vec2(0.0, 3.0), whole), font.clone());
         }
         let key_place = Rect::from_min_size(pos2(place.max.x - key.x, place.min.y), key);
-        copied = parts::key(ui, key_place, ui.scope_id().with("remote copy"), copy, false).clicked();
+        copied = parts::key(ui, key_place, ui.scope_id().with("remote copy"), copy, false)
+            .hint(t("quickhelp.remote.copy", "Copy the address, to send it to another device."))
+            .clicked();
     });
     if !beside {
         let width = ui.available_width();
@@ -160,7 +165,9 @@ fn port_row(ui: &mut egui::Ui, view: &mut View) {
         let field = parts::field(ui, Rect::from_min_size(place.min, vec2(PORT_WIDTH, 32.0)), &mut view.port, false, "");
         let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let key_place = Rect::from_min_size(place.min + vec2(PORT_WIDTH + 8.0, 1.0), key);
-        if parts::key(ui, key_place, ui.scope_id().with("remote port use"), use_words, false).clicked() || entered {
+        if parts::key(ui, key_place, ui.scope_id().with("remote port use"), use_words, false).hint(range).clicked()
+            || entered
+        {
             match view.port.trim().parse::<u16>() {
                 Ok(port) if port >= 1024 => view.request = Some(Request::Port(port)),
                 _ => view.said = Some((range.to_owned(), true)),
@@ -186,7 +193,7 @@ fn certificate(ui: &mut egui::Ui, view: &mut View) {
     let make = t("remote.new_certificate", "Make a New Certificate");
     let hint = t("remote.new_certificate.hint", "A new key too: devices see a new fingerprint and a warning again");
     parts::row(ui, make, hint, parts::key_size(ui, make), |ui, place| {
-        if parts::key(ui, place, ui.scope_id().with("remote new certificate"), make, false).clicked() {
+        if parts::key(ui, place, ui.scope_id().with("remote new certificate"), make, false).hint(hint).clicked() {
             view.request = Some(Request::NewCertificate);
         }
     });
@@ -212,7 +219,10 @@ fn password_card(ui: &mut egui::Ui, view: &mut View) {
         } else if view.has_password && !view.changing {
             let change = t("remote.password.change_open", "Change Password\u{2026}");
             parts::row(ui, t("remote.password", "Password"), forgets, parts::key_size(ui, change), |ui, place| {
-                if parts::key(ui, place, ui.scope_id().with("remote password change"), change, false).clicked() {
+                if parts::key(ui, place, ui.scope_id().with("remote password change"), change, false)
+                    .hint(forgets)
+                    .clicked()
+                {
                     view.changing = true;
                 }
             });
@@ -259,10 +269,11 @@ fn password_fields(ui: &mut egui::Ui, view: &mut View, forgets: &str) {
     };
     let size = vec2(FIELD_WIDTH, 32.0);
     parts::row(ui, label, note, size, |ui, place| {
-        parts::field(ui, place, &mut view.password, true, "");
+        parts::field(ui, place, &mut view.password, true, "").hint(note);
     });
     parts::row(ui, t("remote.password.again", "Again"), "", size, |ui, place| {
-        parts::field(ui, place, &mut view.password_again, true, "");
+        parts::field(ui, place, &mut view.password_again, true, "")
+            .hint(t("quickhelp.remote.again", "The same password again, to be sure it was typed right."));
     });
     let set = if view.has_password {
         t("remote.password.change", "Change Password")
@@ -285,10 +296,14 @@ fn password_fields(ui: &mut egui::Ui, view: &mut View, forgets: &str) {
         Flat::Main,
         true,
     )
+    .hint(t("quickhelp.remote.set", "Keep this password for phones signing in."))
     .clicked();
     if view.has_password {
         let cancel_place = Rect::from_min_size(pos2(set_place.min.x - 8.0 - cancel_size.x, line.min.y), cancel_size);
-        if parts::key(ui, cancel_place, ui.scope_id().with("remote password cancel"), cancel, false).clicked() {
+        if parts::key(ui, cancel_place, ui.scope_id().with("remote password cancel"), cancel, false)
+            .hint(t("quickhelp.remote.cancel", "Keep the password as it was."))
+            .clicked()
+        {
             view.changing = false;
             view.password.clear();
             view.password_again.clear();
@@ -337,6 +352,10 @@ fn connected_card(ui: &mut egui::Ui, view: &mut View) {
                 tf("remote.page.since", "{ip} · since {ago}", &[("ip", &page.ip.to_string()), ("ago", &ago(since))]);
             parts::row(ui, &page.name, &note, parts::key_size(ui, disconnect), |ui, place| {
                 if parts::key(ui, place, ui.scope_id().with(("remote disconnect", page.id)), disconnect, false)
+                    .hint(t(
+                        "quickhelp.remote.disconnect",
+                        "Close this device\u{2019}s connection. It stays remembered.",
+                    ))
                     .clicked()
                 {
                     view.request = Some(Request::Disconnect(page.id));
@@ -365,7 +384,10 @@ fn devices_card(ui: &mut egui::Ui, view: &mut View) {
                 &[("day", &day(device.first_seen)), ("ago", &ago(device.last_seen)), ("ip", &device.ip)],
             );
             parts::row(ui, &device.name, &note, parts::key_size(ui, forget), |ui, place| {
-                if parts::key(ui, place, ui.scope_id().with(("remote forget", &device.id)), forget, false).clicked() {
+                if parts::key(ui, place, ui.scope_id().with(("remote forget", &device.id)), forget, false)
+                    .hint(t("quickhelp.remote.forget", "Forget this device. It signs in again next time."))
+                    .clicked()
+                {
                     view.request = Some(Request::Forget(device.id.clone()));
                 }
             });

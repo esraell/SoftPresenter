@@ -13,6 +13,7 @@ use sp_render::object_frame;
 use crate::editor::MIN_SIDE;
 use crate::home::HomeState;
 use crate::i18n::{t, tf, tk};
+use crate::quick_help::Hint;
 
 const PANEL: Color32 = crate::studio::PANEL;
 /// What is chosen: grey, as the rest of the app.
@@ -211,6 +212,26 @@ fn rule(ui: &mut egui::Ui) {
     ui.add_space(9.0);
 }
 
+/// A slider from 0 to 100% with the percentage beside it in a number box of its own (so each
+/// says what it does for Quick Help), as the slider's own value showed it; a whole percentage
+/// whatever is typed. True when either changed it.
+fn percent_slider(ui: &mut egui::Ui, percent: &mut f32, hint: &str) -> bool {
+    let slider = egui::Slider::new(percent, 0.0..=100.0).step_by(1.0).show_value(false);
+    let moved = ui.add(slider).hint(hint).changed();
+    let typed = ui
+        .add(
+            egui::DragValue::new(percent)
+                .range(0.0..=100.0)
+                .speed(1.0)
+                .custom_formatter(|n, _| percent_text(n))
+                .custom_parser(typed_percent),
+        )
+        .hint(hint)
+        .changed();
+    *percent = percent.round();
+    moved || typed
+}
+
 /// A percentage as the language writes it ("75%", "75 %"), for a number box or a slider's.
 fn percent_text(n: f64) -> String {
     crate::i18n::percent(n.round().clamp(0.0, 100.0) as u64)
@@ -313,7 +334,13 @@ fn tick(ui: &mut egui::Ui, on: &mut bool, title: &str) -> egui::Response {
 }
 
 /// A pop-up list showing its current choice.
-fn choice<T: PartialEq + Copy>(ui: &mut egui::Ui, salt: &str, width: f32, value: &mut T, options: &[(T, &str)]) {
+fn choice<T: PartialEq + Copy>(
+    ui: &mut egui::Ui,
+    (salt, hint): (&str, &str),
+    width: f32,
+    value: &mut T,
+    options: &[(T, &str)],
+) {
     let shown = options.iter().find(|(v, _)| v == value).map_or("", |(_, name)| name);
     fixed(ui, width, |ui| {
         egui::ComboBox::from_id_salt(salt)
@@ -324,7 +351,9 @@ fn choice<T: PartialEq + Copy>(ui: &mut egui::Ui, salt: &str, width: f32, value:
                 for (option, name) in options {
                     ui.selectable_value(value, *option, *name);
                 }
-            });
+            })
+            .response
+            .hint(hint);
     });
 }
 
@@ -454,7 +483,7 @@ fn row_tall(ui: &mut egui::Ui, column: f32, caption: &str, tall: f32, add: impl 
         let cut = words.elided;
         ui.painter().galley(at, words, crate::studio::TEXT_DIM);
         if cut {
-            over.on_hover_text(caption);
+            over.hint(caption);
         }
         ui.add_space(CAPTION_GAP - BETWEEN);
         add(ui);
@@ -511,7 +540,7 @@ fn square_key(
         painter.rect_filled(lower, egui::CornerRadius { nw: 0, ne: 0, sw: 9, se: 9 }, BLUE);
     }
     draw(painter, rect, INK);
-    response.on_hover_text(hint)
+    response.hint(hint)
 }
 
 /// A [`square_key`] with a letter or two on it.
@@ -541,23 +570,23 @@ fn word_key(ui: &mut egui::Ui, words: &str, on: bool, enabled: bool) -> egui::Re
 fn number(
     ui: &mut egui::Ui,
     value: &mut f32,
-    width: f32,
+    (width, hint): (f32, &str),
     make: impl FnOnce(egui::DragValue) -> egui::DragValue,
 ) -> egui::Response {
-    ui.add_sized([width, KEY], make(egui::DragValue::new(value).speed(1.0).max_decimals(0)))
+    ui.add_sized([width, KEY], make(egui::DragValue::new(value).speed(1.0).max_decimals(0))).hint(hint)
 }
 
 /// A number `width` wide with its name over it in small capitals: the usual words where they
 /// fit that width, else their short form.
 fn mini(
     ui: &mut egui::Ui,
-    width: f32,
+    (width, hint): (f32, &str),
     (key, english): (&'static str, &'static str),
     value: &mut f32,
     make: impl FnOnce(egui::DragValue) -> egui::DragValue,
 ) -> egui::Response {
     let name = crate::studio::within(ui, key, english, mini_font(), 0.0, width, true);
-    mini_named(ui, width, &name, value, make)
+    mini_named(ui, (width, hint), &name, value, make)
 }
 
 /// The face of the name over a [`mini`] number.
@@ -568,7 +597,7 @@ fn mini_font() -> FontId {
 /// [`mini`] with its name as given.
 fn mini_named(
     ui: &mut egui::Ui,
-    width: f32,
+    (width, hint): (f32, &str),
     name: &str,
     value: &mut f32,
     make: impl FnOnce(egui::DragValue) -> egui::DragValue,
@@ -578,7 +607,7 @@ fn mini_named(
         let (cell, _) = ui.allocate_exact_size(vec2(width, MINI - KEY - 3.0), Sense::hover());
         let ink = crate::studio::TEXT_FAINT;
         crate::studio::paint_spaced(ui, cell.left_center(), Align2::LEFT_CENTER, name, mini_font(), ink, 0.0);
-        number(ui, value, width, make)
+        number(ui, value, (width, hint), make)
     })
     .inner
 }
@@ -649,8 +678,7 @@ fn swatch_row(ui: &mut egui::Ui, row: &Swatches, colour: &mut Option<Rgba>) -> b
     if row.none_too {
         let cell = cell_at(place);
         place += 1;
-        let response =
-            ui.interact(cell, id.with("none"), Sense::click()).on_hover_text(t("inspector.swatch.none", "None"));
+        let response = ui.interact(cell, id.with("none"), Sense::click()).hint(t("inspector.swatch.none", "None"));
         let painter = ui.painter();
         painter.rect_filled(cell, 5.0, crate::studio::CARD);
         let inside = cell.shrink(3.0);
@@ -666,7 +694,8 @@ fn swatch_row(ui: &mut egui::Ui, row: &Swatches, colour: &mut Option<Rgba>) -> b
     let offered = &ROW_SWATCHES[..row.count.min(ROW_SWATCHES.len())];
     for [r, g, b] in offered {
         let cell = cell_at(place);
-        let response = ui.interact(cell, id.with(place), Sense::click());
+        let response =
+            ui.interact(cell, id.with(place), Sense::click()).hint(t("quickhelp.inspector.swatch", "Use this colour."));
         place += 1;
         let painter = ui.painter();
         painter.rect_filled(cell, 5.0, Color32::from_rgb(*r, *g, *b));
@@ -686,7 +715,7 @@ fn swatch_row(ui: &mut egui::Ui, row: &Swatches, colour: &mut Option<Rgba>) -> b
     } else {
         t("inspector.swatch.any", "Any colour")
     };
-    let response = ui.interact(cell, id.with("any"), Sense::click()).on_hover_text(hint);
+    let response = ui.interact(cell, id.with("any"), Sense::click()).hint(hint);
     let painter = ui.painter();
     match (row.mixed, before, own) {
         (Some(other), Some(first), _) => {
@@ -776,7 +805,7 @@ fn colour_well(ui: &mut egui::Ui, width: f32, tall: f32, value: &mut Rgba, hint:
     let painter = ui.painter();
     painter.rect_filled(well, 5.0, to_color32(*value));
     painter.rect_stroke(well, 5.0, egui::Stroke::new(1.0, Color32::from_gray(90)), egui::StrokeKind::Inside);
-    let response = response.on_hover_text(hint);
+    let response = response.hint(hint);
     colour_popup(&response, value);
 }
 
@@ -794,12 +823,16 @@ fn gradient_rows(ui: &mut egui::Ui, column: f32, salt: &str, filled: bool, gradi
         ui.add_enabled_ui(filled, |ui| {
             let options: Vec<(sp_model::GradientKind, &str)> =
                 sp_model::GradientKind::ALL.iter().map(|kind| (*kind, gradient_name(*kind))).collect();
-            choice(ui, salt, room - NUMBER - BETWEEN, &mut gradient.kind, &options);
+            choice(
+                ui,
+                (salt, t("quickhelp.inspector.fill_kind", "A plain colour, or one that fades to another.")),
+                room - NUMBER - BETWEEN,
+                &mut gradient.kind,
+                &options,
+            );
             ui.add_enabled_ui(gradient.kind == sp_model::GradientKind::Linear, |ui| {
-                number(ui, &mut gradient.angle, NUMBER, |d| d.range(0.0..=359.0).suffix("°")).on_hover_text(t(
-                    "inspector.gradient.angle",
-                    "The way it runs: 0° left to right, 90° top to bottom",
-                ));
+                number(ui, &mut gradient.angle, (NUMBER, ""), |d| d.range(0.0..=359.0).suffix("°"))
+                    .hint(t("inspector.gradient.angle", "The way it runs: 0° left to right, 90° top to bottom"));
             });
         });
     });
@@ -868,7 +901,9 @@ fn switch_with_more(
 ) -> bool {
     let between = ui.spacing().item_spacing.x;
     ui.spacing_mut().item_spacing.x = 1.0;
-    let clicked = word_key(ui, words, on, true).clicked();
+    let switch =
+        t("quickhelp.inspector.effect_switch", "Switch this effect on or off; the key beside it sets its look.");
+    let clicked = word_key(ui, words, on, true).hint(switch).clicked();
     ui.spacing_mut().item_spacing.x = between;
     more_key(ui, open, which, hint, false);
     clicked
@@ -910,7 +945,7 @@ fn ramp_swatch(
     if key.clicked() {
         *open = if *open == Some(which) { None } else { Some(which) };
     }
-    key.on_hover_text(hint)
+    key.hint(hint)
 }
 
 /// The room a row of `cells` swatches has, and each one's side, when one more swatch (the ramp)
@@ -967,7 +1002,7 @@ fn panel_over(
                     );
                     let hint = t("inspector.panel.close", "Close");
                     key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, hint));
-                    close = key.on_hover_text(hint).clicked();
+                    close = key.hint(hint).clicked();
                 });
             });
             add(ui);
@@ -997,13 +1032,19 @@ fn gradient_panel(ui: &mut egui::Ui, salt: &str, filled: bool, gradient: &mut sp
         ui.add_enabled_ui(filled, |ui| {
             let options: Vec<(sp_model::GradientKind, &str)> =
                 sp_model::GradientKind::ALL.iter().map(|kind| (*kind, gradient_name(*kind))).collect();
-            choice(ui, salt, room, &mut gradient.kind, &options);
+            choice(
+                ui,
+                (salt, t("quickhelp.inspector.fill_kind", "A plain colour, or one that fades to another.")),
+                room,
+                &mut gradient.kind,
+                &options,
+            );
         });
     });
     row(ui, column, captions[1], |ui| {
         ui.add_enabled_ui(filled && gradient.kind == sp_model::GradientKind::Linear, |ui| {
-            number(ui, &mut gradient.angle, NUMBER, |d| d.range(0.0..=359.0).suffix("°"))
-                .on_hover_text(t("inspector.gradient.angle", "The way it runs: 0° left to right, 90° top to bottom"));
+            number(ui, &mut gradient.angle, (NUMBER, ""), |d| d.range(0.0..=359.0).suffix("°"))
+                .hint(t("inspector.gradient.angle", "The way it runs: 0° left to right, 90° top to bottom"));
         });
     });
     let look = Swatches { salt, room, count: 8, none_too: false, mixed: None };
@@ -1025,13 +1066,27 @@ fn shadow_panel(ui: &mut egui::Ui, salt: &str, can: bool, look: &mut sp_model::S
     let each = mini_width(room, 3);
     row_tall(ui, column, captions[0], MINI, |ui| {
         ui.add_enabled_ui(can, |ui| {
-            mini(ui, each, tk("inspector.shadow.angle", "Angle"), &mut look.angle, |d| {
-                d.range(0.0..=360.0).suffix("°")
-            });
-            mini(ui, each, tk("inspector.shadow.offset", "Offset"), &mut look.offset, |d| {
-                d.speed(0.5).range(0.0..=200.0)
-            });
-            mini(ui, each, tk("inspector.shadow.blur", "Blur"), &mut look.blur, |d| d.speed(0.5).range(0.0..=200.0));
+            mini(
+                ui,
+                (each, t("quickhelp.inspector.shadow_angle", "Which way the shadow falls, in degrees.")),
+                tk("inspector.shadow.angle", "Angle"),
+                &mut look.angle,
+                |d| d.range(0.0..=360.0).suffix("°"),
+            );
+            mini(
+                ui,
+                (each, t("quickhelp.inspector.shadow_offset", "How far the shadow falls from the box.")),
+                tk("inspector.shadow.offset", "Offset"),
+                &mut look.offset,
+                |d| d.speed(0.5).range(0.0..=200.0),
+            );
+            mini(
+                ui,
+                (each, t("quickhelp.inspector.shadow_blur", "How soft the shadow\u{2019}s edge is.")),
+                tk("inspector.shadow.blur", "Blur"),
+                &mut look.blur,
+                |d| d.speed(0.5).range(0.0..=200.0),
+            );
         });
     });
     row(ui, column, captions[1], |ui| {
@@ -1040,11 +1095,9 @@ fn shadow_panel(ui: &mut egui::Ui, salt: &str, can: bool, look: &mut sp_model::S
             ui.spacing_mut().interact_size.x = PERCENT_BOX;
             let shown = (look.opacity * 100.0).round();
             let mut percent = shown;
-            let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-                .step_by(1.0)
-                .custom_formatter(|n, _| percent_text(n))
-                .custom_parser(typed_percent);
-            if ui.add(slider).changed() && percent != shown {
+            let hint =
+                t("quickhelp.inspector.shadow_opacity", "How dark the shadow is. At 100% nothing shows through it.");
+            if percent_slider(ui, &mut percent, hint) && percent != shown {
                 look.opacity = (percent / 100.0).clamp(0.0, 1.0);
             }
         });
@@ -1103,7 +1156,22 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
                 state.inspector.tab = tabs[0].0;
             }
             let names: Vec<&str> = tabs.iter().map(|(_, name)| *name).collect();
-            let switch = crate::studio::Tabs::plain(&names);
+            let hints: Vec<&str> = tabs
+                .iter()
+                .map(|(tab, _)| match tab {
+                    InspectorTab::Own => t(
+                        "quickhelp.inspector.own",
+                        "This box\u{2019}s own settings: its words, shape, picture or page.",
+                    ),
+                    InspectorTab::Box => {
+                        t("quickhelp.inspector.box", "The box itself: its place, size, turn, look and order.")
+                    }
+                    InspectorTab::Animation => {
+                        t("quickhelp.inspector.build", "How the box comes onto the slide and leaves it.")
+                    }
+                })
+                .collect();
+            let switch = crate::studio::Tabs { hints: &hints, ..crate::studio::Tabs::plain(&names) };
             let width = ui.available_width();
             let (place, _) =
                 ui.allocate_exact_size(vec2(width, crate::studio::tab_switch_height(&switch)), Sense::hover());
@@ -1125,7 +1193,7 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
                         let open = state.inspector.notes_open;
                         if ui
                             .add(egui::Button::selectable(open, t("inspector.notes", "Slide Notes")))
-                            .on_hover_text(t(
+                            .hint(t(
                                 "inspector.notes.hint",
                                 "Notes for whoever runs the slides; the audience never sees them",
                             ))
@@ -1137,12 +1205,12 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let done = ui
                             .button(t("inspector.done", "Done"))
-                            .on_hover_text(t("inspector.done.hint", "Go back to the Service view"));
+                            .hint(t("inspector.done.hint", "Go back to the Service view"));
                         if done.clicked() {
                             leave = true;
                         }
                         if !for_theme {
-                            ui.checkbox(&mut state.live_edit, t("inspector.live_edit", "Live Edit")).on_hover_text(t(
+                            ui.checkbox(&mut state.live_edit, t("inspector.live_edit", "Live Edit")).hint(t(
                                 "inspector.live_edit.hint",
                                 "When on, changes to a slide that is on screen appear on the output as they are made",
                             ));
@@ -1254,17 +1322,15 @@ fn theme_slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
         }
     });
     labelled_left(ui, column, size, |ui| {
-        ui.label(egui::RichText::new("1920 × 1080").size(12.5).color(INK)).on_hover_text(t(
-            "inspector.theme.size.hint",
-            "Every slide is 1920 by 1080; other sizes are not made yet.",
-        ));
+        ui.label(egui::RichText::new("1920 × 1080").size(12.5).color(INK))
+            .hint(t("inspector.theme.size.hint", "Every slide is 1920 by 1080; other sizes are not made yet."));
     });
     rule(ui);
     ui.horizontal(|ui| {
         let mut filled = edit.theme.background.is_some();
         let words = t("inspector.theme.background", "Background");
         let hint = t("inspector.theme.background.hint", "A colour behind everything on the slide");
-        if tick(ui, &mut filled, words).on_hover_text(hint).changed() {
+        if tick(ui, &mut filled, words).hint(hint).changed() {
             edit.theme.background = filled.then_some(Rgba { r: 20, g: 30, b: 60, a: 255 });
         }
         if let Some(background) = edit.theme.background.as_mut() {
@@ -1275,11 +1341,10 @@ fn theme_slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
     rule(ui);
     // A picture behind every slide drawn with the theme, while no media is showing.
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(t("inspector.theme.picture", "Picture")).size(13.0).strong().color(INK))
-            .on_hover_text(t(
-                "inspector.theme.picture.hint",
-                "A picture behind every slide drawn with this theme, while no media is showing",
-            ));
+        ui.label(egui::RichText::new(t("inspector.theme.picture", "Picture")).size(13.0).strong().color(INK)).hint(t(
+            "inspector.theme.picture.hint",
+            "A picture behind every slide drawn with this theme, while no media is showing",
+        ));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if edit.theme.background_picture.is_some() {
                 if ui.button(t("inspector.theme.picture.remove", "Remove")).clicked() {
@@ -1290,7 +1355,7 @@ fn theme_slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
                 }
             } else if ui
                 .button(t("inspector.theme.picture.choose", "Choose…"))
-                .on_hover_text(t("inspector.theme.picture.choose.hint", "Choose a picture from a file"))
+                .hint(t("inspector.theme.picture.choose.hint", "Choose a picture from a file"))
                 .clicked()
             {
                 *picture_request = true;
@@ -1306,7 +1371,7 @@ fn theme_slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
         let mut change = false;
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(t("inspector.theme.song_end", "Song end")).size(13.0).strong().color(INK))
-                .on_hover_text(t(
+                .hint(t(
                     "inspector.theme.song_end.hint",
                     "The mark under the last slide of a song drawn with this theme, when Settings \u{203a} Slides has it on",
                 ));
@@ -1429,9 +1494,9 @@ fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
             let cut = words.elided;
             ui.painter().galley(pos2(place.min.x, place.center().y - words.size().y / 2.0), words, INK);
             if cut {
-                over.on_hover_text(said);
+                over.hint(said);
             }
-            let key = word_key(ui, change, false, true).on_hover_text(t(
+            let key = word_key(ui, change, false, true).hint(t(
                 "inspector.slide.group.hint",
                 "This slide and the slides after it in its group become the group you choose",
             ));
@@ -1482,7 +1547,9 @@ fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
                         label = Some(name.to_owned());
                     }
                 }
-            });
+            })
+            .response
+            .hint(t("quickhelp.edit.slide_label", "A label for the slide, such as Blank Slide or Instrumental."));
     });
     // Which of the theme's templates the slide is drawn with. Usual lets the theme pick the one
     // that suits what is on the slide.
@@ -1508,7 +1575,9 @@ fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
                             template = Some(*id);
                         }
                     }
-                });
+                })
+                .response
+                .hint(t("quickhelp.edit.slide_template", "Which of the theme\u{2019}s layouts this slide uses."));
         });
     }
     // Going on to the next slide by itself, after a time.
@@ -1517,16 +1586,21 @@ fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
             |seconds: f32| tf("slides.menu.go_next.after", "After {n} Seconds", &[("n", &format!("{seconds:.0}"))]);
         let none = t("slides.menu.go_next.none", "None");
         let shown = advance.map_or(none.to_owned(), after);
-        egui::ComboBox::from_id_salt("slide go to next").selected_text(shown).width(room).show_ui(ui, |ui| {
-            if ui.add(egui::Button::selectable(advance.is_none(), none)).clicked() {
-                advance = None;
-            }
-            for seconds in [3.0, 5.0, 8.0, 10.0, 15.0, 20.0, 30.0, 45.0, 60.0] {
-                if ui.add(egui::Button::selectable(advance == Some(seconds), after(seconds))).clicked() {
-                    advance = Some(seconds);
+        egui::ComboBox::from_id_salt("slide go to next")
+            .selected_text(shown)
+            .width(room)
+            .show_ui(ui, |ui| {
+                if ui.add(egui::Button::selectable(advance.is_none(), none)).clicked() {
+                    advance = None;
                 }
-            }
-        });
+                for seconds in [3.0, 5.0, 8.0, 10.0, 15.0, 20.0, 30.0, 45.0, 60.0] {
+                    if ui.add(egui::Button::selectable(advance == Some(seconds), after(seconds))).clicked() {
+                        advance = Some(seconds);
+                    }
+                }
+            })
+            .response
+            .hint(t("quickhelp.edit.slide_advance", "Go on to the next slide by itself after a time."));
     });
     if (label.clone(), template, advance) != before {
         draft.record();
@@ -1658,7 +1732,13 @@ fn fits_row(ui: &mut egui::Ui, column: f32, salt: &str, fit: &mut sp_model::Imag
     row(ui, column, t("inspector.row.fits", "Fits"), |ui| {
         let fits: Vec<(sp_model::ImageFit, &str)> =
             sp_model::ImageFit::ALL.iter().map(|fit| (*fit, fit_name(*fit))).collect();
-        choice(ui, salt, control_room(column), fit, &fits);
+        choice(
+            ui,
+            (salt, t("quickhelp.inspector.fits", "How the picture fits its box.")),
+            control_room(column),
+            fit,
+            &fits,
+        );
     });
 }
 
@@ -1719,11 +1799,12 @@ fn ndi_source(
                     ui.label(egui::RichText::new(none).size(11.5).color(crate::studio::TEXT_DIM));
                 }
             });
+        chooser.response.clone().hint(t("quickhelp.inspector.ndi_source", "The NDI source this box shows."));
         if ui.data_mut(|data| data.remove_temp::<bool>(egui::Id::unique("ndi source focus"))).is_some() {
             chooser.response.request_focus();
         }
         let hint = t("inspector.ndi.look_again.hint", "Look for NDI sources on the network again");
-        if word_key(ui, &again, false, true).on_hover_text(hint).clicked() {
+        if word_key(ui, &again, false, true).hint(hint).clicked() {
             view.look_again = true;
         }
     });
@@ -1740,13 +1821,29 @@ fn ndi_source(
     };
     let qualities: Vec<(sp_model::NdiQuality, &str)> =
         sp_model::NdiQuality::ALL.iter().map(|q| (*q, quality_name(*q))).collect();
-    row(ui, column, captions[2], |ui| choice(ui, "ndi quality", room, quality, &qualities));
+    row(ui, column, captions[2], |ui| {
+        choice(
+            ui,
+            ("ndi quality", t("quickhelp.inspector.ndi_quality", "The quality the NDI source is taken at.")),
+            room,
+            quality,
+            &qualities,
+        )
+    });
     let light = t("inspector.ndi.quality.light.about", "Light is the sender\u{2019}s smaller picture");
     line_of_words(ui, light, crate::studio::TEXT_FAINT);
     let sounds = [(false, t("inspector.ndi.sound.off", "Off")), (true, t("inspector.ndi.sound.on", "On"))];
-    row(ui, column, captions[3], |ui| choice(ui, "ndi sound", room, sound, &sounds));
+    row(ui, column, captions[3], |ui| {
+        choice(
+            ui,
+            ("ndi sound", t("quickhelp.inspector.ndi_sound", "Whether the source\u{2019}s sound is wanted.")),
+            room,
+            sound,
+            &sounds,
+        )
+    });
     let later = t("inspector.ndi.sound.later", "Sound comes later");
-    ui.label(egui::RichText::new(later).size(12.0).color(crate::studio::TEXT_FAINT)).on_hover_text(t(
+    ui.label(egui::RichText::new(later).size(12.0).color(crate::studio::TEXT_FAINT)).hint(t(
         "inspector.ndi.sound.later.hint",
         "The setting is kept. SoftPresenter has no way yet to play a source\u{2019}s sound.",
     ));
@@ -1801,8 +1898,8 @@ fn outline_row(ui: &mut egui::Ui, column: f32, object: &mut sp_model::Object) {
     row(ui, column, t("inspector.row.outline", "Outline"), |ui| {
         let mut line = object.stroke.unwrap_or(sp_model::StrokeLook { width: 0.0, color: Rgba::WHITE });
         let before = line;
-        number(ui, &mut line.width, NUMBER, |d| d.speed(0.2).range(0.0..=100.0).max_decimals(1))
-            .on_hover_text(t("inspector.shape.stroke.hint", "Draw a line round the box or shape"));
+        number(ui, &mut line.width, (NUMBER, ""), |d| d.speed(0.2).range(0.0..=100.0).max_decimals(1))
+            .hint(t("inspector.shape.stroke.hint", "Draw a line round the box or shape"));
         swatches(ui, &look, &mut line.color);
         if line != before {
             // A colour chosen while there is no line draws one: 3 points to start with.
@@ -1903,7 +2000,19 @@ fn kind_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         row(ui, column, captions[0], |ui| {
             let shapes: Vec<(sp_model::Shape, &str)> =
                 sp_model::Shape::ALL.into_iter().map(|shape| (shape, crate::editor::shape_name(shape))).collect();
-            choice(ui, "which shape", control_room(column), shape, &shapes);
+            choice(
+                ui,
+                (
+                    "which shape",
+                    t(
+                        "quickhelp.inspector.shape_kind",
+                        "Make this shape another, keeping its place, size and colours.",
+                    ),
+                ),
+                control_room(column),
+                shape,
+                &shapes,
+            );
         });
         let now = *shape;
         if now != was && object.name == crate::editor::shape_name(was) {
@@ -1928,7 +2037,7 @@ fn kind_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 let words = egui::RichText::new(name.as_str()).size(12.5).color(INK);
                 let room = vec2(control_room(column), KEY);
                 ui.allocate_ui_with_layout(room, Layout::left_to_right(Align::Center), |ui| {
-                    ui.add(egui::Label::new(words).truncate()).on_hover_text(name.as_str());
+                    ui.add(egui::Label::new(words).truncate()).hint(name.as_str());
                 });
             });
             fits_row(ui, column, "picture fit", fit);
@@ -2015,21 +2124,57 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         let lock_wide = 12.0;
         let each = mini_width(room - lock_wide - BETWEEN, 4);
         let shape = frame.w / frame.h.max(1.0);
-        mini_named(ui, each, "X", &mut edited.x, |d| d);
-        mini_named(ui, each, "Y", &mut edited.y, |d| d);
+        mini_named(
+            ui,
+            (
+                each,
+                t(
+                    "quickhelp.inspector.x",
+                    "How far the box is from the slide\u{2019}s left edge, in the slide\u{2019}s pixels.",
+                ),
+            ),
+            "X",
+            &mut edited.x,
+            |d| d,
+        );
+        mini_named(
+            ui,
+            (
+                each,
+                t(
+                    "quickhelp.inspector.y",
+                    "How far the box is from the slide\u{2019}s top edge, in the slide\u{2019}s pixels.",
+                ),
+            ),
+            "Y",
+            &mut edited.y,
+            |d| d,
+        );
         let wide = t("edit.status.w", "W").to_uppercase();
-        mini_named(ui, each, &wide, &mut edited.w, |d| d.range(MIN_SIDE..=10_000.0));
+        mini_named(
+            ui,
+            (each, t("quickhelp.inspector.width", "How wide the box is, in the slide\u{2019}s pixels.")),
+            &wide,
+            &mut edited.w,
+            |d| d.range(MIN_SIDE..=10_000.0),
+        );
         let lock = ui
             .add_sized(
                 [lock_wide, KEY],
                 egui::Button::selectable(*lock_shape, egui::RichText::new("=").size(11.0)).frame(false),
             )
-            .on_hover_text(t("inspector.shape.lock.hint", "Keep the box's shape when its width or height changes"));
+            .hint(t("inspector.shape.lock.hint", "Keep the box's shape when its width or height changes"));
         if lock.clicked() {
             *lock_shape = !*lock_shape;
         }
         let high = t("edit.status.h", "H").to_uppercase();
-        mini_named(ui, each, &high, &mut edited.h, |d| d.range(MIN_SIDE..=10_000.0));
+        mini_named(
+            ui,
+            (each, t("quickhelp.inspector.height", "How tall the box is, in the slide\u{2019}s pixels.")),
+            &high,
+            &mut edited.h,
+            |d| d.range(MIN_SIDE..=10_000.0),
+        );
         if *lock_shape {
             if edited.w != frame.w {
                 edited.h = (edited.w / shape).max(MIN_SIDE);
@@ -2090,7 +2235,12 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     }
 
     row(ui, column, rotate, |ui| {
-        number(ui, &mut object.rotation, NUMBER, |d| d.speed(0.5).range(-360.0..=360.0).suffix("°").max_decimals(1));
+        number(
+            ui,
+            &mut object.rotation,
+            (NUMBER, t("quickhelp.inspector.rotation", "Turn the box, in degrees.")),
+            |d| d.speed(0.5).range(-360.0..=360.0).suffix("°").max_decimals(1),
+        );
         // After the angle: mirror it left to right, or top to bottom.
         for (across, hint) in [
             (true, t("inspector.flip.across", "Mirror it left to right")),
@@ -2114,11 +2264,8 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         // It shows a whole percentage, and an opacity in between is kept until it is changed.
         let shown = (object.opacity * 100.0).round();
         let mut percent = shown;
-        let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
-            .step_by(1.0)
-            .custom_formatter(|n, _| percent_text(n))
-            .custom_parser(typed_percent);
-        if ui.add(slider).changed() && percent != shown {
+        let hint = t("quickhelp.inspector.opacity", "How solid the box is. At 100% nothing shows through it.");
+        if percent_slider(ui, &mut percent, hint) && percent != shown {
             object.opacity = (percent / 100.0).clamp(0.0, 1.0);
         }
     });
@@ -2147,8 +2294,8 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         let mut line = object.stroke.unwrap_or(sp_model::StrokeLook { width: 0.0, color: Rgba::WHITE });
         let before = line;
         row(ui, column, captions[0], |ui| {
-            number(ui, &mut line.width, NUMBER, |d| d.speed(0.2).range(0.0..=100.0).max_decimals(1))
-                .on_hover_text(t("inspector.shape.stroke.hint", "Draw a line round the box or shape"));
+            number(ui, &mut line.width, (NUMBER, ""), |d| d.speed(0.2).range(0.0..=100.0).max_decimals(1))
+                .hint(t("inspector.shape.stroke.hint", "Draw a line round the box or shape"));
         });
         let colours = Swatches { salt: "box outline", room, count: 8, none_too: false, mixed: None };
         swatches_row(ui, column, captions[1], &colours, |ui, look| swatches(ui, look, &mut line.color));
@@ -2176,13 +2323,13 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let mut restack: Option<bool> = None;
     row(ui, column, order, |ui| {
         if word_key(ui, t("inspector.order.forward", "Forward"), false, true)
-            .on_hover_text(t("inspector.forward.hint", "Move in front of the next object"))
+            .hint(t("inspector.forward.hint", "Move in front of the next object"))
             .clicked()
         {
             restack = Some(true);
         }
         if word_key(ui, t("inspector.order.back", "Back"), false, true)
-            .on_hover_text(t("inspector.backward.hint", "Move behind the previous object"))
+            .hint(t("inspector.backward.hint", "Move behind the previous object"))
             .clicked()
         {
             restack = Some(false);
@@ -2212,7 +2359,7 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         if object_keys_named(ui, room) {
             for (at, (words, hint, _)) in keys.into_iter().enumerate() {
                 let can = at != 0 || one;
-                pressed[at] = word_key(ui, words, false, can).on_hover_text(if can { hint } else { several }).clicked();
+                pressed[at] = word_key(ui, words, false, can).hint(if can { hint } else { several }).clicked();
             }
         } else {
             for (at, (words, _, icon)) in keys.into_iter().enumerate() {
@@ -2223,7 +2370,7 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
                         crate::icons::paint(painter, icon, glyph, ink);
                     });
                     key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, can, words));
-                    pressed[at] = key.on_disabled_hover_text(several).clicked();
+                    pressed[at] = key.reason(several).clicked();
                 });
             }
         }
@@ -2246,7 +2393,7 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         ] {
             let can = if redo { history.1 } else { history.0 };
             let why = if can { hint } else { crate::home::nothing_to(redo).to_owned() };
-            if word_key(ui, words, false, can).on_hover_text(why).clicked() {
+            if word_key(ui, words, false, can).hint(why).clicked() {
                 use crate::menubar::Action;
                 *menu_asked = Some(if redo { Action::Redo } else { Action::Undo });
             }
@@ -2254,7 +2401,7 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         if !for_theme {
             let words = t("inspector.reset_to_theme", "Reset to theme");
             let hint = t("inspector.reset_to_theme.hint", "Put this object back where the theme has it");
-            reset = word_key(ui, words, false, !follows_theme).on_hover_text(hint).clicked();
+            reset = word_key(ui, words, false, !follows_theme).hint(hint).clicked();
         }
     });
     if let Some(across) = spread {
@@ -2475,7 +2622,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
                     }
                 })
                 .response
-                .on_hover_text(t(
+                .hint(t(
                     "inspector.text.linked.hint",
                     "Show something that changes, such as the time or a timer, instead of these words",
                 ));
@@ -2524,11 +2671,16 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
                         let key =
                             ui.add_enabled(!taken, egui::Button::selectable(on, crate::editor::role_label(&role)));
                         let why = t("editor.add.box.taken", "This template has one already");
-                        if key.on_disabled_hover_text(why).clicked() {
+                        if key.reason(why).clicked() {
                             holds = Some(role);
                         }
                     }
-                });
+                })
+                .response
+                .hint(t(
+                    "quickhelp.inspector.holds",
+                    "Which of a slide\u{2019}s words this box of the template holds.",
+                ));
         });
         if holds != object.role {
             // A box still named after what it held is named after what it holds now.
@@ -2546,7 +2698,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(FOOT_APART, FOOT_APART);
         if word_key(ui, t("inspector.text.copy_style", "Copy style"), false, true)
-            .on_hover_text(t("inspector.text.copy_style.hint", "Remember how this text looks"))
+            .hint(t("inspector.text.copy_style.hint", "Remember how this text looks"))
             .clicked()
         {
             inspector.copied_style = Some(style.clone());
@@ -2557,7 +2709,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         } else {
             crate::home::copy_a_style()
         };
-        if word_key(ui, t("inspector.text.paste_style", "Paste style"), false, can_paste).on_hover_text(hint).clicked()
+        if word_key(ui, t("inspector.text.paste_style", "Paste style"), false, can_paste).hint(hint).clicked()
             && let Some(copied) = &inspector.copied_style
         {
             *style = copied.clone();
@@ -2584,7 +2736,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
                     )
                 };
                 let back = egui::Button::new(t("inspector.text.reset", "Back to theme"));
-                let back = ui.add_enabled(!plain, back).on_hover_text(hint).on_disabled_hover_text(hint);
+                let back = ui.add_enabled(!plain, back).hint(hint).reason(hint);
                 if back.clicked() {
                     *style = TextStyle::default();
                     ui.close();
@@ -2592,7 +2744,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
             }
             let clear = egui::Button::new(t("inspector.text.clear_words", "Clear word styles"));
             let hint = t("inspector.text.clear_words.hint", "Every word takes the box's look again");
-            if ui.add_enabled(!spans.is_empty(), clear).on_hover_text(hint).clicked() {
+            if ui.add_enabled(!spans.is_empty(), clear).hint(hint).clicked() {
                 spans.clear();
                 inspector.new_step = true;
                 ui.close();
@@ -2684,6 +2836,10 @@ fn text_look(
                     }
                 })
         });
+        font_menu
+            .response
+            .clone()
+            .hint(t("quickhelp.inspector.font", "Choose the font. Type in its list to find one."));
         // Testing aid: SOFTPRESENTER_CAPTURE_FONT_MENU=1 opens the font list once, for a capture.
         static MENU_OPENED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if std::env::var_os("SOFTPRESENTER_CAPTURE_FONT_MENU").is_some()
@@ -2702,16 +2858,16 @@ fn text_look(
                 }
             })
             .response
-            .on_hover_text(t("inspector.row.weight", "Weight"));
+            .hint(t("inspector.row.weight", "Weight"));
     });
     row(ui, column, t("inspector.row.size", "Size"), |ui| {
         // Room for "Mixed" whatever the sizes are, so the field keeps one width.
-        number(ui, &mut wanted.size, NUMBER + 14.0, |d| {
+        number(ui, &mut wanted.size, (NUMBER + 14.0, ""), |d| {
             d.range(8.0..=600.0).custom_formatter(move |value, _| {
                 if mix.size { t("inspector.size.mixed", "Mixed").to_owned() } else { format!("{value:.0}") }
             })
         })
-        .on_hover_text(t("inspector.size.hint", "Size, in slide units"));
+        .hint(t("inspector.size.hint", "Size, in slide units"));
         for (label, by, hint) in [
             ("A\u{2212}", -SIZE_STEP, t("inspector.size.smaller", "Every size one step smaller")),
             ("A+", SIZE_STEP, t("inspector.size.bigger", "Every size one step bigger")),
@@ -2833,7 +2989,12 @@ fn text_look(
         row(ui, column, captions[0], |ui| {
             // Typing a width draws the outline: there is none at 0.
             let mut width = wanted.outline_width;
-            number(ui, &mut width, NUMBER, |d| d.speed(0.25).range(0.0..=60.0).max_decimals(1));
+            number(
+                ui,
+                &mut width,
+                (NUMBER, t("quickhelp.inspector.stroke_width", "The outline\u{2019}s width, in points.")),
+                |d| d.speed(0.25).range(0.0..=60.0).max_decimals(1),
+            );
             wanted.outline_width = width;
         });
         let colours = Swatches { salt: "text outline", room, count: 8, none_too: false, mixed: None };
@@ -2857,17 +3018,14 @@ fn text_look(
     let more_spacing = wanted.margins != [0.0; 4] || wanted.paragraph_spacing != 0.0 || wanted.baseline != 0.0;
     let spacing = row_tall(ui, column, t("inspector.row.spacing", "Spacing"), MINI, |ui| {
         let each = mini_width(room - KEY - BETWEEN, 2).min(76.0);
-        mini(ui, each, tk("inspector.mini.letters", "Letters"), &mut wanted.letter_spacing, |d| {
+        mini(ui, (each, ""), tk("inspector.mini.letters", "Letters"), &mut wanted.letter_spacing, |d| {
             d.speed(0.2).range(-20.0..=100.0).max_decimals(1)
         })
-        .on_hover_text(t(
-            "inspector.spacing.letters.hint",
-            "Extra room between letters, in points at the box's font size",
-        ));
-        mini(ui, each, tk("inspector.mini.lines", "Lines"), &mut wanted.line_height, |d| {
+        .hint(t("inspector.spacing.letters.hint", "Extra room between letters, in points at the box's font size"));
+        mini(ui, (each, ""), tk("inspector.mini.lines", "Lines"), &mut wanted.line_height, |d| {
             d.speed(0.01).range(0.5..=3.0).fixed_decimals(2)
         })
-        .on_hover_text(t(
+        .hint(t(
             "inspector.spacing.line_height.hint",
             "The distance from one line to the next, as a multiple of the font size",
         ));
@@ -2889,32 +3047,41 @@ fn text_look(
                 tk("inspector.margin.bottom", "Bottom"),
             ];
             for (margin, name) in wanted.margins.iter_mut().zip(sides) {
-                mini(ui, each, name, margin, |d| d.range(0.0..=400.0));
+                mini(
+                    ui,
+                    (
+                        each,
+                        t(
+                            "quickhelp.inspector.margin",
+                            "Room between the box\u{2019}s edge and its words, on this side.",
+                        ),
+                    ),
+                    name,
+                    margin,
+                    |d| d.range(0.0..=400.0),
+                );
             }
         });
         row_tall(ui, column, captions[1], MINI, |ui| {
             let each = mini_width(room, 2).min(96.0);
-            mini(ui, each, tk("inspector.mini.paragraph", "Paragraph"), &mut wanted.paragraph_spacing, |d| {
+            mini(ui, (each, ""), tk("inspector.mini.paragraph", "Paragraph"), &mut wanted.paragraph_spacing, |d| {
                 d.speed(0.5).range(0.0..=400.0)
             })
-            .on_hover_text(t(
+            .hint(t(
                 "inspector.spacing.paragraph.hint",
                 "Extra room after each paragraph (each line break typed), in points",
             ));
-            mini(ui, each, tk("inspector.mini.baseline", "Baseline"), &mut wanted.baseline, |d| {
+            mini(ui, (each, ""), tk("inspector.mini.baseline", "Baseline"), &mut wanted.baseline, |d| {
                 d.speed(0.5).range(-400.0..=400.0)
             })
-            .on_hover_text(t(
-                "inspector.spacing.baseline.hint",
-                "Raise the text by this many points (lower it with a minus)",
-            ));
+            .hint(t("inspector.spacing.baseline.hint", "Raise the text by this many points (lower it with a minus)"));
         });
         // Spacing and margins as a new box has them.
         let changed = more_spacing || wanted.letter_spacing != 0.0 || wanted.line_height != sp_model::LINE_HEIGHT;
         ui.horizontal(|ui| {
             let reset = t("inspector.spacing.reset", "Reset spacing");
             let hint = t("inspector.spacing.reset.hint", "Spacing and margins as a new box has them");
-            if word_key(ui, reset, false, changed).on_hover_text(hint).clicked() {
+            if word_key(ui, reset, false, changed).hint(hint).clicked() {
                 wanted.letter_spacing = 0.0;
                 wanted.line_height = sp_model::LINE_HEIGHT;
                 wanted.paragraph_spacing = 0.0;
@@ -2932,7 +3099,13 @@ fn text_look(
             (Scaling::TextUpOrDown, t("inspector.scaling.up_or_down", "Text up or down")),
             (Scaling::ContainerUpOrDown, t("inspector.scaling.container", "Box up or down")),
         ];
-        choice(ui, "scaling", room, &mut wanted.scaling, &options);
+        choice(
+            ui,
+            ("scaling", t("quickhelp.inspector.scaling", "Whether the words grow or shrink to fill the box.")),
+            room,
+            &mut wanted.scaling,
+            &options,
+        );
     });
 
     // Words: their capitals on the row; how the lines are broken, their bullets, scrolling and
@@ -2949,7 +3122,13 @@ fn text_look(
             (Caps::StartCase, t("inspector.caps.start", "Each Word")),
             (Caps::TitleCase, t("inspector.caps.title", "Like a Title")),
         ];
-        choice(ui, "caps", room - KEY - BETWEEN, &mut wanted.caps, &options);
+        choice(
+            ui,
+            ("caps", t("quickhelp.inspector.caps", "Capital letters for the words, whatever was typed.")),
+            room - KEY - BETWEEN,
+            &mut wanted.caps,
+            &options,
+        );
         let hint = t("inspector.lines.more", "Lines: breaks, bullets, scrolling and the band behind the lines");
         more_key(ui, &mut inspector.panel, Panel::Lines, hint, more_lines);
     });
@@ -2972,13 +3151,28 @@ fn text_look(
                 (LineTransform::OneWordPerLine, t("inspector.lines.word", "A word on each line")),
                 (LineTransform::OneCharacterPerLine, t("inspector.lines.character", "A letter on each line")),
             ];
-            choice(ui, "line transform", room, &mut wanted.line_transform, &options);
+            choice(
+                ui,
+                (
+                    "line transform",
+                    t("quickhelp.inspector.line_transform", "How the lines of the words are broken on the slide."),
+                ),
+                room,
+                &mut wanted.line_transform,
+                &options,
+            );
         });
         // Bullets or numbers before each line.
         row(ui, column, captions[1], |ui| {
             let lists: Vec<(sp_model::ListStyle, &str)> =
                 sp_model::ListStyle::ALL.iter().map(|list| (*list, list_name(*list))).collect();
-            choice(ui, "list", room, &mut wanted.list, &lists);
+            choice(
+                ui,
+                ("list", t("quickhelp.inspector.list", "Bullets or numbers before each line.")),
+                room,
+                &mut wanted.list,
+                &lists,
+            );
         });
         // Text that keeps moving through its box, as a ticker does.
         row(ui, column, captions[2], |ui| {
@@ -2989,7 +3183,13 @@ fn text_look(
                 (sp_model::Scroll::Up, t("inspector.scroll.up", "Scrolls up")),
                 (sp_model::Scroll::Down, t("inspector.scroll.down", "Scrolls down")),
             ];
-            choice(ui, "scroll", room, &mut wanted.scroll, &ways);
+            choice(
+                ui,
+                ("scroll", t("quickhelp.inspector.scroll_way", "The way the words scroll across the box.")),
+                room,
+                &mut wanted.scroll,
+                &ways,
+            );
         });
         // A band of colour behind each line: under its words, or across the box. (The colour of
         // the box itself is the tab's Behind row.)
@@ -3012,7 +3212,19 @@ fn text_look(
                     (false, t("inspector.text.background.lines", "Lines Only")),
                     (true, t("inspector.text.background.full", "Full Width")),
                 ];
-                choice(ui, "line fill", room, &mut wanted.line_fill.full_width, &options);
+                choice(
+                    ui,
+                    (
+                        "line fill",
+                        t(
+                            "quickhelp.inspector.line_fill",
+                            "The colour behind each line only, or across the whole box.",
+                        ),
+                    ),
+                    room,
+                    &mut wanted.line_fill.full_width,
+                    &options,
+                );
             });
         });
     });
@@ -3108,7 +3320,16 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let half = ((room - BETWEEN) / 2.0).floor();
             let mut options: Vec<(Option<BuildEffect>, &str)> = vec![(None, t("inspector.build.none", "None"))];
             options.extend(BuildEffect::ALL.iter().map(|effect| (Some(*effect), effect_name(*effect, coming_in))));
-            choice(ui, if coming_in { "build in" } else { "build out" }, half, &mut effect, &options);
+            choice(
+                ui,
+                (
+                    if coming_in { "build in" } else { "build out" },
+                    t("quickhelp.inspector.build_effect", "How the box comes onto the slide, or leaves it."),
+                ),
+                half,
+                &mut effect,
+                &options,
+            );
             // The side it flies from, or to: only a build that flies has one.
             ui.add_enabled_ui(effect == Some(BuildEffect::Fly), |ui| {
                 let sides = [
@@ -3119,7 +3340,10 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 ];
                 choice(
                     ui,
-                    if coming_in { "build in side" } else { "build out side" },
+                    (
+                        if coming_in { "build in side" } else { "build out side" },
+                        t("quickhelp.inspector.build_side", "The side it flies in from, or out to."),
+                    ),
                     half,
                     &mut build.direction,
                     &sides,
@@ -3133,19 +3357,39 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                         (false, t("inspector.build.with_slide", "With the slide")),
                         (true, t("inspector.build.on_click", "On a click of Next")),
                     ];
-                    choice(ui, "build in start", room, &mut build.on_click, &starts);
+                    choice(
+                        ui,
+                        (
+                            "build in start",
+                            t(
+                                "quickhelp.inspector.build_start",
+                                "Whether it comes with the slide or waits for the next click.",
+                            ),
+                        ),
+                        room,
+                        &mut build.on_click,
+                        &starts,
+                    );
                 });
             });
         }
         row_tall(ui, column, timing, MINI, |ui| {
             ui.add_enabled_ui(on, |ui| {
                 let each = mini_width(room, 4);
-                mini(ui, each, tk("inspector.build.seconds", "Seconds"), &mut build.seconds, |d| {
-                    d.speed(0.05).range(0.0..=10.0).max_decimals(2)
-                });
-                mini(ui, each, tk("inspector.build.delay", "Delay"), &mut build.delay, |d| {
-                    d.speed(0.05).range(0.0..=30.0).max_decimals(2)
-                });
+                mini(
+                    ui,
+                    (each, t("quickhelp.inspector.build_seconds", "How long the build takes, in seconds.")),
+                    tk("inspector.build.seconds", "Seconds"),
+                    &mut build.seconds,
+                    |d| d.speed(0.05).range(0.0..=10.0).max_decimals(2),
+                );
+                mini(
+                    ui,
+                    (each, t("quickhelp.inspector.build_delay", "How long it waits before it starts, in seconds.")),
+                    tk("inspector.build.delay", "Delay"),
+                    &mut build.delay,
+                    |d| d.speed(0.05).range(0.0..=30.0).max_decimals(2),
+                );
             });
         });
         if coming_in && is_text {
@@ -3157,7 +3401,7 @@ fn build_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                     } else {
                         t("inspector.build.by_time", "Each paragraph follows the last after its time in seconds.")
                     };
-                    if key.on_hover_text(hint).clicked() {
+                    if key.hint(hint).clicked() {
                         build.by_paragraph = !build.by_paragraph;
                     }
                 });

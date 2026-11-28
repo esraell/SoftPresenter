@@ -13,6 +13,7 @@ use egui::{Align2, Color32, FontId, Key, Modifiers, Rect, Sense, pos2, vec2};
 use super::row::{failed_line, failed_under, installed_line, megabytes};
 use super::{LICENCE_URL, NdiDownload, Place, Stage, Step, way};
 use crate::i18n::{t, tf};
+use crate::quick_help::Hint;
 use crate::studio::{
     BUTTON, CARD, CARE, Flat, LINE, PANEL, READY, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, fixed, fixed_semibold,
     flat_button, semibold,
@@ -202,7 +203,7 @@ pub fn window(ctx: &egui::Context, download: &mut NdiDownload, place: Place) {
             Rect::from_center_size(cross.center(), vec2(14.0, 14.0)),
             TEXT_DIM,
         );
-        if cross_response.on_hover_text(t("integrations.ndi.window.close", "Close (Esc)")).clicked() {
+        if cross_response.hint(t("integrations.ndi.window.close", "Close (Esc)")).clicked() {
             hide = true;
         }
         let inner = Rect::from_min_max(
@@ -226,7 +227,7 @@ pub fn window(ctx: &egui::Context, download: &mut NdiDownload, place: Place) {
             let id = ui.scope_id().with(("install ndi key", index));
             let pressed = flat_button(ui, at, id, key.words, font, look, !key.held);
             // Greyed, never live and refusing: the reason is under the pointer.
-            let pressed = if key.held { pressed.on_hover_text(super::row::on_screen_words()) } else { pressed };
+            let pressed = if key.held { pressed.hint(super::row::on_screen_words()) } else { pressed };
             if pressed.clicked() && !key.held {
                 asked = Some(key.asks);
             }

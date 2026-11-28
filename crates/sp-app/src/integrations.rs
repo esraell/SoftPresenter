@@ -14,6 +14,7 @@ use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use crate::home::settings::parts;
 use crate::i18n::{t, tf, tn};
 use crate::logos::{self, Logo, Mark};
+use crate::quick_help::Hint;
 use crate::studio::{CARD, CARE, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 use crate::voxlive::{Status, View};
 
@@ -121,7 +122,8 @@ fn ndi_page(ui: &mut egui::Ui, mut ndi: Ndi<'_>) -> bool {
         |ui| to_screens = crate::ndi_download::row::rows(ui, ndi.download, ndi.found),
     );
     // NDI's site, linked wherever NDI is offered, as NDI's SDK asks.
-    ui.hyperlink_to(egui::RichText::new("ndi.video").size(12.5), sp_ndi::DOWNLOAD_URL);
+    ui.hyperlink_to(egui::RichText::new("ndi.video").size(12.5), sp_ndi::DOWNLOAD_URL)
+        .hint(t("quickhelp.ndi.page", "Open NDI\u{2019}s download page in your browser."));
     to_screens
 }
 
@@ -342,8 +344,7 @@ fn service_card(ui: &mut egui::Ui, rect: Rect, service: &Service, index: usize) 
         3 => t("integrations.timelychurch.row.hint", "Connect TimelyChurch, or see its services"),
         _ => t("integrations.ndi.row.hint", "Install NDI, check for a newer one, or remove it"),
     };
-    let hint = if service.soon { t("integrations.state.soon", "Coming soon") } else { hint };
-    response.on_hover_text(hint).clicked()
+    response.hint_or_greyed(hint, service.soon.then(|| t("integrations.state.soon", "Coming soon"))).clicked()
 }
 
 /// The last card's question and its line, each line of them centred, laid out for a card
@@ -380,7 +381,10 @@ fn request_card_height(ui: &egui::Ui, width: f32) -> f32 {
 /// under the pointer, and in its middle "Don't see what your church uses?", a line, and the key
 /// Request an Integration…. The whole card is the key. True when clicked.
 fn request_card(ui: &mut egui::Ui, rect: Rect) -> bool {
-    let response = ui.interact(rect, ui.scope_id().with("request an integration card"), Sense::click());
+    let response = ui.interact(rect, ui.scope_id().with("request an integration card"), Sense::click()).hint(t(
+        "quickhelp.integrations.request",
+        "Tell the SoftPresenter project which app or device you\u{2019}d like it to work with.",
+    ));
     let hovered = response.hovered();
     let painter = ui.painter();
     let mut outline = parts::rounded_outline(rect.shrink(0.5), crate::studio::RADIUS_CARD);
@@ -414,6 +418,7 @@ fn page_head(ui: &mut egui::Ui, mark: Mark, name: &str, (colour, words): (Color3
     let font = FontId::proportional(13.0);
     let wide = crate::studio::widest(ui, &[back_words], &font) + 8.0 + 12.0 + 6.0 + 12.0;
     let (back, response) = ui.allocate_exact_size(vec2(wide, 32.0), Sense::click());
+    let response = response.hint(t("quickhelp.integrations.back", "Back to the list of integrations."));
     let ink = if response.hovered() { TEXT } else { TEXT_DIM };
     ui.painter().rect_filled(back, 16.0, CARD);
     paint(
@@ -910,16 +915,24 @@ fn timelychurch_connect(
         if view.asks_address {
             let address = t("integrations.timelychurch.address", "Address");
             let hint = (false, "yourchurch.timelychurch.com");
-            parts::field_row(ui, "timelychurch address", address, "", &mut view.typed_address, hint, 240.0, None);
+            parts::field_row(ui, "timelychurch address", address, "", &mut view.typed_address, hint, 240.0, None)
+                .0
+                .hint(t("quickhelp.timelychurch.address", "Your church\u{2019}s TimelyChurch address."));
         }
         let code = t("integrations.timelychurch.code", "Pairing code");
         let (field, _) =
             parts::field_row(ui, "timelychurch code", code, "", &mut view.typed_code, (false, ""), 240.0, None);
+        let field = field.hint(t(
+            "quickhelp.timelychurch.code",
+            "The pairing code an administrator made in TimelyChurch, under Setlists \u{203a} Song Sync.",
+        ));
         let mut connect = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
         let filled =
             !view.typed_code.trim().is_empty() && (!view.asks_address || !view.typed_address.trim().is_empty());
         let lead = if pairing { t("integrations.state.connecting", "Connecting…") } else { "" };
-        let key = parts::Key::main(t("integrations.timelychurch.connect", "Connect")).enabled(filled && !pairing);
+        let key = parts::Key::main(t("integrations.timelychurch.connect", "Connect"))
+            .enabled(filled && !pairing)
+            .hint(t("quickhelp.timelychurch.connect", "Connect to your church\u{2019}s TimelyChurch with this code."));
         connect |= parts::keys_line(ui, "timelychurch connect", lead, &[key]).is_some();
         if connect && filled && !pairing {
             *request = Some(crate::timelychurch::Request::Connect {
@@ -1090,14 +1103,25 @@ fn canva_connect(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut
             },
         );
         let redirect = t("integrations.canva.redirect", "Redirect URL");
-        let copy = [parts::Key::plain(t("integrations.copy", "Copy"))];
+        let copy = [parts::Key::plain(t("integrations.copy", "Copy")).hint(t(
+            "quickhelp.canva.copy_redirect",
+            "Copy the redirect URL, to paste in Canva\u{2019}s developer portal.",
+        ))];
         if parts::keys_row(ui, "canva redirect", redirect, "", Some(view.redirect.as_str()), &copy).is_some() {
             ui.ctx().copy_text(view.redirect.clone());
         }
         let id = t("integrations.canva.client_id", "Client ID");
-        parts::field_row(ui, "canva client id", id, "", &mut view.typed_id, (false, ""), 190.0, None);
+        parts::field_row(ui, "canva client id", id, "", &mut view.typed_id, (false, ""), 190.0, None).0.hint(t(
+            "quickhelp.canva.client_id",
+            "Your Canva integration\u{2019}s client ID, from Canva\u{2019}s developer portal.",
+        ));
         let secret = t("integrations.canva.client_secret", "Client secret");
-        parts::field_row(ui, "canva client secret", secret, "", &mut view.typed_secret, (true, ""), 190.0, None);
+        parts::field_row(ui, "canva client secret", secret, "", &mut view.typed_secret, (true, ""), 190.0, None)
+            .0
+            .hint(t(
+                "quickhelp.canva.client_secret",
+                "The secret made for your Canva integration. It is kept in this computer\u{2019}s keyring.",
+            ));
         if view.phase == Phase::SigningIn {
             let stop = [parts::Key::plain(t("integrations.canva.stop", "Stop"))];
             if parts::keys_line(ui, "canva sign in", &view.phase.words(), &stop).is_some() {
@@ -1124,7 +1148,8 @@ fn canva_connect(ui: &mut egui::Ui, view: &mut crate::canva::View, request: &mut
                 ),
             );
             let key = parts::Key::plain(t("integrations.canva.old.use", "Use the Sign-in from the Old Sync Script"))
-                .enabled(!view.phase.busy());
+                .enabled(!view.phase.busy())
+                .hint(t("quickhelp.canva.old_use", "Take over the old sync script\u{2019}s sign-in."));
             if parts::keys_line(ui, "canva old use", "", &[key]).is_some() {
                 *request = Some(R::Import);
             }
@@ -1153,8 +1178,12 @@ fn old_script_warning(ui: &mut egui::Ui, view: &crate::canva::View, request: &mu
         parts::code(ui, &view.old_steps.join("\n"));
         ui.add_space(12.0);
         let keys = [
-            parts::Key::plain(t("integrations.canva.old.copy", "Copy the Steps")),
-            parts::Key::plain(t("integrations.canva.old.off", "It's Switched Off")),
+            parts::Key::plain(t("integrations.canva.old.copy", "Copy the Steps")).hint(t(
+                "quickhelp.canva.old_copy",
+                "Copy the steps that switch the old script off, to paste in Terminal.",
+            )),
+            parts::Key::plain(t("integrations.canva.old.off", "It's Switched Off"))
+                .hint(t("quickhelp.canva.old_off", "Say the old script is switched off, so syncing can go on.")),
         ];
         match parts::keys_line(ui, "canva old script", "", &keys) {
             Some(0) => ui.ctx().copy_text(view.old_steps.join("\n")),
@@ -1251,6 +1280,7 @@ fn pages_strip(ui: &mut egui::Ui, view: &mut crate::canva::View) -> Option<Strin
         // Its name for a screen reader, which the pointer's tip used to say.
         let named = tf("integrations.canva.page.hint", "Make page {number} the divider", &[("number", &number)]);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &named));
+        let response = response.hint(named.as_str());
         let divider = settings.divider.as_deref() == Some(id.as_str());
         let above = settings.divider_number.is_some_and(|divider| page.number < divider);
         let below = settings.divider_number.is_some_and(|divider| page.number > divider);
@@ -1370,7 +1400,11 @@ fn look_page(ui: &mut egui::Ui, view: &mut View) {
     let schema = view.schema.clone();
     let Some(look) = view.look.as_mut() else { return };
     let mut request = None;
-    if ui.add(egui::Button::new(egui::RichText::new("‹ VoxLive").color(TEXT_DIM)).frame(false)).clicked() {
+    if ui
+        .add(egui::Button::new(egui::RichText::new("‹ VoxLive").color(TEXT_DIM)).frame(false))
+        .hint(t("quickhelp.integrations.back_voxlive", "Back to VoxLive\u{2019}s page."))
+        .clicked()
+    {
         request = Some(Request::CloseLook);
     }
     ui.add_space(4.0);
@@ -1427,7 +1461,7 @@ fn look_page(ui: &mut egui::Ui, view: &mut View) {
             }
             let label = ui.label(egui::RichText::new(setting_name(key)).color(TEXT_DIM));
             if let Some(about) = field.get("description").and_then(serde_json::Value::as_str) {
-                label.on_hover_text(about);
+                label.hint(about);
             }
             let current = look.style.get(key).cloned().or_else(|| field.get("default").cloned()).unwrap_or_default();
             if let Some(changed) = setting_control(ui, key, field, &current)
@@ -1448,13 +1482,17 @@ fn look_page(ui: &mut egui::Ui, view: &mut View) {
         });
         if ui
             .add_enabled(changes > 0 && !look.saving, save)
-            .on_hover_text(t("integrations.look.save.hint", "The screen changes at once, wherever it is showing"))
+            .hint(t("integrations.look.save.hint", "The screen changes at once, wherever it is showing"))
             .clicked()
         {
             request = Some(Request::SaveLook { anyway: false });
         }
         if ui
             .add_enabled(changes > 0 && !look.saving, egui::Button::new(t("integrations.look.revert", "Revert")))
+            .hint(t(
+                "quickhelp.integrations.revert",
+                "Put back the settings as VoxLive has them, dropping your changes.",
+            ))
             .clicked()
         {
             look.style = look.base.clone();
@@ -1481,7 +1519,7 @@ fn look_page(ui: &mut egui::Ui, view: &mut View) {
         ui.horizontal(|ui| {
             if ui
                 .button(t("integrations.look.use_theirs", "Use VoxLive's"))
-                .on_hover_text(t(
+                .hint(t(
                     "integrations.look.use_theirs.hint",
                     "Let your changes go and start from the look VoxLive has now",
                 ))
@@ -1493,7 +1531,7 @@ fn look_page(ui: &mut egui::Ui, view: &mut View) {
             }
             if ui
                 .button(t("integrations.look.save_mine", "Save Mine Anyway"))
-                .on_hover_text(t("integrations.look.save_mine.hint", "Your changed settings go over VoxLive's"))
+                .hint(t("integrations.look.save_mine.hint", "Your changed settings go over VoxLive's"))
                 .clicked()
             {
                 request = Some(Request::SaveLook { anyway: true });
@@ -1567,25 +1605,29 @@ fn setting_control(
                 labels.get(&raw).and_then(serde_json::Value::as_str).map_or(raw, str::to_owned)
             };
             let mut chosen = current.clone();
-            egui::ComboBox::from_id_salt(("voxlive look", key)).selected_text(words(current)).width(180.0).show_ui(
-                ui,
-                |ui| {
+            egui::ComboBox::from_id_salt(("voxlive look", key))
+                .selected_text(words(current))
+                .width(180.0)
+                .show_ui(ui, |ui| {
                     for value in &values {
                         ui.selectable_value(&mut chosen, value.clone(), words(value));
                     }
-                },
-            );
+                })
+                .response
+                .hint(t("quickhelp.integrations.look_setting", "This setting of how VoxLive\u{2019}s captions look."));
             Some(chosen)
         }
         "color" => {
             let hex = current.as_str().unwrap_or("#000000");
             let mut colour = colour_of(hex);
-            ui.color_edit_button_srgba(&mut colour);
+            ui.color_edit_button_srgba(&mut colour)
+                .hint(t("quickhelp.integrations.look_setting", "This setting of how VoxLive\u{2019}s captions look."));
             Some(serde_json::Value::String(hex_of(colour, hex.len() > 7)))
         }
         "boolean" => {
             let mut on = current.as_bool().unwrap_or(false);
-            ui.checkbox(&mut on, "");
+            ui.checkbox(&mut on, "")
+                .hint(t("quickhelp.integrations.look_setting", "This setting of how VoxLive\u{2019}s captions look."));
             Some(serde_json::Value::Bool(on))
         }
         "number" => {
@@ -1595,7 +1637,8 @@ fn setting_control(
             let unit = field.get("unit").and_then(serde_json::Value::as_str).unwrap_or("");
             let mut number = current.as_f64().unwrap_or(min).clamp(min, max);
             let suffix = if unit.is_empty() { String::new() } else { format!(" {unit}") };
-            ui.add(egui::Slider::new(&mut number, min..=max).step_by(step).suffix(suffix));
+            ui.add(egui::Slider::new(&mut number, min..=max).step_by(step).suffix(suffix))
+                .hint(t("quickhelp.integrations.look_setting", "This setting of how VoxLive\u{2019}s captions look."));
             // A whole number stays whole, as VoxLive gave it.
             if number.fract() == 0.0 && current.is_i64() {
                 return Some(serde_json::Value::from(number as i64));

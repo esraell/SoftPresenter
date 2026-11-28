@@ -10,6 +10,7 @@ use crate::find_songs::Phase;
 use crate::home::HomeState;
 use crate::home::settings::parts;
 use crate::i18n::{t, tf, tn};
+use crate::quick_help::Hint;
 use crate::screens::{Kind, Output};
 use crate::studio::{CARD, CARE, Flat, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 
@@ -273,19 +274,20 @@ pub(super) fn reports_line(standing: &crate::reports::Standing) -> Line {
 }
 
 /// What the tips line says to a first-timer: a click shows a slide and Esc clears, or with
-/// SoftProjector's keys a double-click shows it and Esc hides the words.
-fn tips_words(softprojector: bool) -> &'static str {
-    if softprojector {
+/// SoftProjector's keys a double-click shows it and Esc hides the words; then how to switch on
+/// Quick Help, to find out what anything does.
+fn tips_words(softprojector: bool) -> String {
+    let keys = if softprojector {
         t(
-            "setup.ready.tips_hide",
-            "Double-click a slide to put it on screen, Space for the next, Esc to hide the words. Later, in Settings: Phone remote, to run the slides from a phone.",
+            "setup.ready.tips_keys_hide",
+            "Double-click a slide to put it on screen, Space for the next, Esc to hide the words.",
         )
     } else {
-        t(
-            "setup.ready.tips",
-            "Click a slide to put it on screen, Space for the next, Esc to clear. Later, in Settings: Phone remote, to run the slides from a phone.",
-        )
-    }
+        t("setup.ready.tips_keys", "Click a slide to put it on screen, Space for the next, Esc to clear.")
+    };
+    let quick_help =
+        t("setup.done.quick_help", "Click ? at the top right for Quick Help: point at anything to see what it does.");
+    format!("{keys} {quick_help}")
 }
 
 /// The Keys line: the key layout as it will be once the setup is finished, and the end of a
@@ -392,6 +394,7 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env: &E
                         Flat::Plain,
                         true,
                     )
+                    .hint(t("quickhelp.setup.change", "Go back to this step, to change it."))
                     .clicked(),
                     Key::Retry | Key::RetryBibles => crate::studio::flat_button(
                         ui,
@@ -402,12 +405,15 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env: &E
                         Flat::Plain,
                         true,
                     )
+                    .hint(t("quickhelp.setup.retry", "Try the download again."))
                     .clicked(),
                     Key::Switch(on) => {
                         // The same key as Settings' switches, as wide as the lines' other keys.
                         let size = parts::on_off_size(ui);
                         let rect = Rect::from_center_size(rect.center(), vec2(rect.width().max(size.x), size.y));
-                        parts::on_off(ui, rect, crate::reports::ui::setup_switch_id(), *on).clicked()
+                        parts::on_off(ui, rect, crate::reports::ui::setup_switch_id(), *on)
+                            .hint(t("quickhelp.setup.reports", "Send anonymous reports of speeds and crashes, or not."))
+                            .clicked()
                     }
                 });
                 if pressed {
@@ -452,7 +458,7 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env: &E
     if !again {
         ui.add_space(8.0);
         let softprojector = super::keys_will_be(setup, state).0 == crate::key_table::KeyStyle::SoftProjector;
-        super::words(ui, tips_words(softprojector), FontId::proportional(12.5), TEXT_DIM, 18.0, 1);
+        super::words(ui, &tips_words(softprojector), FontId::proportional(12.5), TEXT_DIM, 18.0, 1);
     }
     go
 }

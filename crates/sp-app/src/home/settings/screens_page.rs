@@ -12,6 +12,7 @@ use sp_engine::Show;
 use super::parts;
 use crate::home::HomeState;
 use crate::i18n::{t, tf, tn};
+use crate::quick_help::Hint;
 use crate::screens::{Kind, Output, Screen};
 use crate::studio::{
     CARD, CARE, Flat, LINE, PANEL, READY, TEXT, TEXT_DIM, TEXT_FAINT, fixed, fixed_semibold, flat_button, semibold,
@@ -167,7 +168,7 @@ fn check_strip(ui: &mut egui::Ui, state: &mut HomeState) {
     let look_now = if state.identify { Flat::On } else { Flat::Plain };
     let identify_response = flat_button(ui, key, ui.scope_id().with("identify"), words, font, look_now, true);
     if identify_response
-        .on_hover_text(t(
+        .hint(t(
             "settings.screens.identify.hint",
             "Each screen shows its name and colour. The room and the stream see it.",
         ))
@@ -188,7 +189,9 @@ fn check_strip(ui: &mut egui::Ui, state: &mut HomeState) {
         ui.add_space(8.0 - ui.spacing().item_spacing.y);
         ui.allocate_exact_size(vec2(width, 30.0), Sense::hover()).0.min
     };
-    let (track, clicked) = crate::studio::pill_switch(ui, "test pattern", switch_at, &labels, &[], chosen, &look);
+    let test = t("quickhelp.screens.test", "Put a test picture on the screens, for lining them up.");
+    let hints = [t("quickhelp.screens.test_off", "Take the test picture off the screens."), test, test, test];
+    let (track, clicked) = crate::studio::pill_switch(ui, "test pattern", switch_at, &labels, &hints, chosen, &look);
     if let Some(at) = clicked {
         state.test_pattern = patterns[at].0;
     }
@@ -248,12 +251,14 @@ fn switches(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
             ui.painter().galley(pos2(x, place.center().y - caption_height / 2.0), caption.clone(), TEXT_FAINT);
             let rect = Rect::from_min_size(pos2(x + caption.size().x + 10.0, place.min.y), key);
             let mut response = parts::on_off(ui, rect, ui.scope_id().with(("screens switch", *at)), on);
-            if *at == 2 {
-                response = response.on_hover_text(t(
+            response = response.hint(match at {
+                0 => t("topbar.screens.audience.hint", "Audience screens on or off"),
+                1 => t("topbar.screens.stage.hint", "Stage screens on or off"),
+                _ => t(
                     "settings.screens.details.hint",
                     "A technical line on every card: the output in full, its format and keyer, see-through or key, theme, layers, edges",
-                ));
-            }
+                ),
+            });
             if response.clicked() {
                 clicked = Some(*at);
             }
@@ -548,7 +553,7 @@ fn draw_card(ui: &egui::Ui, rect: Rect, card: &CardView, screen: &Screen, identi
         ),
         None => tf("settings.screens.open", "Set up {name} in the Screens window", &[("name", &screen.name)]),
     };
-    let response = response.on_hover_text(hint);
+    let response = response.hint(hint);
     let mut asked = response.clicked().then_some(CardAsked::Open);
     ui.painter().rect_filled(rect, CARD_CORNER, CARD);
     let inner = rect.width() - 2.0 * CARD_PAD;
@@ -566,10 +571,11 @@ fn draw_card(ui: &egui::Ui, rect: Rect, card: &CardView, screen: &Screen, identi
     let switch = parts::on_off(ui, key_rect, ui.scope_id().with(("screen on", screen.id)), card.on);
     // A screen with nowhere to go yet (a new one) is set up in the Screens window first.
     let nowhere = screen.output == Output::Off;
+    // Why it doesn't simply switch on, always.
     let switch = if nowhere {
-        switch.on_hover_text(t("settings.screens.off.hint", "Choose where it goes, in the Screens window"))
+        switch.greyed(t("settings.screens.off.hint", "Choose where it goes, in the Screens window"))
     } else {
-        switch
+        switch.hint(t("quickhelp.screens.switch", "Switch this screen on or off."))
     };
     if switch.clicked() {
         asked = Some(match (card.on, nowhere) {
@@ -692,7 +698,9 @@ fn paint_picture(ui: &egui::Ui, picture: Rect, card: &CardView, screen: &Screen,
 
 /// The dashed card that adds a screen. True when clicked.
 fn add_card(ui: &egui::Ui, rect: Rect) -> bool {
-    let response = ui.interact(rect, ui.scope_id().with("add a screen"), Sense::click());
+    let response = ui
+        .interact(rect, ui.scope_id().with("add a screen"), Sense::click())
+        .hint(t("quickhelp.screens.add", "Add a screen, starting from what it is for."));
     let hovered = response.hovered();
     let edge = if hovered { TEXT_FAINT } else { LINE };
     let mut outline = parts::rounded_outline(rect.shrink(0.75), CARD_CORNER);

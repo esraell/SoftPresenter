@@ -12,6 +12,7 @@ use super::HomeState;
 use crate::deck::ImportAs;
 use crate::i18n::{t, tf};
 use crate::icons::Icon;
+use crate::quick_help::Hint;
 use crate::studio::{CARD, Flat, HOVER, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT};
 
 /// What the card for slides says of itself.
@@ -165,7 +166,7 @@ fn card(ui: &mut egui::Ui, at: Pos2, title: &str, line: &str, ringed: bool, last
     if usable {
         response.clicked()
     } else {
-        response.on_hover_text(line);
+        response.greyed(line);
         false
     }
 }
@@ -188,7 +189,7 @@ fn title_row(ui: &mut egui::Ui, title: &str) -> bool {
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
             let (close, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
             if crate::studio::quiet_icon(ui, close, ui.scope_id().with("close"), Icon::Close, 11.0, 0.7, None)
-                .on_hover_text(t("import.close", "Close"))
+                .hint(t("import.close", "Close"))
                 .clicked()
             {
                 closed = true;

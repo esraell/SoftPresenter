@@ -16,6 +16,7 @@ use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, Galley, Key, Modifiers, Painter, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2, pos2, vec2};
 
 use crate::i18n::{t, tf, tn};
+use crate::quick_help::Hint;
 use crate::studio::{CARD, LINE, PANEL, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, fixed, fixed_semibold, semibold};
 
 /// The changelog, as it was when this program was built.
@@ -465,7 +466,7 @@ fn draw(ctx: &egui::Context, view: &mut View, all: &[Version], running: &str) {
             Rect::from_center_size(cross.center(), vec2(14.0, 14.0)),
             TEXT_DIM,
         );
-        if cross_response.on_hover_text(t("settings.whats_new.close", "Close (Esc)")).clicked() {
+        if cross_response.hint(t("settings.whats_new.close", "Close (Esc)")).clicked() {
             close = true;
         }
         // The body, which scrolls; its end in view takes the foot's line away.

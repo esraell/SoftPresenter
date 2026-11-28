@@ -75,6 +75,7 @@ mod pack;
 mod pptx;
 mod private_folder;
 mod props;
+mod quick_help;
 mod remote;
 mod removed;
 mod renamed;

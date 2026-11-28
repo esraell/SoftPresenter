@@ -7,6 +7,7 @@ use egui::{Align, Align2, FontId, Frame, Layout, Rect, Sense, Stroke, StrokeKind
 use sp_engine::Show;
 
 use super::{HomeState, Page, open_page};
+use crate::quick_help::Hint;
 
 pub(crate) mod find_card;
 pub(crate) mod keys_card;
@@ -253,6 +254,7 @@ const CAPS_SPACING: f32 = 0.575;
 /// The Settings window's contents: the list of pages down the left, in a panel of its own, and the
 /// chosen page beside it, as the home window's columns are.
 pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
+    crate::quick_help::set_on(ui.ctx(), state.quick_help);
     egui::CentralPanel::default().frame(Frame::new().fill(BG).inner_margin(GAP)).show(ui, |ui| {
         let whole = ui.max_rect();
         let list = Rect::from_min_size(whole.min, vec2(LIST_WIDTH, whole.height()));
@@ -339,10 +341,7 @@ fn pane_list(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
         let (place, _) = ui.allocate_exact_size(vec2(panel.width(), 30.0), Sense::hover());
         let button = Rect::from_min_size(pos2(left + 10.0, place.min.y), vec2(wide, 30.0));
         let hint = t("settings.set_up.hint_five", "Run the first-start setup again: languages, songs, Bibles, screens");
-        if flat_button(ui, button, ui.scope_id().with("set up"), &words, font, Flat::Plain, true)
-            .on_hover_text(hint)
-            .clicked()
-        {
+        if flat_button(ui, button, ui.scope_id().with("set up"), &words, font, Flat::Plain, true).hint(hint).clicked() {
             state.preferences_open = false;
             state.menu_asked = Some(crate::menubar::Action::SetUp);
         }
@@ -354,7 +353,9 @@ fn pane_list(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
 /// on, and a word or two in the fixed-width face). True when clicked.
 fn list_row(ui: &mut egui::Ui, row: Rect, pane: Pane, state: &HomeState, show: &Show) -> bool {
     let chosen = state.preferences_pane == pane;
-    let response = ui.interact(row, ui.scope_id().with(("settings pane", pane as u8)), Sense::click());
+    let response = ui
+        .interact(row, ui.scope_id().with(("settings pane", pane as u8)), Sense::click())
+        .hint(t("quickhelp.settings.page", "Open this page of Settings."));
     if chosen {
         ui.painter().rect_filled(row, RADIUS, CARD);
     } else if response.hovered() {
@@ -497,7 +498,8 @@ fn slides_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
                 t("settings.continuous.about", "Next at the end of a song opens the one after it"),
                 size,
                 |ui, place| {
-                    if on_off(ui, place, ui.scope_id().with("continuous"), state.continuous).clicked() {
+                    let note = t("settings.continuous.about", "Next at the end of a song opens the one after it");
+                    if on_off(ui, place, ui.scope_id().with("continuous"), state.continuous).hint(note).clicked() {
                         state.continuous = !state.continuous;
                     }
                 },
@@ -533,7 +535,13 @@ fn slides_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
             // Measured first, then drawn at the row's end.
             let size = vec2(crate::studio::pill_switch_width(ui, &labels, &look), look.height + 2.0 * look.inset);
             row(ui, t("settings.window.shown_as", "Slides are shown as"), "", size, |ui, place| {
-                let (_, clicked) = crate::studio::pill_switch(ui, "slide view", place.min, &labels, &[], chosen, &look);
+                let hints = [
+                    t("quickhelp.slides.view.grid", "Show the slides as a grid of pictures."),
+                    t("quickhelp.slides.view.words", "Show the slides as a list of their words."),
+                    t("quickhelp.slides.view.table", "Show the slides as a table, with their groups and keys."),
+                ];
+                let (_, clicked) =
+                    crate::studio::pill_switch(ui, "slide view", place.min, &labels, &hints, chosen, &look);
                 if let Some(at) = clicked {
                     state.slide_view = views[at];
                 }
@@ -570,14 +578,16 @@ fn interface_size_row(ui: &mut egui::Ui, state: &mut HomeState, look: &crate::st
     let size = vec2(crate::studio::pill_switch_width(ui, &labels, look), look.height + 2.0 * look.inset);
     let title = t("settings.size", "Interface size");
     let mut clicked = None;
+    // Quick Help: each size says what the row says.
+    let hints = vec![note.as_str(); labels.len()];
     if ui.available_width() - size.x - 16.0 >= 220.0 {
         row(ui, title, &note, size, |ui, place| {
-            clicked = crate::studio::pill_switch(ui, "interface size", place.min, &labels, &[], chosen, look).1;
+            clicked = crate::studio::pill_switch(ui, "interface size", place.min, &labels, &hints, chosen, look).1;
         });
     } else {
         row(ui, title, &note, egui::Vec2::ZERO, |_, _| {});
         let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), size.y + 12.0), Sense::hover());
-        clicked = crate::studio::pill_switch(ui, "interface size", place.min, &labels, &[], chosen, look).1;
+        clicked = crate::studio::pill_switch(ui, "interface size", place.min, &labels, &hints, chosen, look).1;
     }
     if let Some(at) = clicked {
         state.interface_size = InterfaceSize::ALL[at];
@@ -591,12 +601,33 @@ fn copyright(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     let width = ui.available_width();
     let choices = [C::FirstSlide, C::LastSlide, C::EverySlide, C::Never];
     let keys = [
-        (t("settings.copyright.first", "First slide"), [true, false, false]),
-        (t("settings.copyright.last", "Last slide"), [false, false, true]),
-        (t("settings.copyright.every", "Every slide"), [true, true, true]),
-        (t("settings.copyright.never", "Nowhere"), [false, false, false]),
+        (
+            t("settings.copyright.first", "First slide"),
+            [true, false, false],
+            t("quickhelp.copyright.first", "Show the copyright line on a song\u{2019}s first slide."),
+        ),
+        (
+            t("settings.copyright.last", "Last slide"),
+            [false, false, true],
+            t("quickhelp.copyright.last", "Show the copyright line on a song\u{2019}s last slide."),
+        ),
+        (
+            t("settings.copyright.every", "Every slide"),
+            [true, true, true],
+            t("quickhelp.copyright.every", "Show the copyright line on every slide of a song."),
+        ),
+        (
+            t("settings.copyright.never", "Nowhere"),
+            [false, false, false],
+            t("quickhelp.copyright.never", "Never show the copyright line."),
+        ),
     ]
-    .map(|(name, marked)| Pick { picture: Picture::Strip(marked), name: name.to_owned(), line: String::new() });
+    .map(|(name, marked, hint)| Pick {
+        picture: Picture::Strip(marked),
+        name: name.to_owned(),
+        line: String::new(),
+        hint: hint.to_owned(),
+    });
     // The keys beside the slide while all four fit there with no word broken, else under it.
     let beside = width - 340.0 >= parts::row_width(ui, &keys).max(320.0);
     let slide = vec2(320.0f32.min(width), 320.0f32.min(width) * 9.0 / 16.0);
@@ -643,6 +674,10 @@ fn licence(ui: &mut egui::Ui, state: &mut HomeState) {
                 .text_color(TEXT)
                 .margin(egui::Margin::ZERO),
         );
+        let field = field.hint(t(
+            "quickhelp.slides.licence",
+            "Your church\u{2019}s CCLI licence number, shown in the copyright line.",
+        ));
         if field.has_focus() {
             ui.painter().rect_stroke(place, RADIUS, Stroke::new(1.5, TEXT_FAINT), StrokeKind::Inside);
         }
@@ -687,7 +722,7 @@ fn sample_slide(ui: &mut egui::Ui, state: &HomeState, show: &Show, size: egui::V
         painter.rect_stroke(band, 4.0, Stroke::new(1.0, TEXT_FAINT), StrokeKind::Outside);
         painter.galley(pos2(band.center().x - galley.size().x / 2.0, band.min.y + 2.0), galley, TEXT);
     }
-    response.on_hover_text(t(
+    response.hint(t(
         "settings.copyright.details",
         "A song's writer, publisher and CCLI song number are set with the Info icon in its header.",
     ));
@@ -717,7 +752,11 @@ fn end_of_a_song(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
             ),
             size,
             |ui, place| {
-                if on_off(ui, place, ui.scope_id().with("end mark"), state.end_mark).clicked() {
+                let note = t(
+                    "settings.slides.end.note",
+                    "A mark under the words of a song\u{2019}s last slide as sung, on the audience screens",
+                );
+                if on_off(ui, place, ui.scope_id().with("end mark"), state.end_mark).hint(note).clicked() {
                     state.end_mark = !state.end_mark;
                 }
             },
@@ -744,7 +783,8 @@ fn end_of_a_song(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
         let tall = if beside { key.y.max(note.size().y) } else { key.y + 6.0 + note.size().y };
         let (place, _) = ui.allocate_exact_size(vec2(room, tall), Sense::hover());
         let at = Rect::from_min_size(place.min, key);
-        if parts::key(ui, at, ui.scope_id().with("end look"), words, false).clicked() {
+        let hint = t("quickhelp.slides.end_look", "Choose the end mark\u{2019}s sign, size, colour and place.");
+        if parts::key(ui, at, ui.scope_id().with("end look"), words, false).hint(hint).clicked() {
             crate::end_look::open(state, main, crate::end_look::Door::Settings);
         }
         let note_at = if beside {
@@ -792,6 +832,7 @@ fn transitions(ui: &mut egui::Ui, state: &mut HomeState) {
             } else {
                 String::new()
             },
+            hint: t("quickhelp.transition.pick", "Change slides this way.").to_owned(),
         })
         .collect();
     keys.push(if other {
@@ -799,12 +840,16 @@ fn transitions(ui: &mut egui::Ui, state: &mut HomeState) {
             picture: Picture::Transition(None),
             name: crate::studio::transition_name(now.kind).to_owned(),
             line: time(now),
+            hint: t("quickhelp.transition.sheet", "Every kind of change between slides, with its time and direction.")
+                .to_owned(),
         }
     } else {
         Pick {
             picture: Picture::Transition(None),
             name: t("settings.transition.more", "More\u{2026}").to_owned(),
             line: t("settings.transition.more.about", "Every kind, its time and direction").to_owned(),
+            hint: t("quickhelp.transition.sheet", "Every kind of change between slides, with its time and direction.")
+                .to_owned(),
         }
     });
     let chosen = three.iter().position(|kind| *kind == now.kind).or(Some(3));
@@ -840,11 +885,14 @@ fn language_page(ui: &mut egui::Ui) {
                         picture: Picture::Computer,
                         name: t("settings.language.this_computer", "This computer\u{2019}s").to_owned(),
                         line: crate::i18n::computer().unwrap_or(crate::i18n::Language::English).own_name().to_owned(),
+                        hint: t("quickhelp.language.computer", "Use the language this computer is set to.").to_owned(),
                     },
                     Choice::Is(language) => Pick {
                         picture: Picture::Flag(*language),
                         name: language.own_name().to_owned(),
                         line: String::new(),
+                        hint: t("quickhelp.language.pick", "SoftPresenter\u{2019}s own words in this language.")
+                            .to_owned(),
                     },
                 })
                 .collect();
@@ -879,7 +927,8 @@ fn keys_page(ui: &mut egui::Ui, state: &mut HomeState) {
             let label = t("keys.show_on_buttons", "Show keys on buttons");
             let about = t("settings.keys.buttons.note", "A small tag beside each button with its key");
             row(ui, label, about, size, |ui, place| {
-                if on_off(ui, place, ui.scope_id().with("keys on buttons"), state.keys_on_buttons).clicked() {
+                let switch = on_off(ui, place, ui.scope_id().with("keys on buttons"), state.keys_on_buttons);
+                if switch.hint(about).clicked() {
                     state.keys_on_buttons = !state.keys_on_buttons;
                 }
             });
@@ -1046,9 +1095,8 @@ fn command_line_page(ui: &mut egui::Ui, state: &mut HomeState) {
                 if let (Some(words), Some(wide)) = (install, install_size) {
                     let rect = Rect::from_min_size(pos2(x, place.min.y), wide);
                     let hint = t("settings.cli.install.hint", "Puts sp (and softpresenter) where a terminal finds it");
-                    clicked_install = parts::key(ui, rect, ui.scope_id().with("install sp"), words, false)
-                        .on_hover_text(hint)
-                        .clicked();
+                    clicked_install =
+                        parts::key(ui, rect, ui.scope_id().with("install sp"), words, false).hint(hint).clicked();
                     x += wide.x + 8.0;
                 }
                 if let Some(wide) = remove_size {
@@ -1058,7 +1106,7 @@ fn command_line_page(ui: &mut egui::Ui, state: &mut HomeState) {
                         "Takes sp and softpresenter away again, with anything SoftPresenter added for them",
                     );
                     clicked_remove = parts::key(ui, rect, ui.scope_id().with("remove sp"), remove_words, quiet_remove)
-                        .on_hover_text(hint)
+                        .hint(hint)
                         .clicked();
                 }
             });
@@ -1106,7 +1154,7 @@ fn song_files_page(ui: &mut egui::Ui, state: &mut HomeState) {
             let size = parts::key_size(ui, reload);
             let note = t("settings.song_files.reload.hint", "Brings in songs and themes changed outside the app");
             row(ui, t("settings.song_files.again", "Read them again"), note, size, |ui, place| {
-                if parts::key(ui, place, ui.scope_id().with("reload songs"), reload, false).clicked() {
+                if parts::key(ui, place, ui.scope_id().with("reload songs"), reload, false).hint(note).clicked() {
                     state.menu_asked = Some(crate::menubar::Action::ReloadSongs);
                 }
             });
@@ -1166,7 +1214,7 @@ fn about_page(ui: &mut egui::Ui, state: &mut HomeState) {
         ] {
             let size = parts::key_size(ui, key);
             row(ui, label, note, size, |ui, place| {
-                if parts::key(ui, place, ui.scope_id().with(("about", key)), key, false).clicked() {
+                if parts::key(ui, place, ui.scope_id().with(("about", key)), key, false).hint(note).clicked() {
                     opened = Some(page);
                 }
             });

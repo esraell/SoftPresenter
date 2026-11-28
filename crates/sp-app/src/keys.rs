@@ -19,6 +19,7 @@ use egui::{Align2, Color32, FontId, Key, Rect, Stroke, StrokeKind, pos2, vec2};
 use crate::home::HomeState;
 use crate::i18n::t;
 use crate::key_table::{KeyAction, KeyTable};
+use crate::quick_help::Hint;
 use crate::studio::{CARE, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, fixed, fixed_semibold, semibold};
 
 /// How long the numbers after modifier-1 to 7 (or Shift-modifier-M) stay.
@@ -687,7 +688,7 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
         ui.set_clip_rect(screen);
         // The whole window under it takes the pointer, so nothing there is clicked; a click
         // outside the sheet puts it away.
-        let outside = ui.allocate_rect(screen, egui::Sense::click());
+        let outside = ui.allocate_rect(screen, egui::Sense::click()).no_hint();
         if outside.clicked() && !outside.interact_pointer_pos().is_some_and(|at| sheet.contains(at)) {
             state.key_sheet = false;
         }
@@ -712,7 +713,7 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
             Rect::from_center_size(close.center(), vec2(14.0, 14.0)),
             TEXT_DIM,
         );
-        if close_response.on_hover_text(t("keys.close", "Close (Esc)")).clicked() {
+        if close_response.hint(t("keys.close", "Close (Esc)")).clicked() {
             state.key_sheet = false;
         }
         // Two columns of groups, in a body that scrolls when the window is too short for all.
@@ -812,8 +813,7 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
             (sheet.max.x - 18.0 - done_wide - 12.0 - left).max(60.0),
         );
         painter.galley(pos2(left, track.center().y - note.size().y / 2.0), note, TEXT_FAINT);
-        switch_response
-            .on_hover_text(t("keys.show_on_buttons.hint", "Write each button's key beside it, all the time"));
+        switch_response.hint(t("keys.show_on_buttons.hint", "Write each button's key beside it, all the time"));
         let done = Rect::from_min_size(pos2(sheet.max.x - 18.0 - done_wide, foot + 12.5), vec2(done_wide, 30.0));
         let done_response = ui.interact(done, ui.scope_id().with("done keys"), egui::Sense::click());
         painter.rect_filled(done, 9.0, if done_response.hovered() { Color32::WHITE } else { TEXT });
@@ -824,7 +824,7 @@ pub fn key_sheet(ctx: &egui::Context, state: &mut HomeState) {
             FontId::proportional(12.5),
             Color32::from_rgb(0x19, 0x19, 0x19),
         );
-        if done_response.clicked() {
+        if done_response.hint(t("quickhelp.sheet.close", "Close this window.")).clicked() {
             state.key_sheet = false;
         }
     });

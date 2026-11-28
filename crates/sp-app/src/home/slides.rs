@@ -17,6 +17,7 @@ use super::*;
 use crate::i18n::{t, tf, tk, tn};
 use crate::key_table::{ClickDoes, slide_click_does};
 use crate::outside::Waiting;
+use crate::quick_help::Hint;
 use crate::service::{Item, SavedPassage};
 use crate::studio::{
     CARD, ICON_BUTTON, ItemAsk, LINE, MORE_BUTTON, PANEL, RADIUS, ROW_HOVER, SongAsks, TALLY, TEXT, TEXT_DIM,
@@ -980,7 +981,7 @@ pub fn slide_scroll(
         let sheet = Sheet { origin, left, grid, columns, clip };
         // Between the slides: a click picks nothing; a drag draws a box that picks out every
         // slide it touches.
-        let background = ui.interact(clip, ui.scope_id().with("slide background"), Sense::click_and_drag());
+        let background = ui.interact(clip, ui.scope_id().with("slide background"), Sense::click_and_drag()).no_hint();
         if background.clicked() {
             state.picked_slides.clear();
             state.selected_slide = None;
@@ -1179,7 +1180,7 @@ pub fn slide_scroll(
                         at.iter().map(|at| thumb(ThumbOf::Media(*at)).map(|(texture, _)| texture)).collect();
                     let response = item_tile(ui, &sheet, tile, ("media tile", *item), &pictures, &words, live, length);
                     if let Some(at) = at
-                        && response.on_hover_text(t("slides.media.show_hint", "Show it on the screens")).clicked()
+                        && response.hint(t("slides.media.show_hint", "Show it on the screens")).clicked()
                     {
                         state.services.chosen = Some(*item);
                         crate::studio::show_media_item(show, state, *at, commands);
@@ -1210,7 +1211,7 @@ pub fn slide_scroll(
                     if !*gone
                         && *count > 0
                         && response
-                            .on_hover_text(t(
+                            .hint(t(
                                 "slides.playlist.hint",
                                 "Play its pictures (8 seconds each) and videos in turn, round and round",
                             ))
@@ -1527,11 +1528,13 @@ fn draw_slides(
             && !deck.made
             && let Some(key) = sp_model::key_for_group(&group.name)
         {
-            response.clone().on_hover_text(tf(
+            response.clone().hint(tf(
                 "slides.group_key",
                 "{group} (key {key})",
                 &[("group", &group.name), ("key", &key.to_string())],
             ));
+        } else {
+            response.clone().hint(t("quickhelp.slides.slide", "Put this slide on screen."));
         }
         let is_live = live_at == Some(at);
         // The slide that waits for Enter: in ink, never orange, and not the blue of slides
@@ -1679,7 +1682,7 @@ fn draw_slides(
                     if let Some(hover) = tag.hover {
                         // Only hovering: a click on the tag is still a click on the slide.
                         let id = ui.scope_id().with(("tag", slide.id, tag.words.clone()));
-                        ui.interact(place, id, Sense::hover()).on_hover_text(hover);
+                        ui.interact(place, id, Sense::hover()).full_name(hover);
                     }
                     right = place.min.x - 4.0;
                 }
@@ -1805,7 +1808,7 @@ fn draw_slides(
         if let (Some(place), Some(here)) = (pencil, here) {
             let strength = if near { 1.0 } else { 0.5 };
             let button = icon_button(ui, place, id.with("pencil"), Icon::Pencil, strength, false);
-            if button.on_hover_text(t("slides.edit_this", "Edit this slide")).clicked() {
+            if button.hint(t("slides.edit_this", "Edit this slide")).clicked() {
                 state.editing = EditDraft::of(show, here);
             }
         }
@@ -2031,8 +2034,7 @@ fn placeholder_tile(
         crate::studio::fill_placeholder(state, item, filled);
     }
     // Or a song chosen from a list.
-    let response =
-        response.on_hover_text(t("slides.placeholder.hint", "Fill the placeholder with a song from the library"));
+    let response = response.hint(t("slides.placeholder.hint", "Fill the placeholder with a song from the library"));
     let mut picked = None;
     egui::Popup::from_toggle_button_response(&response)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
@@ -2087,7 +2089,9 @@ fn item_bar(
     // Or a song of the song catalog being looked at, as made, whose tools put it to use.
     let catalog = slides.and_then(|slides| state.catalog.held_at(slides.at?)).cloned();
     let id = ui.scope_id().with(("bar", item, slides.and_then(|slides| slides.at)));
-    let response = ui.interact(bar, id, Sense::click());
+    let response = ui
+        .interact(bar, id, Sense::click())
+        .hint(t("quickhelp.slides.bar", "This item\u{2019}s name and tools. Its menu is on a right-click."));
     // A picture or video dropped on a song's bar becomes a slide of its own at the song's end
     // (after the slide on screen, when that is in it); an ink outline shows it will.
     if let Some((at, _)) = song {
@@ -2178,7 +2182,7 @@ fn item_bar(
         let drawn = painter.text(pos2(x, middle), Align2::LEFT_CENTER, words, font, ink);
         if let Some((at, song)) = song {
             let slides = song.slide_count();
-            let name = ui.interact(drawn.intersect(bar), id.with("name"), Sense::click()).on_hover_text(tn(
+            let name = ui.interact(drawn.intersect(bar), id.with("name"), Sense::click()).hint(tn(
                 "slides.name.hint",
                 slides as u64,
                 "{n} slide \u{b7} double-click to rename",
@@ -2210,7 +2214,7 @@ fn item_bar(
                 "From {source}, not in your library: it joins it, in {library}, once you add it to a playlist or change it. Putting it on screen adds nothing.",
                 &[("source", crate::catalog::SOURCE_NAME), ("library", crate::catalog::LIBRARY_NAME)],
             );
-            ui.interact(drawn.intersect(bar), id.with("catalog"), Sense::hover()).on_hover_text(hint);
+            ui.interact(drawn.intersect(bar), id.with("catalog"), Sense::hover()).status(hint);
         }
     }
     // A passage's version button, after its kind.
@@ -2229,7 +2233,7 @@ fn item_bar(
         (None, Some((at, _))) => {
             if ui
                 .button(t("slides.add_slide", "Add Slide"))
-                .on_hover_text(t("slides.add_slide.hint", "Add a slide laid out like the last one"))
+                .hint(t("slides.add_slide.hint", "Add a slide laid out like the last one"))
                 .clicked()
             {
                 state.add_slide = Some(at);
@@ -2263,15 +2267,10 @@ fn item_bar(
             "Edit Words: the song joins your library, in {library}, to be changed",
             library,
         );
-        if icon_button(ui, place(), id.with("catalog add"), Icon::Plus, strength, false)
-            .on_hover_text(add_hint)
-            .clicked()
-        {
+        if icon_button(ui, place(), id.with("catalog add"), Icon::Plus, strength, false).hint(add_hint).clicked() {
             catalog_add(state, held);
         }
-        if icon_button(ui, place(), id.with("catalog words"), Icon::Reflow, strength, false)
-            .on_hover_text(words_hint)
-            .clicked()
+        if icon_button(ui, place(), id.with("catalog words"), Icon::Reflow, strength, false).hint(words_hint).clicked()
         {
             state.catalog.join(held, crate::catalog_songs::Then::Words);
         }
@@ -2288,7 +2287,7 @@ fn item_bar(
             rect.intersect(bar)
         };
         let info = icon_button(ui, place(), id.with("details"), Icon::Status, strength, false)
-            .on_hover_text(t("slides.details", "Details: the song's writer, publisher and CCLI number"));
+            .hint(t("slides.details", "Details: the song's writer, publisher and CCLI number"));
         egui::Popup::from_toggle_button_response(&info)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show(|ui| {
@@ -2327,19 +2326,19 @@ fn item_bar(
             }
             None => t("slides.words.hint", "Edit Words: the song's words as text, to change").to_owned(),
         };
-        let words = icon_button(ui, place(), id.with("words"), Icon::Reflow, strength, false).on_hover_text(words_hint);
+        let words = icon_button(ui, place(), id.with("words"), Icon::Reflow, strength, false).hint(words_hint);
         if words.clicked() {
             state.reflow = Some((at, sp_model::to_song_text(song)));
         }
         let arranged = song.active_arrangement().is_some();
         let arrangement = icon_button(ui, place(), id.with("arrangement"), Icon::Arrangement, strength, arranged)
-            .on_hover_text(t("slides.arrangement", "Arrangement: play the song's groups in another order"));
+            .hint(t("slides.arrangement", "Arrangement: play the song's groups in another order"));
         arrangement_menu(at, song, state, &arrangement);
         if let Some(item) = item.filter(|item| crate::studio::can_show_with(state, *item)) {
             version_button(ui, show, state, place(), id.with("version"), item, strength);
         }
         let notes = icon_button(ui, place(), id.with("notes"), Icon::Notes, strength, state.show_notes)
-            .on_hover_text(t("slides.notes", "Notes: show the notes of the slide on screen"));
+            .hint(t("slides.notes", "Notes: show the notes of the slide on screen"));
         if notes.clicked() {
             state.show_notes = !state.show_notes;
         }
@@ -2471,7 +2470,7 @@ fn version_button(
             None => t("slides.version.none", "Show this with a theme version").to_owned(),
         },
     };
-    let response = response.on_hover_text(hint);
+    let response = response.hint(hint);
     egui::Popup::menu(&response).show(|ui| crate::studio::show_with_menu(ui, state, item, true));
 }
 
@@ -2527,7 +2526,7 @@ fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, bu
             if song.chorus_after_each_verse().is_some()
                 && ui
                     .button(t("slides.arrangement.chorus_after", "Chorus After Each Verse"))
-                    .on_hover_text(t(
+                    .hint(t(
                         "slides.arrangement.chorus_after.hint",
                         "Sing the chorus again after every verse; the order follows the song's parts until you change it",
                     ))
@@ -2541,7 +2540,7 @@ fn arrangement_menu(index: usize, song: &Presentation, state: &mut HomeState, bu
             }
             if ui
                 .button(t("slides.arrangement.new", "New Arrangement"))
-                .on_hover_text(t("slides.arrangement.new.hint", "Starts with the groups as written"))
+                .hint(t("slides.arrangement.new.hint", "Starts with the groups as written"))
                 .clicked()
             {
                 let made = song.new_arrangement(arrangement_name);
@@ -2791,7 +2790,7 @@ fn arrangement_strip(
         0.7,
     );
     let hint = t("slides.arrangement.hint", "Choose, make or change an arrangement");
-    arrangement_menu(index, song, state, &button.on_hover_text(hint));
+    arrangement_menu(index, song, state, &button.hint(hint));
     let mut groups: Option<Vec<Uuid>> = None;
     let count = layout.chips.len();
     let rects: Vec<Rect> = layout.chips.iter().map(|chip| chip.rect.translate(origin.to_vec2())).collect();
@@ -2840,7 +2839,7 @@ fn arrangement_strip(
         let arrow_ink = if on { Color32::WHITE } else { TEXT_DIM };
         let arrow_strength = if arrow_response.hovered() { 1.0 } else { 0.6 };
         icons::paint(ui.painter(), Icon::ChevronDown, arrow, arrow_ink.gamma_multiply(arrow_strength));
-        egui::Popup::menu(&arrow_response.on_hover_text(t("slides.chip.arrow", "Times, move or remove"))).show(|ui| {
+        egui::Popup::menu(&arrow_response.hint(t("slides.chip.arrow", "Times, move or remove"))).show(|ui| {
             if let Some(changed) = piece_menu(ui, arrangement, chip, count) {
                 groups = Some(changed);
             }
@@ -2849,10 +2848,8 @@ fn arrangement_strip(
         if response.drag_started() {
             response.dnd_set_drag_payload(PieceDrag { song: index, start: place.run.start });
         }
-        let response = response.on_hover_text(t(
-            "slides.chip.hint",
-            "Click to go there \u{b7} drag to move \u{b7} the arrow sets how many times",
-        ));
+        let response = response
+            .hint(t("slides.chip.hint", "Click to go there \u{b7} drag to move \u{b7} the arrow sets how many times"));
         if response.clicked() {
             commands.push(Command::GoToStep { presentation: index, step: place.first });
             if deck.item.is_some() {
@@ -2887,7 +2884,7 @@ fn arrangement_strip(
         ui.ctx().request_repaint();
     }
     let add = icon_button(ui, layout.add.translate(origin.to_vec2()), id.with("add"), Icon::Plus, 1.0, false)
-        .on_hover_text(t("slides.add_group", "Add a group to the end"));
+        .hint(t("slides.add_group", "Add a group to the end"));
     egui::Popup::menu(&add).show(|ui| {
         for group in &song.groups {
             if ui.button(group.name.as_str()).clicked() {
@@ -3015,21 +3012,40 @@ fn nothing_open(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
         let wide = if playlist { 300.0 } else { 190.0 };
         ui.allocate_ui_with_layout(vec2(wide, 30.0), Layout::left_to_right(Align::Center), |ui| {
             if playlist {
-                if ui.button(t("slides.empty.add_bible", "Add a Bible passage")).clicked() {
+                if ui
+                    .button(t("slides.empty.add_bible", "Add a Bible passage"))
+                    .hint(t(
+                        "quickhelp.slides.add_bible",
+                        "Look a passage up on the Bible page, to add to this playlist.",
+                    ))
+                    .clicked()
+                {
                     state.bible_open = true;
                     state.bible.focus_lookup = true;
                 }
-                if ui.button(t("slides.empty.add_header", "Add a header")).clicked() {
+                if ui
+                    .button(t("slides.empty.add_header", "Add a header"))
+                    .hint(t("left.add.header.hint", "A heading over the items under it"))
+                    .clicked()
+                {
                     let name = t("left.add.header.name", "Header");
                     state.services.add(Item::Header { name: name.to_owned() });
                     let at = state.services.front().items.len() - 1;
                     state.renaming_header = Some((at, name.to_owned()));
                     state.rename_started = true;
                 }
-            } else if ui.button(t("left.new_song", "New song")).clicked() {
+            } else if ui
+                .button(t("left.new_song", "New song"))
+                .hint(crate::keys::hint(t("left.new_song", "New song"), "N", false))
+                .clicked()
+            {
                 state.new_song = true;
             }
-            if ui.button(t("slides.empty.import", "Import\u{2026}")).clicked() {
+            if ui
+                .button(t("slides.empty.import", "Import\u{2026}"))
+                .hint(t("left.import", "Import songs or slides"))
+                .clicked()
+            {
                 state.menu_asked = Some(Action::ImportSongs);
             }
         });
@@ -3088,7 +3104,7 @@ fn slide_menu(
     let all = these.len() >= presentation.slide_count();
     let cut = ui.add_enabled(!all, egui::Button::new(t("slides.menu.cut", "Cut")).shortcut_text(key("X")));
     let one_slide = t("slides.menu.one_slide", "A song always keeps one slide");
-    if cut.on_disabled_hover_text(one_slide).clicked() {
+    if cut.reason(one_slide).clicked() {
         copy_slides(ui.ctx(), state, presentation, &these);
         state.slide_request = Some((here, SlideRequest::DeleteMany(these.clone())));
         ui.close();
@@ -3100,7 +3116,7 @@ fn slide_menu(
     let clip = state.slide_clip.clone();
     let paste =
         ui.add_enabled(!clip.is_empty(), egui::Button::new(t("slides.menu.paste", "Paste")).shortcut_text(key("V")));
-    if paste.on_disabled_hover_text(t("slides.menu.paste.none", "Copy or cut a slide first")).clicked() {
+    if paste.reason(t("slides.menu.paste.none", "Copy or cut a slide first")).clicked() {
         state.slide_request = Some((here, SlideRequest::PasteAfter(clip)));
         ui.close();
     }
@@ -3120,21 +3136,21 @@ fn slide_menu(
     } else {
         t("slides.delete", "Delete").to_owned()
     };
-    if ui.add_enabled(!all, egui::Button::new(delete)).on_disabled_hover_text(one_slide).clicked() {
+    if ui.add_enabled(!all, egui::Button::new(delete)).reason(one_slide).clicked() {
         crate::home::delete_slides(state, which, &these);
         ui.close();
     }
     // One place up or down the song (with the slides picked with it).
     let (first, last) = (these.first().copied().unwrap_or(index), these.last().copied().unwrap_or(index));
     let up = ui.add_enabled(first > 0, egui::Button::new(t("left.move_up", "Move Up")));
-    if up.on_disabled_hover_text(t("left.at_top", "Already at the top")).clicked() {
+    if up.reason(t("left.at_top", "Already at the top")).clicked() {
         let to = first - 1;
         state.slide_request = Some((here, SlideRequest::Move { slides: these.clone(), to, after: false }));
         ui.close();
     }
     let down =
         ui.add_enabled(last + 1 < presentation.slide_count(), egui::Button::new(t("left.move_down", "Move Down")));
-    if down.on_disabled_hover_text(t("left.at_bottom", "Already at the bottom")).clicked() {
+    if down.reason(t("left.at_bottom", "Already at the bottom")).clicked() {
         let to = last + 1;
         state.slide_request = Some((here, SlideRequest::Move { slides: these.clone(), to, after: true }));
         ui.close();
@@ -3264,11 +3280,11 @@ fn slide_menu(
             state.inspector.copied_style.is_some(),
             egui::Button::new(t("slides.menu.paste_style", "Paste Style")),
         )
-        .on_hover_text(t(
+        .hint(t(
             "slides.menu.paste_style.hint",
             "Give every text box on the slide (and the slides picked with it) the look that was copied",
         ))
-        .on_disabled_hover_text(t("slides.menu.paste_style.none", "Copy a style first"))
+        .reason(t("slides.menu.paste_style.none", "Copy a style first"))
         .clicked()
         && let Some(copied) = state.inspector.copied_style.clone()
     {

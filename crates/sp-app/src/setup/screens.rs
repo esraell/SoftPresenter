@@ -7,6 +7,7 @@ use egui::{Align2, RichText, Sense, vec2};
 use crate::displays::{DisplayInfo, kept_for_operator};
 use crate::home::HomeState;
 use crate::i18n::{t, tf};
+use crate::quick_help::Hint;
 use crate::screens::{Kind, Output, Screen};
 use crate::studio::{CARD, HOVER, READY, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 
@@ -16,9 +17,11 @@ fn say(ui: &mut egui::Ui, text: &str) {
 }
 
 /// A choice in a list, lit when chosen.
-fn choice(ui: &mut egui::Ui, chosen: bool, label: &str, detail: &str) -> egui::Response {
+/// `hint` says what choosing it does, for Quick Help.
+fn choice(ui: &mut egui::Ui, chosen: bool, label: &str, detail: &str, hint: &str) -> egui::Response {
     let width = ui.available_width();
     let (place, response) = ui.allocate_exact_size(vec2(width, 40.0), Sense::click());
+    let response = response.hint(hint);
     let fill = if chosen {
         SELECTED
     } else if response.hovered() {
@@ -161,6 +164,7 @@ pub fn step(ui: &mut egui::Ui, state: &mut HomeState) {
             lit == OneDisplayChoice::Automatic,
             t("setup.screens.automatic", "In a window for now"),
             t("setup.screens.automatic.detail", "On a TV or projector as soon as one is plugged in"),
+            t("setup.screens.automatic.detail", "On a TV or projector as soon as one is plugged in"),
         )
         .clicked()
         {
@@ -173,6 +177,7 @@ pub fn step(ui: &mut egui::Ui, state: &mut HomeState) {
                 true,
                 t("setup.screens.window", "Only in a window"),
                 t("setup.screens.window.detail", "Stays in a window, even with a TV or projector plugged in"),
+                t("setup.screens.window.detail", "Stays in a window, even with a TV or projector plugged in"),
             );
             ui.add_space(6.0);
         }
@@ -182,6 +187,7 @@ pub fn step(ui: &mut egui::Ui, state: &mut HomeState) {
                 lit == OneDisplayChoice::Ndi,
                 t("setup.screens.ndi", "Send over NDI"),
                 t("setup.screens.ndi.detail", "For a stream or a video switcher"),
+                t("quickhelp.setup.ndi", "Send the audience screen over NDI, for a stream or a video switcher."),
             )
             .clicked()
         {
@@ -194,6 +200,7 @@ pub fn step(ui: &mut egui::Ui, state: &mut HomeState) {
             ui,
             lit == OneDisplayChoice::NotNow,
             t("setup.screens.not_now", "Not now"),
+            t("setup.screens.not_now.detail", "Choose in the Screens window later"),
             t("setup.screens.not_now.detail", "Choose in the Screens window later"),
         )
         .clicked()
@@ -218,7 +225,8 @@ pub fn step(ui: &mut egui::Ui, state: &mut HomeState) {
         _ => None,
     };
     for (name, size) in &others {
-        if choice(ui, current.as_deref() == Some(name), name, size).clicked() {
+        let hint = t("quickhelp.setup.display", "Show the audience screen on this display.");
+        if choice(ui, current.as_deref() == Some(name), name, size, hint).clicked() {
             state.screens[audience].go_to(Output::Display(name.clone()));
             state.screens_changed = true;
         }
@@ -228,6 +236,7 @@ pub fn step(ui: &mut egui::Ui, state: &mut HomeState) {
         ui,
         current.is_none(),
         t("setup.screens.not_now", "Not now"),
+        t("setup.screens.not_now.display", "Choose a display later in the Screens window"),
         t("setup.screens.not_now.display", "Choose a display later in the Screens window"),
     )
     .clicked()
@@ -251,7 +260,8 @@ pub fn step(ui: &mut egui::Ui, state: &mut HomeState) {
             _ => None,
         });
         for (name, size) in free {
-            if choice(ui, stage_on.as_deref() == Some(name), name, size).clicked() {
+            let hint = t("quickhelp.setup.stage_display", "Show the band\u{2019}s stage screen on this display.");
+            if choice(ui, stage_on.as_deref() == Some(name), name, size, hint).clicked() {
                 match stage {
                     Some(at) => state.screens[at].go_to(Output::Display(name.clone())),
                     None => state.screens.push(Screen::stage(
@@ -263,7 +273,8 @@ pub fn step(ui: &mut egui::Ui, state: &mut HomeState) {
             }
             ui.add_space(6.0);
         }
-        if choice(ui, stage_on.is_none(), t("setup.screens.stage.none", "No stage display"), "").clicked()
+        let hint = t("quickhelp.setup.no_stage", "No stage screen for now.");
+        if choice(ui, stage_on.is_none(), t("setup.screens.stage.none", "No stage display"), "", hint).clicked()
             && let Some(at) = stage
         {
             state.screens[at].output = Output::Off;
@@ -278,7 +289,10 @@ pub fn step(ui: &mut egui::Ui, state: &mut HomeState) {
         } else {
             t("setup.screens.identify", "Identify Screens")
         };
-        if super::key(ui, "identify", identify, 90.0, true).clicked() {
+        if super::key(ui, "identify", identify, 90.0, true)
+            .hint(t("quickhelp.setup.identify", "Show each screen\u{2019}s name on it, to tell them apart."))
+            .clicked()
+        {
             state.identify = !state.identify;
         }
         // NDI beside it: the key that opens the Install NDI window (the setup is back at this
@@ -294,7 +308,7 @@ pub fn step(ui: &mut egui::Ui, state: &mut HomeState) {
             crate::studio::paint_light(ui.painter(), light.center(), Some(READY));
             ui.label(RichText::new(words).size(12.5).color(TEXT_DIM));
         } else if super::key(ui, "install ndi", crate::ndi_download::install_key(), 90.0, true)
-            .on_hover_text(t(
+            .hint(t(
                 "setup.screens.ndi.install.hover",
                 "NDI sends the slides over your network, to a live stream or another computer. It\u{2019}s free.",
             ))

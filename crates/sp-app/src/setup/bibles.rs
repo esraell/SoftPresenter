@@ -14,6 +14,7 @@ use super::{Env, Setup, language_own_name};
 use crate::bible::Shelf;
 use crate::home::{BiblePage, HomeState};
 use crate::i18n::{t, tf};
+use crate::quick_help::Hint;
 use crate::studio::{CARD, Flat, HOVER, LINE, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 
 /// A Bible the step lists.
@@ -505,7 +506,9 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env: &E
 pub(super) fn fold_key(ui: &mut egui::Ui, salt: &str, title: &str, open: bool) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(title.to_owned(), FontId::proportional(13.0), TEXT_DIM);
     let (place, _) = ui.allocate_exact_size(vec2(14.0 + galley.size().x + 4.0, 26.0), Sense::hover());
-    let response = ui.interact(place, ui.scope_id().with(salt), Sense::click());
+    let response = ui
+        .interact(place, ui.scope_id().with(salt), Sense::click())
+        .hint(t("quickhelp.fold", "Open or close this part."));
     let ink = if response.hovered() { TEXT } else { TEXT_DIM };
     let middle = pos2(place.min.x + 4.0, place.center().y);
     let corners = if open {
@@ -531,7 +534,9 @@ fn row(ui: &mut egui::Ui, choice: &mut Choice, bible: &Entry, two: bool, recomme
     let chosen = choice.has(&bible.id);
     let id = ui.scope_id().with(("setup bible", bible.id.as_str()));
     // With one language the whole row is the choice.
-    let whole = (!two).then(|| ui.interact(place, id.with("row"), Sense::click()));
+    let whole = (!two).then(|| {
+        ui.interact(place, id.with("row"), Sense::click()).hint(t("quickhelp.setup.bible", "Use this Bible."))
+    });
     let hovered = whole.as_ref().is_some_and(egui::Response::hovered);
     ui.painter().rect_filled(place, 9.0, if hovered { HOVER } else { CARD });
     if chosen {
@@ -573,17 +578,23 @@ fn row(ui: &mut egui::Ui, choice: &mut Choice, bible: &Entry, two: bool, recomme
         let on_top = choice.top.as_deref() == Some(bible.id.as_str());
         let is_below = choice.below.as_deref() == Some(bible.id.as_str());
         let look = |on: bool| if on { Flat::On } else { Flat::Plain };
-        if crate::studio::flat_button(ui, top, id.with("top"), labels[0], font.clone(), look(on_top), true).clicked() {
+        if crate::studio::flat_button(ui, top, id.with("top"), labels[0], font.clone(), look(on_top), true)
+            .hint(t("quickhelp.setup.bible_top", "The translation whose words go on top on a Bible slide."))
+            .clicked()
+        {
             choice.put_on_top(&bible.id);
         }
-        if crate::studio::flat_button(ui, below, id.with("below"), labels[1], font, look(is_below), true).clicked() {
+        if crate::studio::flat_button(ui, below, id.with("below"), labels[1], font, look(is_below), true)
+            .hint(t("quickhelp.setup.bible_below", "The translation shown below it, or none."))
+            .clicked()
+        {
             choice.put_below(&bible.id);
         }
     } else if whole.as_ref().is_some_and(egui::Response::clicked) {
         choice.only(&bible.id);
     }
     if !bible.terms.is_empty() {
-        ui.interact(place, id.with("terms"), Sense::hover()).on_hover_text(&bible.terms);
+        ui.interact(place, id.with("terms"), Sense::hover()).hint(&bible.terms);
     }
 }
 

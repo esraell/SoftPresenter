@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use crate::control::Reply;
 use crate::i18n::{t, tf};
 use crate::outside::Waiting;
+use crate::quick_help::Hint;
 
 /// The helper program's name, beside SoftPresenter's own.
 const PROGRAM: &str = "softpresenter-mirror";
@@ -706,7 +707,11 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
     crate::studio::caption(ui, t("mirror.caption", "AIRPLAY"));
     let mut on = view.on;
     ui.add_enabled_ui(view.found || view.on, |ui| {
-        if ui.checkbox(&mut on, t("mirror.turn_on", "Show an iPhone, iPad or Mac screen")).changed() {
+        if ui
+            .checkbox(&mut on, t("mirror.turn_on", "Show an iPhone, iPad or Mac screen"))
+            .hint(t("quickhelp.mirror.on", "Let a phone, iPad or Mac show its screen through SoftPresenter."))
+            .changed()
+        {
             view.request = Some(Request::Switch(on));
         }
     });
@@ -744,12 +749,16 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
 
     crate::studio::caption(ui, t("mirror.name.caption", "THE NAME DEVICES SEE"));
     ui.horizontal(|ui| {
-        let field = ui.add(egui::TextEdit::singleline(&mut view.name).desired_width(300.0).char_limit(NAME_MOST));
+        let field = ui.add(egui::TextEdit::singleline(&mut view.name).desired_width(300.0).char_limit(NAME_MOST)).hint(
+            t("quickhelp.mirror.name", "The name phones and iPads see when they look for a screen to mirror to."),
+        );
         let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let changed = clean_name(&view.name) != view.name_now;
-        if (ui.add_enabled(changed, egui::Button::new(t("mirror.name.use", "Use"))).clicked() || (entered && changed))
-            && !clean_name(&view.name).is_empty()
-        {
+        let use_it = ui
+            .add_enabled(changed, egui::Button::new(t("mirror.name.use", "Use")))
+            .hint(t("quickhelp.mirror.use", "Use the name typed."))
+            .reason(t("quickhelp.mirror.use.same", "Type a new name first"));
+        if (use_it.clicked() || (entered && changed)) && !clean_name(&view.name).is_empty() {
             view.request = Some(Request::Name(clean_name(&view.name)));
         }
     });
@@ -759,7 +768,7 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
     let mut ask = view.ask;
     if ui
         .checkbox(&mut ask, t("mirror.ask", "Ask me each time"))
-        .on_hover_text(t(
+        .hint(t(
             "mirror.ask.hint",
             "When a device wants to show its screen, SoftPresenter asks you in the notices before taking its picture",
         ))
@@ -783,7 +792,11 @@ pub fn pane(ui: &mut egui::Ui, view: &mut View) {
         Some(name) => {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(name).color(TEXT));
-                if ui.button(t("mirror.stop", "Stop")).clicked() {
+                if ui
+                    .button(t("mirror.stop", "Stop"))
+                    .hint(t("quickhelp.mirror.stop", "End this device\u{2019}s screen mirroring."))
+                    .clicked()
+                {
                     view.request = Some(Request::Stop);
                 }
             });

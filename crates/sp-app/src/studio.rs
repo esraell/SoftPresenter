@@ -18,6 +18,7 @@ use crate::editor::EditDraft;
 use crate::home::{HomeState, SlideView, ThumbOf, matches_filter};
 use crate::i18n::{t, tf, tk, tn, ts};
 use crate::icons::{self, Icon};
+use crate::quick_help::Hint;
 
 // A dark, quiet window built like a piece of equipment: greys in steps, each thing that sits on
 // another a step lighter than it, and one colour, orange, kept for what is on screen.
@@ -309,7 +310,7 @@ pub fn pill_switch(
         let ink = if on || response.hovered() { TEXT } else { look.idle };
         paint_spaced(ui, cell.center(), Align2::CENTER_CENTER, label, look.font.clone(), ink, look.spacing);
         if let Some(hint) = hints.get(index) {
-            response = response.on_hover_text(*hint);
+            response = response.hint(*hint);
         }
         if response.clicked() {
             clicked = Some(index);
@@ -368,7 +369,7 @@ pub fn icon_switch(
         let ink = if on || response.hovered() { TEXT } else { TEXT_DIM };
         icons::paint(ui.painter(), *icon, Rect::from_center_size(cell.center(), egui::Vec2::splat(12.0)), ink);
         if let Some(hint) = hints.get(index) {
-            response = response.on_hover_text(*hint);
+            response = response.hint(*hint);
         }
         if response.clicked() {
             clicked = Some(index);
@@ -482,7 +483,7 @@ pub fn tab_switch(
                 crate::keys::tag(ui.painter(), words.max.x + tag_wide, cell.center().y, tag);
             }
             if let Some(hint) = hints.get(index) {
-                response = response.on_hover_text(*hint);
+                response = response.hint(*hint);
             }
             if response.clicked() {
                 clicked = Some(index);
@@ -1187,21 +1188,38 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         }
         icons::paint(ui.painter(), Icon::Gear, Rect::from_center_size(gear.center(), vec2(16.0, 16.0)), TEXT_DIM);
         let hint = crate::keys::hint(t("topbar.settings", "Settings"), ",", false);
-        if response.on_hover_text(hint).clicked() {
+        if response.hint(hint).clicked() {
             state.preferences_open = !state.preferences_open;
         }
 
-        // The keys: the list of every key, as `?` opens it.
+        // Quick Help: on, each control says what it does under the pointer; the key is lit (white,
+        // its mark dark) while it is. The list of every key is the keyboard's ? (and the Help menu
+        // on a Mac), no longer this key.
         let keys = pos2(gear.min.x - 10.0 - 14.0, middle);
         let response = ui.interact(
             Rect::from_center_size(keys, egui::Vec2::splat(28.0)),
             ui.scope_id().with("keys"),
             Sense::click(),
         );
-        ui.painter().circle_filled(keys, 14.0, if response.hovered() { HOVER } else { CARD });
-        ui.painter().text(keys, Align2::CENTER_CENTER, "?", fixed_semibold(13.0), TEXT_DIM);
-        if response.on_hover_text(t("topbar.keys", "Every key (press ?)")).clicked() {
-            state.key_sheet = true;
+        let (fill, ink) = match (state.quick_help, response.hovered()) {
+            (true, hovered) => (if hovered { Color32::WHITE } else { TEXT }, PANEL),
+            (false, hovered) => (if hovered { HOVER } else { CARD }, TEXT_DIM),
+        };
+        ui.painter().circle_filled(keys, 14.0, fill);
+        ui.painter().text(keys, Align2::CENTER_CENTER, "?", fixed_semibold(13.0), ink);
+        let hint = if state.quick_help {
+            t(
+                "topbar.quick_help.on",
+                "Quick Help is on: point at anything to see what it does. This switches it off. For every key, press ?",
+            )
+        } else {
+            t(
+                "topbar.quick_help",
+                "Quick Help: switch it on, then point at anything to see what it does. For every key, press ?",
+            )
+        };
+        if response.always(hint).clicked() {
+            state.quick_help = !state.quick_help;
         }
 
         let stage_on = state.stage_on;
@@ -1211,7 +1229,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             crate::keys::corner_tag(ui.painter(), response.rect, &crate::keys::stage_key());
         }
         if response
-            .on_hover_text(crate::keys::hint(t("topbar.screens.stage.hint", "Stage screens on or off"), "2", true))
+            .hint(crate::keys::hint(t("topbar.screens.stage.hint", "Stage screens on or off"), "2", true))
             .clicked()
         {
             state.stage_on = !stage_on;
@@ -1223,11 +1241,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             crate::keys::corner_tag(ui.painter(), response.rect, &crate::keys::audience_key());
         }
         if response
-            .on_hover_text(crate::keys::hint(
-                t("topbar.screens.audience.hint", "Audience screens on or off"),
-                "1",
-                true,
-            ))
+            .hint(crate::keys::hint(t("topbar.screens.audience.hint", "Audience screens on or off"), "1", true))
             .clicked()
         {
             commands.push(Command::SetOutputEnabled(!on));
@@ -1290,14 +1304,21 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             if wide >= 48.0 {
                 let room = Rect::from_min_max(pos2(right - wide, bar.min.y), pos2(right, bar.max.y));
                 let galley = spaced(ui, &words.to_uppercase(), fixed(12.0), READY, 0.6);
+                // Too long for its room, its end (the time) is cut off: its whole always shows.
+                let cut = galley.size().x > wide;
                 let at = pos2((right - galley.size().x).max(room.min.x), middle - galley.size().y / 2.0);
                 let shown = ui.interact(room, ui.scope_id().with("running timer"), Sense::hover());
                 ui.painter().with_clip_rect(room).galley(at, galley, READY);
-                shown.on_hover_text(tf(
+                let said = tf(
                     "topbar.timer.hint",
                     "{timer} (the Timers tab: {key})",
                     &[("timer", &words), ("key", &crate::keys::with_modifier("1"))],
-                ));
+                );
+                if cut {
+                    shown.full_name(said);
+                } else {
+                    shown.status(said);
+                }
             }
         } else if let Some(words) = state.canva.quiet.clone() {
             // Otherwise, in the same room, what Canva Sync is doing (an export, a download); how
@@ -1308,18 +1329,16 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                 let room = Rect::from_min_max(pos2(right - wide, bar.min.y), pos2(right, bar.max.y));
                 let colour = TEXT_DIM;
                 let galley = spaced(ui, &words.to_uppercase(), fixed(11.0), colour, 0.5);
+                // Cut off by its room, the whole of it always shows.
+                let cut = galley.size().x > wide;
                 let at = pos2((right - galley.size().x).max(room.min.x), middle - galley.size().y / 2.0);
                 let shown = ui.interact(room, ui.scope_id().with("canva sync line"), Sense::click());
                 ui.painter().with_clip_rect(room).galley(at, galley, colour);
                 let detail = state.canva.said.as_ref().map_or_else(|| words.clone(), |(said, _)| said.clone());
-                if shown
-                    .on_hover_text(tf(
-                        "topbar.canva.hint",
-                        "{detail} (Settings › Integrations › Canva Sync)",
-                        &[("detail", &detail)],
-                    ))
-                    .clicked()
-                {
+                let said =
+                    tf("topbar.canva.hint", "{detail} (Settings › Integrations › Canva Sync)", &[("detail", &detail)]);
+                let shown = if cut { shown.full_name(said) } else { shown.hint(said) };
+                if shown.clicked() {
                     state.preferences_open = true;
                     state.preferences_pane = crate::home::Pane::Integrations;
                     state.canva.open = true;
@@ -1369,7 +1388,7 @@ pub fn toolbar(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                         )
                     },
                 );
-                if shown.on_hover_text(hint).clicked() {
+                if shown.hint(hint).clicked() {
                     state.preferences_open = true;
                     state.preferences_pane = crate::home::Pane::PhoneRemote;
                 }
@@ -1515,7 +1534,7 @@ pub fn list_heading_with_add(ui: &mut egui::Ui, text: &str, hint: &str) -> egui:
     let middle = top + 14.0 + 15.5 / 2.0;
     let right = ui.max_rect().max.x - 8.0;
     let plus = Rect::from_center_size(pos2(right - ICON_BUTTON / 2.0, middle), egui::Vec2::splat(ICON_BUTTON));
-    icon_button(ui, plus, ui.scope_id().with(("list heading add", text)), Icon::Plus, 0.6, false).on_hover_text(hint)
+    icon_button(ui, plus, ui.scope_id().with(("list heading add", text)), Icon::Plus, 0.6, false).hint(hint)
 }
 
 /// How tall a [`plain_row`] is.
@@ -1711,17 +1730,18 @@ pub fn list_keys(ui: &mut egui::Ui, salt: &str, can: [bool; 5], hints: [&str; 5]
         // A greyed key still senses the pointer, so it takes a hover: the reason. A key that
         // is only its picture says its name.
         // One that is greyed as a picture says both: its name, and why it can't be pressed.
-        let greyed;
-        let hover = match (can[at], named) {
-            (false, true) => why[at],
+        // Quick Help: the reason always shows on a greyed key; a key that is only its picture
+        // always says its name (its words cut short to a picture), and what it does with Quick
+        // Help on.
+        let response = match (can[at], named) {
+            (false, true) => response.greyed(why[at]),
             (false, false) => {
-                greyed = tf("edit.list.greyed", "{name}: {why}", &[("name", name), ("why", why[at])]);
-                greyed.as_str()
+                response.greyed(tf("edit.list.greyed", "{name}: {why}", &[("name", name), ("why", why[at])]))
             }
-            (true, true) => hints[at],
-            (true, false) => name,
+            (true, true) => response.hint(hints[at]),
+            (true, false) => response.full_name_and_hint(hints[at], Some(name)),
         };
-        if response.on_hover_text(hover).clicked() {
+        if response.clicked() {
             pressed = Some(key);
         }
     }
@@ -1745,6 +1765,8 @@ pub struct ListPicture<'a> {
     /// Its name is being retyped: the caller puts a field where the name was (see
     /// [`ListPlaces`]), so the name isn't drawn.
     pub renaming: bool,
+    /// What a click on it does, for Quick Help.
+    pub hint: &'a str,
 }
 
 /// Where a picture of the list was drawn: the picture's room, for the caller to paint it in
@@ -1831,6 +1853,7 @@ pub fn list_picture(
     let right = picture.max.x - 3.0;
     // Only a strip in sight is measured (a name too long is measured once for each letter cut).
     // A line fits when its letters do, up to where their ink ends.
+    let mut whole = None;
     if !look.renaming && ui.is_rect_visible(tile) {
         let lettering = list_name_look(ink);
         let (caption, cut) =
@@ -1839,10 +1862,10 @@ pub fn list_picture(
         let room = Rect::from_min_max(pos2(start, picture.max.y), pos2(right, tile.max.y));
         ui.painter().with_clip_rect(room).galley(pos2(start, middle - words.size().y / 2.0), words, ink);
         if cut {
-            let whole = look.kind.map_or_else(|| look.name.to_owned(), |kind| format!("{} \u{b7} {kind}", look.name));
-            response = response.on_hover_text(whole);
+            whole = Some(look.kind.map_or_else(|| look.name.to_owned(), |kind| format!("{} \u{b7} {kind}", look.name)));
         }
     }
+    response = response.full_name_and_hint(look.hint, whole.as_deref());
     // The open one is brought into sight when it changes (added, copied, moved, opened).
     let shown = list.with("open");
     if look.open && ui.data(|data| data.get_temp::<usize>(shown)) != Some(index) {
@@ -1961,7 +1984,7 @@ fn find_box(ui: &mut egui::Ui, state: &mut HomeState, find: Rect) {
         "Find a song by its title or a line of its words, or a Bible passage or verse (press /, or {key})",
         &[("key", &crate::keys::hint_key("F"))],
     );
-    response.on_hover_text(hint);
+    response.hint(hint);
     state.find_rect = Some(find);
 }
 
@@ -2032,7 +2055,7 @@ pub fn icon_button(ui: &egui::Ui, rect: Rect, id: egui::Id, icon: Icon, strength
 /// strength and full when the pointer is `near` (over its row). It opens what a right-click
 /// on the row opens.
 pub fn more_button(ui: &egui::Ui, rect: Rect, id: egui::Id, near: bool) -> egui::Response {
-    icon_button(ui, rect, id, Icon::More, if near { 1.0 } else { 0.5 }, false).on_hover_text(t("left.more", "More"))
+    icon_button(ui, rect, id, Icon::More, if near { 1.0 } else { 0.5 }, false).hint(t("left.more", "More"))
 }
 
 /// The dot that says a thing is on the screens: orange, with a faint ring round it.
@@ -2101,7 +2124,7 @@ pub fn even_switch(
         let ink = if on || response.hovered() { TEXT } else { TEXT_DIM };
         ui.painter().text(cell.center(), Align2::CENTER_CENTER, *label, font.clone(), ink);
         if let Some(hint) = hints.get(index) {
-            response = response.on_hover_text(*hint);
+            response = response.hint(*hint);
         }
         if response.clicked() {
             clicked = Some(index);
@@ -2151,6 +2174,8 @@ struct ListRow<'a> {
     version: Option<(&'a str, bool)>,
     /// Just dropped into: how its flash looks now, over the row and under its words.
     flash: Option<Flash>,
+    /// What a click on it does, for Quick Help (under its whole title when that is cut short).
+    hint: &'a str,
 }
 
 /// How far apart a title's lines are, and the room above and below them in a row.
@@ -2311,9 +2336,7 @@ fn list_row(ui: &mut egui::Ui, look: &ListRow) -> (egui::Response, Rect) {
     if !ui.is_rect_visible(row) {
         return (response, more);
     }
-    if let Some(hover) = &shape.hover {
-        response = response.on_hover_text(hover);
-    }
+    response = response.full_name_and_hint(look.hint, shape.hover.as_deref());
     let painter = ui.painter();
     if look.chosen || look.lit {
         painter.rect_filled(row, RADIUS, CARD);
@@ -2810,7 +2833,7 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
         let place =
             Rect::from_min_size(pos2(head.max.x - 8.0 - ICON_BUTTON, head.min.y), egui::Vec2::splat(ICON_BUTTON));
         let import = icon_button(ui, place, ui.scope_id().with("import"), Icon::Import, 1.0, false)
-            .on_hover_text(t("left.import", "Import songs or slides"));
+            .hint(t("left.import", "Import songs or slides"));
         // File › Import… of the menu bar opens this menu.
         if std::mem::take(&mut state.import_menu_request) {
             egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&import));
@@ -2840,7 +2863,7 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
                     Action::ImportWords => t("left.import.words", "Words from Text\u{2026}"),
                     _ => t("left.import.documents", "Song Files\u{2026}"),
                 };
-                if ui.button(words).on_hover_text(hint).clicked() {
+                if ui.button(words).hint(hint).clicked() {
                     state.menu_asked = Some(action);
                     ui.close();
                 }
@@ -2848,7 +2871,7 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             // Songbooks shared by churches, downloaded when one is chosen (`free_songbooks`).
             if ui
                 .button(t("freesongbooks.menu", "Free Songbooks\u{2026}"))
-                .on_hover_text(t("freesongbooks.menu.hint", "Free songbooks shared by churches, to download"))
+                .hint(t("freesongbooks.menu.hint", "Free songbooks shared by churches, to download"))
                 .clicked()
             {
                 state.free_songbooks.open = true;
@@ -2857,7 +2880,7 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             ui.separator();
             if ui
                 .button(t("left.import.slides", "Slides\u{2026}"))
-                .on_hover_text(t(
+                .hint(t(
                     "left.import.slides.hint",
                     "Pictures as slides, or a presentation (.pptx, .ppsx, .key, .odp, .ppt, .pps or a PDF)",
                 ))
@@ -2901,8 +2924,7 @@ pub fn library(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: 
             crate::keys::corner_tag(ui.painter(), tag_at, &crate::keys::with_modifier("P"));
         }
         let hint = crate::keys::hint(t("left.choose", "Choose a playlist or a library"), "P", false);
-        let hint = if cut { format!("{title}\n{hint}") } else { hint };
-        if name.on_hover_text(hint).clicked() {
+        if name.full_name_and_hint(hint, cut.then_some(title.as_str())).clicked() {
             state.chooser_open = !state.chooser_open;
         }
         // Escape puts it away, unless it ends retyping a name in it, or is for a menu or
@@ -3015,7 +3037,7 @@ fn left_foot(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &m
                 Some(Icon::Plus),
                 false,
             );
-            if button.on_hover_text(crate::keys::hint(t("left.new_song", "New song"), "N", false)).clicked() {
+            if button.hint(crate::keys::hint(t("left.new_song", "New song"), "N", false)).clicked() {
                 state.new_song = true;
             }
         } else {
@@ -3027,6 +3049,10 @@ fn left_foot(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &m
                 Some(Icon::Plus),
                 false,
             );
+            let button = button.hint(t(
+                "quickhelp.left.add_to_playlist",
+                "Add a song, a Bible passage, a header, a placeholder or media to this playlist.",
+            ));
             egui::Popup::menu(&button).show(|ui| add_to_playlist_menu(ui, show, state, commands));
         }
         // The filter: a round field, a step lighter than the panel.
@@ -3046,7 +3072,8 @@ fn left_foot(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &m
                         .desired_width(inner.width()),
                 )
             })
-            .inner;
+            .inner
+            .hint(t("quickhelp.left.filter", "Type to show only the items whose names have these letters."));
         if typed.has_focus() {
             ui.painter().rect_stroke(field, 16.0, Stroke::new(1.5, TEXT_FAINT), StrokeKind::Inside);
         }
@@ -3069,10 +3096,7 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
     });
     if ui
         .button(t("left.add.bible", "A Bible Passage\u{2026}"))
-        .on_hover_text(t(
-            "left.add.bible.hint",
-            "Opens the Bible page: look the passage up there, then Add to the playlist",
-        ))
+        .hint(t("left.add.bible.hint", "Opens the Bible page: look the passage up there, then Add to the playlist"))
         .clicked()
     {
         state.bible_open = true;
@@ -3081,7 +3105,7 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
     }
     if ui
         .button(t("left.add.header", "A Header"))
-        .on_hover_text(t("left.add.header.hint", "A heading over the items under it"))
+        .hint(t("left.add.header.hint", "A heading over the items under it"))
         .clicked()
     {
         made = Some((Item::Header { name: t("left.add.header.name", "Header").to_owned() }, true));
@@ -3089,7 +3113,7 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
     }
     if ui
         .button(t("left.add.placeholder", "A Placeholder"))
-        .on_hover_text(t("left.add.placeholder.hint", "A place kept for something to come, such as the sermon slides"))
+        .hint(t("left.add.placeholder.hint", "A place kept for something to come, such as the sermon slides"))
         .clicked()
     {
         made = Some((Item::Placeholder { name: t("left.add.placeholder.name", "Placeholder").to_owned() }, true));
@@ -3129,7 +3153,7 @@ fn add_to_playlist_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, c
     if screens > 0
         && ui
             .button("VoxLive")
-            .on_hover_text(t(
+            .hint(t(
                 "left.add.voxlive.hint",
                 "Your VoxLive screens, a slide each: a click on one puts its captions on the screens",
             ))
@@ -3200,7 +3224,7 @@ fn chooser_row(
     painter.with_clip_rect(clip).text(start, Align2::LEFT_CENTER, name, font, TEXT);
     let more = menu
         .then(|| Rect::from_center_size(pos2(row.max.x - ICON_BUTTON / 2.0, middle), egui::Vec2::splat(ICON_BUTTON)));
-    (response.on_hover_text(counted(count as u64)), more, start, right)
+    (response.status(counted(count as u64)), more, start, right)
 }
 
 /// A heading of the chooser with a + at its right; `second` sets it apart from the rows above
@@ -3216,9 +3240,7 @@ fn chooser_head(ui: &mut egui::Ui, text: &str, add_hint: &str, second: bool) -> 
     };
     let place = Rect::from_min_size(pos2(head.max.x - 8.0 - ICON_BUTTON, top), egui::Vec2::splat(ICON_BUTTON));
     cap(ui, pos2(head.min.x + 8.0, place.center().y), Align2::LEFT_CENTER, text, TEXT_DIM);
-    icon_button(ui, place, ui.scope_id().with(("chooser add", second)), Icon::Plus, 1.0, false)
-        .on_hover_text(add_hint)
-        .clicked()
+    icon_button(ui, place, ui.scope_id().with(("chooser add", second)), Icon::Plus, 1.0, false).hint(add_hint).clicked()
 }
 
 /// The chooser: only things to open. The playlists first, then the song libraries under a
@@ -3313,7 +3335,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
             }
             if ui
                 .button(t("left.export", "Export\u{2026}"))
-                .on_hover_text(t("left.export.hint", "Save the playlist and its songs as a song pack"))
+                .hint(t("left.export.hint", "Save the playlist and its songs as a song pack"))
                 .clicked()
             {
                 state.export_request = Some(crate::home::ExportRequest::Playlist(index));
@@ -3322,8 +3344,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
             ui.separator();
             let delete_playlist =
                 ui.add_enabled(several, egui::Button::new(t("left.playlist.delete", "Delete Playlist")));
-            if delete_playlist.on_disabled_hover_text(t("left.playlist.last", "There is always one playlist")).clicked()
-            {
+            if delete_playlist.reason(t("left.playlist.last", "There is always one playlist")).clicked() {
                 delete = Some(index);
                 ui.close();
             }
@@ -3453,7 +3474,7 @@ fn chooser(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
             ui.separator();
             if ui
                 .button(t("left.library.delete", "Delete Library"))
-                .on_hover_text(t("left.library.delete.hint", "The songs stay in All Songs"))
+                .hint(t("left.library.delete.hint", "The songs stay in All Songs"))
                 .clicked()
             {
                 delete = Some(id);
@@ -3762,6 +3783,10 @@ fn library_songs(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands
                 chosen,
                 live: live_in == Some(index),
                 count: Some(song.slide_count()),
+                hint: t(
+                    "quickhelp.left.song",
+                    "Open this song. Its slides show in the middle; nothing changes on screen.",
+                ),
                 ..ListRow::default()
             };
             let (response, more) = list_row(ui, &look);
@@ -4247,7 +4272,7 @@ pub fn song_menu(
     if others.is_empty() {
         if ui
             .button(t("left.song.add_to_new", "Add to New Playlist\u{2026}"))
-            .on_hover_text(t("left.song.add_to_new.hint", "A new playlist with this song in it"))
+            .hint(t("left.song.add_to_new.hint", "A new playlist with this song in it"))
             .clicked()
         {
             asks.add_to = Some((adds, None));
@@ -4313,7 +4338,7 @@ pub fn song_menu(
     }
     if ui
         .button(t("left.export", "Export\u{2026}"))
-        .on_hover_text(t("left.song.export.hint", "Save as a song pack, to open on another computer"))
+        .hint(t("left.song.export.hint", "Save as a song pack, to open on another computer"))
         .clicked()
     {
         state.export_request = Some(crate::home::ExportRequest::Songs(songs_menu_acts_on(state, index, in_playlist)));
@@ -4323,10 +4348,7 @@ pub fn song_menu(
     let loops = show.presentations().get(index).is_some_and(|song| song.loops);
     if ui
         .add(egui::Button::selectable(loops, t("left.song.loop", "Loop to First Slide")))
-        .on_hover_text(t(
-            "left.song.loop.hint",
-            "Next on the last slide goes back to the first, for a loop of announcements",
-        ))
+        .hint(t("left.song.loop.hint", "Next on the last slide goes back to the first, for a loop of announcements"))
         .clicked()
     {
         state.song_loop_request = Some(index);
@@ -4350,7 +4372,7 @@ pub fn song_menu(
     ui.menu_button(t("left.song.transition", "Transition"), |ui| {
         if ui
             .add(egui::Button::selectable(own_transition.is_none(), usual_transition(state.transition)))
-            .on_hover_text(t("left.song.transition.usual.hint", "The transition chosen under the slides"))
+            .hint(t("left.song.transition.usual.hint", "The transition chosen under the slides"))
             .clicked()
         {
             state.song_transition_request = Some((index, None));
@@ -4371,7 +4393,7 @@ pub fn song_menu(
     ui.menu_button(t("left.song.theme", "Theme"), |ui| {
         if ui
             .add(egui::Button::selectable(own.is_none(), t("left.song.theme.main", "Main Theme")))
-            .on_hover_text(t("left.song.theme.main.hint", "The theme songs use unless they set their own"))
+            .hint(t("left.song.theme.main.hint", "The theme songs use unless they set their own"))
             .clicked()
         {
             state.song_theme_request = Some((index, None));
@@ -4407,7 +4429,7 @@ pub fn song_menu(
 /// Playlist, which only takes the item out.
 fn delete_song_from_library(ui: &mut egui::Ui, state: &mut HomeState, song: usize) {
     let hint = t("left.song.delete_from_library.hint", "Deletes the song itself, not just this item, after asking");
-    if ui.button(t("left.song.delete_from_library", "Delete Song from Library\u{2026}")).on_hover_text(hint).clicked() {
+    if ui.button(t("left.song.delete_from_library", "Delete Song from Library\u{2026}")).hint(hint).clicked() {
         state.confirm_delete_songs = songs_menu_acts_on(state, song, true);
         ui.close();
     }
@@ -4527,7 +4549,7 @@ pub fn item_menu(
     if let Some(song) = song {
         if ui
             .button(t("slides.add_slide", "Add Slide"))
-            .on_hover_text(t("slides.add_slide.hint", "Add a slide laid out like the last one"))
+            .hint(t("slides.add_slide.hint", "Add a slide laid out like the last one"))
             .clicked()
         {
             state.add_slide = Some(song);
@@ -4608,7 +4630,7 @@ pub fn show_with_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, he
             now.is_some(),
             egui::Button::selectable(keep, t("left.item.version.keep", "Keep It After This Item")),
         )
-        .on_hover_text(t(
+        .hint(t(
             "left.item.version.keep.hint",
             "The version stays on when the next item goes on screen, until it is switched back",
         ));
@@ -4651,8 +4673,8 @@ pub fn announce_button(
         (t("media.announce.play", "Play on Announcements Layer"), hint)
     };
     let can = announcing || nothing.is_none();
-    let button = ui.add_enabled(can, egui::Button::new(label)).on_hover_text(hint);
-    if button.on_disabled_hover_text(nothing.unwrap_or_default()).clicked() {
+    let button = ui.add_enabled(can, egui::Button::new(label)).hint(hint);
+    if button.reason(nothing.unwrap_or_default()).clicked() {
         state.announcement_request = Some((!announcing).then_some(what));
         ui.close();
     }
@@ -4685,7 +4707,7 @@ fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usize, a
     if matches!(item, Some(Item::Passage(_))) {
         if ui
             .button(t("left.item.open_bible", "Open on the Bible Page"))
-            .on_hover_text(t("left.item.open_bible.hint", "With the translations and options it was kept with"))
+            .hint(t("left.item.open_bible.hint", "With the translations and options it was kept with"))
             .clicked()
         {
             *ask = Some(ItemAsk::Bible(index));
@@ -4716,12 +4738,12 @@ fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usize, a
         }
     };
     let up = ui.add_enabled(first > 0, egui::Button::new(up));
-    if up.on_disabled_hover_text(t("left.at_top", "Already at the top")).clicked() {
+    if up.reason(t("left.at_top", "Already at the top")).clicked() {
         *ask = Some(ItemAsk::Earlier(index));
         ui.close();
     }
     let down = ui.add_enabled(last + 1 < items.len(), egui::Button::new(down));
-    if down.on_disabled_hover_text(t("left.at_bottom", "Already at the bottom")).clicked() {
+    if down.reason(t("left.at_bottom", "Already at the bottom")).clicked() {
         *ask = Some(ItemAsk::Later(index));
         ui.close();
     }
@@ -4732,7 +4754,7 @@ fn item_moves(ui: &mut egui::Ui, show: &Show, state: &HomeState, index: usize, a
     } else {
         t("left.item.remove", "Remove from Playlist").to_owned()
     };
-    if ui.button(label).on_hover_text(t("left.item.remove.hint", "Takes it out of this playlist only")).clicked() {
+    if ui.button(label).hint(t("left.item.remove.hint", "Takes it out of this playlist only")).clicked() {
         *ask = Some(ItemAsk::Remove(index));
         ui.close();
     }
@@ -5161,6 +5183,15 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
                 icon,
                 version,
                 flash: flash_at.filter(|(at, _)| *at == index).map(|(_, flash)| flash),
+                // A placeholder says what it is for below.
+                hint: if matches!(item, Item::Placeholder { .. }) {
+                    ""
+                } else {
+                    t(
+                        "quickhelp.left.item",
+                        "Open this item. Its slides show in the middle; nothing changes on screen.",
+                    )
+                },
                 ..ListRow::default()
             };
             let (mut response, more) = list_row(ui, &look);
@@ -5195,17 +5226,14 @@ fn playlist_items(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, command
             }
             // The library a song is in is said when the pointer rests on its row.
             if let Some(library) = looked_up.get(index).and_then(|(_, library)| library.as_deref()) {
-                response = response.on_hover_text(tf(
-                    "left.item.in_library",
-                    "In the library {library}",
-                    &[("library", library)],
-                ));
+                response =
+                    response.status(tf("left.item.in_library", "In the library {library}", &[("library", library)]));
             }
             if missing && !gone.is_empty() {
-                response = response.on_hover_text(gone);
+                response = response.greyed(gone);
             }
             if matches!(item, Item::Placeholder { .. }) {
-                response = response.on_hover_text(t(
+                response = response.hint(t(
                     "left.item.placeholder.hint",
                     "A place kept for something to come: fill it with a song from its menu, or drag a \
                      picture or video onto it",
@@ -5526,7 +5554,7 @@ pub fn right_column(
             let name = within(ui, name_key, name_english, fixed_semibold(11.0), 0.6, face.max.x - 8.0 - at.x, true);
             paint_spaced(ui, at, Align2::LEFT_CENTER, &name, fixed_semibold(11.0), ink, 0.6);
             if response
-                .on_hover_text(if lit { hint.as_str() } else { t("right.layer.idle", "Nothing showing") })
+                .hint_or_greyed(hint.as_str(), (!lit).then_some(t("right.layer.idle", "Nothing showing")))
                 .clicked()
             {
                 commands.push(Command::Clear(layer));
@@ -5542,10 +5570,7 @@ pub fn right_column(
         let (response, face) = raised_key(ui, rect, ui.scope_id().with("clear all"), fill, edge);
         ui.painter().text(face.center(), Align2::CENTER_CENTER, t("right.clear_all", "Clear All"), semibold(15.0), ink);
         if response
-            .on_hover_text(hint(
-                t("right.clear_all.hint", "Clear All: take everything off the screens"),
-                KeyAction::ClearAll,
-            ))
+            .hint(hint(t("right.clear_all.hint", "Clear All: take everything off the screens"), KeyAction::ClearAll))
             .clicked()
         {
             commands.push(Command::ClearAll);
@@ -5596,7 +5621,7 @@ fn next_line(ui: &egui::Ui, state: &mut HomeState, rect: Rect) {
     ui.painter().galley(pos2(rect.min.x, rect.center().y - line.size().y / 2.0), line, TEXT_FAINT);
     let response = ui.interact(rect, ui.scope_id().with("next line"), Sense::hover());
     if cut {
-        response.on_hover_text(words);
+        response.full_name(words);
     }
 }
 
@@ -5661,7 +5686,7 @@ fn preview_block(
         }
         let ink = if lit || response.hovered() { TEXT } else { SCREEN_DIM };
         icons::paint(ui.painter(), Icon::ChevronDown, Rect::from_center_size(arrow.center(), vec2(12.0, 12.0)), ink);
-        let response = response.on_hover_text(t("right.preview.look_at", "Look at one screen, as it draws the show"));
+        let response = response.hint(t("right.preview.look_at", "Look at one screen, as it draws the show"));
         egui::Popup::menu(&response).show(|ui| look_at_menu(ui, state));
     }
     // Set from the right, so the longer wording takes its room to the left and nothing moves.
@@ -5814,13 +5839,12 @@ fn preview_block(
     let id = ui.scope_id().with("readout go");
     if at.is_some() {
         let go_live = t("right.preview.go_live", "Go to the slide on screen");
-        let hint = whole.map_or_else(|| go_live.to_owned(), |whole| format!("{whole}\n{go_live}"));
         let go = ui.interact(readout, id, Sense::click());
-        if go.on_hover_text(hint).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+        if go.full_name_and_hint(go_live, whole.as_deref()).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             state.menu_asked = Some(crate::menubar::Action::ShowLiveSong);
         }
     } else if let Some(whole) = whole {
-        ui.interact(readout, id, Sense::hover()).on_hover_text(whole);
+        ui.interact(readout, id, Sense::hover()).full_name(whole);
     }
     if let Some(second) = second {
         let line = spaced(ui, &second, label, SCREEN_DIM, 0.7);
@@ -5949,7 +5973,7 @@ fn playing_line(ui: &egui::Ui, row: Rect, what: &str, name: &str, key: &str, hin
     let painter = ui.painter().with_clip_rect(words);
     let said = painter.text(words.left_center(), Align2::LEFT_CENTER, what, font, SCREEN_DIM);
     painter.text(pos2(said.max.x + 5.0, words.center().y), Align2::LEFT_CENTER, name, semibold(12.0), TEXT);
-    response.on_hover_text(hint).clicked()
+    response.hint(hint).clicked()
 }
 
 /// How far Forward goes in the video on screen, in seconds.
@@ -6001,20 +6025,20 @@ fn video_row(ui: &mut egui::Ui, video: &crate::home::VideoLive, row: Rect) -> Op
     let nudge = if video.playing { 0.0 } else { 1.0 };
     let glyph = Rect::from_center_size(play_at + vec2(nudge, 0.0), egui::Vec2::splat(12.0));
     icons::paint(ui.painter(), play, glyph, Color32::from_gray(17));
-    if big.on_hover_text(words).clicked() {
+    if big.hint(words).clicked() {
         asked = Some(VideoRequest::TogglePause);
     }
     // Start Over, and Forward ten seconds.
     let start_at = pos2(row.min.x + 45.0, y);
     let start = round_key(ui, start_at, 26.0, "video start", dark, false);
     icons::paint(ui.painter(), Icon::ToStart, Rect::from_center_size(start_at, egui::Vec2::splat(12.0)), TEXT);
-    if start.on_hover_text(t("right.video.restart", "Start over, from the beginning")).clicked() {
+    if start.hint(t("right.video.restart", "Start over, from the beginning")).clicked() {
         asked = Some(VideoRequest::Restart);
     }
     let forward_at = pos2(row.min.x + 75.0, y);
     let forward = round_key(ui, forward_at, 26.0, "video forward", dark, false);
     icons::paint(ui.painter(), Icon::Forward, Rect::from_center_size(forward_at, egui::Vec2::splat(15.0)), TEXT);
-    if forward.on_hover_text(t("right.video.forward", "Forward 10 seconds")).clicked()
+    if forward.hint(t("right.video.forward", "Forward 10 seconds")).clicked()
         && let Some(length) = length
     {
         asked = Some(VideoRequest::Seek((video.position + VIDEO_STEP).min(length)));
@@ -6029,7 +6053,7 @@ fn video_row(ui: &mut egui::Ui, video: &crate::home::VideoLive, row: Rect) -> Op
     let response = round_key(ui, sound_at, 26.0, "video sound", dark, !video.muted);
     let ink = if video.muted { TEXT_FAINT } else { TEXT };
     icons::paint(ui.painter(), sound, Rect::from_center_size(sound_at, egui::Vec2::splat(14.0)), ink);
-    if response.on_hover_text(sound_hint).clicked() {
+    if response.hint(sound_hint).clicked() {
         asked = Some(VideoRequest::Muted(!video.muted));
     }
     let loop_at = pos2(row.max.x - 43.0, y);
@@ -6041,7 +6065,7 @@ fn video_row(ui: &mut egui::Ui, video: &crate::home::VideoLive, row: Rect) -> Op
     let response = round_key(ui, loop_at, 26.0, "video loop", dark, video.looping);
     let ink = if video.looping { TEXT } else { TEXT_FAINT };
     icons::paint(ui.painter(), Icon::Loop, Rect::from_center_size(loop_at, egui::Vec2::splat(14.0)), ink);
-    if response.on_hover_text(loop_hint).clicked() {
+    if response.hint(loop_hint).clicked() {
         asked = Some(VideoRequest::Looping(!video.looping));
     }
     // The bar between them, and the time left at its right.
@@ -6192,7 +6216,7 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
             } else {
                 ui.painter().text(cell.center(), Align2::CENTER_CENTER, label, FontId::proportional(12.0), ink);
             }
-            let response = response.on_hover_text(hint);
+            let response = response.hint(hint);
             match index {
                 0 if response.clicked() => state.transition = sp_model::Transition::of(K::Cut),
                 1 if response.clicked() && kind != K::Dissolve => {
@@ -6220,10 +6244,7 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
                 None,
                 state.continuous,
             );
-            if button
-                .on_hover_text(t("dock.continuous.hint", "Next at the end of a song goes on to the next song"))
-                .clicked()
-            {
+            if button.hint(t("dock.continuous.hint", "Next at the end of a song goes on to the next song")).clicked() {
                 state.continuous = !state.continuous;
             }
             x += continuous_button;
@@ -6249,7 +6270,7 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
                 let place = Rect::from_min_size(pos2(x, middle - 15.0), vec2(undo, 30.0));
                 let button = icon_key(ui, place, ui.scope_id().with(("undo", redo)), icon, 15.0, enabled);
                 let why = crate::home::nothing_to(redo);
-                if button.on_hover_text(if enabled { hint.as_str() } else { why }).clicked() {
+                if button.hint_or_greyed(hint.as_str(), (!enabled).then_some(why)).clicked() {
                     state.menu_asked = Some(action);
                 }
                 x += undo + 8.0;
@@ -6271,7 +6292,7 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
                     },
                 )
                 .inner;
-            if slider.on_hover_text(t("dock.size", "Slide size")).changed() {
+            if slider.hint(t("dock.size", "Slide size")).changed() {
                 state.columns = 7 - size;
             }
             edge -= wide + 12.0;
@@ -6294,7 +6315,7 @@ pub fn dock_bar(ui: &mut egui::Ui, state: &mut HomeState) {
             paint_pill(ui.painter(), cell, on);
             let ink = if on || response.hovered() { TEXT } else { TEXT_DIM };
             icons::paint(ui.painter(), icon, Rect::from_center_size(cell.center(), vec2(13.0, 13.0)), ink);
-            if response.on_hover_text(hint).clicked() {
+            if response.hint(hint).clicked() {
                 state.slide_view = view;
             }
         }
@@ -6335,7 +6356,7 @@ fn version_switch_button(ui: &mut egui::Ui, state: &mut HomeState, place: Rect) 
         "Theme version: {now}. Choose a version, such as {example}, for every screen whose theme has it",
         &[("now", &now), ("example", &example)],
     );
-    let response = response.on_hover_text(hint);
+    let response = response.hint(hint);
     egui::Popup::menu(&response).show(|ui| {
         crate::live_tabs::menu_heading(ui, t("dock.version.show_in", "Show the screens in"));
         let keep = on.is_some_and(|on| on.keep);
@@ -6356,13 +6377,13 @@ fn version_switch_button(ui: &mut egui::Ui, state: &mut HomeState, place: Rect) 
                 on.is_some(),
                 egui::Button::selectable(keep, t("dock.version.keep", "Keep It Until Switched Back")),
             )
-            .on_hover_text(t("dock.version.keep.hint", "The version stays on when the next item goes on screen"));
+            .hint(t("dock.version.keep.hint", "The version stays on when the next item goes on screen"));
         if kept.clicked() {
             asked = Some(Ask::Keep(!keep));
         }
         if ui
             .button(t("dock.version.make", "Make or Change Versions\u{2026}"))
-            .on_hover_text(t("dock.version.make.hint", "Edit \u{203a} Themes"))
+            .hint(t("dock.version.make.hint", "Edit \u{203a} Themes"))
             .clicked()
         {
             state.menu_asked = Some(crate::menubar::Action::ThemesView);
@@ -6476,7 +6497,7 @@ pub fn media_strip(
             ui.painter().text(pos2(label.max.x + 12.0, middle), Align2::LEFT_CENTER, words, fixed(11.0), TEXT_FAINT);
             let place = Rect::from_center_size(pos2(head.max.x - 15.0, middle), egui::Vec2::splat(ICON_BUTTON));
             let open = icon_button(ui, place, ui.scope_id().with("unfold media"), Icon::ChevronUp, 1.0, false);
-            if open.on_hover_text(t("media.unfold", "Show the media strip")).clicked() {
+            if open.hint(t("media.unfold", "Show the media strip")).clicked() {
                 state.media_hidden = false;
             }
             return;
@@ -6485,12 +6506,12 @@ pub fn media_strip(
         // strip away, and how one picture or video gives way to the next.
         let place = Rect::from_center_size(pos2(head.max.x - 15.0, middle), egui::Vec2::splat(30.0));
         let add = icon_button(ui, place, ui.scope_id().with("add media"), Icon::Plus, 1.0, false);
-        if add.on_hover_text(t("media.add", "Add pictures or videos")).clicked() {
+        if add.hint(t("media.add", "Add pictures or videos")).clicked() {
             state.media_request = Some(crate::home::MediaRequest::Choose);
         }
         let place = place.translate(vec2(-32.0, 0.0));
         let fold = icon_button(ui, place, ui.scope_id().with("fold media"), Icon::ChevronDown, 0.6, false);
-        if fold.on_hover_text(t("media.fold", "Hide the media strip")).clicked() {
+        if fold.hint(t("media.fold", "Hide the media strip")).clicked() {
             state.media_hidden = true;
         }
         let transition = menu_pill(
@@ -6501,7 +6522,7 @@ pub fn media_strip(
             &transition_chip(state.media_transition),
             true,
         )
-        .on_hover_text(t("media.transition.hint", "How one picture or video gives way to the next"));
+        .hint(t("media.transition.hint", "How one picture or video gives way to the next"));
         egui::Popup::from_toggle_button_response(&transition)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
             .show(|ui| transition_picker(ui, &mut state.media_transition, "media"));
@@ -6520,7 +6541,8 @@ pub fn media_strip(
             let bin = ui.available_rect_before_wrap();
             let (pointer, mods, down) =
                 ui.input(|input| (input.pointer.interact_pos(), input.modifiers, input.pointer.primary_down()));
-            let background = ui.interact(bin, ui.scope_id().with("media background"), Sense::click_and_drag());
+            let background =
+                ui.interact(bin, ui.scope_id().with("media background"), Sense::click_and_drag()).no_hint();
             if background.clicked() {
                 state.picked_media.clear();
                 state.picking = crate::home::Picking::Media;
@@ -6650,6 +6672,7 @@ pub fn media_strip(
                             let (font, ink) =
                                 if live { (fixed_semibold(12.0), TALLY) } else { (fixed(12.0), TEXT_DIM) };
                             let name = tile_name(ui.ctx(), &item.name, show.media(), label.width(), font, ink);
+                            let cut = name.text().ends_with('\u{2026}');
                             ui.painter().with_clip_rect(label).galley(
                                 pos2(label.min.x, label.center().y - name.size().y / 2.0),
                                 name,
@@ -6664,7 +6687,11 @@ pub fn media_strip(
                             ui.painter().rect_filled(place, 6.0, Color32::from_black_alpha(178));
                             let more = more_button(ui, place, ui.scope_id().with(("media more", item.id)), near);
                             egui::Popup::menu(&more).show(|ui| media_item_menu(ui, show, state, index, item));
-                            response.on_hover_text(item.name.as_str()).context_menu(|ui| {
+                            let hint = t(
+                                "quickhelp.media.tile",
+                                "Show this picture or video on the media layer, behind the words.",
+                            );
+                            response.full_name_and_hint(hint, cut.then_some(item.name.as_str())).context_menu(|ui| {
                                 media_item_menu(ui, show, state, index, item);
                             });
                         }
@@ -7125,7 +7152,7 @@ fn empty_media_place(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
     dashed_rect(painter, button.shrink(1.0), Stroke::new(1.5, if hot { TEXT_DIM } else { LINE }));
     painter.text(button.center(), Align2::CENTER_CENTER, words, semibold(13.0), if hot { TEXT } else { TEXT_DIM });
     if response
-        .on_hover_text(t(
+        .hint(t(
             "media.samples.hint",
             "Seven pictures and a video to put behind the words, in a media playlist of their own",
         ))
@@ -7144,8 +7171,8 @@ fn media_playlist_picker(ui: &egui::Ui, show: &Show, state: &mut HomeState, left
         state.media_playlist_shown = None;
     }
     let label = shown.map_or_else(|| t("media.all", "All Media").to_owned(), |playlist| playlist.name.clone());
-    let picker = menu_pill(ui, "media source", left, middle, &label, false)
-        .on_hover_text(t("media.choose", "Choose a media playlist"));
+    let picker =
+        menu_pill(ui, "media source", left, middle, &label, false).hint(t("media.choose", "Choose a media playlist"));
     let place = picker.rect;
     // Testing aid: SOFTPRESENTER_CAPTURE_MEDIA_MENU=1 opens this menu once, for a capture.
     static MENU_OPENED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -7189,7 +7216,7 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
             let ask_name = egui::Id::unique("media playlist name asked");
             if ui
                 .button(t("media.new_playlist", "New Media Playlist\u{2026}"))
-                .on_hover_text(t("media.new_playlist.hint", "Add media to it from an item's right-click menu"))
+                .hint(t("media.new_playlist.hint", "Add media to it from an item's right-click menu"))
                 .clicked()
             {
                 let made = crate::media::Playlist::new(crate::media::new_playlist_name(&state.media_playlists));
@@ -7202,7 +7229,7 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
             if crate::samples::offered(show.media())
                 && ui
                     .button(t("media.add_samples", "Add the Sample Backgrounds"))
-                    .on_hover_text(t(
+                    .hint(t(
                         "media.samples.hint",
                         "Seven pictures and a video to put behind the words, in a media playlist of their own",
                     ))
@@ -7223,7 +7250,7 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
                         "Add to Playlist {name}",
                         &[("name", &crate::i18n::quoted(&front))],
                     ))
-                    .on_hover_text(t(
+                    .hint(t(
                         "media.add_to_playlist.play",
                         "Put it in the running order of the playlist in front, to play it from there",
                     ))
@@ -7243,11 +7270,11 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
                     }
                 } else if ui
                     .add_enabled(!empty, egui::Button::new(t("media.play_playlist", "Play This Playlist")))
-                    .on_hover_text(t(
+                    .hint(t(
                         "media.play_playlist.hint",
                         "Its pictures (8 seconds each) and videos (to their end) in turn, round and round",
                     ))
-                    .on_disabled_hover_text(nothing_to_play())
+                    .reason(nothing_to_play())
                     .clicked()
                 {
                     state.media_request = Some(crate::home::MediaRequest::PlayPlaylist(Some(id)));
@@ -7283,7 +7310,7 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
                     None => {
                         if ui
                             .button(t("media.follow", "Follow a Folder…"))
-                            .on_hover_text(t(
+                            .hint(t(
                                 "media.follow.hint",
                                 "The pictures and videos in a folder join this playlist as they come and change",
                             ))
@@ -7318,7 +7345,7 @@ fn media_playlist_menu(show: &Show, state: &mut HomeState, picker: &egui::Respon
                 });
                 if ui
                     .button(t("media.delete_playlist", "Delete Playlist"))
-                    .on_hover_text(t("media.delete_playlist.hint", "The media stays in All Media"))
+                    .hint(t("media.delete_playlist.hint", "The media stays in All Media"))
                     .clicked()
                 {
                     state.media_playlists.remove(at);
@@ -7353,7 +7380,7 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
                 t("media.scaling.stretch.hint", "Stretch it to the screen's shape"),
             ),
         ] {
-            if ui.add(egui::Button::selectable(item.fit == fit, name)).on_hover_text(hint).clicked() {
+            if ui.add(egui::Button::selectable(item.fit == fit, name)).hint(hint).clicked() {
                 state.media_request = Some(MediaRequest::Look(index, fit, item.looping));
                 ui.close();
             }
@@ -7362,7 +7389,7 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
     if crate::media::is_video(&item.path)
         && ui
             .add(egui::Button::selectable(item.looping, t("media.loop", "Loop")))
-            .on_hover_text(t("media.loop.hint", "Start again at the end; otherwise stay on the last picture"))
+            .hint(t("media.loop.hint", "Start again at the end; otherwise stay on the last picture"))
             .clicked()
     {
         state.media_request = Some(MediaRequest::Look(index, item.fit, !item.looping));
@@ -7370,7 +7397,7 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
     }
     if ui
         .button(t("media.add_as_slide", "Add to Song as Slide"))
-        .on_hover_text(t(
+        .hint(t(
             "media.add_as_slide.hint",
             "A slide that shows this when it goes on screen, after the song's chosen slide",
         ))
@@ -7382,7 +7409,7 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
     let front = state.services.front().name.clone();
     if ui
         .button(tf("media.add_to_playlist", "Add to Playlist {name}", &[("name", &crate::i18n::quoted(&front))]))
-        .on_hover_text(t(
+        .hint(t(
             "media.add_to_playlist.show",
             "Put it in the running order of the playlist in front, to show it from there",
         ))
@@ -7425,7 +7452,7 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
         let key = ui.add_enabled(to.is_some(), egui::Button::new(words));
         // Greyed because the folder keeps the order: it says so, as other greyed controls do.
         let key = match why {
-            Some(why) => key.on_disabled_hover_text(why),
+            Some(why) => key.reason(why),
             None => key,
         };
         if key.clicked() {
@@ -7441,12 +7468,8 @@ fn media_item_menu(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, index:
         Some(playlist) => {
             let words = remove_words(&these, &playlist.name);
             if !playlist.arranged_by_hand() {
-                ui.add_enabled(false, egui::Button::new(words)).on_disabled_hover_text(follows_a_folder());
-            } else if ui
-                .button(words)
-                .on_hover_text(t("media.remove.hint", "Taken out of this media playlist only"))
-                .clicked()
-            {
+                ui.add_enabled(false, egui::Button::new(words)).reason(follows_a_folder());
+            } else if ui.button(words).hint(t("media.remove.hint", "Taken out of this media playlist only")).clicked() {
                 remove_from_media_playlist(show, state, &these);
                 ui.close();
             }
@@ -8404,7 +8427,10 @@ pub mod tests {
                 ..RawInput::default()
             };
             let preview = crate::home::Preview { amount: 1.0, ..Default::default() };
-            let output = ctx.run_ui(input, |ui| preview_block(ui, show, state, preview, block, true));
+            let output = ctx.run_ui(input, |ui| {
+                crate::quick_help::set_on(ui.ctx(), state.quick_help);
+                preview_block(ui, show, state, preview, block, true)
+            });
             drawn.clear();
             output.shapes.iter().for_each(|clipped| words(&clipped.shape, &mut drawn));
             output.drop_without_applying_deltas();
@@ -8487,19 +8513,28 @@ pub mod tests {
             long.starts_with(kept) && kept.len() > 8 && kept.len() < long.len(),
             "after whole letters: {heading:?}"
         );
-        // Hovered, the whole name shows, over what a click does.
+        // Hovered, the whole name shows, Quick Help off as on; on, over what a click does.
         let choose = crate::keys::hint("Choose a playlist or a library", "P", false);
-        let hovered =
-            (0..3).flat_map(|_| frame(&mut state, vec![Event::PointerMoved(place.center())])).collect::<Vec<_>>();
+        let hover = |state: &mut HomeState| {
+            (0..3).flat_map(|_| frame(state, vec![Event::PointerMoved(place.center())])).collect::<Vec<_>>()
+        };
+        let hovered = hover(&mut state);
+        assert!(hovered.iter().any(|(whole, ..)| whole == long), "{hovered:?}");
+        assert!(!hovered.iter().any(|(whole, ..)| whole.contains(&choose)), "{hovered:?}");
+        crate::quick_help::set_on(&ctx, true);
+        let hovered = hover(&mut state);
         assert!(hovered.iter().any(|(whole, ..)| *whole == format!("{long}\n{choose}")), "{hovered:?}");
-        // A name that fits is as it was: whole, and its hover only says what a click does.
+        // A name that fits is as it was: whole, and its hover only says what a click does, and
+        // only with Quick Help on.
         state.libraries[0].name = "Hymns".to_owned();
         let drawn_lines = frame(&mut state, vec![]);
         assert!(drawn_lines.iter().any(|(whole, shown, _)| whole == "Hymns" && shown == "Hymns"), "{drawn_lines:?}");
-        let hovered =
-            (0..3).flat_map(|_| frame(&mut state, vec![Event::PointerMoved(place.center())])).collect::<Vec<_>>();
+        let hovered = hover(&mut state);
         assert!(hovered.iter().any(|(whole, ..)| *whole == choose), "{hovered:?}");
         assert!(!hovered.iter().any(|(whole, ..)| whole.starts_with("Hymns\n")), "{hovered:?}");
+        crate::quick_help::set_on(&ctx, false);
+        let hovered = hover(&mut state);
+        assert!(!hovered.iter().any(|(whole, ..)| whole.contains(&choose)), "off, nothing: {hovered:?}");
 
         // The readout under the preview: the slide's group, then a song too long for the room.
         let title = "The Long Road Home Through the Quiet Valley";
@@ -8511,7 +8546,9 @@ pub mod tests {
         let whose = words.iter().find(|w| w.starts_with(" \u{b7} THE LONG")).expect("the song's name");
         assert!(whose.ends_with('\u{2026}') && !whose.contains("VALLEY"), "cut short with an ellipsis: {whose:?}");
         assert!(words.iter().any(|w| *w == group.to_uppercase()), "the group whole: {words:?}");
-        // Resting the pointer on it says the whole of it, over what a click does.
+        // Resting the pointer on it says the whole of it, over what a click does (that with Quick
+        // Help on).
+        state.quick_help = true;
         let over = pos2(200.0, 263.0);
         let mut frames = vec![vec![Event::PointerMoved(over)]];
         frames.extend((0..9).map(|_| vec![]));

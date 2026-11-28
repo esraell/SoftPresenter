@@ -87,6 +87,8 @@ under Settings › About › What's new. In short:
 - **Remote Control.** Run the show from a computer or tablet on the church's network: switched
   on in Settings, the app serves a page over HTTPS behind a password
   ([docs/remote-api.md](docs/remote-api.md)).
+- **Quick Help.** The ? at the top right switches it on: then pointing at anything says what it
+  does. Off, hover hints stay out of the way.
 
 ## A service from start to finish
 

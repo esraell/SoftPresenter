@@ -10,6 +10,7 @@ use crate::editor::EditDraft;
 use crate::home::HomeState;
 use crate::i18n::{t, tf};
 use crate::live_tabs::StagePictures;
+use crate::quick_help::Hint;
 use crate::stage::STAGE_SLOT;
 use crate::studio::{ListKey, ListPicture, TEXT, TEXT_DIM, TEXT_FAINT, Thumb};
 
@@ -241,6 +242,7 @@ pub fn list(
                     open: open == Some(index),
                     live: false,
                     renaming,
+                    hint: t("quickhelp.edit.stage_layout", "Edit this stage layout. Its menu is on a right-click."),
                 };
                 let (response, places) = crate::studio::list_picture(ui, list, index, &look);
                 rows.push(response.rect);
@@ -332,11 +334,8 @@ fn layout_menu(ui: &mut egui::Ui, only_one: bool) -> Option<Choice> {
     }
     let delete = ui
         .add_enabled(!only_one, egui::Button::new(t("editor.layout.delete", "Delete")))
-        .on_hover_text(t(
-            "editor.layouts.delete.hint",
-            "Delete this layout; stage screens that use it show the first one",
-        ))
-        .on_disabled_hover_text(crate::home::one_layout());
+        .hint(t("editor.layouts.delete.hint", "Delete this layout; stage screens that use it show the first one"))
+        .reason(crate::home::one_layout());
     if delete.clicked() {
         chose = Some(Choice::Delete);
     }
@@ -405,7 +404,9 @@ pub fn layout_panel(ui: &mut egui::Ui, state: &mut HomeState) {
         ui.label(egui::RichText::new(t("editor.layout.name", "Name")).size(12.5).strong().color(TEXT));
         // A layout always has a name: emptied, it keeps the one it had, as a theme's does.
         let before = layout.name.clone();
-        let field = ui.add(egui::TextEdit::singleline(&mut layout.name).desired_width(f32::INFINITY));
+        let field = ui
+            .add(egui::TextEdit::singleline(&mut layout.name).desired_width(f32::INFINITY))
+            .hint(t("quickhelp.stage.name", "This stage layout\u{2019}s name, as the Stage tab lists it."));
         if field.changed() {
             if layout.name.trim().is_empty() {
                 layout.name = before;
@@ -457,9 +458,10 @@ pub fn item_settings(ui: &mut egui::Ui, object: &mut Object, timers: &[(sp_model
             };
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(t("editor.item.timer", "Timer")).size(12.5).color(TEXT_DIM));
-                egui::ComboBox::from_id_salt("stage timer").selected_text(shown).width(ui.available_width()).show_ui(
-                    ui,
-                    |ui| {
+                egui::ComboBox::from_id_salt("stage timer")
+                    .selected_text(shown)
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
                         let first = t("editor.item.timer.first", "The first one running");
                         if ui.add(egui::Button::selectable(shows.timer.is_none(), first)).clicked() {
                             shows.timer = None;
@@ -469,8 +471,9 @@ pub fn item_settings(ui: &mut egui::Ui, object: &mut Object, timers: &[(sp_model
                                 shows.timer = Some(*id);
                             }
                         }
-                    },
-                );
+                    })
+                    .response
+                    .hint(t("quickhelp.stage.timer", "Which timer this box shows."));
             });
             let note = if shows.timer.is_some() {
                 t("editor.item.timer.this", "Shows this timer's name and time, running or not.")
@@ -485,19 +488,29 @@ pub fn item_settings(ui: &mut egui::Ui, object: &mut Object, timers: &[(sp_model
         "clock" => {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(t("editor.item.clock", "Clock")).size(12.5).color(TEXT_DIM));
-                if ui.add(egui::Button::selectable(!shows.hours_24, t("editor.item.clock.12", "12-hour"))).clicked() {
+                if ui
+                    .add(egui::Button::selectable(!shows.hours_24, t("editor.item.clock.12", "12-hour")))
+                    .hint(t("quickhelp.stage.clock12", "Show the time on a 12-hour clock."))
+                    .clicked()
+                {
                     shows.hours_24 = false;
                 }
-                if ui.add(egui::Button::selectable(shows.hours_24, t("editor.item.clock.24", "24-hour"))).clicked() {
+                if ui
+                    .add(egui::Button::selectable(shows.hours_24, t("editor.item.clock.24", "24-hour")))
+                    .hint(t("quickhelp.stage.clock24", "Show the time on a 24-hour clock."))
+                    .clicked()
+                {
                     shows.hours_24 = true;
                 }
-                ui.checkbox(&mut shows.seconds, t("editor.item.clock.seconds", "Seconds"));
+                ui.checkbox(&mut shows.seconds, t("editor.item.clock.seconds", "Seconds"))
+                    .hint(t("quickhelp.stage.seconds", "Show the seconds too."));
             });
         }
         "notes" => {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(t("editor.item.notes.lines", "Lines")).size(12.5).color(TEXT_DIM));
-                ui.add(egui::DragValue::new(&mut shows.lines).range(0..=40));
+                ui.add(egui::DragValue::new(&mut shows.lines).range(0..=40))
+                    .hint(t("quickhelp.stage.lines", "How many lines of the notes show; 0 shows them all."));
                 let said = if shows.lines == 0 {
                     t("editor.item.notes.all", "all of them")
                 } else {
@@ -541,9 +554,10 @@ pub fn screen_settings(ui: &mut egui::Ui, object: &mut Object, screens: &[crate:
     ui.label(
         egui::RichText::new(t("editor.screen", "SCREEN")).font(crate::studio::fixed_semibold(11.0)).color(TEXT_FAINT),
     );
-    egui::ComboBox::from_id_salt("screen picture source").selected_text(shown).width(ui.available_width()).show_ui(
-        ui,
-        |ui| {
+    egui::ComboBox::from_id_salt("screen picture source")
+        .selected_text(shown)
+        .width(ui.available_width())
+        .show_ui(ui, |ui| {
             if ui.add(egui::Button::selectable(screen.is_none(), main_screen())).clicked() {
                 *screen = None;
             }
@@ -552,8 +566,9 @@ pub fn screen_settings(ui: &mut egui::Ui, object: &mut Object, screens: &[crate:
                     *screen = Some(*id);
                 }
             }
-        },
-    );
+        })
+        .response
+        .hint(t("quickhelp.stage.screen", "Which screen this box shows, live."));
     let main_name = listed.first().map(|(_, name)| name.as_str());
     let said = match (fell_back, main_name) {
         (true, Some(main)) => {
@@ -593,11 +608,13 @@ pub fn screen_settings(ui: &mut egui::Ui, object: &mut Object, screens: &[crate:
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(t("editor.screen.corners", "Corners")).size(12.5).color(TEXT_DIM));
-        ui.add(egui::DragValue::new(corner).range(0.0..=200.0).speed(0.5).max_decimals(0));
+        ui.add(egui::DragValue::new(corner).range(0.0..=200.0).speed(0.5).max_decimals(0))
+            .hint(t("quickhelp.stage.corners", "How round the picture\u{2019}s corners are."));
         ui.add_space(12.0);
         ui.label(egui::RichText::new(t("editor.screen.label", "Label")).size(12.5).color(TEXT_DIM));
         let none = t("editor.screen.label.none", "None");
-        ui.add(egui::TextEdit::singleline(label).hint_text(none).desired_width(f32::INFINITY));
+        ui.add(egui::TextEdit::singleline(label).hint_text(none).desired_width(f32::INFINITY))
+            .hint(t("quickhelp.stage.label", "Words over the picture, saying which screen it is."));
     });
     // A name that said which screen it showed follows the new choice.
     if *screen != was && name_before == auto_name(was) {

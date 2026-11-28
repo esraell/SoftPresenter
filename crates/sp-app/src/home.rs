@@ -17,6 +17,7 @@ use crate::key_table::KeyAction;
 use crate::screens::{Kind, Output, Screen};
 
 use crate::icons::{self, Icon};
+use crate::quick_help::Hint;
 
 mod import_sheet;
 pub(crate) mod settings;
@@ -400,6 +401,9 @@ pub struct HomeState {
     /// Keys on Buttons, or the switch in the list of keys; kept with the preferences), and
     /// whether a testing aid shows them for a picture without changing the setting.
     pub keys_on_buttons: bool,
+    /// Whether Quick Help is on: each control says what it does under the pointer (the top bar's
+    /// ? key; kept with the preferences, off on a new install). See `quick_help`.
+    pub quick_help: bool,
     /// What each key that runs the show does (Settings › Keys; kept with the preferences).
     pub keys: crate::key_table::KeyTable,
     /// What puts a slide on screen with the pointer, once the person has chosen (Settings › Keys'
@@ -2109,6 +2113,7 @@ impl Default for HomeState {
             pick_scroll: 0,
             numbers: None,
             keys_on_buttons: false,
+            quick_help: false,
             keys: crate::key_table::KeyTable::default(),
             slide_click_chosen: None,
             slide_clicked: None,
@@ -2764,6 +2769,7 @@ impl HomeState {
             playlist_in_front: self.playlist_open,
             song_order: self.song_order.name().to_owned(),
             keys_on_buttons: self.keys_on_buttons,
+            quick_help: self.quick_help,
             keys: self.keys.clone(),
             slide_click: self.slide_click_chosen.map_or_else(String::new, |click| click.code().to_owned()),
             screens_details: self.screens_details,
@@ -2811,6 +2817,7 @@ impl HomeState {
         self.playlist_open = prefs.playlist_in_front;
         self.song_order = crate::kept::SongOrder::named(&prefs.song_order);
         self.keys_on_buttons = prefs.keys_on_buttons;
+        self.quick_help = prefs.quick_help;
         self.keys = prefs.keys.clone();
         self.slide_click_chosen = crate::key_table::SlideClick::from_code(&prefs.slide_click);
         self.screens_details = prefs.screens_details;
@@ -2913,6 +2920,7 @@ pub fn home_ui(
     if std::mem::take(&mut state.media_carry_stale) && egui::DragAndDrop::has_payload_of_type::<MediaDrag>(ui.ctx()) {
         egui::DragAndDrop::clear_payload(ui.ctx());
     }
+    crate::quick_help::set_on(ui.ctx(), state.quick_help);
     let commands = home_view(ui, show, state, theme, thumb, preview, canvas);
     // A key's ask that no field took (it went before it drew) is let go of, never carried out
     // later.
@@ -3678,6 +3686,10 @@ fn edit_view(
                         let selected = draft.is_selected(object.id);
                         let (row, response) =
                             ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click_and_drag());
+                        let response = response.hint(t(
+                            "quickhelp.edit.object",
+                            "Pick this box on the slide. Double-click to rename it; drag to change what is in front.",
+                        ));
                         let shown = if theme_mode || stage_mode {
                             crate::editor::object_name(object)
                         } else {
@@ -3806,7 +3818,7 @@ fn edit_view(
                                     );
                                 }
                             }
-                            if mark.on_hover_text(if on { to_clear } else { to_set }).clicked() {
+                            if mark.hint(if on { to_clear } else { to_set }).clicked() {
                                 asked = Some((object.id, if index == 0 { Ask::Hide(!on) } else { Ask::Lock(!on) }));
                             }
                         }
@@ -3990,7 +4002,7 @@ fn edit_view(
                         }
                     })
                     .response
-                    .on_hover_text(t(
+                    .hint(t(
                         "edit.zoom.hint",
                         "How large the slide is shown. Pinch to zoom; scroll to move a zoomed slide.",
                     ));
@@ -3999,7 +4011,7 @@ fn edit_view(
                             state.edit_grid,
                             egui::RichText::new(t("edit.grid", "Grid")).size(11.5),
                         ))
-                        .on_hover_text(t("edit.grid.hint", "Show a grid that boxes snap to"))
+                        .hint(t("edit.grid.hint", "Show a grid that boxes snap to"))
                         .clicked()
                     {
                         state.edit_grid = !state.edit_grid;
@@ -4096,7 +4108,10 @@ fn edit_view(
         ui.painter().rect_stroke(safe, 0.0, Stroke::new(1.0, Color32::from_white_alpha(38)), StrokeKind::Inside);
         let to_slide = |p: egui::Pos2| ((p.x - slide.min.x) / scale, (p.y - slide.min.y) / scale);
         let to_screen = |f: SlideRect| Rect::from_min_size(slide.min + vec2(f.x, f.y) * scale, vec2(f.w, f.h) * scale);
-        let response = ui.interact(area, ui.scope_id().with("canvas"), Sense::click_and_drag());
+        let response = ui.interact(area, ui.scope_id().with("canvas"), Sense::click_and_drag()).hint(t(
+            "quickhelp.edit.canvas",
+            "The slide being edited. Pick a box to change it, and drag it or its corners to move or size it.",
+        ));
         let for_theme = state.theme_edit.is_some();
         // A picture or video dragged over the editor is put on the slide when dropped.
         if state.drop_hover && state.file_drag.has(crate::file_drop::Kind::Media) {
@@ -4207,7 +4222,7 @@ fn edit_view(
                     // Greyed until a look is copied, saying so.
                     let paste_style =
                         ui.add_enabled(style_copied, egui::Button::new(t("edit.canvas.paste_style", "Paste Style")));
-                    if paste_style.on_disabled_hover_text(copy_a_style()).clicked() {
+                    if paste_style.reason(copy_a_style()).clicked() {
                         asked.set(Some(A::PasteStyle));
                         ui.close();
                     }
@@ -4338,7 +4353,9 @@ fn edit_view(
                         .font(FontId::proportional(size))
                         .align(Align2::CENTER_TOP)
                         .desired_width(rect.width() - 16.0);
-                    let field = ui.put(rect.shrink(8.0), field);
+                    let field = ui
+                        .put(rect.shrink(8.0), field)
+                        .hint(t("quickhelp.edit.typing", "The box\u{2019}s words, typed here on the slide."));
                     if started || refocus {
                         field.request_focus();
                     }
@@ -4604,7 +4621,7 @@ fn stage_tools(ui: &mut egui::Ui, state: &mut HomeState, inner: Rect, layout: us
         let look = crate::studio::Flat::Plain;
         let enabled = state.can_undo(!back);
         let pressed = crate::studio::flat_button(ui, bar, id, words, font.clone(), look, enabled);
-        if pressed.on_hover_text(if enabled { hint } else { nothing_to(!back) }).clicked() {
+        if pressed.hint_or_greyed(hint, (!enabled).then(|| nothing_to(!back))).clicked() {
             use crate::menubar::Action;
             state.menu_asked = Some(if back { Action::Undo } else { Action::Redo });
         }
@@ -4681,7 +4698,11 @@ fn slide_list_head(
                 let look =
                     crate::studio::PlainRow { icon: Icon::Document, name: Some(title), tag: None, on: is_open, greyed };
                 let row = crate::studio::plain_row(ui, &look).0;
-                let row = if greyed { row.on_hover_text(no_slides_yet(title)) } else { row };
+                let row = if greyed {
+                    row.greyed(no_slides_yet(title))
+                } else {
+                    row.hint(t("quickhelp.edit.song", "Edit this song\u{2019}s slides."))
+                };
                 if row.clicked() && !is_open {
                     open = Some(SlideRef { presentation: *song, slide: 0 });
                 }
@@ -4850,6 +4871,7 @@ fn slide_list(
                     open: index == at.slide,
                     live: live == Some(index),
                     renaming: renaming_on == Some(index),
+                    hint: t("quickhelp.edit.slide", "Edit this slide. Drag it to another place in the song."),
                 };
                 let (response, places) = crate::studio::list_picture(ui, list, index, &look);
                 rows.push(response.rect);
@@ -4912,7 +4934,7 @@ fn slide_list(
                 response.context_menu(|ui| {
                     // Greyed, a choice says why when hovered.
                     let mut item = |ui: &mut egui::Ui, words: &str, can: bool, why: &str, choice: SlideChoice| {
-                        if ui.add_enabled(can, egui::Button::new(words)).on_disabled_hover_text(why).clicked() {
+                        if ui.add_enabled(can, egui::Button::new(words)).reason(why).clicked() {
                             chose = Some(choice);
                             ui.close();
                         }
@@ -5073,6 +5095,7 @@ fn prop_list(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut crate::studio
                     open: open == Some(index),
                     live: state.props_live.iter().any(|(live, _)| *live == prop.id),
                     renaming,
+                    hint: t("quickhelp.edit.prop", "Edit this prop. Its menu is on a right-click."),
                 };
                 let (response, places) = crate::studio::list_picture(ui, list, index, &look);
                 rows.push(response.rect);
@@ -5712,13 +5735,13 @@ fn backdrop_key(ui: &mut egui::Ui, state: &mut HomeState) {
     let hint =
         t("edit.backdrop.hint", "Backdrop: what shows behind the slide while you edit. It never goes on the screens.");
     key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, hint));
-    let key = key.on_hover_text(hint);
+    let key = key.hint(hint);
     egui::Popup::menu(&key).show(|ui| {
         for backdrop in EditBackdrop::ALL {
             let can = backdrop != EditBackdrop::Media || state.media_on_screen;
             let choice = egui::Button::selectable(state.edit_backdrop == backdrop, backdrop.name());
             let why = t("edit.backdrop.media.none", "No media is on screen");
-            if ui.add_enabled(can, choice).on_disabled_hover_text(why).clicked() {
+            if ui.add_enabled(can, choice).reason(why).clicked() {
                 state.edit_backdrop = backdrop;
                 ui.close();
             }
@@ -5804,7 +5827,7 @@ fn reflow_editor(ui: &mut egui::Ui, title: &str, state: &mut HomeState) {
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let rebuild = t("edit.words.done.hint", "Rebuild the slides from these words");
-                if ui.button(t("edit.words.done", "Done")).on_hover_text(rebuild).clicked() {
+                if ui.button(t("edit.words.done", "Done")).hint(rebuild).clicked() {
                     done = Some(true);
                 }
                 if ui.button(t("edit.words.cancel", "Cancel")).clicked() {
@@ -5828,11 +5851,7 @@ fn reflow_editor(ui: &mut egui::Ui, title: &str, state: &mut HomeState) {
                     }
                 });
                 let slide_break = t("edit.words.insert_break", "Insert Slide Break");
-                if ui
-                    .button(slide_break)
-                    .on_hover_text(t("edit.words.insert_break.hint", "Start a new slide here"))
-                    .clicked()
-                {
+                if ui.button(slide_break).hint(t("edit.words.insert_break.hint", "Start a new slide here")).clicked() {
                     insert("\n\n");
                 }
             });
@@ -5855,7 +5874,11 @@ fn reflow_editor(ui: &mut egui::Ui, title: &str, state: &mut HomeState) {
                     .desired_width(f32::INFINITY)
                     .desired_rows(24)
                     .lock_focus(true),
-            );
+            )
+            .hint(t(
+                "quickhelp.edit.words",
+                "All the song\u{2019}s words at once, as text: a blank line starts a new slide.",
+            ));
         });
     });
     match done {
@@ -6668,16 +6691,21 @@ pub(crate) fn language_menu(ui: &mut egui::Ui) {
             ui.painter().layout_no_wrap(language_choice_name(*choice), font.clone(), egui::Color32::WHITE).size().x
         })
         .fold(0.0, f32::max);
-    egui::ComboBox::from_id_salt("app language").selected_text(language_choice_name(now)).width(widest + 44.0).show_ui(
-        ui,
-        |ui| {
+    egui::ComboBox::from_id_salt("app language")
+        .selected_text(language_choice_name(now))
+        .width(widest + 44.0)
+        .show_ui(ui, |ui| {
             for choice in Choice::ALL {
                 if ui.add(egui::Button::selectable(now == choice, language_choice_name(choice))).clicked() {
                     crate::i18n::set_choice(choice);
                 }
             }
-        },
-    );
+        })
+        .response
+        .hint(t(
+            "quickhelp.language.menu",
+            "The language of SoftPresenter\u{2019}s own words: buttons, menus and messages.",
+        ));
 }
 
 /// How the Language card writes a choice: "The computer's language (Español)" for the first
@@ -6703,7 +6731,7 @@ pub(crate) fn switch(ui: &mut egui::Ui, on: bool, hint: &str) -> bool {
     ui.painter().rect_filled(rect, 10.0, track);
     let knob = pos2(egui::lerp(rect.left() + 10.0..=rect.right() - 10.0, how_far), rect.center().y);
     ui.painter().circle_filled(knob, 8.0, Color32::WHITE);
-    response.on_hover_text(hint).clicked()
+    response.hint(hint).clicked()
 }
 
 /// Where the Screens window keeps the screen its − asked to remove, while the question is open.
@@ -6745,6 +6773,7 @@ fn confirm_remove_screen(ui: &mut egui::Ui, state: &mut HomeState) -> bool {
 /// saved, as they are made. `output_on` is whether the audience output is on; switching it is
 /// returned as a command.
 pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> Vec<Command> {
+    crate::quick_help::set_on(ui.ctx(), state.quick_help);
     use crate::studio::{ACCENT, CARD, HOVER, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT};
     let mut commands = Vec::new();
     let mut changed = confirm_remove_screen(ui, state);
@@ -6765,8 +6794,8 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                     let remove = ui
                         .add_enabled_ui(!only, |ui| ui.add_sized(small, egui::Button::new("−")))
                         .inner
-                        .on_hover_text(t("screens.list.remove.hover", "Remove the selected screen"))
-                        .on_disabled_hover_text(t("screens.list.remove.always_one", "There is always one audience screen"));
+                        .hint(t("screens.list.remove.hover", "Remove the selected screen"))
+                        .reason(t("screens.list.remove.always_one", "There is always one audience screen"));
                     // Undo can't bring a screen back, so it asks first (see `confirm_remove_screen`).
                     if remove.clicked()
                         && !only
@@ -6777,7 +6806,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let identify = ui
                             .add(egui::Button::selectable(state.identify, t("screens.list.identify", "Identify")))
-                            .on_hover_text(t(
+                            .hint(t(
                                 "screens.list.identify.hover",
                                 "Mark each screen with its name and its own colour, to tell them apart; the colours are shown here beside the screens",
                             ));
@@ -6827,7 +6856,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                             }
                             let add = ui
                                 .add_sized(vec2(22.0, 20.0), egui::Button::new("+").frame(false))
-                                .on_hover_text(add_hint);
+                                .hint(add_hint);
                             if add.clicked() {
                                 let name = crate::screens::next_name(&state.screens, kind);
                                 // A new screen goes nowhere until it is told where, so nothing
@@ -6852,6 +6881,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                         any = true;
                         let shown = state.screen_status.get(index).is_some_and(|(_, shown)| *shown);
                         let (row, response) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
+                        let response = response.hint(t("quickhelp.screens.row", "Choose this screen, to set it up."));
                         let selected = state.screen_selected == index;
                         if selected {
                             ui.painter().rect_filled(row, 6.0, ACCENT.gamma_multiply(0.35));
@@ -6946,7 +6976,11 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             egui::Grid::new("screen settings").num_columns(2).spacing([16.0, 12.0]).min_col_width(84.0).show(ui, |ui| {
                 ui.label(egui::RichText::new(t("screens.row.name", "Name")).color(TEXT_DIM));
                 let mut name = screen.name.clone();
-                if ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY)).changed() {
+                if ui
+                    .add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY))
+                    .hint(t("quickhelp.screens.name", "This screen\u{2019}s name, as the lists and Identify show it."))
+                    .changed()
+                {
                     state.screens[index].name = name;
                     changed = true;
                 }
@@ -6978,7 +7012,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                             };
                             let mut entry = ui.add(egui::Button::selectable(on, label));
                             if is_ndi && !state.ndi_available {
-                                entry = entry.on_hover_text(crate::screens::ndi_not_installed());
+                                entry = entry.greyed(crate::screens::ndi_not_installed());
                             }
                             if entry.clicked() && !on {
                                 state.screens[index].choose_output(choice);
@@ -6986,7 +7020,9 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                                 changed = true;
                             }
                         }
-                    });
+                    })
+                    .response
+                    .hint(t("quickhelp.screens.output", "Send this screen to this display or output, or switch it off."));
                 ui.end_row();
 
                 if let Output::Ndi(current) = &screen.output {
@@ -6995,7 +7031,9 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                         Some((id, typed)) if *id == screen.id => typed.clone(),
                         _ => current.clone(),
                     };
-                    let field = ui.add(egui::TextEdit::singleline(&mut typed).desired_width(f32::INFINITY));
+                    let field = ui
+                        .add(egui::TextEdit::singleline(&mut typed).desired_width(f32::INFINITY))
+                        .hint(t("quickhelp.screens.ndi_name", "The name this screen goes out under over NDI."));
                     if field.changed() {
                         state.ndi_draft = Some((screen.id, typed.clone()));
                     }
@@ -7013,7 +7051,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                         "screens.ndi.sound.hover",
                         "The sound of videos and audio playlists goes out with this screen's picture, as loud as the speakers play it. Turn it off for a screen that should be silent.",
                     );
-                    if ui.checkbox(&mut sound, t("screens.ndi.sound.send", "Send what plays")).on_hover_text(hover).changed() {
+                    if ui.checkbox(&mut sound, t("screens.ndi.sound.send", "Send what plays")).hint(hover).changed() {
                         state.screens[index].sound = sound;
                         changed = true;
                     }
@@ -7033,7 +7071,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                             }
                         })
                         .response
-                        .on_hover_text(hover);
+                        .hint(hover);
                     if rate != screen.rate {
                         state.screens[index].rate = rate;
                         changed = true;
@@ -7107,7 +7145,8 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                         state.ndi_download.open(crate::ndi_download::Place::Screens);
                     }
                 }
-                ui.hyperlink_to(egui::RichText::new("ndi.video").size(11.5), sp_ndi::DOWNLOAD_URL);
+                ui.hyperlink_to(egui::RichText::new("ndi.video").size(11.5), sp_ndi::DOWNLOAD_URL)
+                        .hint(t("quickhelp.ndi.page", "Open NDI\u{2019}s download page in your browser."));
             });
         }
         // An audience screen's look: which layers it shows, its colour, its covered edges.
@@ -7118,7 +7157,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             // The theme its slides are drawn with: the main theme, or one of its own.
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(t("screens.look.theme", "Theme")).color(TEXT_DIM))
-                    .on_hover_text(t("screens.look.theme.hover", "The same words, laid out by this theme on this screen"));
+                    .hint(t("screens.look.theme.hover", "The same words, laid out by this theme on this screen"));
                 ui.add_space(8.0);
                 let names = state.themes_shown();
                 let main_name = names.get(state.theme_for_songs).cloned().unwrap_or_default();
@@ -7129,17 +7168,22 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                 let main_words = tf("screens.look.main_theme", "Main theme ({name})", &[("name", &main_name)]);
                 let shown = own_name.unwrap_or_else(|| main_words.clone());
                 let mut picked = None;
-                egui::ComboBox::from_id_salt(("screen theme", index)).selected_text(shown).width(220.0).show_ui(ui, |ui| {
-                    if ui.selectable_label(own.is_none(), main_words.as_str()).clicked() {
-                        picked = Some(None);
-                    }
-                    ui.separator();
-                    for (id, name) in state.theme_ids.iter().zip(&names) {
-                        if ui.selectable_label(own == Some(*id), name.as_str()).clicked() {
-                            picked = Some(Some(*id));
+                egui::ComboBox::from_id_salt(("screen theme", index))
+                    .selected_text(shown)
+                    .width(220.0)
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_label(own.is_none(), main_words.as_str()).clicked() {
+                            picked = Some(None);
                         }
-                    }
-                });
+                        ui.separator();
+                        for (id, name) in state.theme_ids.iter().zip(&names) {
+                            if ui.selectable_label(own == Some(*id), name.as_str()).clicked() {
+                                picked = Some(Some(*id));
+                            }
+                        }
+                    })
+                    .response
+                    .hint(t("screens.look.theme.hover", "The same words, laid out by this theme on this screen"));
                 if let Some(theme) = picked
                     && theme != own
                 {
@@ -7154,11 +7198,12 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(t("screens.look.shows", "Shows")).color(TEXT_DIM));
                 ui.add_space(8.0);
-                ui.checkbox(&mut look.slides, t("screens.look.slides", "Slides"));
-                ui.checkbox(&mut look.media, t("screens.look.media", "Media"));
-                ui.checkbox(&mut look.props, t("screens.look.props", "Props"));
-                ui.checkbox(&mut look.messages, t("screens.look.messages", "Messages"));
-                ui.checkbox(&mut look.announcements, t("screens.look.announcements", "Announcements"));
+                let layer = t("quickhelp.screens.layer", "Show or hide this layer on this screen.");
+                ui.checkbox(&mut look.slides, t("screens.look.slides", "Slides")).hint(layer);
+                ui.checkbox(&mut look.media, t("screens.look.media", "Media")).hint(layer);
+                ui.checkbox(&mut look.props, t("screens.look.props", "Props")).hint(layer);
+                ui.checkbox(&mut look.messages, t("screens.look.messages", "Messages")).hint(layer);
+                ui.checkbox(&mut look.announcements, t("screens.look.announcements", "Announcements")).hint(layer);
             });
             // VoxLive's captions, a line of its own under the layers, while VoxLive is connected
             // and has screens.
@@ -7168,20 +7213,27 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             }
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(t("screens.look.colour", "Colour")).color(TEXT_DIM)).on_hover_text(t(
+                ui.label(egui::RichText::new(t("screens.look.colour", "Colour")).color(TEXT_DIM)).hint(t(
                     "screens.look.colour.hover",
                     "Shown where nothing is drawn: around the slide, and when the screen is clear",
                 ));
                 ui.add_space(8.0);
                 let mut color = Color32::from_rgba_unmultiplied(look.color.r, look.color.g, look.color.b, 255);
-                if ui.color_edit_button_srgba(&mut color).changed() {
+                if ui
+                    .color_edit_button_srgba(&mut color)
+                    .hint(t(
+                        "screens.look.colour.hover",
+                        "Shown where nothing is drawn: around the slide, and when the screen is clear",
+                    ))
+                    .changed()
+                {
                     let [r, g, b, _] = color.to_srgba_unmultiplied();
                     look.color = sp_model::Rgba::rgb(r, g, b);
                 }
             });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(t("screens.look.edges", "Cover edges")).color(TEXT_DIM)).on_hover_text(t(
+                ui.label(egui::RichText::new(t("screens.look.edges", "Cover edges")).color(TEXT_DIM)).hint(t(
                     "screens.look.edges.hover",
                     "How much of each edge to cover, in the slide's pixels, for a screen that cuts them off",
                 ));
@@ -7193,7 +7245,11 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
                     t("screens.look.edge.bottom", "Bottom"),
                 ];
                 for (at, name) in sides.into_iter().enumerate() {
-                    ui.add(egui::DragValue::new(&mut look.mask[at]).range(0.0..=540.0).speed(1.0).prefix(format!("{name} ")));
+                    ui.add(egui::DragValue::new(&mut look.mask[at]).range(0.0..=540.0).speed(1.0).prefix(format!("{name} ")))
+                        .hint(t(
+                            "screens.look.edges.hover",
+                            "How much of each edge to cover, in the slide's pixels, for a screen that cuts them off",
+                        ));
                 }
             });
             if *look != before {
@@ -7201,7 +7257,7 @@ pub fn screens_ui(ui: &mut egui::Ui, state: &mut HomeState, output_on: bool) -> 
             }
             let everything = t("screens.look.everything", "Show Everything");
             let everything_hover = t("screens.look.everything.hover", "Back to every layer, black, nothing covered");
-            if !look.shows_everything() && ui.small_button(everything).on_hover_text(everything_hover).clicked() {
+            if !look.shows_everything() && ui.small_button(everything).hint(everything_hover).clicked() {
                 *look = look.everything();
                 changed = true;
             }
@@ -7252,7 +7308,11 @@ fn voxlive_row(ui: &mut egui::Ui, on: &mut bool, index: usize) {
         ui.label(egui::RichText::new(t("screens.look.voxlive", "VoxLive captions")).color(TEXT_DIM));
         ui.add_space(8.0);
         let (rect, _) = ui.allocate_exact_size(settings::parts::on_off_size(ui), egui::Sense::hover());
-        if settings::parts::on_off(ui, rect, ui.scope_id().with(("screen voxlive", index)), *on).clicked() {
+        // Quick Help: the switch says what the line under it says.
+        if settings::parts::on_off(ui, rect, ui.scope_id().with(("screen voxlive", index)), *on)
+            .hint(voxlive_words(*on))
+            .clicked()
+        {
             *on = !*on;
         }
     });
@@ -7279,7 +7339,7 @@ fn missing_font_notice(ui: &mut egui::Ui, missing: &[String]) {
         tf("dialogs.font.missing_many", "{n} missing fonts", &[("n", &crate::i18n::count(missing.len() as u64))])
     };
     let warning = Color32::from_rgb(240, 190, 40);
-    ui.menu_button(egui::RichText::new(label).size(12.0).color(warning), |ui| {
+    let notice = ui.menu_button(egui::RichText::new(label).size(12.0).color(warning), |ui| {
         ui.set_max_width(320.0);
         ui.label(t(
             "dialogs.font.about",
@@ -7291,7 +7351,7 @@ fn missing_font_notice(ui: &mut egui::Ui, missing: &[String]) {
                 ui.label(egui::RichText::new(family.as_str()).strong());
                 let query: String = family.chars().map(|c| if c == ' ' { '+' } else { c }).collect();
                 ui.hyperlink_to(t("dialogs.font.look", "Look for it"), format!("https://fonts.google.com/?query={query}"))
-                    .on_hover_text(t(
+                    .hint(t(
                         "dialogs.font.look.hint",
                         "Opens a font library in your browser. Not every font is free to download.",
                     ));
@@ -7301,6 +7361,10 @@ fn missing_font_notice(ui: &mut egui::Ui, missing: &[String]) {
         let restart = t("dialogs.font.restart", "After installing a font, restart SoftPresenter.");
         ui.label(egui::RichText::new(restart).size(11.5).color(DIM));
     });
+    notice.response.hint(t(
+        "quickhelp.slides.missing_font",
+        "This song uses a font this computer doesn\u{2019}t have: where to find it.",
+    ));
 }
 
 /// Asks before a theme is deleted, since it cannot be brought back.
@@ -7325,7 +7389,9 @@ fn new_song_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
             ui.add_space(8.0);
             egui::Grid::new("new song").num_columns(2).spacing([12.0, 10.0]).show(ui, |ui| {
                 ui.label(egui::RichText::new(t("dialogs.new_song.title", "Title")).color(DIM));
-                let title = ui.add(egui::TextEdit::singleline(&mut sheet.title).desired_width(340.0));
+                let title = ui
+                    .add(egui::TextEdit::singleline(&mut sheet.title).desired_width(340.0))
+                    .hint(t("quickhelp.new_song.title", "The new song\u{2019}s title."));
                 if std::mem::take(&mut sheet.focus) {
                     title.request_focus();
                 }
@@ -7345,7 +7411,9 @@ fn new_song_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
                             sheet.theme = Some(at);
                         }
                     }
-                });
+                })
+                .response
+                .hint(t("quickhelp.new_song.theme", "The theme the new song is drawn with."));
                 ui.end_row();
             });
             ui.add_space(8.0);
@@ -7359,7 +7427,8 @@ fn new_song_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
                             "dialogs.new_song.words.example",
                             "[Verse 1]\nThe first slide's lines\n\nThe next slide\n\n[Chorus]\n…",
                         )),
-                );
+                )
+                .hint(t("quickhelp.new_song.words", "The song\u{2019}s words, if you have them: a blank line starts a new slide."));
             });
             ui.label(
                 egui::RichText::new(t(
@@ -7677,6 +7746,7 @@ fn theme_rows(ui: &mut egui::Ui, state: &mut HomeState) {
             // The built-in theme, first, stays there.
             let sense = if index == 0 { Sense::click() } else { Sense::click_and_drag() };
             let (response, start, right) = crate::studio::plain_row_sensing(ui, &look, sense);
+            let response = response.hint(t("quickhelp.themes.row", "Edit this theme. Its menu is on a right-click."));
             rows.push(response.rect);
             if response.dragged() {
                 dragging = Some(index);
@@ -7751,7 +7821,7 @@ fn theme_row_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, start_
     let main = state.theme_for_songs == index;
     let make_main = ui
         .add_enabled(!main, egui::Button::new(t("themes.make_main", "Make It the Main Theme")))
-        .on_hover_text(t("themes.make_main.hint", "Songs and Bible slides are drawn with the main theme"));
+        .hint(t("themes.make_main.hint", "Songs and Bible slides are drawn with the main theme"));
     if make_main.clicked() {
         state.theme_request = Some(ThemeRequest::UseForSongs(index));
         ui.close();
@@ -7770,7 +7840,7 @@ fn theme_row_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize, start_
     }
     let delete = ui
         .add_enabled(!state.themes_kept.contains(&index), egui::Button::new(t("themes.delete", "Delete\u{2026}")))
-        .on_disabled_hover_text(kept_themes());
+        .reason(kept_themes());
     if delete.clicked() {
         state.confirm_delete_theme = Some(index);
         ui.close();
@@ -7788,7 +7858,7 @@ fn use_on_menu(ui: &mut egui::Ui, state: &mut HomeState, index: usize) {
         let mut on = screen.theme == id || (main && screen.theme.is_none());
         let tick = ui
             .add_enabled(!(main && on), egui::Checkbox::new(&mut on, screen.name.as_str()))
-            .on_disabled_hover_text(t("themes.use_on.follows", "Follows the main theme"));
+            .reason(t("themes.use_on.follows", "Follows the main theme"));
         if tick.clicked() {
             // On: this theme (the main one needs nothing of its own). Off: back to the main theme.
             screen.theme = if on && !main { id } else { None };
@@ -7872,7 +7942,7 @@ fn version_switch(ui: &mut egui::Ui, state: &mut HomeState) {
         "themes.version.add.hint",
         "Add a version to this theme: other templates for a moment in the service, such as the offering",
     );
-    if response.on_hover_text(hint).clicked() {
+    if response.hint(hint).clicked() {
         state.version_sheet = Some(VersionSheet::adding(state));
     }
 }
@@ -7916,7 +7986,7 @@ fn version_line(ui: &mut egui::Ui, state: &mut HomeState) {
     let more = crate::studio::more_button(ui, more, ui.scope_id().with(("version more", id)), true);
     egui::Popup::menu(&more).show(|ui| {
         let renames = t("themes.version.rename.hint", "Renames it in every theme that has it");
-        if ui.button(t("themes.version.rename", "Rename\u{2026}")).on_hover_text(renames).clicked() {
+        if ui.button(t("themes.version.rename", "Rename\u{2026}")).hint(renames).clicked() {
             state.version_sheet =
                 Some(VersionSheet { renaming: Some(id), name, songs: false, bible: false, focus: true });
             ui.close();
@@ -7938,7 +8008,7 @@ fn version_line(ui: &mut egui::Ui, state: &mut HomeState) {
         let hint = t("themes.version.remove.hint", "Its templates go with it; Undo puts them back");
         let remove =
             tf("themes.version.remove", "Remove It From {theme}", &[("theme", &crate::i18n::quoted(&theme_name))]);
-        if ui.button(remove).on_hover_text(hint).clicked() {
+        if ui.button(remove).hint(hint).clicked() {
             state.version_asks.push(crate::versions::Ask::Remove { theme, version: id });
             state.note_deleted_in_editor();
             ui.close();
@@ -8074,6 +8144,7 @@ fn template_pictures(
                     open,
                     live: false,
                     renaming,
+                    hint: t("quickhelp.edit.template", "Edit this layout of the theme. Its menu is on a right-click."),
                 };
                 let (response, places) = crate::studio::list_picture(ui, list, index, &look);
                 rows.push(response.rect);
@@ -8137,7 +8208,7 @@ fn template_pictures(
                         ] {
                             let on = (*songs, *bible) == wanted;
                             let words = used_for(wanted.0, wanted.1);
-                            if ui.add(egui::Button::selectable(on, words)).on_hover_text(hint).clicked() {
+                            if ui.add(egui::Button::selectable(on, words)).hint(hint).clicked() {
                                 used = Some((index, wanted.0, wanted.1));
                                 ui.close();
                             }
@@ -8154,7 +8225,7 @@ fn template_pictures(
                     }
                     if ui
                         .add_enabled(can_delete, egui::Button::new(t("themes.template.delete", "Delete")))
-                        .on_disabled_hover_text(one_template())
+                        .reason(one_template())
                         .clicked()
                     {
                         ask_delete = Some(index);
@@ -8339,7 +8410,7 @@ fn version_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let (close, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
                 if crate::studio::quiet_icon(ui, close, ui.scope_id().with("close"), Icon::Close, 11.0, 0.7, None)
-                    .on_hover_text(t("themes.sheet.close", "Close"))
+                    .hint(t("themes.sheet.close", "Close"))
                     .clicked()
                 {
                     decided = Some(false);
@@ -8360,7 +8431,9 @@ fn version_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
         ui.label(egui::RichText::new(t("themes.sheet.name", "Name")).size(12.5).color(TEXT));
         ui.horizontal(|ui| {
             let wide = if sheet.renaming.is_none() && !others.is_empty() { 424.0 - 38.0 } else { 424.0 };
-            let field = ui.add(egui::TextEdit::singleline(&mut sheet.name).hint_text(t("themes.sheet.example", "Offering")).desired_width(wide));
+            let field = ui
+                .add(egui::TextEdit::singleline(&mut sheet.name).hint_text(t("themes.sheet.example", "Offering")).desired_width(wide))
+                .hint(t("quickhelp.themes.version_name", "The version\u{2019}s name, such as Offering."));
             if std::mem::take(&mut sheet.focus) {
                 field.request_focus();
             }
@@ -8370,7 +8443,7 @@ fn version_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
             // The names other themes' versions have, to take one.
             if sheet.renaming.is_none() && !others.is_empty() {
                 let pick = ui.add(egui::Button::new("\u{25be}").min_size(vec2(30.0, 24.0)));
-                egui::Popup::menu(&pick.on_hover_text(t("themes.sheet.others.hint", "The versions other themes have"))).show(|ui| {
+                egui::Popup::menu(&pick.hint(t("themes.sheet.others.hint", "The versions other themes have"))).show(|ui| {
                     for other in &others {
                         if ui.button(other.as_str()).clicked() {
                             sheet.name = other.clone();
@@ -8442,7 +8515,7 @@ fn version_sheet(ui: &mut egui::Ui, state: &mut HomeState) {
         }
         let yes = crate::studio::flat_button(ui, yes, ui.scope_id().with("yes"), yes_words, font, Flat::Main, ready);
         let yes = match &blocked {
-            Some(why) => yes.on_hover_text(why.as_str()),
+            Some(why) => yes.greyed(why.as_str()),
             None => yes,
         };
         if yes.clicked() {
@@ -8514,54 +8587,62 @@ fn target_menu(
         Some(role) => label_of(role),
         None => t("themes.target.none", "None").to_owned(),
     };
-    egui::ComboBox::from_id_salt(salt).selected_text(shown).width(width).height(360.0).truncate().show_ui(ui, |ui| {
-        let entry = |ui: &mut egui::Ui, name: &str, lit: Option<&sp_model::Role>, chosen: bool, free: bool| -> bool {
-            let (row, response) =
-                ui.allocate_exact_size(vec2(170.0, 34.0), if free { Sense::click() } else { Sense::hover() });
-            if chosen {
-                ui.painter().rect_filled(row, 5.0, crate::studio::ACCENT.gamma_multiply(0.3));
-            } else if free && response.hovered() {
-                ui.painter().rect_filled(row, 5.0, crate::studio::HOVER);
-            }
-            let picture = Rect::from_min_size(row.min + vec2(4.0, 4.0), vec2(46.0, 26.0));
-            box_diagram(ui.painter(), picture, boxes, lit);
-            let ink = if free { crate::studio::TEXT } else { crate::studio::TEXT_FAINT };
-            ui.painter().text(
-                pos2(picture.max.x + 10.0, row.center().y),
-                Align2::LEFT_CENTER,
-                name,
-                FontId::proportional(13.0),
-                ink,
-            );
-            if !free {
-                response.on_hover_text(t("themes.target.taken", "Another translation is using this box"));
-                return false;
-            }
-            response.clicked()
-        };
-        if entry(ui, t("themes.target.none", "None"), None, target.is_none(), true) {
-            *target = None;
-            ui.close();
-        }
-        if let Some(with) = with_verse
-            && entry(ui, t("themes.target.with_verse", "With Verse"), Some(with), is_with_verse, true)
-        {
-            *target = Some(with.clone());
-            ui.close();
-        }
-        for (role, _) in boxes {
-            // In a reference menu the words' own box is reached by "With Verse".
-            if Some(role) == with_verse {
-                continue;
-            }
-            let chosen = target.as_ref() == Some(role);
-            let free = chosen || !taken.contains(role);
-            if entry(ui, &label_of(role), Some(role), chosen, free) {
-                *target = Some(role.clone());
+    egui::ComboBox::from_id_salt(salt)
+        .selected_text(shown)
+        .width(width)
+        .height(360.0)
+        .truncate()
+        .show_ui(ui, |ui| {
+            let entry =
+                |ui: &mut egui::Ui, name: &str, lit: Option<&sp_model::Role>, chosen: bool, free: bool| -> bool {
+                    let (row, response) =
+                        ui.allocate_exact_size(vec2(170.0, 34.0), if free { Sense::click() } else { Sense::hover() });
+                    if chosen {
+                        ui.painter().rect_filled(row, 5.0, crate::studio::ACCENT.gamma_multiply(0.3));
+                    } else if free && response.hovered() {
+                        ui.painter().rect_filled(row, 5.0, crate::studio::HOVER);
+                    }
+                    let picture = Rect::from_min_size(row.min + vec2(4.0, 4.0), vec2(46.0, 26.0));
+                    box_diagram(ui.painter(), picture, boxes, lit);
+                    let ink = if free { crate::studio::TEXT } else { crate::studio::TEXT_FAINT };
+                    ui.painter().text(
+                        pos2(picture.max.x + 10.0, row.center().y),
+                        Align2::LEFT_CENTER,
+                        name,
+                        FontId::proportional(13.0),
+                        ink,
+                    );
+                    if !free {
+                        response.greyed(t("themes.target.taken", "Another translation is using this box"));
+                        return false;
+                    }
+                    response.clicked()
+                };
+            if entry(ui, t("themes.target.none", "None"), None, target.is_none(), true) {
+                *target = None;
                 ui.close();
             }
-        }
-    });
+            if let Some(with) = with_verse
+                && entry(ui, t("themes.target.with_verse", "With Verse"), Some(with), is_with_verse, true)
+            {
+                *target = Some(with.clone());
+                ui.close();
+            }
+            for (role, _) in boxes {
+                // In a reference menu the words' own box is reached by "With Verse".
+                if Some(role) == with_verse {
+                    continue;
+                }
+                let chosen = target.as_ref() == Some(role);
+                let free = chosen || !taken.contains(role);
+                if entry(ui, &label_of(role), Some(role), chosen, free) {
+                    *target = Some(role.clone());
+                    ui.close();
+                }
+            }
+        })
+        .response
+        .hint(t("quickhelp.bible.target", "The box of the theme this Bible\u{2019}s words, or its reference, go in."));
 }
 
 /// ↑ and ↓ in the Bible view. Under Slides they pick the verse before or after (see
@@ -8788,7 +8869,7 @@ fn bible_bar(
     if !state.bible.lists_open {
         let books = key(x, books_width - GAP, middle);
         if flat_button(ui, books, egui::Id::unique("bible books button"), books_words, font.clone(), Flat::Plain, true)
-            .on_hover_text(t("bible.bar.books.hint", "Bring the books, chapters and verses back"))
+            .hint(t("bible.bar.books.hint", "Bring the books, chapters and verses back"))
             .clicked()
         {
             state.bible.lists_open = true;
@@ -8802,13 +8883,13 @@ fn bible_bar(
     let on = key(x + STEP + 6.0, STEP, middle);
     let step_font = crate::studio::semibold(12.5);
     if flat_button(ui, back, egui::Id::unique("bible verse before"), "\u{2039}", step_font.clone(), Flat::Plain, shown)
-        .on_hover_text(t("bible.bar.longer_start", "A verse longer at the start"))
+        .hint(t("bible.bar.longer_start", "A verse longer at the start"))
         .clicked()
     {
         state.bible.step(false, live);
     }
     if flat_button(ui, on, egui::Id::unique("bible verse after"), "\u{203a}", step_font, Flat::Plain, shown)
-        .on_hover_text(t("bible.bar.longer_end", "A verse longer at the end"))
+        .hint(t("bible.bar.longer_end", "A verse longer at the end"))
         .clicked()
     {
         state.bible.step(true, live);
@@ -8850,7 +8931,7 @@ fn bible_bar(
         if open { Flat::On } else { Flat::Plain },
         true,
     )
-    .on_hover_text(t("bible.bar.options.hint", "How verses become slides, and which Bibles are installed"));
+    .hint(t("bible.bar.options.hint", "How verses become slides, and which Bibles are installed"));
     if button.clicked() {
         state.bible.options.open = !open;
     }
@@ -8905,7 +8986,7 @@ fn bible_read_in(ui: &mut egui::Ui, state: &mut HomeState, rect: Rect) {
     let words_at = pos2(left + mark.size().x + 6.0, rect.center().y - words.size().y / 2.0);
     ui.painter().galley(pos2(left, rect.center().y - mark.size().y / 2.0), mark, TEXT_FAINT);
     ui.painter().galley(words_at, words, TEXT);
-    let response = response.on_hover_text(t(
+    let response = response.hint(t(
         "bible.read_in.hint",
         "The language you read this page in: book names, the reference and the verse text. The slides on screen don't change; they keep the translations line.",
     ));
@@ -8919,10 +9000,7 @@ fn bible_read_in(ui: &mut egui::Ui, state: &mut HomeState, rect: Rect) {
                 chosen.is_none(),
                 tf("bible.read_in.auto_is", "Auto \u{b7} {language}", &[("language", &auto)]),
             ))
-            .on_hover_text(t(
-                "bible.read_in.auto.hint",
-                "The language typed, else the last one typed, else the computer's",
-            ))
+            .hint(t("bible.read_in.auto.hint", "The language typed, else the last one typed, else the computer's"))
             .clicked()
         {
             picked = Some(None);
@@ -8989,12 +9067,12 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
     ui.painter().text(arrow.center(), Align2::CENTER_CENTER, "\u{25be}", FontId::proportional(11.0), ink);
     let reading = state.bible.reading.clone();
     let response = response
-        .on_hover_text(tf(
+        .hint(tf(
             "bible.add.hint",
             "Add {reading} to {playlist}, to open again with these settings",
             &[("reading", &reading), ("playlist", &crate::i18n::quoted(&front))],
         ))
-        .on_disabled_hover_text(t("bible.add.first", "Look a passage up first"));
+        .reason(t("bible.add.first", "Look a passage up first"));
     if response.clicked()
         && let Some(saved) = saved.clone()
     {
@@ -9002,7 +9080,7 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
         add_passage(state, Some(front), saved);
     }
     // The other playlists (Add already adds to the one in front), then a new one.
-    let open_arrow = open_arrow.on_hover_text(t("bible.add.elsewhere", "Add it to another playlist"));
+    let open_arrow = open_arrow.hint(t("bible.add.elsewhere", "Add it to another playlist"));
     egui::Popup::from_toggle_button_response(&open_arrow)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
@@ -9029,7 +9107,7 @@ fn bible_add(ui: &mut egui::Ui, state: &mut HomeState, add: Rect, arrow: Rect) {
                 ui.separator();
             }
             let new_hint = t("bible.add.new.hint", "A new playlist with this passage in it");
-            if ui.button(t("bible.add.new", "New Playlist\u{2026}")).on_hover_text(new_hint).clicked() {
+            if ui.button(t("bible.add.new", "New Playlist\u{2026}")).hint(new_hint).clicked() {
                 chosen = Some(None);
             }
             if let Some(playlist) = chosen {
@@ -9104,7 +9182,7 @@ fn bible_field(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, rect: Rect
         .align(egui::RectAlign::BOTTOM_START)
         .max_height(240.0)
         .show(&mut place, field, |query| book_suggestions(query.text, &language));
-    let lookup = completion.text_edit.response.response.clone().on_hover_text(tf(
+    let lookup = completion.text_edit.response.response.clone().hint(tf(
         "bible.field.hint",
         "Type a reference, such as John 3:16, or words to find. Return picks its first verse, Enter puts it on screen; with nothing on screen the arrows pick another ({key} comes here)",
         &[("key", &crate::keys::hint_key("2"))],
@@ -9218,7 +9296,7 @@ fn bible_translations(ui: &mut egui::Ui, state: &mut HomeState) {
                 "{bible}: its words go in {verse}, its reference in {reference}",
                 &[("bible", &bible.name), ("verse", &goes(&row.verse)), ("reference", &goes(&row.reference))],
             );
-            if response.on_hover_text(hint).clicked() {
+            if response.hint(hint).clicked() {
                 open = true;
             }
             x = pill.max.x + 8.0;
@@ -9227,7 +9305,7 @@ fn bible_translations(ui: &mut egui::Ui, state: &mut HomeState) {
         let wide = flat_button_width(ui, &[words], &small, 9.0);
         let change = Rect::from_min_size(pos2(x, middle - 12.0), vec2(wide, 24.0));
         if flat_button(ui, change, egui::Id::unique("bible translations change"), words, small, Flat::Plain, true)
-            .on_hover_text(t("bible.translations.change.hint", "Choose the Bibles shown and the boxes they go in"))
+            .hint(t("bible.translations.change.hint", "Choose the Bibles shown and the boxes they go in"))
             .clicked()
         {
             open = true;
@@ -9308,7 +9386,7 @@ fn bible_translations(ui: &mut egui::Ui, state: &mut HomeState) {
                                 // row to None, give its Bible to the other, then pick again.
                                 if ui
                                     .add(egui::Button::selectable(row.bible.is_none(), t("bible.rows.none", "None")))
-                                    .on_hover_text(t(
+                                    .hint(t(
                                         "bible.rows.none.hint",
                                         "Show no Bible in this row, so its Bible can go to another row",
                                     ))
@@ -9326,7 +9404,7 @@ fn bible_translations(ui: &mut egui::Ui, state: &mut HomeState) {
                                         egui::Button::selectable(row.bible == Some(place), label),
                                     );
                                     if item
-                                        .on_disabled_hover_text(t(
+                                        .reason(t(
                                             "bible.rows.elsewhere",
                                             "Another row shows this Bible. Set that row to None first.",
                                         ))
@@ -9335,7 +9413,9 @@ fn bible_translations(ui: &mut egui::Ui, state: &mut HomeState) {
                                         row.bible = Some(place);
                                     }
                                 }
-                            });
+                            })
+                            .response
+                            .hint(t("quickhelp.bible.translation", "The Bible this row shows."));
                     });
                     cap_at(ui, verse_in, verse_cap);
                     column(ui, menu_width, &mut |ui| {
@@ -9376,7 +9456,7 @@ fn bible_translations(ui: &mut egui::Ui, state: &mut HomeState) {
                 let wide = flat_button_width(ui, &[words], &small, 9.0);
                 let rect = Rect::from_min_size(pos2(x, middle - 12.0), vec2(wide, 24.0));
                 if flat_button(ui, rect, egui::Id::unique("bible row add"), words, small.clone(), Flat::Plain, true)
-                    .on_hover_text(t("bible.rows.add.hint", "Show another Bible on the slides"))
+                    .hint(t("bible.rows.add.hint", "Show another Bible on the slides"))
                     .clicked()
                 {
                     add = true;
@@ -9391,7 +9471,7 @@ fn bible_translations(ui: &mut egui::Ui, state: &mut HomeState) {
             let wide = flat_button_width(ui, &[words], &small, 9.0);
             let rect = Rect::from_min_size(pos2(x, middle - 12.0), vec2(wide, 24.0));
             if flat_button(ui, rect, egui::Id::unique("bible manage"), words, small.clone(), Flat::Plain, true)
-                .on_hover_text(t("bible.rows.manage.hint", "Install and remove Bibles"))
+                .hint(t("bible.rows.manage.hint", "Install and remove Bibles"))
                 .clicked()
             {
                 manage = true;
@@ -9400,7 +9480,7 @@ fn bible_translations(ui: &mut egui::Ui, state: &mut HomeState) {
             let wide = flat_button_width(ui, &[done], &small, 9.0);
             let rect = Rect::from_min_size(pos2(foot.max.x - wide, middle - 12.0), vec2(wide, 24.0));
             if flat_button(ui, rect, egui::Id::unique("bible rows done"), done, small.clone(), Flat::Main, true)
-                .on_hover_text(t("bible.rows.done.hint", "Fold the translations away into one line"))
+                .hint(t("bible.rows.done.hint", "Fold the translations away into one line"))
                 .clicked()
             {
                 fold = true;
@@ -9483,8 +9563,8 @@ fn bible_row_extras(
     let ink = if licence.hovered() { Color32::WHITE } else { DIM };
     ui.painter().circle_stroke(mark.center(), 8.0, Stroke::new(1.2, ink));
     ui.painter().text(mark.center(), Align2::CENTER_CENTER, "i", crate::studio::semibold(11.5), ink);
-    let licence = licence
-        .on_hover_text(t("bible.licence.hint", "Licence: who holds the rights to this translation, and its terms"));
+    let licence =
+        licence.hint(t("bible.licence.hint", "Licence: who holds the rights to this translation, and its terms"));
     egui::Popup::from_toggle_button_response(&licence)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
@@ -9512,7 +9592,7 @@ fn bible_row_extras(
     if count > 1 {
         let id = egui::Id::unique(("bible row remove", index));
         if crate::studio::icon_button(ui, cell, id, Icon::Close, 1.0, false)
-            .on_hover_text(t("bible.rows.remove", "Take this translation off"))
+            .hint(t("bible.rows.remove", "Take this translation off"))
             .clicked()
         {
             *remove = Some(index);

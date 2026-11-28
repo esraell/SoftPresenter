@@ -1029,6 +1029,7 @@ mod tests {
         "freesongbooks",
         "reports",
         "program",
+        "quickhelp",
     ];
 
     // Russian is translated in full too: every area Spanish has finished, Russian has, so a

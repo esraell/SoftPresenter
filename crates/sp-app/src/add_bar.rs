@@ -20,6 +20,7 @@ use crate::editor::EditDraft;
 use crate::home::HomeState;
 use crate::i18n::t;
 use crate::icons::Icon;
+use crate::quick_help::Hint;
 
 /// Which editor the toolbar is over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -337,7 +338,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState, editor: Editor, bar: &Bar)
         let keys = kinds(editor).into_iter().zip(bar.keys.iter().copied()).collect();
         data.insert_temp(well_id(), Drawn { well: bar.well, keys, form: bar.form });
     });
-    ui.interact(bar.well, well_id(), Sense::click_and_drag());
+    // The bar's own ground takes the pointer so a press between its keys never reaches the slide.
+    ui.interact(bar.well, well_id(), Sense::click_and_drag()).no_hint();
     let painter = ui.painter();
     // It floats: a soft shadow under it, and a thin line round it.
     let shadow = egui::Shadow { offset: [0, 6], blur: 18, spread: 0, color: Color32::from_black_alpha(89) };
@@ -350,7 +352,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState, editor: Editor, bar: &Bar)
     for (kind, rect) in kinds(editor).into_iter().zip(bar.keys.iter().copied()) {
         let key = flat_key(ui, rect, kind, bar.form);
         // A key that is only its picture says its name; one with its name says what it does.
-        let key = key.on_hover_text(if bar.form == Form::Pictures { kind.name() } else { kind.hint() });
+        let key = key.hint(if bar.form == Form::Pictures { kind.name() } else { kind.hint() });
         key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, kind.name()));
         match kind {
             Kind::Shape => {
@@ -507,7 +509,7 @@ fn words_box_menu(ui: &mut egui::Ui, draft: Option<&mut EditDraft>) {
     for role in crate::editor::word_roles() {
         let taken = draft.slide.objects.iter().any(|object| object.role.as_ref() == Some(&role));
         let button = ui.add_enabled(!taken, egui::Button::new(crate::editor::role_label(&role)));
-        if button.on_disabled_hover_text(t("editor.add.box.taken", "This template has one already")).clicked() {
+        if button.reason(t("editor.add.box.taken", "This template has one already")).clicked() {
             add_words_box(draft, role);
             ui.close();
         }
@@ -530,7 +532,7 @@ fn screen_menu(ui: &mut egui::Ui, draft: Option<&mut EditDraft>, screens: &[(sp_
     choices.extend(screens.iter().map(|(id, name)| (Some(*id), name.clone())));
     for (screen, name) in choices {
         let hint = t("editor.add.screen.hint", "What this screen shows, live, in a box on the stage");
-        if ui.button(name).on_hover_text(hint).clicked() {
+        if ui.button(name).hint(hint).clicked() {
             let mut object = sp_model::Object::screen(screen);
             object.name = crate::stage_editor::screen_object_name(screen, screens);
             draft.add(object);

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use egui::{Align2, Color32, CornerRadius, FontId, Frame, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 
 use crate::i18n::t;
+use crate::quick_help::Hint;
 use crate::studio::{
     BUTTON, BUTTON_HOVER, CARD, Flat, LINE, ON_EDGE, RADIUS_CARD, RADIUS_PANEL, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT,
     fixed, flat_button, paint_light, semibold, widest,
@@ -121,6 +122,7 @@ pub fn framed(ui: &mut egui::Ui, head: impl FnOnce(&mut egui::Ui), add: impl FnO
 /// A card's head with a small key (24 high, the design's small button) at its right end, in the
 /// middle of the title's line; its line wraps in what the title and the key leave.
 fn keyed_head(ui: &mut egui::Ui, title: &str, about: &str, key: &str) -> bool {
+    let said = about;
     let width = ui.available_width();
     let title = lines(ui, title, semibold(15.0), TEXT, f32::INFINITY, TITLE_LINE);
     let font = FontId::proportional(11.5);
@@ -137,7 +139,9 @@ fn keyed_head(ui: &mut egui::Ui, title: &str, about: &str, key: &str) -> bool {
         pos2(place.max.x - key_size.x, place.min.y + ((title_height - key_size.y) / 2.0).max(0.0)),
         key_size,
     );
-    let clicked = flat_button(ui, at, ui.scope_id().with(("card key", key)), key, font, Flat::Plain, true).clicked();
+    // Quick Help: the key says what the card's line says.
+    let clicked =
+        flat_button(ui, at, ui.scope_id().with(("card key", key)), key, font, Flat::Plain, true).hint(said).clicked();
     ui.add_space(8.0);
     clicked
 }
@@ -360,12 +364,14 @@ pub struct Key<'a> {
     pub least: f32,
     pub look: Flat,
     pub enabled: bool,
+    /// What it does, for Quick Help, where the row or line it is in says nothing (or not that).
+    pub hint: Option<&'a str>,
 }
 
 impl<'a> Key<'a> {
     /// A key in the button grey.
     pub fn plain(words: &'a str) -> Key<'a> {
-        Key { words, wordings: &[], least: 0.0, look: Flat::Plain, enabled: true }
+        Key { words, wordings: &[], least: 0.0, look: Flat::Plain, enabled: true, hint: None }
     }
 
     /// The page's one main key, in white.
@@ -376,6 +382,11 @@ impl<'a> Key<'a> {
     /// Greyed, taking no clicks, unless `enabled`.
     pub fn enabled(self, enabled: bool) -> Key<'a> {
         Key { enabled, ..self }
+    }
+
+    /// Says `what` it does for Quick Help, in place of its row's sentence.
+    pub fn hint(self, what: &'a str) -> Key<'a> {
+        Key { hint: Some(what), ..self }
     }
 
     /// As wide as the widest of `wordings`.
@@ -400,16 +411,18 @@ pub fn keys_width(ui: &egui::Ui, keys: &[Key]) -> f32 {
     keys.iter().map(|key| key.size(ui).x).sum::<f32>() + 8.0 * keys.len().saturating_sub(1) as f32
 }
 
-/// Draws `keys` side by side, the last ending at `right`, in the middle of `middle`'s height.
-/// The one clicked, if any.
-fn draw_keys(ui: &egui::Ui, right: f32, middle: f32, salt: &str, keys: &[Key]) -> Option<usize> {
+/// Draws `keys` side by side, the last ending at `right`, in the middle of `middle`'s height,
+/// each saying for Quick Help what its own hint says, or else `said` (its row's sentence). The one
+/// clicked, if any.
+fn draw_keys(ui: &egui::Ui, right: f32, middle: f32, salt: &str, keys: &[Key], said: &str) -> Option<usize> {
     let mut clicked = None;
     let mut x = right;
     for (index, key) in keys.iter().enumerate().rev() {
         let size = key.size(ui);
         let place = Rect::from_min_size(pos2(x - size.x, middle - size.y / 2.0), size);
         let id = ui.scope_id().with((salt, index));
-        if flat_button(ui, place, id, key.words, FontId::proportional(12.5), key.look, key.enabled).clicked() {
+        let response = flat_button(ui, place, id, key.words, FontId::proportional(12.5), key.look, key.enabled);
+        if response.hint(key.hint.unwrap_or(said)).clicked() {
             clicked = Some(index);
         }
         x = place.min.x - 8.0;
@@ -454,7 +467,7 @@ pub fn keys_row(
                 let size = readout_size(ui, text);
                 paint_readout(ui, Rect::from_min_size(pos2(place.min.x, place.center().y - 12.0), size), text);
             }
-            clicked = draw_keys(ui, place.max.x, place.center().y, salt, keys);
+            clicked = draw_keys(ui, place.max.x, place.center().y, salt, keys, note);
         });
         return clicked;
     }
@@ -471,7 +484,7 @@ pub fn keys_row(
         let size = readout_size(ui, text);
         paint_readout(ui, Rect::from_min_size(pos2(line.min.x, line.center().y - 12.0), size), text);
     }
-    let clicked = draw_keys(ui, line.max.x, line.center().y, salt, keys);
+    let clicked = draw_keys(ui, line.max.x, line.center().y, salt, keys, note);
     ui.add_space(12.0);
     clicked
 }
@@ -496,16 +509,17 @@ pub fn keys_row_keeping(
         let mut clicked = None;
         let control = vec2(keys_width(ui, keys), 30.0);
         let words = inked_row(ui, label, TEXT, note, control, true, |ui, place| {
-            clicked = draw_keys(ui, place.max.x, place.center().y, salt, keys);
+            clicked = draw_keys(ui, place.max.x, place.center().y, salt, keys, note.0);
         });
         return (clicked, words);
     }
+    let said = note.0;
     let (label, note, text) = row_words(ui, label, TEXT, note, width);
     let (place, _) = ui.allocate_exact_size(vec2(width, 12.0 + text + 8.0 + 30.0 + 12.0), Sense::hover());
     ui.painter().hline(place.x_range(), place.min.y + 0.5, Stroke::new(1.0, LINE));
     let top = place.min.y + 12.0;
     paint_row_words(ui, pos2(place.min.x, top), TEXT, label, note);
-    let clicked = draw_keys(ui, place.min.x + keys_width(ui, keys), top + text + 8.0 + 15.0, salt, keys);
+    let clicked = draw_keys(ui, place.min.x + keys_width(ui, keys), top + text + 8.0 + 15.0, salt, keys, said);
     (clicked, Rect::from_min_size(pos2(place.min.x, top), vec2(width, text)))
 }
 
@@ -530,7 +544,7 @@ pub fn keys_line(ui: &mut egui::Ui, salt: &str, lead: &str, keys: &[Key]) -> Opt
         let at = pos2(line.max.x - keys_wide - 12.0 - galley.size().x, line.center().y - galley.size().y / 2.0);
         ui.painter().galley(at, galley, TEXT_FAINT);
     }
-    let clicked = draw_keys(ui, line.max.x, line.center().y, salt, keys);
+    let clicked = draw_keys(ui, line.max.x, line.center().y, salt, keys, lead);
     ui.add_space(12.0);
     clicked
 }
@@ -557,11 +571,13 @@ pub fn field_row(
     let mut clicked = false;
     let mut draw = |ui: &mut egui::Ui, place: Rect| {
         let field_place = Rect::from_min_size(place.min, vec2(place.width() - after, 32.0));
-        drawn = Some(field(ui, field_place, text, secret, hint));
+        // Quick Help: the field and its key say what the row's sentence says.
+        drawn = Some(field(ui, field_place, text, secret, hint).hint(note));
         if let Some(key) = key {
             let id = ui.scope_id().with((salt, "key"));
             let at = Rect::from_min_size(pos2(place.max.x - key_size.x, place.min.y + 1.0), key_size);
-            clicked = flat_button(ui, at, id, key.words, FontId::proportional(12.5), key.look, key.enabled).clicked();
+            let response = flat_button(ui, at, id, key.words, FontId::proportional(12.5), key.look, key.enabled);
+            clicked = response.hint(key.hint.unwrap_or(note)).clicked();
         }
     };
     // The field narrows to 140 before it leaves the row's words less than their least room.
@@ -708,7 +724,7 @@ pub fn fold(ui: &mut egui::Ui, salt: &str, title: &str, open: bool, add: impl Fn
         state.set_open(true);
     }
     let (place, response) = ui.allocate_exact_size(vec2(width, 18.0), Sense::click());
-    if response.clicked() {
+    if response.clone().hint(t("quickhelp.fold", "Open or close this part.")).clicked() {
         state.toggle(ui);
     }
     let ink = if response.hovered() { TEXT } else { TEXT_DIM };
@@ -795,6 +811,8 @@ pub struct Pick {
     pub picture: Picture,
     pub name: String,
     pub line: String,
+    /// What choosing it does, for Quick Help.
+    pub hint: String,
 }
 
 /// A row of keys among which one is chosen, sharing the row's width: each a flat key with its
@@ -849,7 +867,7 @@ pub fn picks(
         let (column, row) = ((index % across) as f32, (index / across) as f32);
         let corner = place.min + vec2(column * (each + BETWEEN), row * (height + BETWEEN));
         let rect = Rect::from_min_size(corner, vec2(each, height));
-        let response = ui.interact(rect, ui.scope_id().with((salt, index)), Sense::click());
+        let response = ui.interact(rect, ui.scope_id().with((salt, index)), Sense::click()).hint(key.hint.as_str());
         let on = chosen == Some(index);
         let painter = ui.painter();
         if on {

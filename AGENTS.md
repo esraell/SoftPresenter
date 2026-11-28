@@ -324,6 +324,15 @@ process, and nextest gives each test a process of its own). One test alone:
   saying "Nothing yet.", goes on top.
 - **Words.** British spelling (colour, licence, behaviour). Plain words in the interface, the
   way a church volunteer would say them.
+- **Every control says what it does** (Quick Help, `crates/sp-app/src/quick_help.rs`). Every hover
+  goes through `quick_help::Hint` on the control's `Response`: `.hint()` (what it does, shown while
+  Quick Help is on), `.reason()` or `.greyed()` (why it is greyed, always shown), `.full_name()`
+  (a name cut short, always shown), `.status()`, `.no_hint()` (no control: a background). egui's
+  own `on_hover_text` is refused by a test. A new key, field, switch, tab, row or card gets one
+  plain sentence saying what it does (never how to click it), in the `quickhelp` table unless its
+  area already has one; a switch or key in a Settings row says its row's sentence.
+  `quick_help::coverage::every_control_has_a_hint` draws the windows and names any control
+  without one; a new view, page or sheet adds its case there.
 
 ## Commits
 

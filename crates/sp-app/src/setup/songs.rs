@@ -12,6 +12,7 @@ use crate::find_songs::{Ask, Phase, Usual, brought_words};
 use crate::home::HomeState;
 use crate::home::settings::find_card;
 use crate::i18n::{t, tf, tn};
+use crate::quick_help::Hint;
 use crate::studio::{CARD, CARE, PANEL, READY, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 
 /// True when songs found on this computer are ticked to come in: the step's key then reads
@@ -172,8 +173,15 @@ fn already_here(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env
                 ui.spacing_mut().item_spacing.x = 8.0;
                 choose =
                     super::key(ui, "choose songs", t("setup.songs.choose", "Choose Song Files\u{2026}"), 90.0, true)
+                        .hint(t("quickhelp.setup.choose", "Choose song files on this computer to bring in."))
                         .clicked();
-                if super::key(ui, "look", t("setup.songs.look_here", "Look on This Computer"), 90.0, true).clicked() {
+                if super::key(ui, "look", t("setup.songs.look_here", "Look on This Computer"), 90.0, true)
+                    .hint(t(
+                        "quickhelp.setup.look_here",
+                        "Look on this computer for song libraries, songbooks and song files.",
+                    ))
+                    .clicked()
+                {
                     card.asks.push(Ask::Find);
                 }
             });
@@ -213,8 +221,12 @@ fn already_here(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env
                 ui.spacing_mut().item_spacing.x = 8.0;
                 choose =
                     super::key(ui, "choose songs", t("setup.songs.choose", "Choose Song Files\u{2026}"), 90.0, true)
+                        .hint(t("quickhelp.setup.choose", "Choose song files on this computer to bring in."))
                         .clicked();
-                if super::key(ui, "look again", t("setup.songs.look_again", "Look Again"), 90.0, true).clicked() {
+                if super::key(ui, "look again", t("setup.songs.look_again", "Look Again"), 90.0, true)
+                    .hint(t("quickhelp.setup.look_again", "Look on this computer again."))
+                    .clicked()
+                {
                     card.asks.push(Ask::Find);
                 }
             });
@@ -264,8 +276,12 @@ fn already_here(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, env
                 ui.spacing_mut().item_spacing.x = 8.0;
                 choose =
                     super::key(ui, "choose songs", t("setup.songs.choose", "Choose Song Files\u{2026}"), 90.0, true)
+                        .hint(t("quickhelp.setup.choose", "Choose song files on this computer to bring in."))
                         .clicked();
-                if super::key(ui, "look again", t("setup.songs.look_again", "Look Again"), 90.0, true).clicked() {
+                if super::key(ui, "look again", t("setup.songs.look_again", "Look Again"), 90.0, true)
+                    .hint(t("quickhelp.setup.look_again", "Look on this computer again."))
+                    .clicked()
+                {
                     card.asks.push(Ask::Find);
                 }
             });

@@ -10,6 +10,7 @@ use sp_model::{Group, Object, Presentation, Rgba, Role, Slide, Uuid};
 
 use crate::home::BibleTarget;
 use crate::i18n::{t, tf, tk, tn};
+use crate::quick_help::Hint;
 
 /// Where a Bible's file is.
 #[derive(Clone)]
@@ -1496,17 +1497,17 @@ fn choices(
     heading(ui, t("bibles.options.each_slide", "EACH SLIDE SHOWS"));
     ui.radio_value(&mut options.break_on_new_verse, true, t("bibles.options.one_verse", "One verse"));
     ui.radio_value(&mut options.break_on_new_verse, false, t("bibles.options.whole", "The whole passage"))
-        .on_hover_text(t("bibles.options.whole.hint", "All its verses on one slide"));
+        .hint(t("bibles.options.whole.hint", "All its verses on one slide"));
     ui.add_space(6.0);
     ui.checkbox(&mut options.show_verse_numbers, t("bibles.options.numbers", "Verse numbers"))
-        .on_hover_text(t("bibles.options.numbers.hint", "Put each verse's number before its words"));
+        .hint(t("bibles.options.numbers.hint", "Put each verse's number before its words"));
     let named = if translations.is_empty() {
         t("bibles.options.translation", "Translation name").to_owned()
     } else {
         tf("bibles.options.translation.named", "Translation name ({translations})", &[("translations", translations)])
     };
     ui.checkbox(&mut options.display_translation, named)
-        .on_hover_text(t("bibles.options.translation.hint", "Put the Bible's short name after the reference"));
+        .hint(t("bibles.options.translation.hint", "Put the Bible's short name after the reference"));
     ui.add_space(6.0);
     egui::Grid::new("bible slide options").num_columns(2).spacing([10.0, 10.0]).show(ui, |ui| {
         ui.label(t("bibles.options.reference", "Reference"));
@@ -1519,7 +1520,7 @@ fn choices(
                 ReferenceStyle::NoReference,
             ] {
                 let (name, hint) = reference_words(style);
-                ui.selectable_value(&mut options.reference, style, name).on_hover_text(hint);
+                ui.selectable_value(&mut options.reference, style, name).hint(hint);
             }
         });
         ui.end_row();
@@ -1565,7 +1566,7 @@ fn choices(
                 }
             })
             .response
-            .on_hover_text(t(
+            .hint(t(
                 "bibles.options.template.hint",
                 "The template of the main theme Bible slides use. Its boxes are what the Verse and Reference menus offer. In the Themes view, right-click a template for this too.",
             ));
@@ -1574,7 +1575,7 @@ fn choices(
     ui.add_space(10.0);
     if ui
         .button(t("bibles.options.manage", "Manage Bibles…"))
-        .on_hover_text(t("bibles.options.manage.hint", "Install and remove Bibles"))
+        .hint(t("bibles.options.manage.hint", "Install and remove Bibles"))
         .clicked()
     {
         options.manage_open = true;
@@ -1914,7 +1915,7 @@ pub fn manage_bibles(
                     }
                     if ui
                         .button(t("bibles.window.from_file", "Install from File…"))
-                        .on_hover_text(t(
+                        .hint(t(
                             "bibles.window.from_file.hint",
                             "A Bible file you have: Zefania, OSIS, Beblia or other XML, USFM or USX (zipped or not), SoftProjector's .spb, or .spbible",
                         ))

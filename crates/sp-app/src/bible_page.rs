@@ -18,6 +18,7 @@ use crate::bible::list_row_id;
 use crate::home::{BiblePage, BibleSide, BookPicker, HomeState};
 use crate::i18n::{t, tf, tk, tn};
 use crate::icons::Icon;
+use crate::quick_help::Hint;
 use crate::studio::{
     BUTTON, BUTTON_HOVER, CARD, Column, Flat, HOVER, LEFT_WIDTH, ROW_HOVER, SELECTED, TALLY, TEXT, TEXT_DIM,
     TEXT_FAINT, cap, column_frame, column_outer, column_panel, even_switch, fixed, fixed_semibold, flat_button,
@@ -151,10 +152,7 @@ pub fn left_column(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
         }
         let hide = Rect::from_min_size(pos2(bar.max.x - hide_width, bar.center().y - 12.0), vec2(hide_width, 24.0));
         if flat_button(ui, hide, list_row_id("hide"), hide_words, hide_font, Flat::Plain, true)
-            .on_hover_text(t(
-                "biblepage.hide.hint",
-                "Put the books away; Books, beside the reference, brings them back",
-            ))
+            .hint(t("biblepage.hide.hint", "Put the books away; Books, beside the reference, brings them back"))
             .clicked()
         {
             state.bible.lists_open = false;
@@ -353,7 +351,11 @@ fn lists(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<C
             }
             let name = sp_bible::book_name(book, &names);
             let row = Row { text: name, chosen, has: numbers.lead.chapter_count(book) > 0, number: false };
-            if list_row(ui, list_row_id(("book", book)), rect, row).on_hover_text(name).clicked() {
+            // Its whole name where the row cuts it short (heavier when chosen, so measured so).
+            let wide = ui.fonts_mut(|fonts| fonts.layout_no_wrap(name.to_owned(), semibold(13.0), TEXT)).size().x;
+            let cut = (wide > rect.width() - 16.0).then_some(name);
+            let book_hint = t("quickhelp.bible.book", "Open this book\u{2019}s chapters.");
+            if list_row(ui, list_row_id(("book", book)), rect, row).full_name_and_hint(book_hint, cut).clicked() {
                 clicked = Some(Choice::Book(book));
             }
         }
@@ -372,7 +374,8 @@ fn lists(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<C
                 continue;
             }
             let row = Row { text: &chapter.to_string(), chosen, has: true, number: true };
-            if list_row(ui, list_row_id(("chapter", chapter)), rect, row).clicked() {
+            let chapter_hint = t("quickhelp.bible.chapter", "Open this chapter.");
+            if list_row(ui, list_row_id(("chapter", chapter)), rect, row).hint(chapter_hint).clicked() {
                 clicked = Some(Choice::Chapter(chapter));
             }
         }
@@ -397,7 +400,7 @@ fn lists(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<C
                 continue;
             }
             let row = Row { text: &verse.to_string(), chosen, has: true, number: true };
-            let response = list_row(ui, list_row_id(("verse", verse)), rect, row).on_hover_text(t(
+            let response = list_row(ui, list_row_id(("verse", verse)), rect, row).hint(t(
                 "biblepage.lists.verse.hint",
                 "Click to pick. Double-click to put it on screen. Shift-click another for a passage.",
             ));
@@ -549,7 +552,9 @@ fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<
                         numbers.lead.chapter_count(book) > 0,
                         book == open_book,
                     );
-                    if response.on_hover_text(name).clicked() {
+                    // A key shows the book's short name: its whole name always shows.
+                    let book_hint = t("quickhelp.bible.book", "Open this book\u{2019}s chapters.");
+                    if response.full_name_and_hint(book_hint, Some(name)).clicked() {
                         clicked = Some(Choice::Book(book));
                     }
                 });
@@ -563,7 +568,10 @@ fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<
             key_grid(ui, usize::from(chapters), bring, |ui, at, rect| {
                 let chapter = at as u16 + 1;
                 let chosen = chapter == open_chapter;
-                if key(ui, list_row_id(("chapter", chapter)), rect, &chapter.to_string(), true, chosen).clicked() {
+                if key(ui, list_row_id(("chapter", chapter)), rect, &chapter.to_string(), true, chosen)
+                    .hint(t("quickhelp.bible.chapter", "Open this chapter."))
+                    .clicked()
+                {
                     clicked = Some(Choice::Chapter(chapter));
                 }
             });
@@ -587,10 +595,7 @@ fn keypad(ui: &mut egui::Ui, page: &mut BiblePage, numbers: &Numbers) -> Option<
                         && here <= (range.end.book, range.end.chapter, range.end.verse)
                 });
                 let response = key(ui, list_row_id(("verse", verse)), rect, &verse.to_string(), true, chosen)
-                    .on_hover_text(t(
-                        "biblepage.keypad.verse.hint",
-                        "Click to pick. Double-click to put it on screen.",
-                    ));
+                    .hint(t("biblepage.keypad.verse.hint", "Click to pick. Double-click to put it on screen."));
                 if response.double_clicked() {
                     clicked = Some(Choice::Verse { verse, shift: false, double: true });
                 } else if response.clicked() {
@@ -1265,7 +1270,7 @@ pub fn found_list(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
             Flat::Plain,
             true,
         )
-        .on_hover_text(t("biblepage.found.close.hint", "Back to the passage"))
+        .hint(t("biblepage.found.close.hint", "Back to the passage"))
         .clicked()
         {
             picked = Some(None);
@@ -1302,13 +1307,10 @@ pub fn found_list(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
                 Flat::Plain,
                 true,
             )
-            .on_hover_text(t("biblepage.found.chapter.hint", "Open its chapter, with this verse picked"));
+            .hint(t("biblepage.found.chapter.hint", "Open its chapter, with this verse picked"));
             if chapter.clicked() {
                 picked = Some(Some((at, true)));
-            } else if response
-                .on_hover_text(t("biblepage.found.verse.hint", "Open this verse, picked for Enter"))
-                .clicked()
-            {
+            } else if response.hint(t("biblepage.found.verse.hint", "Open this verse, picked for Enter")).clicked() {
                 picked = Some(Some((at, false)));
             }
         }

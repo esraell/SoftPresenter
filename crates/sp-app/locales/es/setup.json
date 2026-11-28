@@ -119,7 +119,8 @@
   "setup.ready.choose": "Elegir",
   "setup.ready.try_again": "Reintentar",
   "setup.ready.look": "Así se verán las canciones. Cambia el aspecto en Edición › Temas.",
-  "setup.ready.tips": "Haz clic en una diapositiva para ponerla en pantalla, Espacio para la siguiente, Esc para borrar. Después, en Ajustes: Mando del móvil, para pasar las diapositivas desde un teléfono.",
+  "setup.ready.tips_keys": "Haz clic en una diapositiva para ponerla en pantalla, Espacio para la siguiente, Esc para borrar.",
+  "setup.done.quick_help": "Haz clic en ? arriba a la derecha para la ayuda rápida: señala cualquier cosa para ver qué hace.",
   "setup.from.question": "¿Vienes de SoftProjector?",
   "setup.from.yes": "Sí",
   "setup.from.no": "No",
@@ -129,7 +130,7 @@
   "setup.ready.keys.softprojector": "Teclas de SoftProjector",
   "setup.ready.keys.standard": "Teclas estándar",
   "setup.ready.keys.mark": "{keys} · * * * al final de una canción",
-  "setup.ready.tips_hide": "Haz doble clic en una diapositiva para ponerla en pantalla, Espacio para la siguiente, Esc para ocultar la letra. Después, en Ajustes: Mando del móvil, para pasar las diapositivas desde un teléfono.",
+  "setup.ready.tips_keys_hide": "Haz doble clic en una diapositiva para ponerla en pantalla, Espacio para la siguiente, Esc para ocultar la letra.",
   "setup.bibles.failed": "{name} no se ha podido descargar, así que la página de la Biblia conserva las Biblias que tenía. Inténtalo de nuevo en Ajustes › Configurar SoftPresenter… o en la ventana Biblias.",
   "setup.ready.bible_failed": "No se ha descargado: {names}. La página de la Biblia conserva las Biblias que tenía.",
   "setup.ready.no_languages": "Aún sin elegir. Hasta entonces, los cancioneros y las Biblias se recomiendan según el idioma de la aplicación."

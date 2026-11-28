@@ -916,6 +916,10 @@ pub struct Prefs {
     /// True when each button's key is written beside it (Help › Show Keys on Buttons).
     #[serde(default)]
     pub keys_on_buttons: bool,
+    /// True when Quick Help is on: each control says what it does under the pointer (the top
+    /// bar's ? key). Off on a new install.
+    #[serde(default)]
+    pub quick_help: bool,
     /// What each key that runs the show does (Settings › Keys): the style, and the keys changed
     /// from it. A file from before the table: SoftPresenter's style, nothing changed.
     #[serde(default)]
@@ -1006,6 +1010,7 @@ impl Default for Prefs {
             playlist_in_front: false,
             song_order: "listed".to_owned(),
             keys_on_buttons: false,
+            quick_help: false,
             keys: crate::key_table::KeyTable::default(),
             slide_click: String::new(),
             screens_details: false,

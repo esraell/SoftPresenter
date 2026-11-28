@@ -8,6 +8,7 @@ use egui::{Color32, FontId, Sense, Stroke, pos2, vec2};
 use super::{LANGUAGES, Setup, language_own_name};
 use crate::home::HomeState;
 use crate::i18n::{t, tf, tn};
+use crate::quick_help::Hint;
 use crate::studio::{CARD, HOVER, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 
 /// The languages the step starts with: the church's as they were answered before (`kept`);
@@ -164,6 +165,10 @@ pub fn step(ui: &mut egui::Ui, setup: &mut Setup, again: bool) {
 /// it carries the ink ring.
 fn language_card(ui: &mut egui::Ui, size: egui::Vec2, code: &str, chosen: bool) -> egui::Response {
     let (place, response) = ui.allocate_exact_size(size, Sense::click());
+    let response = response.hint(t(
+        "quickhelp.setup.language",
+        "Choose this language if your church shows it; its free songbooks and Bible are then recommended.",
+    ));
     ui.painter().rect_filled(place, 9.0, if response.hovered() { HOVER } else { CARD });
     if chosen {
         ui.painter().rect_stroke(place, 9.0, Stroke::new(2.0, TEXT), egui::StrokeKind::Inside);
@@ -217,17 +222,22 @@ fn order_menus(ui: &mut egui::Ui, width: f32, languages: &mut [String]) {
                 None => "\u{2014}".to_owned(),
             };
             ui.add_enabled_ui(languages.len() > place && languages.len() > 1, |ui| {
-                egui::ComboBox::from_id_salt(("setup language order", place)).width(menu).selected_text(shown).show_ui(
-                    ui,
-                    |ui| {
+                egui::ComboBox::from_id_salt(("setup language order", place))
+                    .width(menu)
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
                         for (index, code) in languages.iter().enumerate() {
                             if ui.selectable_label(index == place, language_own_name(code)).clicked() && index != place
                             {
                                 swap = Some((place, index));
                             }
                         }
-                    },
-                );
+                    })
+                    .response
+                    .hint(t(
+                        "quickhelp.setup.language_order",
+                        "Which language goes on top on a slide, and which below.",
+                    ));
             });
         });
         ui.add_space(8.0);

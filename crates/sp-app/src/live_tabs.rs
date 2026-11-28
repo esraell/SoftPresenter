@@ -15,6 +15,7 @@ use crate::home::HomeState;
 use crate::i18n::{t, tf, tk, tn, ts};
 use crate::icons::Icon;
 use crate::messages::Message;
+use crate::quick_help::Hint;
 use crate::screens::Kind;
 use crate::studio::{
     CARD, CARD_RUNNING, CARD_SHOWN, Flat, PANEL, RADIUS_CARD, READY, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, Tabs, Thumb,
@@ -144,7 +145,7 @@ fn heading(ui: &mut egui::Ui, title: &str, add: Option<&str>) -> (Rect, bool) {
     let clicked = add.is_some_and(|hint| {
         let plus = Rect::from_min_size(pos2(row.max.x - 28.0, row.min.y), vec2(28.0, 28.0));
         let id = egui::Id::unique(("tab heading +", title));
-        quiet_icon(ui, plus, id, Icon::Plus, 13.0, 0.78, Some(CARD)).on_hover_text(hint).clicked()
+        quiet_icon(ui, plus, id, Icon::Plus, 13.0, 0.78, Some(CARD)).hint(hint).clicked()
     });
     (row, clicked)
 }
@@ -234,7 +235,7 @@ fn fitting(
 
 /// A card's ⋯: always there, faded until the pointer is over it.
 fn more_key(ui: &egui::Ui, rect: Rect, id: egui::Id) -> egui::Response {
-    quiet_icon(ui, rect, id, Icon::More, 16.0, 0.6, None).on_hover_text(t("tools.more", "More"))
+    quiet_icon(ui, rect, id, Icon::More, 16.0, 0.6, None).hint(t("tools.more", "More"))
 }
 
 /// A field for a length of time or a time of day as `HH:MM:SS`. What is typed is kept while the
@@ -244,7 +245,8 @@ fn clock_field(ui: &mut egui::Ui, id: egui::Id, current: Option<u32>, empty: &st
     let shown = current.map(|seconds| timers::clock_text(i64::from(seconds))).unwrap_or_default();
     let mut text = ui.data_mut(|data| data.get_temp::<String>(id)).unwrap_or(shown);
     let response = ui
-        .add(egui::TextEdit::singleline(&mut text).id(id).background_color(PANEL).desired_width(96.0).hint_text(empty));
+        .add(egui::TextEdit::singleline(&mut text).id(id).background_color(PANEL).desired_width(96.0).hint_text(empty))
+        .hint(t("quickhelp.tools.timer.time", "The time, as minutes and seconds, or a time of day."));
     if response.has_focus() {
         ui.data_mut(|data| data.insert_temp(id, text.clone()));
     }
@@ -355,7 +357,7 @@ fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let time_right = key(2.0).min.x - CARD_GAP;
             paint_spaced(ui, pos2(time_right, y), Align2::RIGHT_CENTER, &time, time_font, ink, -0.5);
             if icon_key(ui, key(2.0), egui::Id::unique(("timer reset", id)), Icon::Back, 15.0, true)
-                .on_hover_text(t("tools.timer.reset", "Reset"))
+                .hint(t("tools.timer.reset", "Reset"))
                 .clicked()
             {
                 asked = Some((index, TimerAsk::Reset));
@@ -365,10 +367,7 @@ fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             } else {
                 (Icon::Play, t("tools.timer.start", "Start"))
             };
-            if icon_key(ui, key(1.0), egui::Id::unique(("timer start", id)), icon, 12.0, true)
-                .on_hover_text(hint)
-                .clicked()
-            {
+            if icon_key(ui, key(1.0), egui::Id::unique(("timer start", id)), icon, 12.0, true).hint(hint).clicked() {
                 asked = Some((index, TimerAsk::Toggle));
             }
             let more = more_key(ui, key(0.0), egui::Id::unique(("timer more", id)));
@@ -380,7 +379,7 @@ fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             if back.double_clicked() {
                 asked = Some((index, TimerAsk::Edit));
             }
-            back.on_hover_text(timer.describe()).context_menu(|ui| {
+            back.status(timer.describe()).context_menu(|ui| {
                 if let Some(ask) = timer_menu(ui, open) {
                     asked = Some((index, ask));
                 }
@@ -405,6 +404,7 @@ fn timers_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                     Flat::Plain,
                     true,
                 )
+                .hint(t("quickhelp.tools.done", "Fold this card\u{2019}s settings away."))
                 .clicked()
                 {
                     state.timer_open = None;
@@ -452,8 +452,9 @@ fn timer_settings(ui: &mut egui::Ui, timer: &mut Timer) -> (bool, Option<String>
         let field_id = egui::Id::unique(("timer name", timer.id));
         let draft_id = field_id.with("typed");
         let mut typed = ui.data(|data| data.get_temp::<String>(draft_id)).unwrap_or_else(|| timer.name.clone());
-        let field =
-            ui.add(egui::TextEdit::singleline(&mut typed).id(field_id).background_color(PANEL).desired_width(160.0));
+        let field = ui
+            .add(egui::TextEdit::singleline(&mut typed).id(field_id).background_color(PANEL).desired_width(160.0))
+            .hint(t("quickhelp.tools.timer.name", "This timer\u{2019}s name, as messages and the stage use it."));
         if field.lost_focus() {
             let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
             if !escape && typed.trim() != timer.name {
@@ -480,21 +481,29 @@ fn timer_settings(ui: &mut egui::Ui, timer: &mut Timer) -> (bool, Option<String>
         // Wide enough for the longest choice in the language set, beside the arrow.
         let font = egui::TextStyle::Button.resolve(ui.style());
         let wide = (crate::studio::widest(ui, &[down_from, down_to, up], &font) + 40.0).max(160.0);
-        egui::ComboBox::from_id_salt(("timer type", timer.id)).selected_text(kind_name).width(wide).show_ui(ui, |ui| {
-            let choices = [
-                (down_from, timers::Kind::Countdown { seconds: 300 }),
-                (down_to, timers::Kind::CountdownTo { hour: 11, minute: 0, second: 0 }),
-                (up, timers::Kind::Elapsed { start: 0, end: None }),
-            ];
-            for (name, kind) in choices {
-                let same = std::mem::discriminant(&kind) == std::mem::discriminant(&timer.kind);
-                if ui.add(egui::Button::selectable(same, name)).clicked() && !same {
-                    timer.kind = kind;
-                    timer.reset();
-                    changed = true;
+        egui::ComboBox::from_id_salt(("timer type", timer.id))
+            .selected_text(kind_name)
+            .width(wide)
+            .show_ui(ui, |ui| {
+                let choices = [
+                    (down_from, timers::Kind::Countdown { seconds: 300 }),
+                    (down_to, timers::Kind::CountdownTo { hour: 11, minute: 0, second: 0 }),
+                    (up, timers::Kind::Elapsed { start: 0, end: None }),
+                ];
+                for (name, kind) in choices {
+                    let same = std::mem::discriminant(&kind) == std::mem::discriminant(&timer.kind);
+                    if ui.add(egui::Button::selectable(same, name)).clicked() && !same {
+                        timer.kind = kind;
+                        timer.reset();
+                        changed = true;
+                    }
                 }
-            }
-        });
+            })
+            .response
+            .hint(t(
+                "quickhelp.tools.timer.kind",
+                "How this timer counts: down from a time, down to a time of day, or up.",
+            ));
         ui.end_row();
         match timer.kind {
             timers::Kind::Countdown { seconds } => {
@@ -547,6 +556,7 @@ fn timer_settings(ui: &mut egui::Ui, timer: &mut Timer) -> (bool, Option<String>
     });
     changed |= ui
         .checkbox(&mut timer.allow_overrun, t("tools.timer.runs_over", "Runs over (counts on past the end)"))
+        .hint(t("quickhelp.tools.timer.overrun", "Go on counting past the end, so a running-over shows."))
         .changed();
     (changed, renamed)
 }
@@ -583,7 +593,7 @@ fn message_menu(ui: &mut egui::Ui, open: bool, has_clip: bool) -> Option<Message
         asked = Some(MessageAsk::Copy);
     }
     let paste = ui.add_enabled(has_clip, egui::Button::new(t("tools.menu.paste", "Paste")));
-    if paste.on_disabled_hover_text(t("tools.message.paste_first", "Copy or cut a message first")).clicked() {
+    if paste.reason(t("tools.message.paste_first", "Copy or cut a message first")).clicked() {
         asked = Some(MessageAsk::Paste);
     }
     ui.separator();
@@ -618,20 +628,22 @@ fn words_once(ui: &mut egui::Ui, row: Rect, state: &mut HomeState) {
     let wide = flat_button_width(ui, &[words_once], &font, 9.0);
     let rect = Rect::from_min_size(pos2(row.max.x - 28.0 - 8.0 - wide, row.center().y - 12.0), vec2(wide, 24.0));
     let button = flat_button(ui, rect, egui::Id::unique("words once"), words_once, font, Flat::Plain, true)
-        .on_hover_text(t("tools.message.words_once.hint", "Type some words and show them over the slides at once"));
+        .hint(t("tools.message.words_once.hint", "Type some words and show them over the slides at once"));
     let draft = egui::Id::unique("words once draft");
     egui::Popup::from_toggle_button_response(&button)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.set_width(250.0);
             let mut words = ui.data_mut(|data| data.get_temp::<String>(draft)).unwrap_or_default();
-            let field = ui.add(
-                egui::TextEdit::multiline(&mut words)
-                    .background_color(CARD)
-                    .desired_rows(2)
-                    .desired_width(f32::INFINITY)
-                    .hint_text(t("tools.message.words_once.field", "Words to show over the slides")),
-            );
+            let field = ui
+                .add(
+                    egui::TextEdit::multiline(&mut words)
+                        .background_color(CARD)
+                        .desired_rows(2)
+                        .desired_width(f32::INFINITY)
+                        .hint_text(t("tools.message.words_once.field", "Words to show over the slides")),
+                )
+                .hint(t("quickhelp.tools.message.once", "Type words to show once, without keeping them as a message."));
             if !field.has_focus() && words.is_empty() {
                 field.request_focus();
             }
@@ -649,7 +661,9 @@ fn words_once(ui: &mut egui::Ui, row: Rect, state: &mut HomeState) {
             let show = Rect::from_min_size(pos2(place.max.x - 64.0, place.min.y), vec2(64.0, 28.0));
             let can = !words.trim().is_empty();
             let id = egui::Id::unique("words once show");
-            if flat_button(ui, show, id, t("tools.show", "Show"), FontId::proportional(12.5), Flat::Main, can).clicked()
+            if flat_button(ui, show, id, t("tools.show", "Show"), FontId::proportional(12.5), Flat::Main, can)
+                .hint(t("quickhelp.tools.message.once.show", "Show these words over the slides now."))
+                .clicked()
             {
                 let at = crate::messages::quick_message(&mut state.messages);
                 state.messages[at].text = words.trim().to_owned();
@@ -751,7 +765,7 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 )
             };
             let toggle = egui::Id::unique(("message show", id));
-            if flat_button(ui, button, toggle, words, button_font.clone(), look, true).on_hover_text(hint).clicked() {
+            if flat_button(ui, button, toggle, words, button_font.clone(), look, true).hint(hint).clicked() {
                 asked = Some((index, MessageAsk::Toggle));
             }
             let more = more_key(ui, more, egui::Id::unique(("message more", id)));
@@ -783,6 +797,7 @@ fn messages_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                     Flat::Plain,
                     true,
                 )
+                .hint(t("quickhelp.tools.done", "Fold this card\u{2019}s settings away."))
                 .clicked()
                 {
                     state.message_selected = None;
@@ -848,6 +863,7 @@ fn message_settings(ui: &mut egui::Ui, message: &mut Message, timer_names: &[Str
     let mut changed = false;
     changed |= ui
         .add(egui::TextEdit::singleline(&mut message.name).background_color(PANEL).desired_width(f32::INFINITY))
+        .hint(t("quickhelp.tools.message.name", "This message\u{2019}s name in the list."))
         .changed();
     changed |= ui
         .add(
@@ -857,12 +873,14 @@ fn message_settings(ui: &mut egui::Ui, message: &mut Message, timer_names: &[Str
                 .desired_width(f32::INFINITY)
                 .hint_text(t("tools.message.words_hint", "Words to show")),
         )
+        .hint(t("quickhelp.tools.message.words", "The words this message shows on the screens."))
         .changed();
     ui.horizontal(|ui| {
         let add_token = t("tools.message.add_token", "Add Token…");
-        egui::ComboBox::from_id_salt(("add token", message.id)).selected_text(add_token).width(130.0).show_ui(
-            ui,
-            |ui| {
+        egui::ComboBox::from_id_salt(("add token", message.id))
+            .selected_text(add_token)
+            .width(130.0)
+            .show_ui(ui, |ui| {
                 if ui.button(t("tools.message.token.clock", "System Clock")).clicked() {
                     message.text.push_str(crate::messages::CLOCK_TOKEN);
                     changed = true;
@@ -873,8 +891,12 @@ fn message_settings(ui: &mut egui::Ui, message: &mut Message, timer_names: &[Str
                         changed = true;
                     }
                 }
-            },
-        );
+            })
+            .response
+            .hint(t(
+                "quickhelp.tools.message.token",
+                "Put the clock or a timer in the words, kept up to date as it shows.",
+            ));
         // Wide enough for the longest look in the language set, beside the arrow.
         let names: Vec<&str> = crate::messages::Look::ALL.iter().map(|look| look.name()).collect();
         let font = egui::TextStyle::Button.resolve(ui.style());
@@ -889,7 +911,9 @@ fn message_settings(ui: &mut egui::Ui, message: &mut Message, timer_names: &[Str
                         changed = true;
                     }
                 }
-            });
+            })
+            .response
+            .hint(t("quickhelp.tools.message.look", "How the message looks on the screens."));
     });
     let leaves = |choice: Option<u32>| match choice {
         None => t("tools.message.stays", "Stays until taken off").to_owned(),
@@ -904,14 +928,19 @@ fn message_settings(ui: &mut egui::Ui, message: &mut Message, timer_names: &[Str
     let wide =
         (crate::studio::widest(ui, &labels.iter().map(String::as_str).collect::<Vec<_>>(), &font) + 40.0).max(180.0);
     let shown = leaves(message.dismiss_after);
-    egui::ComboBox::from_id_salt(("dismiss", message.id)).selected_text(shown).width(wide).show_ui(ui, |ui| {
-        for (choice, label) in choices.into_iter().zip(labels) {
-            if ui.add(egui::Button::selectable(message.dismiss_after == choice, label)).clicked() {
-                message.dismiss_after = choice;
-                changed = true;
+    egui::ComboBox::from_id_salt(("dismiss", message.id))
+        .selected_text(shown)
+        .width(wide)
+        .show_ui(ui, |ui| {
+            for (choice, label) in choices.into_iter().zip(labels) {
+                if ui.add(egui::Button::selectable(message.dismiss_after == choice, label)).clicked() {
+                    message.dismiss_after = choice;
+                    changed = true;
+                }
             }
-        }
-    });
+        })
+        .response
+        .hint(t("quickhelp.tools.message.leaves", "Whether the message stays until taken off, or leaves by itself."));
     changed
 }
 
@@ -1144,7 +1173,7 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
                 )
             };
             let toggle = egui::Id::unique(("prop show", id));
-            if flat_button(ui, button, toggle, words, button_font.clone(), look, true).on_hover_text(hint).clicked() {
+            if flat_button(ui, button, toggle, words, button_font.clone(), look, true).hint(hint).clicked() {
                 asked = Some((index, PropAsk::Toggle));
             }
             let auto_clear = prop.auto_clear;
@@ -1157,13 +1186,11 @@ fn props_tab(ui: &mut egui::Ui, state: &mut HomeState, thumb: &mut Thumb) {
             if back.double_clicked() {
                 asked = Some((index, PropAsk::Edit));
             }
-            back.on_hover_text(t("tools.prop.double_click", "Double-click to change it in the editor")).context_menu(
-                |ui| {
-                    if let Some(ask) = prop_menu(ui, auto_clear, false) {
-                        asked = Some((index, ask));
-                    }
-                },
-            );
+            back.hint(t("tools.prop.double_click", "Double-click to change it in the editor")).context_menu(|ui| {
+                if let Some(ask) = prop_menu(ui, auto_clear, false) {
+                    asked = Some((index, ask));
+                }
+            });
         });
     }
     state.rename_started = rename_started;
@@ -1455,7 +1482,7 @@ fn group_steps(
                 "Fetch a fresh announcements video (Settings \u{203a} Integrations \u{203a} Canva Sync)",
             );
             let marked = current == Some(&ShowAction::CanvaSync);
-            if ui.add(egui::Button::selectable(marked, group.title())).on_hover_text(hint).clicked() {
+            if ui.add(egui::Button::selectable(marked, group.title())).hint(hint).clicked() {
                 chosen = Some(ShowAction::CanvaSync);
             }
         }
@@ -1672,6 +1699,7 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
                 row.max + vec2(f32::from(MACRO_MARGIN.right), f32::from(MACRO_MARGIN.bottom)),
             );
             let back = ui.interact(reach, egui::Id::unique(("macro card", id)), Sense::click());
+            let back = back.hint(t("quickhelp.tools.macro.card", "A macro: steps run one after another, from Run or a key."));
             let y = row.center().y;
             // From the right: ⋯, the chevron that opens the steps, and Run.
             let more = Rect::from_min_size(pos2(row.max.x - 28.0, y - 14.0), vec2(28.0, 28.0));
@@ -1720,19 +1748,19 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
             let icon = Rect::from_center_size(pos2(run.min.x + 12.0 + 5.0, y), vec2(10.0, 10.0));
             crate::icons::paint(ui.painter(), Icon::Play, icon, TEXT);
             ui.painter().galley(pos2(icon.max.x + 6.0, y - word.size().y / 2.0), word, TEXT);
-            if run_response.on_hover_text(t("tools.macro.run.hint", "Run this macro now")).clicked() {
+            if run_response.hint(t("tools.macro.run.hint", "Run this macro now")).clicked() {
                 asked = Some((index, MacroAsk::Run));
             }
             let glyph = if open { Icon::ChevronUp } else { Icon::ChevronDown };
             let hint = if open { t("tools.macro.hide_steps", "Hide its steps") } else { t("tools.macro.show_steps", "Its steps") };
             if quiet_icon(ui, chevron, egui::Id::unique(("macro steps", id)), glyph, 13.0, 0.78, None)
-                .on_hover_text(hint)
+                .hint(hint)
                 .clicked()
             {
                 asked = Some((index, MacroAsk::Steps));
             }
             let more = quiet_icon(ui, more, egui::Id::unique(("macro more", id)), Icon::More, 16.0, 0.6, None)
-                .on_hover_text(t("tools.more", "More"));
+                .hint(t("tools.more", "More"));
             egui::Popup::menu(&more).show(|ui| {
                 if let Some(ask) = macro_menu(ui, made, open) {
                     asked = Some((index, ask));
@@ -1743,7 +1771,7 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
             } else {
                 steps.iter().map(|(words, _)| words.as_str()).collect::<Vec<_>>().join("\n")
             };
-            back.on_hover_text(summary).context_menu(|ui| {
+            back.status(summary).context_menu(|ui| {
                 if let Some(ask) = macro_menu(ui, made, open) {
                     asked = Some((index, ask));
                 }
@@ -1829,12 +1857,12 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
                 if crate::studio::drag_let_go(&response) {
                     dropped = Some(at);
                 }
-                let hint = if *gone {
-                    t("tools.macro.step_gone.hint", "What this step names has gone: click to choose another")
+                // A step whose thing has gone says why, always (it is drawn in amber).
+                let response = if *gone {
+                    response.greyed(t("tools.macro.step_gone.hint", "What this step names has gone: click to choose another"))
                 } else {
-                    t("tools.macro.step.hint", "Click to change this step; drag it to another place")
+                    response.hint(t("tools.macro.step.hint", "Click to change this step; drag it to another place"))
                 };
-                let response = response.on_hover_text(hint);
                 // A click (or a right-click) opens every step in groups, its own marked; the one
                 // chosen takes its place.
                 let change = |ui: &mut egui::Ui, asked: &mut Option<(usize, MacroAsk)>| {
@@ -1861,7 +1889,7 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
                     0.6,
                     Some(crate::studio::BUTTON),
                 )
-                .on_hover_text(t("tools.macro.remove_step", "Remove this step"))
+                .hint(t("tools.macro.remove_step", "Remove this step"))
                 .clicked()
                 {
                     asked = Some((index, MacroAsk::Remove(at)));
@@ -1894,7 +1922,7 @@ fn macros_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState) 
             let button = Rect::from_min_size(place.min, vec2(flat_button_width(ui, &[words], &small, 9.0), 24.0));
             let adding =
                 flat_button(ui, button, egui::Id::unique(("macro add step", id)), words, small, Flat::Plain, true)
-                    .on_hover_text(t("tools.macro.add_step.hint", "Add a step at the end"));
+                    .hint(t("tools.macro.add_step.hint", "Add a step at the end"));
             egui::Popup::menu(&adding).show(|ui| {
                 if let Some(action) = step_menu(ui, show, state, t("tools.macro.add_step.heading", "Add a step"), None) {
                     asked = Some((index, MacroAsk::Add(action)));
@@ -2024,11 +2052,11 @@ fn track_menu(ui: &mut egui::Ui, first: bool, last: bool) -> Option<TrackAsk> {
     }
     ui.separator();
     let up = ui.add_enabled(!first, egui::Button::new(t("tools.audio.move_up", "Move Up")));
-    if up.on_disabled_hover_text(crate::studio::at_top()).clicked() {
+    if up.reason(crate::studio::at_top()).clicked() {
         asked = Some(TrackAsk::Up);
     }
     let down = ui.add_enabled(!last, egui::Button::new(t("tools.audio.move_down", "Move Down")));
-    if down.on_disabled_hover_text(crate::studio::at_bottom()).clicked() {
+    if down.reason(crate::studio::at_bottom()).clicked() {
         asked = Some(TrackAsk::Down);
     }
     if ui.button(t("tools.menu.rename", "Rename")).clicked() {
@@ -2065,7 +2093,7 @@ fn audio_heading(ui: &mut egui::Ui, state: &mut HomeState) {
     match renaming {
         Some(mut typed) => {
             // The menu stays drawn round the name, which is typed where it was shown.
-            small_select(ui, select, egui::Id::unique("audio playlist picker"), "");
+            small_select(ui, select, egui::Id::unique("audio playlist picker"), "").no_hint();
             let start = pos2(select.min.x + 8.0, select.center().y);
             let look = crate::studio::Lettering::plain(FontId::proportional(11.5), TEXT);
             let field = crate::studio::rename_field_at(ui, &mut typed, &look, start, select.max.x - 22.0);
@@ -2088,7 +2116,7 @@ fn audio_heading(ui: &mut egui::Ui, state: &mut HomeState) {
         }
         None => {
             let picker = small_select(ui, select, egui::Id::unique("audio playlist picker"), &name)
-                .on_hover_text(t("tools.audio.choose_playlist", "Choose an audio playlist"));
+                .hint(t("tools.audio.choose_playlist", "Choose an audio playlist"));
             egui::Popup::menu(&picker).show(|ui| {
                 let names: Vec<String> = state.audio.playlists.iter().map(|playlist| playlist.name.clone()).collect();
                 for (at, other) in names.iter().enumerate() {
@@ -2101,7 +2129,7 @@ fn audio_heading(ui: &mut egui::Ui, state: &mut HomeState) {
         }
     }
     let more = quiet_icon(ui, more, egui::Id::unique("audio playlist more"), Icon::More, 16.0, 0.6, Some(CARD))
-        .on_hover_text(t("tools.more", "More"));
+        .hint(t("tools.more", "More"));
     let many = state.audio.playlists.len() > 1;
     egui::Popup::menu(&more).show(|ui| {
         if ui.button(t("tools.menu.rename", "Rename")).clicked() {
@@ -2113,8 +2141,7 @@ fn audio_heading(ui: &mut egui::Ui, state: &mut HomeState) {
         ui.separator();
         // At once, asking nothing: Undo puts it back (the files stay on this computer).
         let delete = ui.add_enabled(many, egui::Button::new(t("tools.menu.delete", "Delete")));
-        if delete.on_disabled_hover_text(t("tools.audio.one_playlist", "There is always one audio playlist")).clicked()
-        {
+        if delete.reason(t("tools.audio.one_playlist", "There is always one audio playlist")).clicked() {
             state.delete_audio_playlist(state.audio.current.min(state.audio.playlists.len() - 1));
         }
     });
@@ -2189,7 +2216,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 let to = length.as_secs_f32() * at;
                 request = Some(AudioRequest::Skip(to - playing.position.as_secs_f32()));
             }
-            response.on_hover_text(t("tools.audio.seek.hint", "Where in the track: drag to move through it"));
+            response.hint(t("tools.audio.seek.hint", "Where in the track: drag to move through it"));
             let gone = if length.is_some() { clock(shown) } else { "0:00".to_owned() };
             let left =
                 length.map_or("0:00".to_owned(), |length| format!("\u{2212}{}", clock(length.saturating_sub(shown))));
@@ -2220,7 +2247,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             };
             let ink = |enabled: bool| if enabled { TEXT } else { TEXT_FAINT };
             if player_key(ui, previous, egui::Id::unique("audio previous"), false, steps)
-                .on_hover_text(t("tools.audio.previous", "Previous track (the start of this one first)"))
+                .hint(t("tools.audio.previous", "Previous track (the start of this one first)"))
                 .clicked()
             {
                 if loaded && playing.position.as_secs_f32() > 3.0 {
@@ -2236,7 +2263,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             glyph(previous, Icon::ChevronLeft, 14.0, ink(steps));
             let font = fixed_semibold(11.5);
             if player_key(ui, back, egui::Id::unique("audio back"), false, loaded)
-                .on_hover_text(t("tools.audio.back", "Back 15 seconds"))
+                .hint(t("tools.audio.back", "Back 15 seconds"))
                 .clicked()
             {
                 request = Some(AudioRequest::Skip(-15.0));
@@ -2245,7 +2272,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let can_play = loaded || current.is_some();
             let pausing = loaded && !playing.paused;
             let hint = if pausing { t("tools.audio.pause", "Pause") } else { t("tools.audio.play", "Play") };
-            if player_key(ui, play, egui::Id::unique("audio play"), true, can_play).on_hover_text(hint).clicked() {
+            if player_key(ui, play, egui::Id::unique("audio play"), true, can_play).hint(hint).clicked() {
                 request = Some(match (loaded, current) {
                     (true, _) => AudioRequest::TogglePause,
                     (false, Some(id)) => AudioRequest::Play(id),
@@ -2255,7 +2282,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let (icon, nudge) = if pausing { (Icon::Pause, 0.0) } else { (Icon::Play, 1.5) };
             glyph(play.translate(vec2(nudge, 0.0)), icon, 16.0, Color32::from_gray(17));
             if player_key(ui, forward, egui::Id::unique("audio forward"), false, loaded)
-                .on_hover_text(t("tools.audio.forward", "Forward 15 seconds"))
+                .hint(t("tools.audio.forward", "Forward 15 seconds"))
                 .clicked()
             {
                 request = Some(AudioRequest::Skip(15.0));
@@ -2263,7 +2290,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             ui.painter().text(forward.center(), Align2::CENTER_CENTER, "+15", font, ink(loaded));
             let can_next = list.len() > 1;
             if player_key(ui, next, egui::Id::unique("audio next"), false, can_next)
-                .on_hover_text(t("tools.audio.next", "Next track"))
+                .hint(t("tools.audio.next", "Next track"))
                 .clicked()
                 && let Some(at) = place
             {
@@ -2297,7 +2324,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 None => (Icon::Sound, TEXT_DIM, t("tools.audio.mute", "Mute")),
             };
             crate::icons::paint(ui.painter(), icon, Rect::from_center_size(mute.center(), vec2(15.0, 15.0)), ink);
-            if mute_response.on_hover_text(hint).clicked() {
+            if mute_response.hint(hint).clicked() {
                 match muted_from {
                     Some(level) => {
                         state.audio_volume = level;
@@ -2328,7 +2355,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                     request = Some(AudioRequest::Volume(level));
                 }
             }
-            response.on_hover_text(t("tools.audio.volume", "Volume"));
+            response.hint(t("tools.audio.volume", "Volume"));
             // Right of the level's line, clear of its handle at the loudest: a short form where the
             // usual word is longer.
             let words = match muted_from {
@@ -2348,7 +2375,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let through = Rect::from_min_size(pos2(options.min.x, y - 12.0), vec2(through_wide, 24.0));
             let look = if state.audio.through { Flat::On } else { Flat::Plain };
             if flat_button(ui, through, egui::Id::unique("audio through"), through_words, small.clone(), look, true)
-                .on_hover_text(t("tools.audio.through.hint", "When a track ends, go on to the next"))
+                .hint(t("tools.audio.through.hint", "When a track ends, go on to the next"))
                 .clicked()
             {
                 state.audio.through = !state.audio.through;
@@ -2359,7 +2386,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let shuffle = Rect::from_min_size(pos2(through.max.x + 6.0, y - 12.0), vec2(shuffle_wide, 24.0));
             let look = if state.audio.shuffle { Flat::On } else { Flat::Plain };
             if flat_button(ui, shuffle, egui::Id::unique("audio shuffle"), shuffle_words, small.clone(), look, true)
-                .on_hover_text(t("tools.audio.shuffle.hint", "Play the tracks in a random order"))
+                .hint(t("tools.audio.shuffle.hint", "Play the tracks in a random order"))
                 .clicked()
             {
                 state.audio.shuffle = !state.audio.shuffle;
@@ -2370,7 +2397,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
             let looping = Rect::from_min_size(pos2(shuffle.max.x + 6.0, y - 12.0), vec2(loop_wide, 24.0));
             let look = if state.audio.looping { Flat::On } else { Flat::Plain };
             if flat_button(ui, looping, egui::Id::unique("audio loop"), loop_words, small, look, true)
-                .on_hover_text(t(
+                .hint(t(
                     "tools.audio.loop.hint",
                     "Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)",
                 ))
@@ -2399,7 +2426,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 0.6,
             );
             let picker = small_select(ui, select, egui::Id::unique("audio crossfade"), &fade_words(fade))
-                .on_hover_text(t("tools.audio.crossfade.hint", "How long one track fades into the next"));
+                .hint(t("tools.audio.crossfade.hint", "How long one track fades into the next"));
             egui::Popup::menu(&picker).show(|ui| {
                 let mut choices = vec![0.0, 1.0, 2.0, 3.0, 5.0, 8.0, 10.0];
                 if !choices.contains(&fade) {
@@ -2435,7 +2462,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
     let add_wide = flat_button_width(ui, &[add_words], &small, 9.0);
     let add = Rect::from_min_size(pos2(row.max.x - add_wide, row.min.y), vec2(add_wide, 24.0));
     if flat_button(ui, add, egui::Id::unique("audio add tracks"), add_words, small, Flat::Plain, true)
-        .on_hover_text(t("tools.audio.add_tracks.hint", "Add music files from this computer to this playlist"))
+        .hint(t("tools.audio.add_tracks.hint", "Add music files from this computer to this playlist"))
         .clicked()
     {
         request = Some(AudioRequest::Add);
@@ -2509,7 +2536,7 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         let first = at == 0;
         let last = at + 1 == count;
         let more = quiet_icon(ui, more, egui::Id::unique(("audio track more", id)), Icon::More, 16.0, 0.55, None)
-            .on_hover_text(t("tools.more", "More"));
+            .hint(t("tools.more", "More"));
         egui::Popup::menu(&more).show(|ui| {
             if let Some(ask) = track_menu(ui, first, last) {
                 asked = Some((at, ask));
@@ -2518,13 +2545,13 @@ fn audio_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         if response.clicked() || numbered_at(ui, &state.numbers, line, at) {
             asked = Some((at, TrackAsk::Play));
         }
-        response
-            .on_hover_text(t("tools.audio.track.hint", "Click to play this track; drag it to another place"))
-            .context_menu(|ui| {
+        response.hint(t("tools.audio.track.hint", "Click to play this track; drag it to another place")).context_menu(
+            |ui| {
                 if let Some(ask) = track_menu(ui, first, last) {
                     asked = Some((at, ask));
                 }
-            });
+            },
+        );
     }
     // A track being dragged: an ink line shows where it would go, by which half of a row the
     // pointer is over; letting go moves it there.
@@ -2670,7 +2697,10 @@ fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, t
         let set_up = t("tools.stage.set_up_screens", "Set Up Screens…");
         let wide = flat_button_width(ui, &[set_up], &font, 9.0);
         let rect = Rect::from_min_size(place.min, vec2(wide, 24.0));
-        if flat_button(ui, rect, egui::Id::unique("stage set up screens"), set_up, font, Flat::Plain, true).clicked() {
+        if flat_button(ui, rect, egui::Id::unique("stage set up screens"), set_up, font, Flat::Plain, true)
+            .hint(t("quickhelp.tools.stage.set_up", "Open the Screens window, to add a stage screen."))
+            .clicked()
+        {
             state.settings_open = true;
         }
         return;
@@ -2692,7 +2722,8 @@ fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, t
             .and_then(|id| state.screens.iter().find(|screen| screen.id == id))
             .map_or(all_words.as_str(), |screen| screen.name.as_str());
         let rect = Rect::from_min_size(pos2(row.max.x - 150.0, row.center().y - 12.0), vec2(150.0, 24.0));
-        let picker = small_select(ui, rect, egui::Id::unique("stage screen picker"), words);
+        let picker = small_select(ui, rect, egui::Id::unique("stage screen picker"), words)
+            .hint(t("quickhelp.tools.stage.screen", "Which stage screens the layouts below are for."));
         egui::Popup::menu(&picker).show(|ui| {
             if ui.add(egui::Button::selectable(chosen.is_none(), t(all.0, all.1))).clicked() {
                 ui.data_mut(|data| data.remove::<sp_model::Uuid>(chosen_id));
@@ -2745,7 +2776,7 @@ fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, t
     let wide = flat_button_width(ui, &[edit_layouts], &font, 9.0);
     let rect = Rect::from_min_size(pos2(row.max.x - wide, row.center().y - 12.0), vec2(wide, 24.0));
     if flat_button(ui, rect, egui::Id::unique("stage edit layouts"), edit_layouts, font, Flat::Plain, true)
-        .on_hover_text(t("tools.stage.edit_layouts.hint", "Lay out what the stage screens show"))
+        .hint(t("tools.stage.edit_layouts.hint", "Lay out what the stage screens show"))
         .clicked()
     {
         state.edit_kind_request = Some(crate::home::EditKind::Stage);
@@ -2795,7 +2826,7 @@ fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, t
         ui.painter().galley(pos2(left, name_y - name.size().y / 2.0), name, ink);
         let picked = numbered_at(ui, &state.numbers, tile, place);
         let hint = tf("tools.stage.switch_to", "Switch the stage to {name}", &[("name", &layout.name)]);
-        if response.on_hover_text(hint).clicked() || picked {
+        if response.hint(hint).clicked() || picked {
             switch_to = Some(layout.id);
         }
     }
@@ -2818,14 +2849,16 @@ fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, t
     heading(ui, title, None);
     let draft_id = egui::Id::unique("stage message draft");
     let mut words = ui.data(|data| data.get_temp::<String>(draft_id)).unwrap_or_else(|| state.stage_message.clone());
-    let field = ui.add(
-        egui::TextEdit::singleline(&mut words)
-            .desired_width(f32::INFINITY)
-            .min_size(vec2(0.0, 32.0))
-            .margin(egui::Margin::symmetric(10, 8))
-            .background_color(CARD)
-            .hint_text(t("tools.stage.message.field", "A note for the people on stage")),
-    );
+    let field = ui
+        .add(
+            egui::TextEdit::singleline(&mut words)
+                .desired_width(f32::INFINITY)
+                .min_size(vec2(0.0, 32.0))
+                .margin(egui::Margin::symmetric(10, 8))
+                .background_color(CARD)
+                .hint_text(t("tools.stage.message.field", "A note for the people on stage")),
+        )
+        .hint(t("quickhelp.tools.stage.message", "Words for the stage screens only, such as a note to the band."));
     if field.changed() {
         ui.data_mut(|data| data.insert_temp(draft_id, words.clone()));
     }
@@ -2841,10 +2874,7 @@ fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, t
     let (send_words, send_look) = if live { (change_it, Flat::Plain) } else { (show_on_stage, Flat::Main) };
     let send_response =
         flat_button(ui, send, egui::Id::unique("stage message show"), send_words, font.clone(), send_look, can_send)
-            .on_hover_text(t(
-                "tools.stage.message.show.hint",
-                "Show these words at the top of the stage screens (Return)",
-            ));
+            .hint(t("tools.stage.message.show.hint", "Show these words at the top of the stage screens (Return)"));
     if (send_response.clicked() || entered) && can_send {
         state.stage_message = words.trim().to_owned();
         state.stage_message_live = true;
@@ -2854,7 +2884,7 @@ fn stage_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState, t
     let clear_wide = flat_button_width(ui, &[clear_words], &font, 13.0);
     let clear = Rect::from_min_size(pos2(send.max.x + 6.0, place.min.y), vec2(clear_wide, 30.0));
     if flat_button(ui, clear, egui::Id::unique("stage message clear"), clear_words, font, Flat::Plain, live)
-        .on_hover_text(t("tools.stage.message.clear.hint", "Take the message off the stage screens"))
+        .hint(t("tools.stage.message.clear.hint", "Take the message off the stage screens"))
         .clicked()
     {
         state.stage_message_live = false;
@@ -2920,9 +2950,7 @@ fn voxlive_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState)
             };
             let id = egui::Id::unique(("voxlive show", index));
             let picked = numbered(ui, state, row, index);
-            if flat_button(ui, button, id, words, button_font.clone(), look, true).on_hover_text(hint).clicked()
-                || picked
-            {
+            if flat_button(ui, button, id, words, button_font.clone(), look, true).hint(hint).clicked() || picked {
                 state.voxlive_go = Some(index);
             }
         });

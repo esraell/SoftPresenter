@@ -27,6 +27,7 @@ use egui::{Align2, Color32, FontId, Key, Modifiers, Rect, Sense, Stroke, StrokeK
 use serde::Serialize;
 
 use crate::i18n::{t, tf};
+use crate::quick_help::Hint;
 use crate::studio::{CARD, CARE, Flat, PANEL, RADIUS, TEXT, TEXT_DIM, TEXT_FAINT, flat_button, semibold};
 
 /// The server's route, after the reports server's address.
@@ -410,6 +411,18 @@ enum Asked {
     Done,
 }
 
+/// What a key of the window's foot does, for Quick Help.
+fn foot_hint(asks: Asked) -> &'static str {
+    match asks {
+        Asked::Issue => {
+            t("quickhelp.request.issue", "Open a new issue on GitHub with what you typed, in your browser.")
+        }
+        Asked::Cancel => t("quickhelp.request.cancel", "Close this window without sending."),
+        Asked::Send => t("quickhelp.request.send", "Send the request to the SoftPresenter project."),
+        Asked::Done => t("quickhelp.sheet.close", "Close this window."),
+    }
+}
+
 /// A key of the window's foot: its words, whether it is the white one, what it asks for.
 struct FootKey {
     words: &'static str,
@@ -467,7 +480,7 @@ pub fn window(ctx: &egui::Context, ask: &mut IntegrationRequest) {
     area.show(ctx, |ui| {
         ui.set_clip_rect(screen);
         // The window under it takes the pointer, so nothing there is clicked.
-        ui.allocate_rect(screen, Sense::click());
+        ui.allocate_rect(screen, Sense::click()).no_hint();
         let painter = ui.painter().clone();
         crate::studio::paint_sheet(&painter, screen, sheet);
         let title = t("integrations.ask.window", "Request an Integration");
@@ -483,7 +496,7 @@ pub fn window(ctx: &egui::Context, ask: &mut IntegrationRequest) {
             Rect::from_center_size(cross.center(), vec2(14.0, 14.0)),
             TEXT_DIM,
         );
-        if cross_response.on_hover_text(t("integrations.ask.close", "Close (Esc)")).clicked() {
+        if cross_response.hint(t("integrations.ask.close", "Close (Esc)")).clicked() {
             hide = true;
         }
         let inner = Rect::from_min_max(
@@ -504,7 +517,7 @@ pub fn window(ctx: &egui::Context, ask: &mut IntegrationRequest) {
             let at = Rect::from_min_size(pos2(x, top), vec2(key_width(ui, key.words), KEY));
             let look = if key.main { Flat::Main } else { Flat::Plain };
             let id = ui.scope_id().with(("request key left", index));
-            if flat_button(ui, at, id, key.words, font.clone(), look, true).clicked() {
+            if flat_button(ui, at, id, key.words, font.clone(), look, true).hint(foot_hint(key.asks)).clicked() {
                 asked = Some(key.asks);
             }
             x = at.max.x + 8.0;
@@ -515,7 +528,7 @@ pub fn window(ctx: &egui::Context, ask: &mut IntegrationRequest) {
                 Rect::from_min_size(pos2(right - key_width(ui, key.words), top), vec2(key_width(ui, key.words), KEY));
             let look = if key.main { Flat::Main } else { Flat::Plain };
             let id = ui.scope_id().with(("request key right", index));
-            if flat_button(ui, at, id, key.words, font.clone(), look, true).clicked() {
+            if flat_button(ui, at, id, key.words, font.clone(), look, true).hint(foot_hint(key.asks)).clicked() {
                 asked = Some(key.asks);
             }
             if key.asks == Asked::Send {
@@ -669,7 +682,9 @@ fn line_field(ui: &mut egui::Ui, rect: Rect, text: &mut String, open: bool, focu
         .char_limit(NAME_MOST)
         .interactive(open)
         .hint_text(egui::RichText::new(t("integrations.ask.name.hint", "Its name")).color(TEXT_FAINT));
-    let field = place.put(inside, edit);
+    let field = place
+        .put(inside, edit)
+        .hint(t("quickhelp.request.name", "The name of the app, service or device your church uses."));
     if focus && open {
         field.request_focus();
     }
@@ -707,7 +722,12 @@ fn text_box(ui: &mut egui::Ui, rect: Rect, text: &mut String, hint: &str, salt: 
             if !hint.is_empty() {
                 edit = edit.hint_text(egui::RichText::new(hint).color(TEXT_FAINT));
             }
-            focused = ui.add(edit).has_focus();
+            let what = if salt == "request what" {
+                t("quickhelp.request.what", "What SoftPresenter should do with it.")
+            } else {
+                t("quickhelp.request.how", "Anything else that would help: how your church uses it, a link.")
+            };
+            focused = ui.add(edit).hint(what).has_focus();
         });
     if focused {
         ring(ui, rect);

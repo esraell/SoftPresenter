@@ -9,6 +9,7 @@ use super::stats::{self, Count};
 use crate::home::settings::parts;
 use crate::home::{HomeState, Page, open_page};
 use crate::i18n::t;
+use crate::quick_help::Hint;
 
 /// What is sent and what isn't, in one plain line, as Settings says it.
 /// While reports are off it says what they would be.
@@ -61,7 +62,7 @@ fn switch_row(ui: &mut egui::Ui, on: bool, note: &str) -> Option<bool> {
     let mut chosen = None;
     let size = parts::on_off_size(ui);
     parts::row(ui, t("reports.switch", "Send anonymous reports"), note, size, |ui, place| {
-        if parts::on_off(ui, place, ui.scope_id().with("anonymous reports"), on).clicked() {
+        if parts::on_off(ui, place, ui.scope_id().with("anonymous reports"), on).hint(note).clicked() {
             chosen = Some(!on);
         }
     });
@@ -97,7 +98,10 @@ fn see_whats_sent(ui: &mut egui::Ui, salt: &str, open: bool) {
                 let words = t("reports.copy", "Copy");
                 let size = parts::key_size(ui, words);
                 let (place, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-                if parts::key(ui, place, ui.scope_id().with((salt, "copy")), words, false).clicked() {
+                if parts::key(ui, place, ui.scope_id().with((salt, "copy")), words, false)
+                    .hint(t("quickhelp.reports.copy", "Copy the report."))
+                    .clicked()
+                {
                     ui.ctx().copy_text(report);
                 }
             }
@@ -190,7 +194,8 @@ pub fn setup_fold(ui: &mut egui::Ui, state: &mut HomeState, may_send: bool) {
         }
     }
     ui.add_space(8.0);
-    if crate::setup::link(ui, t("reports.privacy.read", "Read the privacy page")).clicked() {
+    let hint = t("quickhelp.reports.privacy", "Open the privacy page in your browser.");
+    if crate::setup::link(ui, t("reports.privacy.read", "Read the privacy page"), hint).clicked() {
         open_page(state, Page::Privacy);
     }
     if !may_send {
@@ -231,7 +236,14 @@ pub fn settings_card(ui: &mut egui::Ui, state: &mut HomeState) {
                 ),
                 size,
                 |ui, place| {
-                    if parts::key(ui, place, ui.scope_id().with("reset anonymous id"), reset, false).clicked() {
+                    let hint = t(
+                        "quickhelp.reports.reset",
+                        "Start a new anonymous id, so later reports can\u{2019}t be matched with earlier ones.",
+                    );
+                    if parts::key(ui, place, ui.scope_id().with("reset anonymous id"), reset, false)
+                        .hint(hint)
+                        .clicked()
+                    {
                         super::new_install_id();
                         preview_stale(ui.ctx());
                     }
@@ -245,7 +257,8 @@ pub fn settings_card(ui: &mut egui::Ui, state: &mut HomeState) {
                 t("reports.privacy.about", "What is sent, what never is, where it goes and how long it is kept"),
                 size,
                 |ui, place| {
-                    if parts::key(ui, place, ui.scope_id().with("reports privacy"), read, false).clicked() {
+                    let hint = t("quickhelp.reports.privacy", "Open the privacy page in your browser.");
+                    if parts::key(ui, place, ui.scope_id().with("reports privacy"), read, false).hint(hint).clicked() {
                         privacy = true;
                     }
                 },

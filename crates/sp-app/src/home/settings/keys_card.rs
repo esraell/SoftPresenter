@@ -25,6 +25,7 @@ use crate::home::HomeState;
 use crate::i18n::{t, tf, tk};
 use crate::icons::{self, Icon};
 use crate::key_table::{ActionGroup, KeyAction, KeyStyle, KeyTable, Pressed, Refusal, ShowKey, SlideClick, rows};
+use crate::quick_help::Hint;
 use crate::studio::{
     Flat, LINE, SELECTED, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, even_switch, fixed_semibold, flat_button, icon_key,
     paint_flat, paint_spaced, semibold, spaced, widest,
@@ -439,11 +440,11 @@ fn head(ui: &mut egui::Ui, state: &HomeState, f_keys: bool, asked: &mut Asked) {
         "settings.keys.add.hint",
         "Any key on the keyboard, or a clicker\u{2019}s button, can be given something to do",
     );
-    asked.add = response.on_hover_text(hint).clicked();
+    asked.add = response.hint(hint).clicked();
     // Reset to Defaults: always there, greyed while there is nothing to reset.
     let lit = differs(&state.keys, f_keys);
     let reset = flat_button(ui, reset_at, ui.scope_id().with("reset keys"), reset_words, font, Flat::Plain, lit);
-    asked.reset = reset.on_hover_text(reset_hint(&state.keys, f_keys)).clicked();
+    asked.reset = reset.hint(reset_hint(&state.keys, f_keys)).clicked();
     ui.add_space(10.0);
 }
 
@@ -460,7 +461,11 @@ fn layout_line(ui: &mut egui::Ui, state: &HomeState, f_keys: bool, asked: &mut A
     let styles = [KeyStyle::SoftPresenter, KeyStyle::SoftProjector];
     let lines = styles.map(|style| style_line(style, !f_keys));
     let chosen = styles.iter().position(|style| *style == state.keys.style);
-    let row = Row { salt: "key layout", caption: vec![caption], halves: &halves, hints: &[], lines: &lines };
+    let style_hints = [
+        t("quickhelp.keys.style.standard", "SoftPresenter\u{2019}s own keys."),
+        t("quickhelp.keys.style.softprojector", "Esc and the F keys do what they do in SoftProjector."),
+    ];
+    let row = Row { salt: "key layout", caption: vec![caption], halves: &halves, hints: &style_hints, lines: &lines };
     if let Some(at) = switch_row(ui, &row, chosen) {
         asked.style = Some(styles[at]);
     }
@@ -702,7 +707,7 @@ fn key_row(ui: &mut egui::Ui, state: &mut HomeState, f_keys: bool, key: ShowKey,
     let cap_at = Rect::from_min_size(pos2(place.min.x, middle - 12.0), vec2((galley.size().x + 14.0).max(44.0), 24.0));
     ui.painter().rect_filled(cap_at, 6.0, SELECTED);
     if galley.elided {
-        ui.interact(cap_at, ui.scope_id().with(("key cap", key.name())), Sense::hover()).on_hover_text(cap.as_str());
+        ui.interact(cap_at, ui.scope_id().with(("key cap", key.name())), Sense::hover()).full_name(cap.as_str());
     }
     ui.painter().galley(cap_at.center() - galley.size() / 2.0, galley, TEXT);
     // The chooser, one width on every row.
@@ -739,6 +744,10 @@ fn key_row(ui: &mut egui::Ui, state: &mut HomeState, f_keys: bool, key: ShowKey,
             }
             chosen
         });
+    let shown = egui::InnerResponse {
+        response: shown.response.hint(t("quickhelp.keys.does", "Choose what this key does in the show.")),
+        inner: shown.inner,
+    };
     if let Some(action) = shown.inner.flatten() {
         asked.set = Some((key, action));
     }
@@ -774,14 +783,14 @@ fn key_row(ui: &mut egui::Ui, state: &mut HomeState, f_keys: bool, key: ShowKey,
         let at = Rect::from_min_size(pos2(note_left, middle - galley.size().y / 2.0), galley.size());
         ui.painter().galley(at.min, galley, TEXT_DIM);
         if cut {
-            ui.interact(at, ui.scope_id().with(("key note", key.name())), Sense::hover()).on_hover_text(note.as_str());
+            ui.interact(at, ui.scope_id().with(("key note", key.name())), Sense::hover()).full_name(note.as_str());
         }
     }
     if added {
         let at = Rect::from_min_size(pos2(place.max.x - 28.0, middle - 14.0), vec2(28.0, 28.0));
         let hint = tf("settings.keys.remove", "Take {key} out of the list", &[("key", &key.said_for(!f_keys))]);
         if icon_key(ui, at, ui.scope_id().with(("remove key", key.name())), Icon::Close, 10.0, true)
-            .on_hover_text(hint)
+            .hint(hint)
             .clicked()
         {
             asked.remove = Some(key);
@@ -807,7 +816,7 @@ fn notes(ui: &mut egui::Ui, state: &HomeState, f_keys: bool) {
         let cut = galley.elided;
         ui.painter().galley(pos2(place.min.x, place.center().y - galley.size().y / 2.0), galley, TEXT_DIM);
         if cut {
-            ui.interact(place, ui.scope_id().with("no key does"), Sense::hover()).on_hover_text(none.as_str());
+            ui.interact(place, ui.scope_id().with("no key does"), Sense::hover()).full_name(none.as_str());
         }
     }
     ui.add_space(8.0);

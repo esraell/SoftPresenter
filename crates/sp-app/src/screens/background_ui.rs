@@ -7,6 +7,7 @@ use egui::{Color32, Rect, vec2};
 
 use super::{Alpha, Kind, Look, Screen, key_trouble};
 use crate::i18n::{t, tf};
+use crate::quick_help::Hint;
 use crate::studio::TEXT_DIM;
 
 /// Shown on a key that cannot follow its fill: orange, as a warning.
@@ -52,16 +53,16 @@ pub fn background_rows(ui: &mut egui::Ui, screens: &mut [Screen], index: usize, 
     if look.key_of.is_none() && !keyed {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(t("screens.background", "Background")).color(TEXT_DIM))
-                .on_hover_text(background_hint());
+                .hint(background_hint());
             ui.add_space(8.0);
             let solid = t("screens.background.solid", "Solid");
             let solid = ui.add(egui::Button::selectable(look.see_through.is_none(), solid));
-            if solid.on_hover_text(background_hint()).clicked() {
+            if solid.hint(background_hint()).clicked() {
                 look.see_through = None;
             }
             let see_through_words = t("screens.background.see_through", "See-through");
             let see_through = ui.add(egui::Button::selectable(look.see_through.is_some(), see_through_words));
-            if see_through.on_hover_text(background_hint()).clicked() && look.see_through.is_none() {
+            if see_through.hint(background_hint()).clicked() && look.see_through.is_none() {
                 look.see_through = Some(Alpha::default());
             }
         });
@@ -69,13 +70,13 @@ pub fn background_rows(ui: &mut egui::Ui, screens: &mut [Screen], index: usize, 
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(t("screens.background.edges", "Soft edges")).color(TEXT_DIM))
-                    .on_hover_text(colours_hint());
+                    .hint(colours_hint());
                 ui.add_space(8.0);
                 for (kind, label) in [
                     (Alpha::Straight, t("screens.background.straight", "Straight")),
                     (Alpha::Premultiplied, t("screens.background.premultiplied", "Premultiplied")),
                 ] {
-                    if ui.add(egui::Button::selectable(alpha == kind, label)).on_hover_text(colours_hint()).clicked() {
+                    if ui.add(egui::Button::selectable(alpha == kind, label)).hint(colours_hint()).clicked() {
                         look.see_through = Some(kind);
                     }
                 }
@@ -84,7 +85,7 @@ pub fn background_rows(ui: &mut egui::Ui, screens: &mut [Screen], index: usize, 
     }
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(t("screens.key", "Key")).color(TEXT_DIM)).on_hover_text(key_hint());
+        ui.label(egui::RichText::new(t("screens.key", "Key")).color(TEXT_DIM)).hint(key_hint());
         ui.add_space(8.0);
         let fill_name = |fill: sp_model::Uuid| {
             fills
@@ -120,8 +121,8 @@ pub fn background_rows(ui: &mut egui::Ui, screens: &mut [Screen], index: usize, 
                     }
                 })
                 .response
-                .on_hover_text(key_hint())
-                .on_disabled_hover_text(why);
+                .hint(key_hint())
+                .reason(why);
         });
     });
     // A line in plain words of what the choice does, or why a key is not doing it.

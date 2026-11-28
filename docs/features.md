@@ -1141,7 +1141,17 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   running timer's name and time just before the clock (in room nothing else uses, so nothing
   moves when it starts or stops), the clock (on a 12-hour or a
   24-hour clock as the computer is set, the figures alone, with no AM or PM), the Audience and Stage
-  keys, a `?` (the list of every key, as the `?` key opens it) and Settings.
+  keys, a `?` (Quick Help, lit while it is on; its own hint says how to switch it on, or, while
+  it is on, off) and Settings.
+- **Quick Help:** the top bar's `?` switches it on and off (off on a new install, and remembered
+  after that). On, everything that can be pointed at (every key, field, switch, tab, slide, list
+  row and card) says what it does in one plain sentence under it; a switch or key in a row of
+  Settings says what its row says. Off, no hover hint shows anywhere except three: why a greyed
+  control is greyed, the whole of a name that is cut short, and the `?` key's own ("Quick Help:
+  switch it on, then point at anything to see what it does. For every key, press ?"). A hint is
+  also the control's description for a screen reader, on or off (and its name where it has
+  none, such as an icon key). The first-time setup's last
+  step says how to switch it on.
 - **Keys for getting around**, the same on every computer (Command on a Mac, Ctrl elsewhere;
   they don't depend on the Mac's menu bar): **Command-1, -2 and -3** go to Service, Bible (with
   the cursor in the reference) and Edit, and Command-B to Bible as well (it stays Bold while
@@ -1159,7 +1169,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Mac, and a switch at the foot of the list of keys on every computer; kept with the
   preferences, off at first) writes each thing's key beside it in a small amber tag, all the
   time: Command-1, 2 and 3 on the views, Option-1 to 7 on the tool tabs, and the rest; holding
-  Command or Option no longer shows them. Wherever the window writes a key (hover hints, the list of keys, notices) a Mac gets its symbols in its order, such as ⌘1 or ⇧⌘1 and ⌥1, and other computers get words ("Ctrl+1", "Alt+1"); they are all made in `keys.rs`. `?` (or the `?` in the top bar) lists every key. In an open menu the arrows move
+  Command or Option no longer shows them. Wherever the window writes a key (hover hints, the list of keys, notices) a Mac gets its symbols in its order, such as ⌘1 or ⇧⌘1 and ⌥1, and other computers get words ("Ctrl+1", "Alt+1"); they are all made in `keys.rs`. `?` lists every key (the top bar's `?` is Quick Help). In an open menu the arrows move
   between its choices, Right opens a group of them, Left goes back, Enter chooses and Escape
   closes; Space and the arrows don't run the show while a menu is open. After a slider or a
   menu is used, the keyboard goes back to running the show.

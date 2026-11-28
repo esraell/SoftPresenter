@@ -13,6 +13,7 @@ use egui::{FontId, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use super::parts::{self, Key, card, keys_line, note};
 use crate::find_songs::{Ask, Card, Kind, Phase, Source, brought_words, folder_name, row_words};
 use crate::i18n::{t, tf, tn};
+use crate::quick_help::Hint;
 use crate::studio::{CARE, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, fixed_semibold, semibold};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -92,7 +93,7 @@ fn before(ui: &mut egui::Ui, state: &mut Card) {
         parts::keys_row_keeping(ui, "find before", label, (&sentence, SENTENCE_LINES), &keys, beside);
     if !state.added.is_empty() {
         ui.interact(words, ui.scope_id().with("find before folders"), Sense::hover())
-            .on_hover_text(added_paths(&state.added));
+            .full_name(added_paths(&state.added));
     }
     match clicked {
         Some(0) => state.asks.push(Ask::AnotherFolder),
@@ -206,7 +207,11 @@ fn nothing_found(ui: &mut egui::Ui, state: &mut Card) {
         ),
     };
     note(ui, &words);
-    match keys_line(ui, "find none", "", &[Key::plain(another_folder()), Key::plain(find_again())]) {
+    let keys = [
+        Key::plain(another_folder()).hint(t("quickhelp.find.another", "Look for song files in another folder.")),
+        Key::plain(find_again()).hint(t("quickhelp.find.again", "Look for song files again.")),
+    ];
+    match keys_line(ui, "find none", "", &keys) {
         Some(0) => state.asks.push(Ask::AnotherFolder),
         Some(_) => state.asks.push(Ask::Find),
         None => {}
@@ -301,7 +306,8 @@ fn done(ui: &mut egui::Ui, state: &mut Card) {
         ui.painter().galley(place.min, galley, TEXT_DIM);
         ui.add_space(12.0);
     }
-    if keys_line(ui, "find done", "", &[Key::plain(find_again())]).is_some() {
+    let again = Key::plain(find_again()).hint(t("quickhelp.find.again", "Look for song files again."));
+    if keys_line(ui, "find done", "", &[again]).is_some() {
         state.asks.push(Ask::Find);
     }
 }
@@ -333,6 +339,9 @@ pub(crate) fn progress_line(ui: &mut egui::Ui, words: &str, key: Option<&str>) -
 /// `also` (its other wordings) where that is more, so it doesn't change height as it changes.
 /// The key clicked, if any.
 fn foot(ui: &mut egui::Ui, lead: &str, also: &[&str], keys: &[Key]) -> Option<usize> {
+    // Quick Help: a key with no hint of its own says what the line beside it says.
+    let keys: Vec<Key> = keys.iter().map(|key| if key.hint.is_some() { *key } else { key.hint(lead) }).collect();
+    let keys = keys.as_slice();
     let width = ui.available_width();
     let top = ui.cursor().min;
     ui.painter().hline(top.x..=top.x + width, top.y + 0.5, Stroke::new(1.0, LINE));
@@ -456,7 +465,7 @@ fn source_row(ui: &mut egui::Ui, source: &Source, ticked: bool, can_tick: bool) 
         if beside { words_height.max(right_galley.size().y) } else { words_height + under + right_galley.size().y };
     let sense = if clickable { Sense::click() } else { Sense::hover() };
     let (place, response) = ui.allocate_exact_size(vec2(width, inner + 22.0), sense);
-    let response = response.on_hover_text(hover_words(source));
+    let response = response.full_name(hover_words(source));
     let painter = ui.painter();
     painter.hline(place.x_range(), place.min.y + 0.5, Stroke::new(1.0, LINE));
     let top = place.min.y + 11.0 + if beside { (inner - words_height) / 2.0 } else { 0.0 };

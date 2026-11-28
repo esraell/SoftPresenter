@@ -22,6 +22,7 @@ use sp_engine::{Command, Show, SlideRef};
 
 use crate::home::HomeState;
 use crate::i18n::t;
+use crate::quick_help::Hint;
 use crate::studio::{CARD, Flat, HOVER, LINE, READY, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 
 pub use bibles::{bible_failed_words, place_downloaded};
@@ -520,9 +521,26 @@ fn foot_keys(ui: &mut egui::Ui, foot: Rect, setup: &Setup, state: &HomeState, sh
     let on = Rect::from_min_max(pos2(foot.max.x - on_width, foot.min.y), foot.max);
     let can_go_on = step != Step::Languages || !setup.languages.is_empty();
     let words = on_words(step, setup.again(), songs::bringing(state));
-    if crate::studio::flat_button(ui, on, ui.scope_id().with("setup on"), words, semibold(13.0), Flat::Main, can_go_on)
-        .clicked()
-    {
+    let on_hint = match step {
+        Step::Welcome => t("quickhelp.setup.start", "Begin the setup."),
+        Step::Ready => t("quickhelp.setup.finish", "Close the setup, keeping what was chosen."),
+        _ => t("quickhelp.setup.continue", "Go on to the next step."),
+    };
+    let on_button = crate::studio::flat_button(
+        ui,
+        on,
+        ui.scope_id().with("setup on"),
+        words,
+        semibold(13.0),
+        Flat::Main,
+        can_go_on,
+    );
+    let on_button = if can_go_on {
+        on_button.hint(on_hint)
+    } else {
+        on_button.greyed(t("quickhelp.setup.languages_first", "Choose at least one language first"))
+    };
+    if on_button.clicked() {
         pressed = Some(Pressed::On);
     }
     // The key beside it: Skip on the middle steps, Show a Test Slide on Ready, none on the welcome.
@@ -543,6 +561,7 @@ fn foot_keys(ui: &mut egui::Ui, foot: Rect, setup: &Setup, state: &HomeState, sh
                 Flat::Plain,
                 can,
             )
+            .hint(t("quickhelp.setup.test_slide", "Put the first slide of the song open on the screens."))
             .clicked()
             {
                 pressed = Some(Pressed::TestSlide);
@@ -561,6 +580,7 @@ fn foot_keys(ui: &mut egui::Ui, foot: Rect, setup: &Setup, state: &HomeState, sh
                 Flat::Plain,
                 true,
             )
+            .hint(t("quickhelp.setup.skip_step", "Go on without answering this step."))
             .clicked()
             {
                 pressed = Some(Pressed::Skip);
@@ -577,7 +597,13 @@ fn foot_keys(ui: &mut egui::Ui, foot: Rect, setup: &Setup, state: &HomeState, sh
         Step::Welcome => (skip_setup_words(), Pressed::Leave),
         _ => (t("setup.back", "Back"), Pressed::Back),
     };
-    if crate::studio::flat_button(ui, rect, ui.scope_id().with("setup back"), words, plain, Flat::Plain, true).clicked()
+    let back_hint = match what {
+        Pressed::Leave => t("quickhelp.setup.skip", "Close the setup. Settings has it again, as Set up SoftPresenter."),
+        _ => t("quickhelp.setup.back", "Go back a step."),
+    };
+    if crate::studio::flat_button(ui, rect, ui.scope_id().with("setup back"), words, plain, Flat::Plain, true)
+        .hint(back_hint)
+        .clicked()
     {
         pressed = Some(what);
     }
@@ -694,10 +720,12 @@ pub(crate) fn key(ui: &mut egui::Ui, salt: &str, label: &str, least: f32, enable
     crate::studio::flat_button(ui, place, ui.scope_id().with(("setup key", salt)), label, font, Flat::Plain, enabled)
 }
 
-/// Faint words that take a click, for a way out to a page.
-pub(crate) fn link(ui: &mut egui::Ui, label: &str) -> egui::Response {
+/// Faint words that take a click, for a way out to a page; `hint` says what it does, for Quick
+/// Help.
+pub(crate) fn link(ui: &mut egui::Ui, label: &str, hint: &str) -> egui::Response {
     ui.add(egui::Label::new(egui::RichText::new(label).size(12.5).color(TEXT_FAINT)).sense(Sense::click()))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .hint(hint)
 }
 
 /// "Recommended", as the Songs and Bibles steps mark what the church's languages choose.
@@ -895,7 +923,15 @@ fn welcome(ui: &mut egui::Ui, setup: &mut Setup, env: &Env) {
                     let (place, _) = ui.allocate_exact_size(vec2(key, 28.0), Sense::hover());
                     let look = if setup.from_softprojector == Some(yes) { Flat::On } else { Flat::Plain };
                     let id = ui.scope_id().with(("setup from softprojector", yes));
-                    if crate::studio::flat_button(ui, place, id, words, font.clone(), look, true).clicked() {
+                    let hint = if yes {
+                        t(
+                            "quickhelp.setup.from_yes",
+                            "Keep SoftProjector\u{2019}s keys, its double-click and its end mark.",
+                        )
+                    } else {
+                        t("quickhelp.setup.from_no", "Use SoftPresenter\u{2019}s own keys.")
+                    };
+                    if crate::studio::flat_button(ui, place, id, words, font.clone(), look, true).hint(hint).clicked() {
                         setup.from_softprojector = Some(yes);
                     }
                 }

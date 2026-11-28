@@ -28,6 +28,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::i18n::{t, tf};
+use crate::quick_help::Hint;
 
 /// A development build's own version ("0.9.0-dev.15"), set when it is built (an empty one counts
 /// as none).
@@ -1192,7 +1193,9 @@ fn draw_row(ui: &mut egui::Ui, state: &mut crate::home::HomeState, now: &Status,
     if shown.check_under && shown.under_key.is_empty() {
         let under =
             Rect::from_min_size(pos2(key_place.min.x, key_place.max.y + UNDER_KEY_GAP), vec2(key_wide, UNDER_KEY_LINE));
-        check_again = parts::key(ui, under, ui.scope_id().with("updates check again"), check_key(), true).clicked();
+        check_again = parts::key(ui, under, ui.scope_id().with("updates check again"), check_key(), true)
+            .hint(t("quickhelp.about.check", "Look for a newer SoftPresenter now."))
+            .clicked();
     }
     if check_again {
         state.menu_asked = Some(crate::menubar::Action::CheckForUpdates);
@@ -1205,7 +1208,13 @@ fn draw_row(ui: &mut egui::Ui, state: &mut crate::home::HomeState, now: &Status,
     let Some(key) = shown.key else { return place };
     let look = if key.amber { Flat::Amber } else { Flat::Plain };
     let id = ui.scope_id().with("updates key");
-    if !flat_button(ui, key_place, id, key.words, key_font, look, key.enabled).clicked() {
+    let hint = match &key.act {
+        Act::Check => t("quickhelp.about.check", "Look for a newer SoftPresenter now."),
+        Act::Open(_) => t("quickhelp.about.open", "Open the newer version\u{2019}s page, where it is downloaded from."),
+        Act::Install => t("quickhelp.about.install", "Put the new version in and start SoftPresenter again."),
+        Act::Cancel => t("quickhelp.about.cancel", "Stop the download and delete what came down."),
+    };
+    if !flat_button(ui, key_place, id, key.words, key_font, look, key.enabled).hint(hint).clicked() {
         return place;
     }
     match key.act {

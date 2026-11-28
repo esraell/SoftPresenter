@@ -7,6 +7,7 @@ use egui::Color32;
 
 use super::{Alpha, DeckLinkOut, Keyer, Kind, Output, Screen};
 use crate::i18n::{t, tf};
+use crate::quick_help::Hint;
 use crate::studio::TEXT_DIM;
 
 /// Shown when the device isn't there, or can't do what is asked: orange, as a warning.
@@ -67,8 +68,7 @@ pub fn decklink_rows(ui: &mut egui::Ui, screen: &mut Screen, found: &sp_decklink
                 if !can && out.keyer != keyer {
                     continue;
                 }
-                let button =
-                    ui.add(egui::Button::selectable(out.keyer == keyer, label)).on_hover_text(keyer_about(keyer));
+                let button = ui.add(egui::Button::selectable(out.keyer == keyer, label)).hint(keyer_about(keyer));
                 if button.clicked() && out.keyer != keyer {
                     screen.set_keyer(keyer, None);
                     changed = true;
@@ -81,14 +81,13 @@ pub fn decklink_rows(ui: &mut egui::Ui, screen: &mut Screen, found: &sp_decklink
         if let Some(alpha) = screen.look.see_through.filter(|_| screen.keyed()) {
             ui.horizontal_wrapped(|ui| {
                 let small = |words: &str| egui::RichText::new(words).size(11.5);
-                ui.label(small(t("screens.background.edges", "Soft edges")).color(TEXT_DIM))
-                    .on_hover_text(edges_hint());
+                ui.label(small(t("screens.background.edges", "Soft edges")).color(TEXT_DIM)).hint(edges_hint());
                 for (kind, label) in [
                     (Alpha::Premultiplied, t("screens.decklink.edges.premultiplied", "Premultiplied (usual)")),
                     (Alpha::Straight, t("screens.background.straight", "Straight")),
                 ] {
                     let button = egui::Button::selectable(alpha == kind, small(label)).small();
-                    if ui.add(button).on_hover_text(edges_hint()).clicked() && alpha != kind {
+                    if ui.add(button).hint(edges_hint()).clicked() && alpha != kind {
                         screen.look.see_through = Some(kind);
                         changed = true;
                     }
@@ -102,8 +101,7 @@ pub fn decklink_rows(ui: &mut egui::Ui, screen: &mut Screen, found: &sp_decklink
     // plainly under it.
     let card = out.card_format_to_offer(found);
     ui.horizontal_wrapped(|ui| {
-        ui.label(egui::RichText::new(t("screens.decklink.format", "Format")).color(TEXT_DIM))
-            .on_hover_text(mode_hint());
+        ui.label(egui::RichText::new(t("screens.decklink.format", "Format")).color(TEXT_DIM)).hint(mode_hint());
         ui.add_space(8.0);
         egui::ComboBox::from_id_salt(("decklink mode", screen.id)).selected_text(mode.as_str()).width(150.0).show_ui(
             ui,
@@ -128,10 +126,10 @@ pub fn decklink_rows(ui: &mut egui::Ui, screen: &mut Screen, found: &sp_decklink
             "Desktop Video Setup has {card}. A switcher usually needs every input in its own format.",
             &[("card", card)],
         );
-        ui.label(egui::RichText::new(words).size(11.5).color(WARNING)).on_hover_text(mode_hint());
+        ui.label(egui::RichText::new(words).size(11.5).color(WARNING)).hint(mode_hint());
     } else if let Some(device) = device.filter(|device| device.mode(&out.mode).is_some()) {
         let words = super::decklink_format_words(device, &out.mode);
-        ui.label(egui::RichText::new(format!("{words}.")).size(11.5).color(TEXT_DIM)).on_hover_text(mode_hint());
+        ui.label(egui::RichText::new(format!("{words}.")).size(11.5).color(TEXT_DIM)).hint(mode_hint());
     }
     if mode != out.mode
         && let Output::DeckLink(out) = &mut screen.output

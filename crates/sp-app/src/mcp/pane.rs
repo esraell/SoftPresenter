@@ -15,6 +15,7 @@ use crate::cli_install::Tone;
 use crate::home::settings::parts::{self, Pick, Picture};
 use crate::i18n::{t, tf};
 use crate::logos::{self, Logo, Mark};
+use crate::quick_help::Hint;
 
 /// The card's state: the switches (kept in `ai-assistants.json`), the assistants' tiles, and
 /// what was said last.
@@ -181,19 +182,34 @@ pub fn page(ui: &mut egui::Ui, view: &mut View) {
 /// itself); then what Prepare allows, and what is never allowed.
 fn level(ui: &mut egui::Ui, view: &mut View) {
     let levels = [
-        (Picture::Level(0), t("mcp.level.off", "Off"), t("mcp.level.off.about", "Nothing can connect")),
+        (
+            Picture::Level(0),
+            t("mcp.level.off", "Off"),
+            t("mcp.level.off.about", "Nothing can connect"),
+            t("quickhelp.mcp.off", "No AI assistant can connect."),
+        ),
         (
             Picture::Level(1),
             t("mcp.level.prepare", "Prepare"),
             t("mcp.level.prepare.about", "Songs, Bible and playlists. The screens stay as they are"),
+            t(
+                "quickhelp.mcp.prepare",
+                "An assistant can find songs and passages and prepare playlists. It can\u{2019}t change the screens.",
+            ),
         ),
         (
             Picture::Level(2),
             t("mcp.level.run", "Prepare and run the screens"),
             t("mcp.level.run.about", "It asks you first, every time"),
+            t("quickhelp.mcp.run", "An assistant can also change what is on screen, asking you each time."),
         ),
     ]
-    .map(|(picture, name, line)| Pick { picture, name: name.to_owned(), line: line.to_owned() });
+    .map(|(picture, name, line, hint)| Pick {
+        picture,
+        name: name.to_owned(),
+        line: line.to_owned(),
+        hint: hint.to_owned(),
+    });
     let now = match (view.switches.allowed, view.switches.screens) {
         (false, _) => 0,
         (true, false) => 1,
@@ -307,13 +323,17 @@ fn connect_one(ui: &mut egui::Ui, view: &mut View) {
                 for ((click, words), wide) in look.keys.iter().zip(&widths) {
                     let rect = Rect::from_min_size(pos2(x, place.min.y), vec2(*wide, 30.0));
                     let id = ui.scope_id().with(("other app", *at, *words));
-                    if parts::key(ui, rect, id, words, *click == Click::Remove).clicked() {
+                    if parts::key(ui, rect, id, words, *click == Click::Remove).hint(&look.state.1).clicked() {
                         pressed = Some((*at, *click));
                     }
                     x += wide + BETWEEN;
                 }
                 let rect = Rect::from_min_size(pos2(x, place.min.y), vec2(copy_width, 30.0));
-                if parts::key(ui, rect, ui.scope_id().with(("other app copy", *at)), copy, false).clicked() {
+                let hint = t(
+                    "quickhelp.mcp.copy",
+                    "Copy the setup that adds SoftPresenter to this app, to paste in yourself.",
+                );
+                if parts::key(ui, rect, ui.scope_id().with(("other app copy", *at)), copy, false).hint(hint).clicked() {
                     pressed = Some((*at, Click::Copy));
                 }
             });
@@ -543,7 +563,7 @@ fn draw_tile(ui: &mut egui::Ui, rect: Rect, look: &TileLook, at: usize) -> Optio
             };
             // Claude Code isn't here: its page, where to get it.
             if click == Click::Get {
-                if response.on_hover_text(connect::GET_CLAUDE_CODE).clicked() {
+                if response.hint(connect::GET_CLAUDE_CODE).clicked() {
                     ui.ctx().open_url(egui::OpenUrl::new_tab(connect::GET_CLAUDE_CODE));
                 }
                 continue;
@@ -561,7 +581,7 @@ fn draw_tile(ui: &mut egui::Ui, rect: Rect, look: &TileLook, at: usize) -> Optio
                 ),
                 Click::Get => connect::GET_CLAUDE_CODE,
             };
-            if response.on_hover_text(hint).clicked() {
+            if response.hint(hint).clicked() {
                 clicked = Some(click);
             }
         }

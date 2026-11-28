@@ -20,6 +20,7 @@ use sp_model::{EndLook, EndMark, EndPlace, EndUnder, Rgba, Uuid};
 use crate::home::settings::parts;
 use crate::home::{HomeState, ThemeRequest};
 use crate::i18n::{t, tf};
+use crate::quick_help::Hint;
 use crate::studio::{
     BUTTON, CARD, Flat, LINE, RADIUS, TALLY, TEXT, TEXT_DIM, TEXT_FAINT, fixed_semibold, flat_button, paint_spaced,
     semibold, widest,
@@ -382,7 +383,7 @@ pub fn window(ctx: &egui::Context, state: &mut HomeState, show: &Show, door: Doo
             Rect::from_center_size(close.center(), vec2(14.0, 14.0)),
             TEXT_DIM,
         );
-        if close_response.on_hover_text(t("keys.close", "Close (Esc)")).clicked() {
+        if close_response.hint(t("keys.close", "Close (Esc)")).clicked() {
             closed = true;
         }
         // The small last slide, and the rows beside it or under it.
@@ -425,7 +426,7 @@ pub fn window(ctx: &egui::Context, state: &mut HomeState, show: &Show, door: Doo
         let can_shrink = look.size > EndLook::SMALLEST;
         let can_grow = look.size < EndLook::LARGEST;
         if flat_button(ui, smaller, ui.scope_id().with("smaller"), "A\u{2212}", font.clone(), Flat::Plain, can_shrink)
-            .on_hover_text(t("settings.endlook.smaller", "Smaller"))
+            .hint(t("settings.endlook.smaller", "Smaller"))
             .clicked()
         {
             chosen = Some(look.stepped(false));
@@ -439,7 +440,7 @@ pub fn window(ctx: &egui::Context, state: &mut HomeState, show: &Show, door: Doo
             TEXT,
         );
         if flat_button(ui, bigger, ui.scope_id().with("bigger"), "A+", font, Flat::Plain, can_grow)
-            .on_hover_text(t("settings.endlook.bigger", "Bigger"))
+            .hint(t("settings.endlook.bigger", "Bigger"))
             .clicked()
         {
             chosen = Some(look.stepped(true));
@@ -523,8 +524,8 @@ pub fn window(ctx: &egui::Context, state: &mut HomeState, show: &Show, door: Doo
             let font = FontId::proportional(13.0);
             if one_mark {
                 greyed_chip(ui, rect, id, words, font, look.under == under)
-                    .on_hover_text(t("settings.endlook.under.one", "At the bottom of the screen there is one mark"));
-            } else if chip(ui, rect, id, words, font, look.under == under).on_hover_text(hint).clicked() {
+                    .greyed(t("settings.endlook.under.one", "At the bottom of the screen there is one mark"));
+            } else if chip(ui, rect, id, words, font, look.under == under).hint(hint).clicked() {
                 chosen = Some(EndLook { under, ..look });
             }
         }

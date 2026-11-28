@@ -13,6 +13,7 @@ use egui::{Align2, Color32, Sense, Stroke, vec2};
 
 use crate::catalog::{self, Songbook};
 use crate::i18n::{t, tf, tn};
+use crate::quick_help::Hint;
 use crate::studio::{CARD, CARE, HOVER, READY, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
 
 /// What the windows know of the songbooks, kept up to date by the app.
@@ -347,6 +348,7 @@ pub(crate) fn tick_card(
     let width = ui.available_width();
     let (place, response) =
         ui.allocate_exact_size(vec2(width, 40.0), if can { Sense::click() } else { Sense::hover() });
+    let response = response.hint(t("quickhelp.setup.songbook", "Download this songbook once the setup is done."));
     let fill = if ticked && !here {
         SELECTED
     } else if can && response.hovered() {
