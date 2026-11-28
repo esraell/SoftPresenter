@@ -127,11 +127,6 @@ pub fn package_signed_by(said: &str, team: &str) -> bool {
     apple && first.is_some_and(|line| line.starts_with("1. Developer ID Installer: ") && line.ends_with(&ending))
 }
 
-/// The team in what `codesign -dv` printed.
-pub fn library_team(said: &str) -> Option<&str> {
-    said.lines().find_map(|line| line.trim().strip_prefix("TeamIdentifier="))
-}
-
 /// The version a package's `PackageInfo` gives: its first two to four numbers
 /// ("6.4.0.2.261117", whose last is a date, is 6.4.0.2; a fourth that is 0 is left off).
 pub fn package_version(info: &str) -> Option<String> {
@@ -172,21 +167,30 @@ pub fn library_for(head: &[u8], processor: &str) -> bool {
     }
 }
 
-/// Whether macOS finds `library`'s code signature whole (`codesign --verify --strict`) and it is
-/// NDI's team's: asked when the library is installed, and again each time before it is loaded.
+/// What a library's code signature must be for macOS to call it NDI's: a certificate chain
+/// that ends at Apple, through Apple's Developer ID authority, with a Developer ID Application
+/// certificate of NDI's team. This is asked of the certificates themselves. (The team a
+/// signature merely *says* it has, which `codesign -dv` prints, proves nothing: a signature
+/// made with no certificate at all can say any team.)
+pub const REQUIREMENT: &str = "=anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"W8U66ET244\"";
+
+/// Whether macOS finds `library`'s code signature whole and meeting [`REQUIREMENT`]
+/// (`codesign --verify --strict -R …`): asked when the library is installed, and again each
+/// time before it is loaded.
 pub fn signed_by_ndi(codesign: &Path, library: &Path) -> Result<(), String> {
-    let ask =
-        |words: &[&str]| Command::new(codesign).args(words).arg(library).env_clear().stdin(Stdio::null()).output();
-    let whole = ask(&["--verify", "--strict"]).map_err(|e| format!("codesign could not be run: {e}"))?;
-    if !whole.status.success() {
-        return Err("its code signature is not whole".to_owned());
+    let asked = Command::new(codesign)
+        .args(["--verify", "--strict", "-R", REQUIREMENT])
+        .arg(library)
+        .env_clear()
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("codesign could not be run: {e}"))?;
+    if asked.status.success() {
+        return Ok(());
     }
-    let about = ask(&["-dv"]).map_err(|e| format!("codesign could not be run: {e}"))?;
-    let said = String::from_utf8_lossy(&about.stderr);
-    match library_team(&said) {
-        Some(TEAM) => Ok(()),
-        other => Err(format!("it is signed by team {}, not NDI's", other.unwrap_or("none"))),
-    }
+    let said = String::from_utf8_lossy(&asked.stderr);
+    let why = said.lines().last().unwrap_or("").rsplit(": ").next().unwrap_or("").trim();
+    Err(format!("its code signature is not NDI's, or not whole ({})", why.chars().take(120).collect::<String>()))
 }
 
 /// The plain files named `name` under `folder`, never following a link, looking no deeper than
@@ -256,11 +260,7 @@ pub fn read(
     if !library_for(&head[..read], processor) {
         return Err(Problem::NoRuntime(processor.to_owned()));
     }
-    let (well, _) = run(&tools.codesign, &[word("--verify"), word("--strict"), runtime.as_os_str()], scratch, cancel)?;
-    let (_, said) = run(&tools.codesign, &[word("-dv"), runtime.as_os_str()], scratch, cancel)?;
-    if !well || library_team(&said) != Some(TEAM) {
-        return Err(Problem::Unsigned(format!("the library: team {}", library_team(&said).unwrap_or("none"))));
-    }
+    signed_by_ndi(&tools.codesign, runtime).map_err(|why| Problem::Unsigned(format!("the library: {why}")))?;
     let (runtime_size, runtime_sha256) = measure(runtime)?;
     if !(SMALLEST_RUNTIME..=LARGEST_RUNTIME).contains(&runtime_size) {
         return Err(Problem::Layout(format!("{RUNTIME_FILE} is {runtime_size} bytes")));
@@ -354,11 +354,17 @@ mod tests {
     }
 
     #[test]
-    fn the_librarys_team_and_the_packages_version_are_read() {
-        let said = "Executable=/x/libndi.dylib\nIdentifier=libndi\nFormat=Mach-O universal (x86_64 arm64)\nAuthority=Developer ID Application: NewTek, Inc. (W8U66ET244)\nTeamIdentifier=W8U66ET244\n";
-        assert_eq!(library_team(said), Some("W8U66ET244"));
-        assert_eq!(library_team("Identifier=libndi\nTeamIdentifier=not set\n"), Some("not set"));
-        assert_eq!(library_team("code object is not signed at all\n"), None);
+    fn the_packages_version_is_read_and_the_librarys_signature_is_asked_of_its_certificates() {
+        // The requirement names Apple's root, the Developer ID authority, a Developer ID
+        // Application certificate and NDI's team: never the team a signature only says.
+        for part in [
+            "anchor apple generic",
+            "certificate 1[field.1.2.840.113635.100.6.2.6] exists",
+            "certificate leaf[field.1.2.840.113635.100.6.1.13] exists",
+            "certificate leaf[subject.OU] = \"W8U66ET244\"",
+        ] {
+            assert!(REQUIREMENT.contains(part), "{part}");
+        }
         let info = "<?xml version=\"1.0\"?>\n<pkg-info overwrite-permissions=\"true\" identifier=\"com.newtek.libndi\" version=\"6.4.0.2.261117\" format-version=\"2\">";
         assert_eq!(package_version(info).as_deref(), Some("6.4.0.2"));
         assert_eq!(package_version(&info.replace("6.4.0.2.261117", "6.3.2.0")).as_deref(), Some("6.3.2"));
@@ -416,10 +422,11 @@ mod tests {
                 payload.display()
             ),
         );
+        // It passes a library only when asked with the requirement, and only for NDI's team.
         let codesign = script(
             "codesign",
             format!(
-                "#!/bin/sh\nif [ \"$1\" = -dv ]; then echo 'Identifier=libndi' >&2; echo 'TeamIdentifier={team}' >&2; fi\nexit 0\n"
+                "#!/bin/sh\ncase \"$*\" in *'-R =anchor apple generic'*W8U66ET244*) [ '{team}' = W8U66ET244 ] && exit 0;; esac\necho 'test-requirement: code failed to satisfy specified code requirement(s)' >&2\nexit 3\n"
             ),
         );
         Tools { pkgutil, codesign }
@@ -564,7 +571,7 @@ mod tests {
         let library = PathBuf::from(std::env::var_os("SOFTPRESENTER_NDI_MAC_LIBRARY").expect("the library's path"));
         let codesign = Tools::system().codesign;
         assert_eq!(signed_by_ndi(&codesign, &library), Ok(()));
-        // This test program is nobody's library: signed by no team at all.
+        // This test program is nobody's library: signed with no certificate at all.
         let other = signed_by_ndi(&codesign, &std::env::current_exe().unwrap());
         println!("another program: {other:?}");
         assert!(other.is_err());
@@ -578,5 +585,35 @@ mod tests {
         println!("a changed library: {refused:?}");
         let _ = std::fs::remove_file(&changed);
         assert!(refused.is_err());
+    }
+
+    /// With macOS's own codesign: a signature made with no certificate that only says it is
+    /// NDI's team's must be refused. (Before the requirement was asked, what `codesign -dv`
+    /// printed as the team was believed, and such a signature passed.)
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_signature_that_only_says_it_is_ndis_team_is_refused() {
+        let codesign = Tools::system().codesign;
+        let made_up = std::env::temp_dir().join(format!("softpresenter-ndi-made-up-{}.dylib", std::process::id()));
+        std::fs::copy(std::env::current_exe().unwrap(), &made_up).unwrap();
+        let sign = |words: &[&str]| {
+            Command::new(&codesign)
+                .args(words)
+                .arg(&made_up)
+                .output()
+                .map(|done| done.status.success())
+                .unwrap_or(false)
+        };
+        // Ad hoc, saying NDI's team; where this codesign can't say a team, plain ad hoc.
+        let said_team = sign(&["--force", "--sign", "-", "--team-identifier", TEAM]);
+        if !said_team {
+            assert!(sign(&["--force", "--sign", "-"]), "the copy could not be signed at all");
+        }
+        let about = Command::new(&codesign).arg("-dv").arg(&made_up).output().unwrap();
+        let about = String::from_utf8_lossy(&about.stderr).into_owned();
+        println!("signed saying NDI's team: {said_team}; codesign -dv says: {:?}", about.lines().last());
+        let refused = signed_by_ndi(&codesign, &made_up);
+        let _ = std::fs::remove_file(&made_up);
+        assert!(refused.is_err(), "a made-up signature passed: {about}");
     }
 }
