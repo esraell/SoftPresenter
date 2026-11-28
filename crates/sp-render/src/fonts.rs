@@ -83,6 +83,13 @@ pub struct Fonts {
     /// size, laying the text out each time, and a slide behind a playing video is drawn again
     /// for every picture of it.
     fitted: Vec<Fitted>,
+    /// While set, sizes fitted are not remembered: the trials of a search (the room made for
+    /// the end of a song's mark) would push out the sizes the slides are really drawn at.
+    pub(crate) trying: bool,
+    /// How the words of the last slides drawn lately make room for the end of a song's mark,
+    /// newest last, so a slide drawn again and again (behind a playing video) is worked out
+    /// once.
+    mark_rooms: Vec<MarkRoom>,
     /// Whether this has the computer's fonts: one made on the screens' thread before they were
     /// found has none, until they are.
     found: bool,
@@ -100,6 +107,54 @@ struct Fitted {
     box_size: (f32, f32),
     size: f32,
 }
+
+/// One box of a slide's song words, as far as where its words lie depends on it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct WordsBox<'a> {
+    /// The place of its object on the slide.
+    pub at: usize,
+    pub text: &'a str,
+    pub spans: &'a [sp_model::TextSpan],
+    pub style: sp_model::BoxStyle,
+    pub rect: sp_model::SlideRect,
+    pub paragraphs: Option<usize>,
+}
+
+/// A [`WordsBox`] kept.
+struct KeptBox {
+    at: usize,
+    text: String,
+    spans: Vec<sp_model::TextSpan>,
+    style: sp_model::BoxStyle,
+    rect: sp_model::SlideRect,
+    paragraphs: Option<usize>,
+}
+
+impl KeptBox {
+    fn is(&self, other: &WordsBox) -> bool {
+        self.at == other.at
+            && self.rect == other.rect
+            && self.paragraphs == other.paragraphs
+            && self.text == other.text
+            && self.spans == other.spans
+            && self.style == other.style
+    }
+}
+
+/// How a slide's words make room for the end of a song's mark: for these boxes of words, a
+/// mark of this share of their size that may reach this far down, the box to take shorter and
+/// by how much (`None`: none). The same always comes to the same, on a screen of any size
+/// (words are laid out in the slide's own units), until the fonts change.
+struct MarkRoom {
+    boxes: Vec<KeptBox>,
+    floor: f32,
+    size: u16,
+    shorter: Option<(usize, f32)>,
+}
+
+/// How many slides' rooms for the mark are remembered: the last slides of the songs lately on
+/// screen, in each theme a screen draws them with.
+const MOST_MARK_ROOMS: usize = 16;
 
 /// How many fitted sizes are remembered (a few screens' worth of boxes, several slides each).
 const MOST_FITTED: usize = 64;
@@ -394,6 +449,8 @@ impl Fonts {
             font_cx: FontContext { collection, source_cache },
             layout_cx: LayoutContext::new(),
             fitted: Vec::new(),
+            trying: false,
+            mark_rooms: Vec::new(),
             found,
             seen: READ_SO_FAR.load(Ordering::Acquire),
             refused: REFUSED.get(),
@@ -409,6 +466,7 @@ impl Fonts {
                 self.font_cx.collection = collection.clone();
                 self.found = true;
                 self.fitted.clear();
+                self.mark_rooms.clear();
             } else if let Some(loaded) = elsewhere()
                 && !ASKED_TO_FIND.replace(true)
                 && !send(Job::Find(loaded))
@@ -423,6 +481,7 @@ impl Fonts {
             if refused != self.refused {
                 self.refused = refused;
                 self.fitted.clear();
+                self.mark_rooms.clear();
                 // Forgets only the files remembered as failed, so they are asked for again.
                 self.font_cx.source_cache.prune(u64::MAX, true);
             }
@@ -464,6 +523,9 @@ impl Fonts {
         box_size: (f32, f32),
         size: f32,
     ) {
+        if self.trying {
+            return;
+        }
         if self.fitted.len() >= MOST_FITTED {
             self.fitted.remove(0);
         }
@@ -472,6 +534,54 @@ impl Fonts {
 }
 
 impl Fonts {
+    /// How these boxes of words were found to make room for the mark before
+    /// ([`MarkRoom`]): `None` when they never were.
+    pub(crate) fn mark_room(&mut self, boxes: &[WordsBox], floor: f32, size: u16) -> Option<Option<(usize, f32)>> {
+        self.catch_up();
+        let at = self.mark_rooms.iter().rposition(|room| {
+            room.floor == floor
+                && room.size == size
+                && room.boxes.len() == boxes.len()
+                && room.boxes.iter().zip(boxes).all(|(kept, now)| kept.is(now))
+        })?;
+        // Used again: moved to the end, so the ones not used for longest are let go first.
+        let found = self.mark_rooms.remove(at);
+        let shorter = found.shorter;
+        self.mark_rooms.push(found);
+        Some(shorter)
+    }
+
+    /// How many slides' rooms for the mark are remembered now.
+    #[cfg(test)]
+    pub(crate) fn mark_rooms_kept(&self) -> usize {
+        self.mark_rooms.len()
+    }
+
+    /// Remembers how these boxes of words make room for the mark.
+    pub(crate) fn remember_mark_room(
+        &mut self,
+        boxes: &[WordsBox],
+        floor: f32,
+        size: u16,
+        shorter: Option<(usize, f32)>,
+    ) {
+        if self.mark_rooms.len() >= MOST_MARK_ROOMS {
+            self.mark_rooms.remove(0);
+        }
+        let boxes = boxes
+            .iter()
+            .map(|b| KeptBox {
+                at: b.at,
+                text: b.text.to_owned(),
+                spans: b.spans.to_vec(),
+                style: b.style.clone(),
+                rect: b.rect,
+                paragraphs: b.paragraphs,
+            })
+            .collect();
+        self.mark_rooms.push(MarkRoom { boxes, floor, size, shorter });
+    }
+
     /// The names of the font families installed on this computer, sorted, with the default
     /// typeface first.
     pub fn family_names(&mut self) -> Vec<String> {

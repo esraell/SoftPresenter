@@ -346,27 +346,33 @@ fn end_mark_place(words: &[(usize, Laid, f32)], floor: f32, look: &sp_model::End
     Some((largest, mark))
 }
 
-/// A slide's box of the song's own words, as it is drawn: its look and its place. `None` for
-/// anything else, and for words turned or flipped (they lie somewhere else than their layout
-/// says: the mark is never put under those).
-fn song_words_box(
-    fonts: &mut Fonts,
+/// A slide's box of the song's own words: its look, and its place as the slide or the theme
+/// gives it (a box that grows round its words is fitted to them when it is drawn: see
+/// [`drawn_place`]). `None` for anything else, and for words turned or flipped (they lie
+/// somewhere else than their layout says: the mark is never put under those).
+fn song_words_box<'a>(
     template: &sp_model::ThemeTemplate,
-    object: &Object,
-) -> Option<(BoxStyle, SlideRect)> {
+    at: usize,
+    object: &'a Object,
+) -> Option<crate::fonts::WordsBox<'a>> {
     let ObjectKind::Text { text, style, spans } = &object.kind else { return None };
     let straight = object.rotation == 0.0 && !object.flip_h && !object.flip_v;
     if object.hidden || !straight || !object.holds_song_words() {
         return None;
     }
-    let look = template.text_style(object.role.as_ref(), style)?;
+    let style = template.text_style(object.role.as_ref(), style)?;
     let rect = object.frame.unwrap_or_else(|| template.place_for(object.role.as_ref()));
-    let rect = if look.scaling == Scaling::ContainerUpOrDown {
-        fitted_container(fonts, text, spans, &look, rect)
+    Some(crate::fonts::WordsBox { at, text, spans, style, rect, paragraphs: object.shown_paragraphs })
+}
+
+/// The place a box of words is drawn in: its own, or for a box set to fit its text, that place
+/// grown or shrunk about its middle to the text's height.
+fn drawn_place(fonts: &mut Fonts, words: &crate::fonts::WordsBox) -> SlideRect {
+    if words.style.scaling == Scaling::ContainerUpOrDown {
+        fitted_container(fonts, words.text, words.spans, &words.style, words.rect)
     } else {
-        rect
-    };
-    Some((look, rect))
+        words.rect
+    }
 }
 
 /// On a last slide too full for the end of a song's mark at its size, even pressed against
@@ -381,8 +387,11 @@ fn song_words_box(
 /// their least size, a box that grows round its words. The mark is then drawn smaller
 /// ([`end_mark_place`]).
 ///
-/// The words are measured as they will be drawn, with nothing drawn; a size fitted once is
-/// remembered, so the same slide drawn again lays each trial out once.
+/// Worked out once for a slide: what it came to is remembered with the fonts
+/// (`Fonts::mark_room`), by the words, their looks and places, the mark's size and `floor`, so
+/// a slide drawn again and again (behind a playing video, in the Program preview) only looks
+/// it up. The words are laid out in the slide's own units, so one answer serves a screen of
+/// any size.
 fn end_mark_shorter_box(
     fonts: &mut Fonts,
     slide: &Slide,
@@ -391,78 +400,115 @@ fn end_mark_shorter_box(
     floor: f32,
     time: f32,
 ) -> Option<(usize, f32)> {
-    let mut boxes = Vec::new();
+    let boxes: Vec<crate::fonts::WordsBox> = slide
+        .objects
+        .iter()
+        .enumerate()
+        .filter_map(|(at, object)| song_words_box(template, at, object))
+        // Words that scroll lie nowhere for long: the mark is never put under them.
+        .filter(|words| words.style.scroll == sp_model::Scroll::None)
+        .collect();
+    if boxes.is_empty() {
+        return None;
+    }
+    if let Some(known) = fonts.mark_room(&boxes, floor, look.size) {
+        return known;
+    }
+    let shorter = find_shorter_box(fonts, slide, &boxes, look, floor, time);
+    fonts.remember_mark_room(&boxes, floor, look.size, shorter);
+    shorter
+}
+
+/// What [`end_mark_shorter_box`] remembers: the words measured as they will be drawn, with
+/// nothing drawn, and the least cut that gives the mark its room looked for.
+fn find_shorter_box(
+    fonts: &mut Fonts,
+    slide: &Slide,
+    boxes: &[crate::fonts::WordsBox],
+    look: &sp_model::EndLook,
+    floor: f32,
+    time: f32,
+) -> Option<(usize, f32)> {
+    let mut places = Vec::new();
     let mut words = Vec::new();
-    for (at, object) in slide.objects.iter().enumerate() {
-        let (ObjectKind::Text { text, spans, .. }, Some((style, rect))) =
-            (&object.kind, song_words_box(fonts, template, object))
-        else {
-            continue;
-        };
-        let (spilt, laid) = measure_text_box(fonts, (text, spans), &style, rect, time, object.shown_paragraphs);
+    for b in boxes {
+        let rect = drawn_place(fonts, b);
+        let (spilt, laid) = measure_text_box(fonts, (b.text, b.spans), &b.style, rect, time, b.paragraphs);
         let Some(laid) = laid else { continue };
-        boxes.push((at, style, rect, spilt));
-        words.push((at, laid, object.opacity));
+        places.push((b, rect, spilt));
+        words.push((b.at, laid, slide.objects.get(b.at).map_or(1.0, |object| object.opacity)));
     }
     if end_mark_fits(&words, floor, look) {
         return None;
     }
-    let (_, (lowest, _, _)) = largest_and_lowest(&words)?;
+    let ((_, sized, _), (lowest, low, _)) = largest_and_lowest(&words)?;
     let place = words.iter().position(|(at, _, _)| *at == lowest)?;
-    let (at, style, rect, spilt) = &boxes[place];
-    let object = slide.objects.get(*at)?;
-    let ObjectKind::Text { text, spans, .. } = &object.kind else { return None };
-    // Words that spill out of their box already, that scroll, or whose box is made to fit them,
-    // have nothing to give.
-    if *spilt || style.scaling == Scaling::ContainerUpOrDown || style.scroll != sp_model::Scroll::None {
+    let (b, rect, spilt) = places[place];
+    // Words that spill out of their box already, or whose box is made to fit them, have
+    // nothing to give.
+    if spilt || b.style.scaling == Scaling::ContainerUpOrDown {
         return None;
     }
+    // How far the mark, at its size and with the least gap, passes the floor as things are.
+    let short_by = low.bottom + sized.size * END_MARK_LEAST_GAP + sized.size * f32::from(look.size) / 100.0 - floor;
+    // The trials' sizes are not remembered: only the one the slide is then drawn at is.
+    fonts.trying = true;
     // Whether the mark has its room with the box this much shorter, the words still inside it.
     let mut fits_with = |cut: f32| {
-        let shorter = SlideRect { h: (rect.h - cut).max(1.0), ..*rect };
-        let (spilt, laid) = measure_text_box(fonts, (text, spans), style, shorter, time, object.shown_paragraphs);
+        let shorter = SlideRect { h: (rect.h - cut).max(1.0), ..rect };
+        let (spilt, laid) = measure_text_box(fonts, (b.text, b.spans), &b.style, shorter, time, b.paragraphs);
         let Some(laid) = laid.filter(|_| !spilt) else { return false };
         let mut trial = words.clone();
         trial[place].1 = laid;
         end_mark_fits(&trial, floor, look)
     };
-    // The least the box is shortened by that gives the room, found by halving between what is
-    // known to be too little and what is known to be enough (the words' size goes down in
-    // steps, so near enough is exact). The most tried is the whole room that is wanting, and
-    // then more, in case words that only moved up must also be made smaller.
+    // The cuts tried, least first. Words in the middle of a box with room to spare move up by
+    // half of what the box loses, and words at its bottom by all of it, so the shortfall and
+    // twice the shortfall come first; then a sixteenth of the box at a time, for words that
+    // must come out smaller, which they do in steps. As the box gets shorter the words' last
+    // line only ever moves up, until they would spill out of it: so the first cut that gives
+    // the room is near the least that does, and halving between it and the one before finds
+    // that. A small cut is never passed over for a large one.
+    let mut cuts: Vec<f32> =
+        [short_by, short_by * 2.0].into_iter().chain((1..=14).map(|n| rect.h * n as f32 / 16.0)).collect();
+    cuts.retain(|cut| *cut > 0.0 && *cut < rect.h);
+    cuts.sort_by(f32::total_cmp);
     let mut too_little = 0.0;
     let mut enough = None;
-    for share in [0.25, 0.5, 0.75] {
-        let cut = rect.h * share;
+    for cut in cuts {
         if fits_with(cut) {
             enough = Some(cut);
             break;
         }
         too_little = cut;
     }
-    let mut enough = enough?;
-    for _ in 0..8 {
-        let middle = (too_little + enough) / 2.0;
-        if fits_with(middle) {
-            enough = middle;
-        } else {
-            too_little = middle;
+    if let Some(enough) = enough.as_mut() {
+        for _ in 0..8 {
+            let middle = (too_little + *enough) / 2.0;
+            if fits_with(middle) {
+                *enough = middle;
+            } else {
+                too_little = middle;
+            }
         }
     }
-    Some((*at, enough))
+    fonts.trying = false;
+    enough.map(|cut| (b.at, cut))
 }
 
 thread_local! {
-    /// Whether a slide drawn on this thread since this was last asked was due the end of a
-    /// song's mark and got none, for want of room ([`take_end_mark_left_out`]).
-    static END_MARK_LEFT_OUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The slide last drawn on this thread that was due the end of a song's mark and got none,
+    /// for want of room, until it is asked for ([`take_end_mark_left_out`]) or the same slide
+    /// is drawn with its mark.
+    static END_MARK_LEFT_OUT: std::cell::Cell<Option<sp_model::Uuid>> = const { std::cell::Cell::new(None) };
 }
 
-/// Whether a slide drawn on this thread since the last call was due the end of a song's mark
-/// and was drawn without it, there being no room for it even at its smallest: for the app to
-/// say so in its log, once.
-pub fn take_end_mark_left_out() -> bool {
-    END_MARK_LEFT_OUT.with(|left_out| left_out.replace(false))
+/// The slide (by its id) that was drawn on this thread since the last call due the end of a
+/// song's mark and without it, there being no room for it even at its smallest: for the app to
+/// say so in its log, once, of that slide, whichever drawing found it (a screen's, the Program
+/// preview's, an NDI picture's).
+pub fn take_end_mark_left_out() -> Option<sp_model::Uuid> {
+    END_MARK_LEFT_OUT.with(|left_out| left_out.replace(None))
 }
 
 /// What drawing a slide's objects came to: whether any text overflowed its box; where the
@@ -640,9 +686,17 @@ fn draw_objects(
         draw_end_mark(scene, fonts, to_target, &look, mark, &theme.end_look);
         end_mark = Some(mark);
     }
-    // Due, with words to go under, and left out for want of room: the app's log says so.
-    if slide.end_mark.is_some() && !slide.words_hidden && end_mark.is_none() && !words.is_empty() {
-        END_MARK_LEFT_OUT.with(|left_out| left_out.set(true));
+    // Due, with words to go under, and left out for want of room: the app's log says so, of
+    // this slide. Drawn with its mark after all (another theme's screen, another floor), it
+    // has nothing to say.
+    if slide.end_mark.is_some() && !slide.words_hidden && !words.is_empty() {
+        END_MARK_LEFT_OUT.with(|left_out| {
+            if end_mark.is_none() {
+                left_out.set(Some(slide.id));
+            } else if left_out.get() == Some(slide.id) {
+                left_out.set(None);
+            }
+        });
     }
     Painted { overflow, words, end_mark }
 }
@@ -2475,11 +2529,15 @@ mod tests {
                             let least = themed.templates[0].boxes[0].min_size;
                             assert!(laid.size <= before.size + 0.01 && laid.size >= least - 0.01, "{said}: {laid:?}");
                             assert!(laid.top >= 60.0 - 0.01 && !on.overflow, "{said}: {laid:?}");
-                            // No smaller than they need be: nearly all the room is used (their
-                            // size goes down in steps of 4%, the box in steps of its halving).
-                            if laid.size < before.size - 0.01 {
+                            // No smaller, and no higher, than they need be: the room left over
+                            // is no more than one step of their size frees (4% of their block).
+                            if laid != before {
                                 let spare = floor - (laid.bottom + 0.25 * laid.size + drawn.size);
-                                assert!(spare < 0.12 * before.size * n as f32, "{said}: {spare} to spare");
+                                let step = 0.04 * (laid.bottom - laid.top) + 2.0;
+                                assert!(
+                                    (-0.01..step).contains(&spare),
+                                    "{said}: {spare} to spare, a step frees {step}"
+                                );
                             }
                             if place == sp_model::EndPlace::Bottom {
                                 assert!((drawn.top + drawn.size - floor).abs() < 0.01, "{said}: {drawn:?}");
@@ -2550,7 +2608,7 @@ mod tests {
             assert!(moved.top < laid.top && moved.top >= 60.0, "{scaling:?}: higher, inside the box: {moved:?}");
             assert!((mark.size - 0.8 * laid.size).abs() < 0.01, "{scaling:?}: {mark:?}");
             assert!(mark.top + mark.size <= floor + 0.01 && mark.top >= moved.bottom + 0.25 * moved.size - 0.01);
-            assert!(!on.overflow && !take_end_mark_left_out());
+            assert!(!on.overflow && take_end_mark_left_out().is_none());
         }
     }
 
@@ -2581,7 +2639,7 @@ mod tests {
             assert_eq!(on.words, off.words, "{said}: the words keep their size and place");
             assert!((mark.size - 0.6 * laid.size).abs() < 0.01, "{said}: {mark:?}");
             assert!((mark.top - (laid.bottom + quarter)).abs() < 0.01, "{said}: {mark:?}");
-            assert!(!take_end_mark_left_out());
+            assert!(take_end_mark_left_out().is_none());
             // Down to 40% of the words' size, to a hair; less room than that, and it is left
             // out, and that is noted for the log.
             let least = laid.bottom + quarter + 0.4 * laid.size;
@@ -2589,11 +2647,126 @@ mod tests {
             assert!(on.end_mark.is_some_and(|mark| (mark.size - 0.4 * laid.size).abs() < 0.02), "{said}");
             let on = drawn_with_mark(&song, &theme, Some(least - 0.01));
             assert_eq!((on.end_mark, &on.words), (None, &off.words), "{said}");
-            assert!(take_end_mark_left_out() && !take_end_mark_left_out(), "{said}: noted once");
+            assert_eq!(take_end_mark_left_out(), Some(song.id), "{said}: noted, of this slide");
+            assert_eq!(take_end_mark_left_out(), None, "{said}: noted once");
+            // Drawn again with room, before anyone asked: it has nothing to say any more.
+            drawn_with_mark(&song, &theme, Some(least - 0.01));
+            drawn_with_mark(&song, &theme, Some(FLOOR + 400.0));
+            assert_eq!(take_end_mark_left_out(), None, "{said}: it fits after all");
             // A theme that asks for a mark of 40% keeps it at that where there is the room.
             let small = Theme { end_look: sp_model::EndLook { size: 40, ..Default::default() }, ..theme.clone() };
             let on = drawn_with_mark(&song, &small, Some(least + 0.01));
             assert!(on.end_mark.is_some_and(|mark| (mark.size - 0.4 * laid.size).abs() < 0.01), "{said}");
+        }
+    }
+
+    #[test]
+    fn a_small_cut_is_found_where_a_large_one_would_spill() {
+        // Eight lines that fill a tall box, in a theme whose words may get only a little
+        // smaller: one step of 4%, and not two. That step gives the mark its room; a box cut
+        // by a quarter would need the words far smaller than they may be, and spill.
+        let song = slide(&lines(8), None);
+        let (_, before, _) = drawn_with_mark(&song, &tall(Scaling::TextDown), None).words[0];
+        let mut theme = tall(Scaling::TextDown);
+        for template in &mut theme.templates {
+            for look in &mut template.boxes {
+                look.min_size = before.size * 0.95;
+            }
+        }
+        let on = drawn_with_mark(&song, &theme, Some(FLOOR));
+        let (mark, (_, laid, _)) = (on.end_mark.expect("the mark"), on.words[0]);
+        assert!((laid.size - 0.96 * before.size).abs() < 0.01, "one step smaller: {} from {}", laid.size, before.size);
+        assert!((mark.size - 0.8 * laid.size).abs() < 0.01, "at its own size, not a smaller one: {mark:?}");
+        assert!(!on.overflow && mark.top + mark.size <= FLOOR + 0.01);
+        // Words with room to spare move up by just what is wanting, to a hair: no step of
+        // sixteenths is taken where less does.
+        let theme = tall(Scaling::None);
+        let short = slide(&lines(4), None);
+        let (_, before, _) = drawn_with_mark(&short, &theme, None).words[0];
+        for wanting in [3.0, 17.0, 41.0, 90.0] {
+            let floor = before.bottom + 0.25 * before.size + 0.8 * before.size - wanting;
+            let on = drawn_with_mark(&short, &theme, Some(floor));
+            let (mark, (_, laid, _)) = (on.end_mark.expect("the mark"), on.words[0]);
+            let moved = before.bottom - laid.bottom;
+            assert!(
+                laid.size == before.size && moved >= wanting - 0.01 && moved < wanting + 1.0,
+                "{wanting}: moved {moved}"
+            );
+            assert!((mark.size - 0.8 * laid.size).abs() < 0.01 && mark.top + mark.size <= floor + 0.01, "{mark:?}");
+        }
+    }
+
+    #[test]
+    fn how_the_words_make_room_is_worked_out_once_and_never_stale() {
+        let theme = tall(Scaling::TextDown);
+        let song = Slide { end_mark: Some(FLOOR), ..slide(&lines(8), None) };
+        let mut fonts = Fonts::new();
+        let draw = |fonts: &mut Fonts, slide: &Slide, theme: &Theme| {
+            let painted = draw_objects(&mut Scene::new(), fonts, Affine::IDENTITY, slide, theme, 0.0);
+            (painted.words, painted.end_mark)
+        };
+        // Drawn again, it comes to the same, with nothing fitted anew (no trial is left
+        // switched on, and the answer is the remembered one).
+        let first = draw(&mut fonts, &song, &theme);
+        let rooms = fonts.mark_rooms_kept();
+        assert_eq!(rooms, 1);
+        for _ in 0..3 {
+            assert_eq!(draw(&mut fonts, &song, &theme), first);
+        }
+        assert!(!fonts.trying && fonts.mark_rooms_kept() == rooms, "looked up, not worked out again");
+        // Another floor, another size of mark, other words, another look: each its own answer,
+        // the same as fonts that never drew anything give.
+        let fresh = |slide: &Slide, theme: &Theme| draw(&mut Fonts::new(), slide, theme);
+        let lower = Slide { end_mark: Some(OVER_THE_COPYRIGHT_LINE), ..song.clone() };
+        let big = Theme { end_look: sp_model::EndLook { size: 160, ..Default::default() }, ..theme.clone() };
+        let other = Slide { end_mark: Some(FLOOR), ..slide(&lines(10), None) };
+        let fixed = tall(Scaling::None);
+        for (slide, theme) in [(&lower, &theme), (&song, &big), (&other, &theme), (&song, &fixed), (&song, &theme)] {
+            assert_eq!(draw(&mut fonts, slide, theme), fresh(slide, theme));
+        }
+        assert_ne!(draw(&mut fonts, &lower, &theme), first, "a lower floor is another answer");
+        // Many themes and slides: the oldest answers are let go, and what is drawn is right.
+        for n in 5..40 {
+            let slide = Slide { end_mark: Some(FLOOR), ..slide(&lines(8 + n % 5), None) };
+            let mut theme = tall(Scaling::TextDown);
+            for template in &mut theme.templates {
+                for look in &mut template.boxes {
+                    look.rect.y += n as f32;
+                }
+            }
+            assert_eq!(draw(&mut fonts, &slide, &theme), fresh(&slide, &theme), "theme {n}");
+        }
+        assert!(fonts.mark_rooms_kept() <= 16);
+        assert_eq!(draw(&mut fonts, &song, &theme), first, "worked out again after it was let go");
+    }
+
+    /// How long drawing a steady last slide takes with the mark and without, the same slide
+    /// drawn again and again as behind a playing video. Run by hand, with the optimiser:
+    /// `cargo test --release -p sp-render --lib the_marks_cost -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a measurement, not a check: it prints times"]
+    fn the_marks_cost_on_a_steady_slide() {
+        let two = "Light rises over the quiet hills\nAnd the morning sings again\nEvery field is bright with rain\nEvery road is new";
+        let cases = [
+            ("8 lines, tall box", slide(&lines(8), None), tall(Scaling::TextDown)),
+            ("two languages, built-in", slide(two, Some(two)), Theme::builtin()),
+            ("8 lines, built-in (room as it is)", slide(&lines(8), None), Theme::builtin()),
+        ];
+        for (name, song, theme) in cases {
+            let mut fonts = Fonts::new();
+            let mut time = |floor: Option<f32>| {
+                let slide = Slide { end_mark: floor, ..song.clone() };
+                for _ in 0..50 {
+                    draw_objects(&mut Scene::new(), &mut fonts, Affine::IDENTITY, &slide, &theme, 0.0);
+                }
+                let started = std::time::Instant::now();
+                for _ in 0..2000 {
+                    draw_objects(&mut Scene::new(), &mut fonts, Affine::IDENTITY, &slide, &theme, 0.0);
+                }
+                started.elapsed().as_secs_f64() * 1000.0 / 2000.0
+            };
+            let (without, with) = (time(None), time(Some(OVER_THE_COPYRIGHT_LINE)));
+            println!("{name}: {without:.3} ms without the mark, {with:.3} ms with it");
         }
     }
 

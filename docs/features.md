@@ -2402,7 +2402,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     and place with it on or off. It comes to the screens with the slide (`Frame::end_mark`), so it goes on and off with
     the slide's own transition. On a slide with builds it comes once every build has played:
     after the last lines a click brings, never over words still coming in.
-  - **On a full last slide** the mark always has a place (the window says so: "On a full last
+  - **On a full last slide** the mark has a place wherever there is room for its smallest (the window says so: "On a full last
     slide the mark moves down, as far as the screen allows. If there is still no room, the
     words are made a little smaller for it, or the mark is."), found in this order:
     1. It moves down: under the last line it may lie below the words' box, as far as the
@@ -2419,6 +2419,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
        smaller, in the room there is, down to 40% of the words' size.
     4. With less room than that it is left out, and the log says so once for the slide
        (`[screens] the end of a song's mark was left out…`).
+    How a slide's words make room is worked out once and remembered with the fonts
+    (`Fonts::mark_room`: by the words, their looks and places, the mark's size and how low it
+    may go; the same for a screen of any size), so a slide drawn again and again behind a
+    playing video only looks it up. Known and left as it is: on a slide with builds the mark
+    comes once every build has played, and where the words then make room for it they take
+    their new place and size at once, with no movement of their own.
     The same holds for a mark at the bottom of the screen, which is drawn wherever it clears
     the words (it used to be left out whenever the place under the last line had no room).
   - **Never.** On a song that loops; on what the app makes (a Bible passage, VoxLive's

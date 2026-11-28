@@ -763,8 +763,10 @@ pub struct Slide {
     pub words_hidden: bool,
     /// The end of a song's mark is drawn under its words, on a layer of its own, wherever the
     /// screen's theme puts and fits them: this is how far down the slide the mark may reach, in
-    /// slide units, and with no room above it the mark is left out. The words are laid out as
-    /// ever. Set on the copy the audience screens draw, never saved.
+    /// slide units. On a slide too full for it above that, the words make room (they move up
+    /// in their box, or are fitted a little smaller), or else the mark is drawn smaller; only
+    /// with no room even for its smallest is it left out. On a slide with room the words are
+    /// laid out as ever. Set on the copy the audience screens draw, never saved.
     #[serde(skip)]
     pub end_mark: Option<f32>,
 }

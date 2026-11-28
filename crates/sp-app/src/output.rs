@@ -1566,8 +1566,8 @@ struct Output {
     identify: Vec<(Uuid, Arc<Slide>, sp_model::Rgba)>,
     identify_since: Instant,
     identify_theme: Arc<Theme>,
-    /// The slide last drawn without the end of a song's mark for want of room, so the log says
-    /// it once.
+    /// The slide whose end of a song's mark the log has said was left out for want of room, so
+    /// it says so once while that slide is up.
     end_mark_left_out: Option<Uuid>,
     /// The screens switched off that go on sending: drawn black (see `OutputMsg::Dark`).
     dark: Vec<Uuid>,
@@ -2004,6 +2004,8 @@ fn run(
                     }
                     let going = going_on(&output.frame, &frame);
                     if going.new_slide {
+                        // Another slide: a mark left out is said again should it come back.
+                        output.end_mark_left_out = None;
                         // Builds that start with the slide wait for its transition to end.
                         output.slide_on = now + Duration::from_secs_f32(frame.transition.duration());
                         output.step_at = now;
@@ -2212,18 +2214,19 @@ fn run(
             }
         } else {
             output.draw(new_picture);
-            // A last slide drawn without the end of a song's mark, for want of room even at
-            // its smallest: said once for the slide.
-            if sp_render::take_end_mark_left_out() {
-                let slide = output.frame.slide.as_ref().map(|slide| slide.id);
-                if slide.is_some() && output.end_mark_left_out != slide {
-                    crate::applog::event(
-                        "screens",
-                        "the end of a song's mark was left out: no room under the words of the last slide, even at its smallest",
-                    );
-                }
-                output.end_mark_left_out = slide;
-            }
+        }
+        // A last slide drawn without the end of a song's mark, for want of room even at its
+        // smallest, in whichever drawing above found it (the windows', the Program preview's
+        // alone, the NDI pictures' alone): said once, of that slide. The renderer's note names
+        // the slide, and is withdrawn if the slide is then drawn with its mark.
+        if let Some(slide) = sp_render::take_end_mark_left_out()
+            && output.end_mark_left_out != Some(slide)
+        {
+            crate::applog::event(
+                "screens",
+                "the end of a song's mark was left out: no room under the words of the last slide, even at its smallest",
+            );
+            output.end_mark_left_out = Some(slide);
         }
         // A window whose X is to look different, and wasn't drawn just now, is shown again;
         // so is one that was passed over, now that its next picture has come.
