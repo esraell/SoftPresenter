@@ -9872,6 +9872,10 @@ impl App {
             if running.ndi_checked.is_none() || found != running.home_state.ndi_available {
                 applog::event("ndi", if found { "the NDI runtime was found" } else { "the NDI runtime was not found" });
             }
+            // A runtime in the app's own folder that was passed over is said in the log, once.
+            for why in sp_ndi::take_skipped() {
+                applog::problem("ndi", &why);
+            }
             // (A made-up state shown for a picture says for itself whether NDI is here.)
             let found = running.home_state.ndi_download.demo_found().unwrap_or(found);
             running.home_state.ndi_available = found;

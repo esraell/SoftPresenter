@@ -412,9 +412,63 @@ mod places_tests {
 
 /// Opens the first runtime found in `places` and starts it.
 fn open(places: &[PathBuf]) -> Result<Runtime, String> {
-    let Some(path) = first_trusted(places, OWN_FOLDER.get().map(PathBuf::as_path), OWN_CHECK.get(), true) else {
-        return Err(NOT_INSTALLED.to_owned());
-    };
+    open_first(places, OWN_FOLDER.get().map(PathBuf::as_path), OWN_CHECK.get(), open_at, &mut note_skipped)
+}
+
+/// Why runtimes in the app's own folder were passed over, for the app to put in its log.
+static SKIPPED: Mutex<(Vec<String>, String)> = Mutex::new((Vec::new(), String::new()));
+
+/// Notes why a runtime in the app's own folder was passed over, once for each reason in a row.
+fn note_skipped(why: String) {
+    if let Ok(mut skipped) = SKIPPED.lock()
+        && skipped.1 != why
+    {
+        skipped.1.clone_from(&why);
+        skipped.0.push(why);
+    }
+}
+
+/// Why runtimes in the app's own folder were passed over since this was last asked, each said
+/// once: for the app's log.
+pub fn take_skipped() -> Vec<String> {
+    SKIPPED.lock().map(|mut skipped| std::mem::take(&mut skipped.0)).unwrap_or_default()
+}
+
+/// Opens (with `load`) the first of `places` that is a file. A runtime in the app's own folder
+/// must pass the check first, and one there that doesn't pass, or can't be opened, is passed
+/// over with its reason told to `skipped`, and the next place is tried: a bad file in the
+/// app's folder never stands in the way of a good NDI the computer has. Any other runtime that
+/// can't be opened is the answer, as before.
+fn open_first<R>(
+    places: &[PathBuf],
+    own: Option<&Path>,
+    check: Option<&OwnCheck>,
+    load: impl Fn(&Path) -> Result<R, String>,
+    skipped: &mut dyn FnMut(String),
+) -> Result<R, String> {
+    for path in places.iter().filter(|path| path.is_file()) {
+        let is_own = own.is_some_and(|own| path.starts_with(own));
+        if is_own
+            && let Some(check) = check
+            && check(path, true) != Some(true)
+        {
+            skipped(format!(
+                "the NDI at {} is not the one SoftPresenter installed, so it was not opened",
+                path.display()
+            ));
+            continue;
+        }
+        match load(path) {
+            Ok(runtime) => return Ok(runtime),
+            Err(why) if is_own => skipped(why),
+            Err(why) => return Err(why),
+        }
+    }
+    Err(NOT_INSTALLED.to_owned())
+}
+
+/// Opens the runtime at `path`.
+fn open_at(path: &Path) -> Result<Runtime, String> {
     // SAFETY: the file is NDI's runtime, found where NDI installs it, where the operator's
     // NDI_RUNTIME_DIR_V6 points, or in the app's own folder where the app put it, taken unchanged
     // from NDI's own download once the operator accepted NDI's licence, and checked just now to
@@ -481,7 +535,7 @@ fn open(places: &[PathBuf]) -> Result<Runtime, String> {
     .and_then(version_of);
     Ok(Runtime {
         _library: library,
-        path: path.clone(),
+        path: path.to_path_buf(),
         version,
         send_create,
         send_destroy,
@@ -895,6 +949,43 @@ mod tests {
         assert_eq!(*asked.lock().unwrap(), [(places[0].clone(), true)]);
         // With no check given (a system that keeps nothing there), nothing changes.
         assert_eq!(first(None, false), Some(places[0].clone()));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_bad_runtime_in_the_apps_folder_never_stands_in_the_way_of_the_computers_own() {
+        let folder = std::env::temp_dir().join(format!("softpresenter-ndi-fall-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let (own, system) = (folder.join("own"), folder.join("system"));
+        for place in [&own, &system] {
+            std::fs::create_dir_all(place).unwrap();
+            std::fs::write(place.join("libndi"), b"a stand-in").unwrap();
+        }
+        let places = vec![own.join("libndi"), system.join("libndi")];
+        let passes: OwnCheck = Box::new(|_: &Path, _: bool| Some(true));
+        let refuses: OwnCheck = Box::new(|_: &Path, _: bool| Some(false));
+        let loads = |path: &Path| Ok::<PathBuf, String>(path.to_path_buf());
+        let own_breaks = |path: &Path| {
+            if path.starts_with(&own) { Err("it could not be opened".to_owned()) } else { Ok(path.to_path_buf()) }
+        };
+        let mut said = Vec::new();
+        // Good: the app's own is opened, and nothing is said.
+        let opened = open_first(&places, Some(&own), Some(&passes), loads, &mut |why| said.push(why));
+        assert_eq!((opened, said.len()), (Ok(places[0].clone()), 0));
+        // Refused by the check: never loaded, the computer's own is opened, and it is said why.
+        let opened = open_first(&places, Some(&own), Some(&refuses), loads, &mut |why| said.push(why));
+        assert_eq!(opened, Ok(places[1].clone()));
+        assert!(said.pop().unwrap().contains("not the one SoftPresenter installed"));
+        // Passed the check but can't be opened: the same.
+        let opened = open_first(&places, Some(&own), Some(&passes), own_breaks, &mut |why| said.push(why));
+        assert_eq!(opened, Ok(places[1].clone()));
+        assert_eq!(said.pop().as_deref(), Some("it could not be opened"));
+        // With no other NDI on the computer, NDI isn't installed.
+        let opened = open_first(&places[..1], Some(&own), Some(&refuses), loads, &mut |why| said.push(why));
+        assert_eq!(opened, Err(NOT_INSTALLED.to_owned()));
+        // The computer's own NDI failing is still said as it is: nothing stands behind it.
+        let breaks = |_: &Path| Err::<PathBuf, String>("too old".to_owned());
+        assert_eq!(open_first(&places[1..], Some(&own), Some(&passes), breaks, &mut |_| {}), Err("too old".to_owned()));
         let _ = std::fs::remove_dir_all(&folder);
     }
 
