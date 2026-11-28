@@ -2502,6 +2502,7 @@ impl HomeState {
     /// Escape closes only the thing on top.
     pub fn escape_taken_above_find(&self, ctx: &egui::Context) -> bool {
         egui::Popup::is_any_open(ctx)
+            || self.inspector.panel.is_some()
             || self.key_sheet
             || crate::end_look::over_the_operators_window(self)
             || self.alert_open()
@@ -15379,6 +15380,105 @@ mod tests {
         frame_events(&ctx, &show, &mut state, pressed(Key::Z, Modifiers::COMMAND), time);
         assert_eq!(state.song_undo, Some(false), "Undo asks the app to put the song's groups back");
         assert_eq!(state.edit_redo, [EditStep::Song], "and Redo can change the group again");
+    }
+
+    /// The controls that took a click in the frame `ctx` drew last, on the line of `caption`
+    /// (the middle of a row's caption) and right of it, left to right.
+    fn keys_beside(ctx: &egui::Context, caption: egui::Pos2) -> Vec<Rect> {
+        let mut keys = Vec::new();
+        ctx.viewport(|viewport| {
+            for (_, rects) in viewport.prev_pass.widgets.layers() {
+                keys.extend(rects.iter().filter(|widget| widget.sense.senses_click()).map(|widget| widget.rect));
+            }
+        });
+        keys.retain(|key| key.min.x > caption.x + 20.0 && key.y_range().contains(caption.y) && key.height() < 40.0);
+        keys.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
+        keys.dedup();
+        keys
+    }
+
+    #[test]
+    fn a_colour_behind_a_text_box_is_the_drafts_change_and_undo_takes_it_back() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let (show, mut state) = song_open(&[("Verse 1", 1)], 0);
+            if let Some(draft) = state.editing.as_mut() {
+                let first = draft.slide.objects.first().map(|object| object.id);
+                draft.select_only(first);
+            }
+            let fill = |state: &HomeState| {
+                state.editing.as_ref().and_then(|draft| draft.selected_object()).and_then(|object| object.fill)
+            };
+            let (ctx, mut time) = (egui::Context::default(), 0.0);
+            frame_events(&ctx, &show, &mut state, Vec::new(), time);
+            let caption = home_place(&ctx, &show, &mut state, "BEHIND", time);
+            // None, then white, on the Text tab's Behind row.
+            let keys = keys_beside(&ctx, caption);
+            assert!(keys.len() >= 11, "{keys:?}");
+            assert_eq!(fill(&state), None);
+            click_at(&ctx, &show, &mut state, keys[1].center(), &mut time);
+            assert_eq!(fill(&state), Some(Rgba { r: 255, g: 255, b: 255, a: 160 }), "the box's own fill");
+            assert!(state.editing.as_ref().is_some_and(EditDraft::can_undo), "kept as a step to undo");
+            time += 0.1;
+            frame_events(&ctx, &show, &mut state, pressed(Key::Z, Modifiers::COMMAND), time);
+            assert_eq!(fill(&state), None, "Undo takes the colour away again");
+        });
+    }
+
+    #[test]
+    fn the_text_tab_fits_a_window_of_1100_by_700_without_scrolling_in_every_language() {
+        fn walk(shape: &egui::Shape, words: &str, found: &mut Option<Rect>) {
+            match shape {
+                egui::Shape::Text(text) if text.galley.text() == words => {
+                    *found = Some(Rect::from_min_size(text.pos, text.galley.size()));
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, words, found)),
+                _ => {}
+            }
+        }
+        use crate::i18n::Language;
+        for language in [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian] {
+            crate::i18n::with_language(language, || {
+                for select in [false, true] {
+                    let (show, mut state) = song_open(&[("Verse 1", 1)], 0);
+                    if let Some(draft) = state.editing.as_mut() {
+                        let first = draft.slide.objects.first().map(|object| object.id);
+                        draft.select_only(first);
+                        if select {
+                            draft.typing = first;
+                            draft.typing_range = Some((0, 5));
+                        }
+                    }
+                    let ctx = egui::Context::default();
+                    // The key at the tab's foot is drawn whole, inside what the column shows.
+                    let foot = t("inspector.text.copy_style", "Copy style");
+                    let mut seen = None;
+                    for frame in 0..3 {
+                        let raw = RawInput {
+                            screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1100.0, 700.0))),
+                            time: Some(f64::from(frame) * 0.1),
+                            ..RawInput::default()
+                        };
+                        let output = ctx.run_ui(raw, |ui| {
+                            home_ui(ui, &show, &mut state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+                        });
+                        seen = None;
+                        for clipped in &output.shapes {
+                            let mut found = None;
+                            walk(&clipped.shape, foot, &mut found);
+                            if let Some(words) = found {
+                                seen = Some((words, clipped.clip_rect));
+                            }
+                        }
+                        output.drop_without_applying_deltas();
+                    }
+                    let (words, shown) = seen.unwrap_or_else(|| panic!("{language:?}: {foot} is drawn"));
+                    assert!(
+                        words.max.y <= shown.max.y && words.max.y <= 700.0,
+                        "{language:?}, words selected {select}: the tab's foot at {words:?} is past {shown:?}"
+                    );
+                }
+            });
+        }
     }
 
     #[test]

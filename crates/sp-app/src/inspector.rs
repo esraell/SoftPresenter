@@ -70,6 +70,33 @@ pub struct InspectorState {
     /// picture (one saved with a gradient by an older version): the rows stay while the same
     /// boxes are picked, though Gradient is then set to None, so no row under them moves.
     pub gradient_rows_for: Vec<sp_model::Uuid>,
+    /// The small panel open over the rows, if one is (see [`Panel`]), and the tab and the boxes
+    /// it was opened for: another tab or another pick closes it.
+    pub panel: Option<Panel>,
+    pub panel_for: (InspectorTab, Vec<sp_model::Uuid>),
+}
+
+/// What is set once and then left alone opens from a key on its own row, as a small panel laid
+/// over the rows under it (or over those above it): no row moves or changes size when one opens.
+/// One is open at a time; its key again, its ×, a click outside it or Escape closes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Panel {
+    /// The words' colour running to a second one: from the last swatch of the Text tab's Colour.
+    TextGradient,
+    /// The words' outline: its width and colour.
+    TextOutline,
+    /// The words' shadow: its throw, opacity and colour.
+    TextShadow,
+    /// The box's margins, and the room after a paragraph and under the baseline.
+    Spacing,
+    /// How the lines are broken, their bullets, scrolling, and the band behind them.
+    Lines,
+    /// The box's own colour running to a second one: from the last swatch of Behind.
+    BehindGradient,
+    /// The line round a box: its width and colour (the Box tab).
+    BoxOutline,
+    /// The shadow under a box: its throw, opacity and colour (the Box tab).
+    BoxShadow,
 }
 
 /// A web page box's address field, as the Edit view's Delete and Undo need it.
@@ -276,6 +303,14 @@ fn align_mark(painter: &egui::Painter, cell: Rect, which: usize, ink: Color32) {
     }
 }
 
+/// A place `width` wide and a key tall in a row, for a menu: one whose words are cut short may
+/// draw a hair wider than it is asked to be, and what follows it in the row stays where it
+/// should.
+fn fixed<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let (place, _) = ui.allocate_exact_size(vec2(width, KEY), Sense::hover());
+    ui.scope_builder(egui::UiBuilder::new().max_rect(place).layout(Layout::left_to_right(Align::Center)), add).inner
+}
+
 /// A tick box with a bold title, as each group of options starts with.
 fn tick(ui: &mut egui::Ui, on: &mut bool, title: &str) -> egui::Response {
     ui.checkbox(on, egui::RichText::new(title).size(13.0).strong().color(INK))
@@ -284,15 +319,17 @@ fn tick(ui: &mut egui::Ui, on: &mut bool, title: &str) -> egui::Response {
 /// A pop-up list showing its current choice.
 fn choice<T: PartialEq + Copy>(ui: &mut egui::Ui, salt: &str, width: f32, value: &mut T, options: &[(T, &str)]) {
     let shown = options.iter().find(|(v, _)| v == value).map_or("", |(_, name)| name);
-    egui::ComboBox::from_id_salt(salt)
-        .selected_text(shown)
-        .width(width)
-        .wrap_mode(egui::TextWrapMode::Truncate)
-        .show_ui(ui, |ui| {
-            for (option, name) in options {
-                ui.selectable_value(value, *option, *name);
-            }
-        });
+    fixed(ui, width, |ui| {
+        egui::ComboBox::from_id_salt(salt)
+            .selected_text(shown)
+            .width(width)
+            .wrap_mode(egui::TextWrapMode::Truncate)
+            .show_ui(ui, |ui| {
+                for (option, name) in options {
+                    ui.selectable_value(value, *option, *name);
+                }
+            });
+    });
 }
 
 /// The colours in the grid at the top of every colour pop-up: greys,
@@ -403,14 +440,15 @@ fn control_room(column: f32) -> f32 {
 
 /// One row of an object's tab: its caption in small capitals at the left, in a column `column`
 /// wide, then its controls, [`KEY`] tall.
-fn row(ui: &mut egui::Ui, column: f32, caption: &str, add: impl FnOnce(&mut egui::Ui)) {
-    row_tall(ui, column, caption, KEY, add);
+fn row(ui: &mut egui::Ui, column: f32, caption: &str, add: impl FnOnce(&mut egui::Ui)) -> Rect {
+    row_tall(ui, column, caption, KEY, add)
 }
 
-/// A [`row`] `tall` points tall, its controls standing on its foot.
-fn row_tall(ui: &mut egui::Ui, column: f32, caption: &str, tall: f32, add: impl FnOnce(&mut egui::Ui)) {
+/// A [`row`] `tall` points tall, its controls standing on its foot. Returns where it is, across
+/// the whole column, for a panel to open against.
+fn row_tall(ui: &mut egui::Ui, column: f32, caption: &str, tall: f32, add: impl FnOnce(&mut egui::Ui)) -> Rect {
     let width = ui.available_width();
-    ui.allocate_ui_with_layout(vec2(width, tall), Layout::left_to_right(Align::Max), |ui| {
+    let drawn = ui.allocate_ui_with_layout(vec2(width, tall), Layout::left_to_right(Align::Max), |ui| {
         ui.spacing_mut().item_spacing.x = BETWEEN;
         let (cell, over) = ui.allocate_exact_size(vec2(column, tall), Sense::hover());
         // A caption longer than the widest column is cut short with "…", never drawn under the
@@ -425,6 +463,7 @@ fn row_tall(ui: &mut egui::Ui, column: f32, caption: &str, tall: f32, add: impl 
         ui.add_space(CAPTION_GAP - BETWEEN);
         add(ui);
     });
+    whole_row(ui, drawn.response.rect)
 }
 
 /// The line that says what the rows under it change: a title in small capitals, in ink, and a
@@ -783,8 +822,241 @@ fn swatches_row(
     caption: &str,
     look: &Swatches,
     add: impl FnOnce(&mut egui::Ui, &Swatches),
+) -> Rect {
+    row_tall(ui, column, caption, swatch_side(look).0, |ui| add(ui, look))
+}
+
+/// The room between a panel's edge and its rows.
+const PANEL_PAD: f32 = 10.0;
+
+/// The room a panel's row has for its controls after a caption column `column` wide.
+fn panel_room(column: f32) -> f32 {
+    PANEL_WIDTH - 2.0 * PANEL_PAD - column - CAPTION_GAP
+}
+
+/// The whole width of the row just drawn, for a panel to open against.
+fn whole_row(ui: &egui::Ui, row: Rect) -> Rect {
+    let across = ui.max_rect().x_range();
+    Rect::from_x_y_ranges(across, row.y_range())
+}
+
+/// The key that opens a panel: three dots, lit while its panel is open, with a small dot in the
+/// accent colour while something inside is not as it comes (`changed`), so a setting out of
+/// sight is never a surprise.
+fn more_key(ui: &mut egui::Ui, open: &mut Option<Panel>, which: Panel, hint: &str, changed: bool) -> egui::Response {
+    let on = *open == Some(which);
+    let key = square_key(ui, KEY, (on, false), hint, |painter, cell, ink| {
+        let c = cell.center();
+        for step in [-5.0, 0.0, 5.0] {
+            painter.circle_filled(pos2(c.x + step, c.y), 1.5, ink);
+        }
+        if changed {
+            painter.circle_filled(pos2(cell.max.x - 6.0, cell.min.y + 6.0), 2.5, crate::studio::TALLY);
+        }
+    });
+    key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, hint));
+    if key.clicked() {
+        *open = if on { None } else { Some(which) };
+    }
+    key
+}
+
+/// A switch with the key to its look joined to it: `words` switches it on or off, and the dots
+/// beside it open `which`. Returns true when the switch was clicked.
+fn switch_with_more(
+    ui: &mut egui::Ui,
+    open: &mut Option<Panel>,
+    which: Panel,
+    (words, on): (&str, bool),
+    hint: &str,
+) -> bool {
+    let between = ui.spacing().item_spacing.x;
+    ui.spacing_mut().item_spacing.x = 1.0;
+    let clicked = word_key(ui, words, on, true).clicked();
+    ui.spacing_mut().item_spacing.x = between;
+    more_key(ui, open, which, hint, false);
+    clicked
+}
+
+/// The last swatch of a row that can run to a second colour: a ramp (the two colours, when
+/// there is a gradient; else grey to dark), ringed while a gradient is on. It opens the
+/// gradient's panel.
+fn ramp_swatch(
+    ui: &mut egui::Ui,
+    side: f32,
+    open: &mut Option<Panel>,
+    which: Panel,
+    ends: Option<(Rgba, Rgba)>,
+) -> egui::Response {
+    let (cell, key) = ui.allocate_exact_size(vec2(side, side), Sense::click());
+    let (from, to) = ends.map_or((Color32::from_gray(210), Color32::from_gray(40)), |(a, b)| {
+        (to_color32(Rgba { a: 255, ..a }), to_color32(Rgba { a: 255, ..b }))
+    });
+    let painter = ui.painter();
+    // The ramp as bands from one colour to the other, top to bottom.
+    const BANDS: usize = 6;
+    for band in 0..BANDS {
+        let part = band as f32 / (BANDS - 1) as f32;
+        let mix = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * part).round() as u8;
+        let colour = Color32::from_rgb(mix(from.r(), to.r()), mix(from.g(), to.g()), mix(from.b(), to.b()));
+        let top = cell.min.y + cell.height() * band as f32 / BANDS as f32;
+        let foot = cell.min.y + cell.height() * (band + 1) as f32 / BANDS as f32;
+        let corner = |at: usize| if band == at { 5 } else { 0 };
+        let corners = egui::CornerRadius { nw: corner(0), ne: corner(0), sw: corner(BANDS - 1), se: corner(BANDS - 1) };
+        painter.rect_filled(Rect::from_min_max(pos2(cell.min.x, top), pos2(cell.max.x, foot)), corners, colour);
+    }
+    painter.rect_stroke(cell, 5.0, Stroke::new(1.0, crate::studio::LINE), egui::StrokeKind::Inside);
+    if ends.is_some() || *open == Some(which) {
+        paint_chosen(painter, cell);
+    }
+    let hint = t("inspector.gradient.more", "Gradient\u{2026}");
+    key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, hint));
+    if key.clicked() {
+        *open = if *open == Some(which) { None } else { Some(which) };
+    }
+    key.on_hover_text(hint)
+}
+
+/// The room a row of `cells` swatches has, and each one's side, when one more swatch (the ramp)
+/// follows them in `room`.
+fn room_before_ramp(room: f32, cells: usize, most: f32) -> (f32, f32) {
+    let with_ramp = cells as f32 + 1.0;
+    let side = ((room - BETWEEN * (with_ramp - 1.0)) / with_ramp).floor().min(most);
+    (side * cells as f32 + BETWEEN * (cells as f32 - 1.0), side)
+}
+
+/// The panel `which`, when it is the one open: a card as wide as the column, laid over the rows
+/// under `against` (the row its key is on), or over those above it with `up`. Its title in
+/// small capitals, a × to close it, then its rows from `add`. A click outside it or Escape
+/// closes it, unless that click or Escape was for a menu or a colour picker opened from it.
+fn panel_over(
+    ui: &mut egui::Ui,
+    open: &mut Option<Panel>,
+    (which, up): (Panel, bool),
+    against: Rect,
+    title: &str,
+    add: impl FnOnce(&mut egui::Ui),
 ) {
-    row_tall(ui, column, caption, swatch_side(look).0, |ui| add(ui, look));
+    if *open != Some(which) {
+        return;
+    }
+    let id = egui::Id::unique(("inspector panel", which));
+    let was_open = ui.ctx().read_response(id).is_some();
+    // A menu or a picker opened from the panel takes the click or the Escape that closes it.
+    let above = egui::Popup::is_any_open(ui.ctx());
+    let frame = Frame::popup(ui.style()).inner_margin(PANEL_PAD - 1.0).corner_radius(10);
+    let mut close = false;
+    let shown = egui::Popup::new(id, ui.ctx().clone(), against, ui.layer_id())
+        .open(true)
+        .align(if up { egui::RectAlign::TOP_START } else { egui::RectAlign::BOTTOM_START })
+        .gap(4.0)
+        .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+        .frame(frame)
+        .show(|ui| {
+            ui.set_width(PANEL_WIDTH - 2.0 * PANEL_PAD);
+            tab_style(ui);
+            ui.horizontal(|ui| {
+                let look = crate::studio::Lettering::cap(INK);
+                let words = crate::studio::spaced(ui, &title.to_uppercase(), look.font, INK, look.spacing);
+                let (cell, _) = ui.allocate_exact_size(vec2(words.size().x, 22.0), Sense::hover());
+                ui.painter().galley(pos2(cell.min.x, cell.center().y - words.size().y / 2.0), words, INK);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let (cell, key) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+                    let ink = if key.hovered() { INK } else { DIM };
+                    crate::icons::paint(
+                        ui.painter(),
+                        crate::icons::Icon::Close,
+                        Rect::from_center_size(cell.center(), vec2(11.0, 11.0)),
+                        ink,
+                    );
+                    let hint = t("inspector.panel.close", "Close");
+                    key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, hint));
+                    close = key.on_hover_text(hint).clicked();
+                });
+            });
+            add(ui);
+        });
+    let Some(shown) = shown else { return };
+    let (clicked, at, escape) = ui
+        .input(|input| (input.pointer.any_click(), input.pointer.interact_pos(), input.key_pressed(egui::Key::Escape)));
+    let outside = clicked && was_open && at.is_some_and(|at| !shown.response.rect.contains(at));
+    if close || (!above && (outside || escape)) {
+        *open = None;
+    }
+}
+
+/// A line of faint words in a panel, saying what is so.
+fn panel_note(ui: &mut egui::Ui, words: &str) {
+    ui.add(egui::Label::new(egui::RichText::new(words).size(11.5).color(crate::studio::TEXT_FAINT)).wrap());
+}
+
+/// A gradient's rows in its panel: Kind, Angle (for a linear one; greyed otherwise) and To (the
+/// colour it runs to; greyed while there is none). `filled` is whether there is a colour to
+/// run from.
+fn gradient_panel(ui: &mut egui::Ui, salt: &str, filled: bool, gradient: &mut sp_model::Gradient) {
+    let captions = [t("inspector.row.kind", "Kind"), t("inspector.shadow.angle", "Angle"), t("inspector.row.to", "To")];
+    let column = caption_column(ui, &captions);
+    let room = panel_room(column);
+    row(ui, column, captions[0], |ui| {
+        ui.add_enabled_ui(filled, |ui| {
+            let options: Vec<(sp_model::GradientKind, &str)> =
+                sp_model::GradientKind::ALL.iter().map(|kind| (*kind, gradient_name(*kind))).collect();
+            choice(ui, salt, room, &mut gradient.kind, &options);
+        });
+    });
+    row(ui, column, captions[1], |ui| {
+        ui.add_enabled_ui(filled && gradient.kind == sp_model::GradientKind::Linear, |ui| {
+            number(ui, &mut gradient.angle, NUMBER, |d| d.range(0.0..=359.0).suffix("°"))
+                .on_hover_text(t("inspector.gradient.angle", "The way it runs: 0° left to right, 90° top to bottom"));
+        });
+    });
+    let look = Swatches { salt, room, count: 8, none_too: false, mixed: None };
+    swatches_row(ui, column, captions[2], &look, |ui, look| {
+        ui.add_enabled_ui(filled && gradient.on(), |ui| swatches(ui, look, &mut gradient.to));
+    });
+}
+
+/// A shadow's rows in its panel: Throw (Angle, Offset and Blur), Opacity as a slider with its
+/// percentage, and Colour. `can` is whether they take a change.
+fn shadow_panel(ui: &mut egui::Ui, salt: &str, can: bool, look: &mut sp_model::Shadow) {
+    let captions = [
+        t("inspector.row.throw", "Throw"),
+        t("inspector.shape.opacity", "Opacity"),
+        t("inspector.row.colour", "Colour"),
+    ];
+    let column = caption_column(ui, &captions);
+    let room = panel_room(column);
+    let each = mini_width(room, 3);
+    row_tall(ui, column, captions[0], MINI, |ui| {
+        ui.add_enabled_ui(can, |ui| {
+            mini(ui, each, tk("inspector.shadow.angle", "Angle"), &mut look.angle, |d| {
+                d.range(0.0..=360.0).suffix("°")
+            });
+            mini(ui, each, tk("inspector.shadow.offset", "Offset"), &mut look.offset, |d| {
+                d.speed(0.5).range(0.0..=200.0)
+            });
+            mini(ui, each, tk("inspector.shadow.blur", "Blur"), &mut look.blur, |d| d.speed(0.5).range(0.0..=200.0));
+        });
+    });
+    row(ui, column, captions[1], |ui| {
+        ui.add_enabled_ui(can, |ui| {
+            ui.spacing_mut().slider_width = room - BETWEEN - PERCENT_BOX;
+            ui.spacing_mut().interact_size.x = PERCENT_BOX;
+            let shown = (look.opacity * 100.0).round();
+            let mut percent = shown;
+            let slider = egui::Slider::new(&mut percent, 0.0..=100.0)
+                .step_by(1.0)
+                .custom_formatter(|n, _| percent_text(n))
+                .custom_parser(typed_percent);
+            if ui.add(slider).changed() && percent != shown {
+                look.opacity = (percent / 100.0).clamp(0.0, 1.0);
+            }
+        });
+    });
+    let colours = Swatches { salt, room, count: 8, none_too: false, mixed: None };
+    swatches_row(ui, column, captions[2], &colours, |ui, colours| {
+        ui.add_enabled_ui(can, |ui| swatches(ui, colours, &mut look.color));
+    });
 }
 
 /// The inspector, drawn in the room it is given: under Clear All in the right column, where the
@@ -800,6 +1072,13 @@ pub fn inspector(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) -> boo
         let layout = stage && state.editing.as_ref().is_some_and(|draft| draft.selected.is_none());
         let tabs = tabs_for(state);
         let nothing_picked = tabs.is_empty();
+        // A panel belongs to the tab and the boxes it was opened for.
+        let panel_for =
+            (state.inspector.tab, state.editing.as_ref().map(|draft| draft.selection()).unwrap_or_default());
+        if state.inspector.panel_for != panel_for {
+            state.inspector.panel = None;
+            state.inspector.panel_for = panel_for;
+        }
         if nothing_picked {
             // One section has a plain heading, not a lone tab.
             let (heading, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
@@ -1991,6 +2270,7 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         state.timers.iter().map(|timer| (timer.id, timer.name.clone())).collect();
     let inspector = &mut state.inspector;
     let Some(draft) = state.editing.as_mut() else { return };
+    ui.spacing_mut().item_spacing.y = TEXT_ROWS_APART;
     let words_selected = draft.selected_words();
     let boxes = draft.selection().len();
     let taken_roles: Vec<sp_model::Role> =
@@ -2035,24 +2315,15 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let shows = !for_theme && !stage_item;
     let mut captions = vec![
         t("inspector.row.font", "Font"),
-        t("inspector.row.weight", "Weight"),
         t("inspector.row.size", "Size"),
         t("inspector.row.style", "Style"),
         t("inspector.row.colour", "Colour"),
-        t("inspector.row.gradient", "Gradient"),
-        t("inspector.row.to", "To"),
         t("inspector.row.align", "Align"),
         t("inspector.row.effects", "Effects"),
-        t("inspector.row.outline", "Outline"),
-        t("inspector.shadow", "Shadow"),
-        t("inspector.row.margins", "Margins"),
         t("inspector.row.spacing", "Spacing"),
-        t("inspector.row.capitals", "Capitals"),
         t("inspector.row.fitting", "Fitting"),
-        t("inspector.row.breaks", "Breaks"),
-        t("inspector.row.lines", "Lines"),
+        t("inspector.row.words", "Words"),
         t("inspector.row.behind", "Behind"),
-        t("inspector.row.covers", "Covers"),
     ];
     if shows {
         captions.push(t("inspector.row.shows", "Shows"));
@@ -2125,6 +2396,9 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         }
         inspector.new_step = true;
     }
+
+    // Behind: the colour of the box itself, behind its words.
+    behind_row(ui, column, &mut inspector.panel, &mut object.fill, &mut object.gradient);
 
     // Shows: the box's own words, or something that changes, such as the time, in their place.
     if shows {
@@ -2258,48 +2532,42 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         {
             *style = copied.clone();
         }
-        // On a slide: let the theme decide the look again.
-        if !for_theme && !stage {
-            let plain = style.is_default();
-            let hint = if plain {
-                t("inspector.text.plain", "Looks as the theme has it")
-            } else {
-                t(
-                    "inspector.text.reset.hint",
-                    "Give this text the theme's look again; words you styled one by one keep theirs",
-                )
-            };
-            if word_key(ui, t("inspector.text.reset", "Back to theme"), false, !plain).on_hover_text(hint).clicked() {
-                *style = TextStyle::default();
+        // More: let the theme decide the look again (on a slide), and give every word the
+        // box's look again. Each is greyed where it has nothing to do.
+        let hint = t("inspector.text.more", "More: back to the theme, clear word styles");
+        let more = square_key(ui, KEY, (false, false), hint, |painter, cell, ink| {
+            let c = cell.center();
+            for step in [-5.0, 0.0, 5.0] {
+                painter.circle_filled(pos2(c.x + step, c.y), 1.5, ink);
             }
-        }
-        let spacing = {
-            let look = style.over(&base);
-            look.letter_spacing != 0.0
-                || look.line_height != sp_model::LINE_HEIGHT
-                || look.paragraph_spacing != 0.0
-                || look.baseline != 0.0
-                || look.margins != [0.0; 4]
-        };
-        let reset = t("inspector.spacing.reset", "Reset spacing");
-        let hint = t("inspector.spacing.reset.hint", "Spacing and margins as a new box has them");
-        if word_key(ui, reset, false, spacing).on_hover_text(hint).clicked() {
-            let mut whole = style.over(&base);
-            whole.letter_spacing = 0.0;
-            whole.line_height = sp_model::LINE_HEIGHT;
-            whole.paragraph_spacing = 0.0;
-            whole.baseline = 0.0;
-            whole.margins = [0.0; 4];
-            *style = TextStyle::between(&base, &whole);
-        }
-        if !spans.is_empty()
-            && word_key(ui, t("inspector.text.clear_words", "Clear word styles"), false, true)
-                .on_hover_text(t("inspector.text.clear_words.hint", "Every word takes the box's look again"))
-                .clicked()
-        {
-            spans.clear();
-            inspector.new_step = true;
-        }
+        });
+        more.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, hint));
+        egui::Popup::menu(&more).show(|ui| {
+            if !for_theme && !stage {
+                let plain = style.is_default();
+                let hint = if plain {
+                    t("inspector.text.plain", "Looks as the theme has it")
+                } else {
+                    t(
+                        "inspector.text.reset.hint",
+                        "Give this text the theme's look again; words you styled one by one keep theirs",
+                    )
+                };
+                let back = egui::Button::new(t("inspector.text.reset", "Back to theme"));
+                let back = ui.add_enabled(!plain, back).on_hover_text(hint).on_disabled_hover_text(hint);
+                if back.clicked() {
+                    *style = TextStyle::default();
+                    ui.close();
+                }
+            }
+            let clear = egui::Button::new(t("inspector.text.clear_words", "Clear word styles"));
+            let hint = t("inspector.text.clear_words.hint", "Every word takes the box's look again");
+            if ui.add_enabled(!spans.is_empty(), clear).on_hover_text(hint).clicked() {
+                spans.clear();
+                inspector.new_step = true;
+                ui.close();
+            }
+        });
     });
 }
 
@@ -2310,9 +2578,18 @@ fn for_each_span_setting(look: &mut BoxStyle, box_look: &BoxStyle) {
     (look.underline, look.strike, look.fill) = (box_look.underline, box_look.strike, box_look.fill);
 }
 
-/// The Text tab's rows for one look, their captions in a column `column` wide. `wanted` starts
-/// as the look the text has now. With `words_picked`, a second line over Align says the rows
-/// from there on are the whole box's.
+/// How wide the Weight menu beside the Font menu is.
+const WEIGHT: f32 = 96.0;
+
+/// The room between one row of the Text tab and the next: closer than the other tabs' rows
+/// ([`ROWS_APART`]), so the whole tab fits a window of 1100 by 700 with words selected.
+const TEXT_ROWS_APART: f32 = 8.0;
+
+/// The Text tab's rows for one look, their captions in a column `column` wide: Font with its
+/// Weight, Size, Style, Colour, Align, Effects, Spacing, Fitting and Words. What is set once
+/// opens from a key on its row as a panel over the rows ([`Panel`]), so the tab fits one screen
+/// and no row moves. `wanted` starts as the look the text has now. With `words_picked`, a
+/// second line over Align says the rows from there on are the whole box's.
 fn text_look(
     ui: &mut egui::Ui,
     column: f32,
@@ -2324,53 +2601,59 @@ fn text_look(
 ) {
     let room = control_room(column);
     row(ui, column, t("inspector.row.font", "Font"), |ui| {
-        let font_menu = egui::ComboBox::from_id_salt("font family")
-            .selected_text(if mix.font_family {
-                egui::RichText::new(t("inspector.font.mixed", "Mixed")).italics().color(DIM)
-            } else {
-                egui::RichText::new(wanted.font_family.as_str())
-            })
-            .width(room)
-            .height(360.0)
-            .wrap_mode(egui::TextWrapMode::Truncate)
-            .show_ui(ui, |ui| {
-                // Type to narrow the list: the field has the keyboard as soon as the menu opens,
-                // and Return takes the first font left.
-                let search = ui.add(
-                    egui::TextEdit::singleline(&mut inspector.font_search)
-                        .hint_text(t("inspector.font.search", "Search fonts"))
-                        .desired_width(f32::INFINITY),
-                );
-                search.request_focus();
-                let typed = inspector.font_search.trim().to_lowercase();
-                // Fonts that start with what was typed come before those that only contain it.
-                let mut found: Vec<&String> =
-                    fonts.iter().filter(|name| name.to_lowercase().starts_with(&typed)).collect();
-                found.extend(fonts.iter().filter(|name| {
-                    let name = name.to_lowercase();
-                    !name.starts_with(&typed) && name.contains(&typed)
-                }));
-                let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
-                if enter
-                    && !typed.is_empty()
-                    && let Some(first) = found.first()
-                {
-                    wanted.font_family = (*first).clone();
-                    inspector.font_search.clear();
-                    ui.close();
-                }
-                ui.separator();
-                if found.is_empty() {
-                    ui.label(egui::RichText::new(t("inspector.font.none", "No font has that in its name.")).color(DIM));
-                }
-                for family in found {
-                    if ui.selectable_label(wanted.font_family == *family, family.as_str()).clicked() {
-                        wanted.font_family = family.clone();
+        // The menu in a place of its own: its words cut short can make it a hair wider than it
+        // is asked to be, and Weight beside it stays where it is.
+        let font_menu = fixed(ui, room - WEIGHT - BETWEEN, |ui| {
+            egui::ComboBox::from_id_salt("font family")
+                .selected_text(if mix.font_family {
+                    egui::RichText::new(t("inspector.font.mixed", "Mixed")).italics().color(DIM)
+                } else {
+                    egui::RichText::new(wanted.font_family.as_str())
+                })
+                .width(room - WEIGHT - BETWEEN)
+                .height(360.0)
+                .wrap_mode(egui::TextWrapMode::Truncate)
+                .show_ui(ui, |ui| {
+                    // Type to narrow the list: the field has the keyboard as soon as the menu opens,
+                    // and Return takes the first font left.
+                    let search = ui.add(
+                        egui::TextEdit::singleline(&mut inspector.font_search)
+                            .hint_text(t("inspector.font.search", "Search fonts"))
+                            .desired_width(f32::INFINITY),
+                    );
+                    search.request_focus();
+                    let typed = inspector.font_search.trim().to_lowercase();
+                    // Fonts that start with what was typed come before those that only contain it.
+                    let mut found: Vec<&String> =
+                        fonts.iter().filter(|name| name.to_lowercase().starts_with(&typed)).collect();
+                    found.extend(fonts.iter().filter(|name| {
+                        let name = name.to_lowercase();
+                        !name.starts_with(&typed) && name.contains(&typed)
+                    }));
+                    let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
+                    if enter
+                        && !typed.is_empty()
+                        && let Some(first) = found.first()
+                    {
+                        wanted.font_family = (*first).clone();
                         inspector.font_search.clear();
                         ui.close();
                     }
-                }
-            });
+                    ui.separator();
+                    if found.is_empty() {
+                        ui.label(
+                            egui::RichText::new(t("inspector.font.none", "No font has that in its name.")).color(DIM),
+                        );
+                    }
+                    for family in found {
+                        if ui.selectable_label(wanted.font_family == *family, family.as_str()).clicked() {
+                            wanted.font_family = family.clone();
+                            inspector.font_search.clear();
+                            ui.close();
+                        }
+                    }
+                })
+        });
         // Testing aid: SOFTPRESENTER_CAPTURE_FONT_MENU=1 opens the font list once, for a capture.
         static MENU_OPENED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if std::env::var_os("SOFTPRESENTER_CAPTURE_FONT_MENU").is_some()
@@ -2378,16 +2661,18 @@ fn text_look(
         {
             egui::Popup::open_id(ui.ctx(), font_menu.response.id.with("popup"));
         }
-    });
-    row(ui, column, t("inspector.row.weight", "Weight"), |ui| {
-        egui::ComboBox::from_id_salt("font weight").selected_text(weight_name(wanted.weight)).width(room).show_ui(
-            ui,
-            |ui| {
+        // Weight, beside the font it belongs to.
+        egui::ComboBox::from_id_salt("font weight")
+            .selected_text(weight_name(wanted.weight))
+            .width(WEIGHT)
+            .wrap_mode(egui::TextWrapMode::Truncate)
+            .show_ui(ui, |ui| {
                 for (weight, (key, english)) in WEIGHTS {
                     ui.selectable_value(&mut wanted.weight, weight, t(key, english));
                 }
-            },
-        );
+            })
+            .response
+            .on_hover_text(t("inspector.row.weight", "Weight"));
     });
     row(ui, column, t("inspector.row.size", "Size"), |ui| {
         // Room for "Mixed" whatever the sizes are, so the field keeps one width.
@@ -2443,17 +2728,24 @@ fn text_look(
             }
         }
     });
+    // Colour: the swatches, any colour, and last a ramp that opens the gradient's panel.
+    let (swatch_room, side) = room_before_ramp(room, 9, SWATCH);
     let colours = Swatches {
         salt: "text colour",
-        room,
+        room: swatch_room,
         count: 8,
         none_too: false,
         mixed: mix.fill.then_some(mix.other_fill).flatten(),
     };
-    swatches_row(ui, column, t("inspector.row.colour", "Colour"), &colours, |ui, look| {
+    let ends = wanted.gradient.on().then_some((wanted.fill, wanted.gradient.to));
+    let colour = swatches_row(ui, column, t("inspector.row.colour", "Colour"), &colours, |ui, look| {
         swatches(ui, look, &mut wanted.fill);
+        ramp_swatch(ui, side, &mut inspector.panel, Panel::TextGradient, ends);
     });
-    gradient_rows(ui, column, "text gradient", true, &mut wanted.gradient);
+    let title = t("inspector.row.gradient", "Gradient");
+    panel_over(ui, &mut inspector.panel, (Panel::TextGradient, false), colour, title, |ui| {
+        gradient_panel(ui, "text gradient", true, &mut wanted.gradient);
+    });
 
     if words_picked {
         scope_line(ui, false, t("inspector.text.whole_box", "THE WHOLE BOX"), "");
@@ -2488,45 +2780,53 @@ fn text_look(
             }
         }
     });
+    // Effects: Outline and Shadow, each a switch with the key to its look beside it.
     let outlined = wanted.outline_width > 0.0;
-    row(ui, column, t("inspector.row.effects", "Effects"), |ui| {
-        if word_key(ui, t("inspector.row.outline", "Outline"), outlined, true).clicked() {
+    let effects = row(ui, column, t("inspector.row.effects", "Effects"), |ui| {
+        let outline = (t("inspector.row.outline", "Outline"), outlined);
+        let hint = t("inspector.outline.more", "Outline: width and colour");
+        if switch_with_more(ui, &mut inspector.panel, Panel::TextOutline, outline, hint) {
             wanted.outline_width = if outlined { 0.0 } else { base.outline_width.max(1.0) };
         }
-        if word_key(ui, t("inspector.shadow", "Shadow"), wanted.shadow, true).clicked() {
+        let shadow = (t("inspector.shadow", "Shadow"), wanted.shadow);
+        let hint = t("inspector.shadow.more", "Shadow: angle, offset, blur, opacity and colour");
+        if switch_with_more(ui, &mut inspector.panel, Panel::TextShadow, shadow, hint) {
             wanted.shadow = !wanted.shadow;
         }
     });
-    // The outline's and the shadow's rows stay while they are off, greyed, so no row under them
-    // moves.
-    let outline_colours =
-        Swatches { salt: "text outline", room: room - NUMBER - BETWEEN, count: 5, none_too: false, mixed: None };
-    row(ui, column, t("inspector.row.outline", "Outline"), |ui| {
-        ui.add_enabled_ui(outlined, |ui| {
+    let outlined = wanted.outline_width > 0.0;
+    let title = t("inspector.row.outline", "Outline");
+    panel_over(ui, &mut inspector.panel, (Panel::TextOutline, false), effects, title, |ui| {
+        let captions = [t("inspector.stroke.width", "Width"), t("inspector.row.colour", "Colour")];
+        let column = caption_column(ui, &captions);
+        let room = panel_room(column);
+        row(ui, column, captions[0], |ui| {
+            // Typing a width draws the outline: there is none at 0.
             let mut width = wanted.outline_width;
-            number(ui, &mut width, NUMBER, |d| d.speed(0.25).range(0.25..=60.0).max_decimals(1))
-                .on_hover_text(t("inspector.stroke.width", "Width"));
-            if outlined {
-                wanted.outline_width = width;
-            }
-            swatches(ui, &outline_colours, &mut wanted.outline_color);
+            number(ui, &mut width, NUMBER, |d| d.speed(0.25).range(0.0..=60.0).max_decimals(1));
+            wanted.outline_width = width;
         });
-    });
-    shadow_rows(ui, column, wanted.shadow, &mut wanted.shadow_look);
-    row_tall(ui, column, t("inspector.row.margins", "Margins"), MINI, |ui| {
-        let each = mini_width(room, 4);
-        let sides = [
-            tk("inspector.margin.left", "Left"),
-            tk("inspector.margin.top", "Top"),
-            tk("inspector.margin.right", "Right"),
-            tk("inspector.margin.bottom", "Bottom"),
-        ];
-        for (margin, name) in wanted.margins.iter_mut().zip(sides) {
-            mini(ui, each, name, margin, |d| d.range(0.0..=400.0));
+        let colours = Swatches { salt: "text outline", room, count: 8, none_too: false, mixed: None };
+        swatches_row(ui, column, captions[1], &colours, |ui, look| {
+            swatches(ui, look, &mut wanted.outline_color);
+        });
+        if !outlined {
+            panel_note(ui, t("inspector.outline.off", "Outline is off. Its colour is kept for when it is on."));
         }
     });
-    row_tall(ui, column, t("inspector.row.spacing", "Spacing"), MINI, |ui| {
-        let each = mini_width(room, 4);
+    let title = t("inspector.shadow", "Shadow");
+    panel_over(ui, &mut inspector.panel, (Panel::TextShadow, false), effects, title, |ui| {
+        shadow_panel(ui, "text shadow", true, &mut wanted.shadow_look);
+        if !wanted.shadow {
+            panel_note(ui, t("inspector.shadow.off", "Shadow is off. Its look is kept for when it is on."));
+        }
+    });
+
+    // Spacing: between letters and between lines on the row; the margins and the rest behind
+    // its key.
+    let more_spacing = wanted.margins != [0.0; 4] || wanted.paragraph_spacing != 0.0 || wanted.baseline != 0.0;
+    let spacing = row_tall(ui, column, t("inspector.row.spacing", "Spacing"), MINI, |ui| {
+        let each = mini_width(room - KEY - BETWEEN, 2).min(76.0);
         mini(ui, each, tk("inspector.mini.letters", "Letters"), &mut wanted.letter_spacing, |d| {
             d.speed(0.2).range(-20.0..=100.0).max_decimals(1)
         })
@@ -2541,31 +2841,59 @@ fn text_look(
             "inspector.spacing.line_height.hint",
             "The distance from one line to the next, as a multiple of the font size",
         ));
-        mini(ui, each, tk("inspector.mini.paragraph", "Paragraph"), &mut wanted.paragraph_spacing, |d| {
-            d.speed(0.5).range(0.0..=400.0)
-        })
-        .on_hover_text(t(
-            "inspector.spacing.paragraph.hint",
-            "Extra room after each paragraph (each line break typed), in points",
-        ));
-        mini(ui, each, tk("inspector.mini.baseline", "Baseline"), &mut wanted.baseline, |d| {
-            d.speed(0.5).range(-400.0..=400.0)
-        })
-        .on_hover_text(t(
-            "inspector.spacing.baseline.hint",
-            "Raise the text by this many points (lower it with a minus)",
-        ));
+        ui.add_space(room - 2.0 * (each + BETWEEN) - KEY);
+        let hint = t("inspector.spacing.more", "Margins and more spacing");
+        more_key(ui, &mut inspector.panel, Panel::Spacing, hint, more_spacing);
     });
-    row(ui, column, t("inspector.row.capitals", "Capitals"), |ui| {
-        let options = [
-            (Caps::None, t("inspector.caps.none", "As typed")),
-            (Caps::AllCaps, t("inspector.caps.all", "ALL CAPITALS")),
-            (Caps::Lowercase, t("inspector.caps.lower", "all small")),
-            (Caps::StartCase, t("inspector.caps.start", "Each Word")),
-            (Caps::TitleCase, t("inspector.caps.title", "Like a Title")),
-        ];
-        choice(ui, "caps", room, &mut wanted.caps, &options);
+    let title = t("inspector.spacing.title", "Margins and spacing");
+    panel_over(ui, &mut inspector.panel, (Panel::Spacing, true), spacing, title, |ui| {
+        let captions = [t("inspector.row.margins", "Margins"), t("inspector.row.spacing", "Spacing")];
+        let column = caption_column(ui, &captions);
+        let room = panel_room(column);
+        row_tall(ui, column, captions[0], MINI, |ui| {
+            let each = mini_width(room, 4);
+            let sides = [
+                tk("inspector.margin.left", "Left"),
+                tk("inspector.margin.top", "Top"),
+                tk("inspector.margin.right", "Right"),
+                tk("inspector.margin.bottom", "Bottom"),
+            ];
+            for (margin, name) in wanted.margins.iter_mut().zip(sides) {
+                mini(ui, each, name, margin, |d| d.range(0.0..=400.0));
+            }
+        });
+        row_tall(ui, column, captions[1], MINI, |ui| {
+            let each = mini_width(room, 2).min(96.0);
+            mini(ui, each, tk("inspector.mini.paragraph", "Paragraph"), &mut wanted.paragraph_spacing, |d| {
+                d.speed(0.5).range(0.0..=400.0)
+            })
+            .on_hover_text(t(
+                "inspector.spacing.paragraph.hint",
+                "Extra room after each paragraph (each line break typed), in points",
+            ));
+            mini(ui, each, tk("inspector.mini.baseline", "Baseline"), &mut wanted.baseline, |d| {
+                d.speed(0.5).range(-400.0..=400.0)
+            })
+            .on_hover_text(t(
+                "inspector.spacing.baseline.hint",
+                "Raise the text by this many points (lower it with a minus)",
+            ));
+        });
+        // Spacing and margins as a new box has them.
+        let changed = more_spacing || wanted.letter_spacing != 0.0 || wanted.line_height != sp_model::LINE_HEIGHT;
+        ui.horizontal(|ui| {
+            let reset = t("inspector.spacing.reset", "Reset spacing");
+            let hint = t("inspector.spacing.reset.hint", "Spacing and margins as a new box has them");
+            if word_key(ui, reset, false, changed).on_hover_text(hint).clicked() {
+                wanted.letter_spacing = 0.0;
+                wanted.line_height = sp_model::LINE_HEIGHT;
+                wanted.paragraph_spacing = 0.0;
+                wanted.baseline = 0.0;
+                wanted.margins = [0.0; 4];
+            }
+        });
     });
+
     row(ui, column, t("inspector.row.fitting", "Fitting"), |ui| {
         let options = [
             (Scaling::None, t("inspector.scaling.none", "None")),
@@ -2576,54 +2904,126 @@ fn text_look(
         ];
         choice(ui, "scaling", room, &mut wanted.scaling, &options);
     });
-    row(ui, column, t("inspector.row.breaks", "Breaks"), |ui| {
+
+    // Words: their capitals on the row; how the lines are broken, their bullets, scrolling and
+    // the band behind them behind its key.
+    let more_lines = wanted.line_transform != LineTransform::None
+        || wanted.list != sp_model::ListStyle::None
+        || wanted.scroll != sp_model::Scroll::None
+        || wanted.line_fill.on;
+    let words = row(ui, column, t("inspector.row.words", "Words"), |ui| {
         let options = [
-            (LineTransform::None, t("inspector.lines.none", "As typed")),
-            (LineTransform::RemoveLineReturns, t("inspector.lines.remove", "Run together")),
-            (LineTransform::ReplaceLineReturns, t("inspector.lines.replace", "Run together, with / between lines")),
-            (LineTransform::OneWordPerLine, t("inspector.lines.word", "A word on each line")),
-            (LineTransform::OneCharacterPerLine, t("inspector.lines.character", "A letter on each line")),
+            (Caps::None, t("inspector.caps.none", "As typed")),
+            (Caps::AllCaps, t("inspector.caps.all", "ALL CAPITALS")),
+            (Caps::Lowercase, t("inspector.caps.lower", "all small")),
+            (Caps::StartCase, t("inspector.caps.start", "Each Word")),
+            (Caps::TitleCase, t("inspector.caps.title", "Like a Title")),
         ];
-        choice(ui, "line transform", room, &mut wanted.line_transform, &options);
+        choice(ui, "caps", room - KEY - BETWEEN, &mut wanted.caps, &options);
+        let hint = t("inspector.lines.more", "Lines: breaks, bullets, scrolling and the band behind the lines");
+        more_key(ui, &mut inspector.panel, Panel::Lines, hint, more_lines);
     });
-    // Bullets or numbers before each line, and text that keeps moving through its box, as a
-    // ticker does.
-    row(ui, column, t("inspector.row.lines", "Lines"), |ui| {
-        let half = ((room - BETWEEN) / 2.0).floor();
-        let lists: Vec<(sp_model::ListStyle, &str)> =
-            sp_model::ListStyle::ALL.iter().map(|list| (*list, list_name(*list))).collect();
-        choice(ui, "list", half, &mut wanted.list, &lists);
-        let ways = [
-            (sp_model::Scroll::None, t("inspector.scroll.none", "Still")),
-            (sp_model::Scroll::Left, t("inspector.scroll.left", "Scrolls left")),
-            (sp_model::Scroll::Right, t("inspector.scroll.right", "Scrolls right")),
-            (sp_model::Scroll::Up, t("inspector.scroll.up", "Scrolls up")),
-            (sp_model::Scroll::Down, t("inspector.scroll.down", "Scrolls down")),
+    let title = t("inspector.row.lines", "Lines");
+    panel_over(ui, &mut inspector.panel, (Panel::Lines, true), words, title, |ui| {
+        let captions = [
+            t("inspector.row.breaks", "Breaks"),
+            t("inspector.row.bullets", "Bullets"),
+            t("inspector.row.scroll", "Scroll"),
+            t("inspector.row.band", "Band"),
+            t("inspector.row.covers", "Covers"),
         ];
-        choice(ui, "scroll", half, &mut wanted.scroll, &ways);
-    });
-    // A colour behind the text: a band under each line's words, or across the box.
-    let behind = Swatches { salt: "behind", room, count: 8, none_too: true, mixed: None };
-    swatches_row(ui, column, t("inspector.row.behind", "Behind"), &behind, |ui, look| {
-        let mut colour = wanted.line_fill.on.then_some(wanted.line_fill.color);
-        let was_on = wanted.line_fill.on;
-        if swatch_row(ui, look, &mut colour) {
-            wanted.line_fill.on = colour.is_some();
-            if let Some(colour) = colour {
-                // A colour chosen where there was none keeps how solid the last one was.
-                let solid = if was_on { colour.a } else { wanted.line_fill.color.a };
-                wanted.line_fill.color = Rgba { a: solid, ..colour };
-            }
-        }
-    });
-    row(ui, column, t("inspector.row.covers", "Covers"), |ui| {
-        ui.add_enabled_ui(wanted.line_fill.on, |ui| {
+        let column = caption_column(ui, &captions);
+        let room = panel_room(column);
+        row(ui, column, captions[0], |ui| {
             let options = [
-                (false, t("inspector.text.background.lines", "Lines Only")),
-                (true, t("inspector.text.background.full", "Full Width")),
+                (LineTransform::None, t("inspector.lines.none", "As typed")),
+                (LineTransform::RemoveLineReturns, t("inspector.lines.remove", "Run together")),
+                (LineTransform::ReplaceLineReturns, t("inspector.lines.replace", "Run together, with / between lines")),
+                (LineTransform::OneWordPerLine, t("inspector.lines.word", "A word on each line")),
+                (LineTransform::OneCharacterPerLine, t("inspector.lines.character", "A letter on each line")),
             ];
-            choice(ui, "line fill", room, &mut wanted.line_fill.full_width, &options);
+            choice(ui, "line transform", room, &mut wanted.line_transform, &options);
         });
+        // Bullets or numbers before each line.
+        row(ui, column, captions[1], |ui| {
+            let lists: Vec<(sp_model::ListStyle, &str)> =
+                sp_model::ListStyle::ALL.iter().map(|list| (*list, list_name(*list))).collect();
+            choice(ui, "list", room, &mut wanted.list, &lists);
+        });
+        // Text that keeps moving through its box, as a ticker does.
+        row(ui, column, captions[2], |ui| {
+            let ways = [
+                (sp_model::Scroll::None, t("inspector.scroll.none", "Still")),
+                (sp_model::Scroll::Left, t("inspector.scroll.left", "Scrolls left")),
+                (sp_model::Scroll::Right, t("inspector.scroll.right", "Scrolls right")),
+                (sp_model::Scroll::Up, t("inspector.scroll.up", "Scrolls up")),
+                (sp_model::Scroll::Down, t("inspector.scroll.down", "Scrolls down")),
+            ];
+            choice(ui, "scroll", room, &mut wanted.scroll, &ways);
+        });
+        // A band of colour behind each line: under its words, or across the box. (The colour of
+        // the box itself is the tab's Behind row.)
+        let band = Swatches { salt: "band", room, count: 8, none_too: true, mixed: None };
+        swatches_row(ui, column, captions[3], &band, |ui, look| {
+            let mut colour = wanted.line_fill.on.then_some(wanted.line_fill.color);
+            let was_on = wanted.line_fill.on;
+            if swatch_row(ui, look, &mut colour) {
+                wanted.line_fill.on = colour.is_some();
+                if let Some(colour) = colour {
+                    // A colour chosen where there was none keeps how solid the last one was.
+                    let solid = if was_on { colour.a } else { wanted.line_fill.color.a };
+                    wanted.line_fill.color = Rgba { a: solid, ..colour };
+                }
+            }
+        });
+        row(ui, column, captions[4], |ui| {
+            ui.add_enabled_ui(wanted.line_fill.on, |ui| {
+                let options = [
+                    (false, t("inspector.text.background.lines", "Lines Only")),
+                    (true, t("inspector.text.background.full", "Full Width")),
+                ];
+                choice(ui, "line fill", room, &mut wanted.line_fill.full_width, &options);
+            });
+        });
+    });
+}
+
+/// The Text tab's Behind row: the colour the box is filled with behind its words (none, the
+/// swatches, any colour), and last a ramp that opens the fill's gradient. It sets the box's
+/// own fill and gradient, the one colour a box has behind what it holds; the panel opens
+/// upward, over the rows above it.
+fn behind_row(
+    ui: &mut egui::Ui,
+    column: f32,
+    panel: &mut Option<Panel>,
+    fill: &mut Option<Rgba>,
+    gradient: &mut Option<sp_model::Gradient>,
+) {
+    let room = control_room(column);
+    let (swatch_room, side) = room_before_ramp(room, 10, 18.0);
+    let look = Swatches { salt: "behind", room: swatch_room, count: 8, none_too: true, mixed: None };
+    let ends = fill.zip(gradient.filter(sp_model::Gradient::on)).map(|(fill, gradient)| (fill, gradient.to));
+    let behind = swatches_row(ui, column, t("inspector.row.behind", "Behind"), &look, |ui, look| {
+        // A colour chosen for a box that had none starts part see-through over what is behind
+        // it, as a new fill always has.
+        let had = fill.is_some();
+        if swatch_row(ui, look, fill)
+            && !had
+            && let Some(fill) = fill.as_mut()
+        {
+            fill.a = 160;
+        }
+        ramp_swatch(ui, side, panel, Panel::BehindGradient, ends);
+    });
+    let title = t("inspector.row.gradient", "Gradient");
+    panel_over(ui, panel, (Panel::BehindGradient, true), behind, title, |ui| {
+        // Drawing changes nothing: the gradient is written back only when a control changed it.
+        let mut look = gradient.unwrap_or_default();
+        let before = look;
+        gradient_panel(ui, "behind gradient", fill.is_some(), &mut look);
+        if look != before {
+            *gradient = look.on().then_some(look);
+        }
     });
 }
 
@@ -2890,8 +3290,8 @@ mod tests {
                 let object = state.editing.as_ref().and_then(|draft| draft.selected_object()).expect("picked");
                 assert_eq!(object.opacity, 0.455, "{language:?}: drawing changes nothing");
                 assert_eq!(object.shadow.map(|look| look.opacity), Some(0.333), "{language:?}");
-                // The Text tab: its shadow's opacity, the same way.
-                let mut state = editing_text(InspectorTab::Own, false, false);
+                // The Text tab: its shadow's opacity, the same way, in the shadow's panel.
+                let mut state = with_panel(editing_text(InspectorTab::Own, false, false), Panel::TextShadow);
                 let percent = (theme.templates[0].boxes[0].shadow_look.opacity * 100.0).round() as u64;
                 let words = words_drawn(&mut state, &theme);
                 let wanted = crate::i18n::percent(percent);
@@ -2953,13 +3353,17 @@ mod tests {
             crate::i18n::with_language(language, || {
                 let on = words_placed(&mut with_shadow(true), &theme);
                 let off = words_placed(&mut with_shadow(false), &theme);
-                // The shadow's own numbers are among them, and the rows under them.
-                let angle = t("inspector.shadow.angle", "Angle");
-                assert!(
-                    on.iter().any(|(words, ..)| words.to_uppercase() == angle.to_uppercase()),
-                    "{language:?}: {on:?}"
-                );
                 assert_eq!(on, off, "{language:?}: the same words in the same places, Shadow on or off");
+                // The shadow's own numbers are in its panel, whether it is on or off.
+                let angle = t("inspector.shadow.angle", "Angle");
+                for shadow in [true, false] {
+                    let mut state = with_panel(with_shadow(shadow), Panel::TextShadow);
+                    let open = words_placed(&mut state, &theme);
+                    assert!(
+                        open.iter().any(|(words, ..)| words.to_uppercase() == angle.to_uppercase()),
+                        "{language:?}: {open:?}"
+                    );
+                }
             });
         }
     }
@@ -3063,8 +3467,8 @@ mod tests {
         for language in LANGUAGES {
             crate::i18n::with_language(language, || {
                 for (what, mut state, rows) in [
-                    // Colour, To, Outline and Behind.
-                    ("text", editing_text(InspectorTab::Own, false, false), vec![9, 9, 6, 10]),
+                    // Colour and Behind, each ending in its ramp.
+                    ("text", editing_text(InspectorTab::Own, false, false), vec![10, 11]),
                     // Fill, To and Outline.
                     ("text box", editing_text(InspectorTab::Box, false, false), vec![10, 9, 6]),
                     ("shape", editing_shape(InspectorTab::Own, false), vec![10, 9, 6]),
@@ -3563,7 +3967,8 @@ mod tests {
                 assert!(without.iter().any(|(words, ..)| *words == gradient), "{language:?}: its row stays");
                 // Every caption is where it was (the menu itself now says another kind).
                 let captions = |all: &[(String, i32, i32)]| -> Vec<(String, i32, i32)> {
-                    all.iter().filter(|(words, ..)| *words == words.to_uppercase()).cloned().collect()
+                    let caption = |words: &str| words.chars().any(char::is_alphabetic) && words == words.to_uppercase();
+                    all.iter().filter(|(words, ..)| caption(words)).cloned().collect()
                 };
                 assert_eq!(captions(&with), captions(&without), "{language:?}");
                 // Picked again later, a box with no gradient has no rows for one.
@@ -3573,6 +3978,138 @@ mod tests {
                 assert!(!words.iter().any(|(words, ..)| *words == gradient), "{language:?}: {words:?}");
             });
         }
+    }
+
+    /// `state` with one of the inspector's panels open, as its key opens it.
+    fn with_panel(mut state: HomeState, panel: Panel) -> HomeState {
+        let picked = state.editing.as_ref().map(|draft| draft.selection()).unwrap_or_default();
+        state.inspector.panel_for = (state.inspector.tab, picked);
+        state.inspector.panel = Some(panel);
+        state
+    }
+
+    /// The controls that take a click on the row captioned `caption` (as drawn, in capitals),
+    /// left to right.
+    fn row_keys(state: &mut HomeState, theme: &Theme, caption: &str) -> Vec<Rect> {
+        let words = words_placed(state, theme);
+        let (_, across, down) = words.iter().find(|(said, ..)| said == caption).unwrap_or_else(|| panic!("{caption}"));
+        let (edge, middle) = (*across as f32 + 20.0, *down as f32 + 6.0);
+        let on_row = |key: &Rect| key.min.x > edge && key.min.y - 1.0 <= middle && middle <= key.max.y + 1.0;
+        let mut keys: Vec<Rect> = keys_drawn(state, theme).into_iter().filter(on_row).collect();
+        keys.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
+        keys.dedup();
+        keys
+    }
+
+    /// Clicks at `at` in the inspector drawn for `state` in `ctx`, and draws a frame after.
+    fn click_point(ctx: &egui::Context, time: &mut f64, state: &mut HomeState, theme: &Theme, at: egui::Pos2) {
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame_with((ctx, time), state, theme, vec![], "");
+        for events in [vec![egui::Event::PointerMoved(at)], vec![press(true)], vec![press(false)], vec![]] {
+            frame_with((ctx, time), state, theme, events, "");
+        }
+    }
+
+    #[test]
+    fn a_panel_opens_over_the_rows_and_moves_none_in_any_language() {
+        let theme = Theme::builtin();
+        let panels = [
+            Panel::TextGradient,
+            Panel::TextOutline,
+            Panel::TextShadow,
+            Panel::Spacing,
+            Panel::Lines,
+            Panel::BehindGradient,
+        ];
+        for language in LANGUAGES {
+            crate::i18n::with_language(language, || {
+                for select in [false, true] {
+                    let closed = words_placed(&mut editing_text(InspectorTab::Own, false, select), &theme);
+                    for panel in panels {
+                        let mut state = with_panel(editing_text(InspectorTab::Own, false, select), panel);
+                        let open = words_placed(&mut state, &theme);
+                        // Every word of the tab is where it was, under the panel or beside it.
+                        for placed in &closed {
+                            assert!(open.contains(placed), "{language:?} {panel:?}: {placed:?} moved");
+                        }
+                        assert!(open.len() > closed.len(), "{language:?} {panel:?}: the panel has rows of its own");
+                        assert_eq!(state.inspector.panel, Some(panel), "{language:?}: it stays open while it is used");
+                        // And the panel, with all in it, is inside the column.
+                        for key in keys_drawn(&mut state, &theme) {
+                            assert!(
+                                key.max.x <= PANEL_WIDTH + 0.5,
+                                "{language:?} {panel:?}: {key:?} is past the column"
+                            );
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn a_panel_closes_with_its_key_a_click_outside_or_another_pick() {
+        let theme = Theme::builtin();
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let (ctx, mut time) = (crate::studio::tests::styled(), 0.0);
+            let mut state = editing_text(InspectorTab::Own, false, false);
+            // The dots at the end of the Words row open Lines; again, they close it.
+            let dots = *row_keys(&mut state, &theme, "WORDS").last().expect("the row's keys");
+            click_point(&ctx, &mut time, &mut state, &theme, dots.center());
+            assert_eq!(state.inspector.panel, Some(Panel::Lines));
+            click_point(&ctx, &mut time, &mut state, &theme, dots.center());
+            assert_eq!(state.inspector.panel, None, "its key again closes it");
+            // Open again: a menu in it is used without closing it; a click outside it closes it.
+            click_point(&ctx, &mut time, &mut state, &theme, dots.center());
+            click_in(&ctx, &mut time, &mut state, &theme, "None");
+            click_in(&ctx, &mut time, &mut state, &theme, "Bullets");
+            assert_eq!(state.inspector.panel, Some(Panel::Lines), "choosing from its menu leaves it open");
+            click_in(&ctx, &mut time, &mut state, &theme, "FONT");
+            assert_eq!(state.inspector.panel, None, "a click outside closes it");
+            // Another tab, or another box picked, closes one too.
+            let mut state = with_panel(editing_text(InspectorTab::Own, false, false), Panel::Spacing);
+            state.inspector.tab = InspectorTab::Box;
+            words_placed(&mut state, &theme);
+            assert_eq!(state.inspector.panel, None, "another tab closes it");
+        });
+    }
+
+    #[test]
+    fn the_text_tabs_behind_row_sets_the_boxs_own_fill_and_its_ramp_the_gradient() {
+        let theme = Theme::builtin();
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let (ctx, mut time) = (crate::studio::tests::styled(), 0.0);
+            let mut state = editing_text(InspectorTab::Own, false, false);
+            let picked = |state: &HomeState| {
+                state.editing.as_ref().and_then(|draft| draft.selected_object().cloned()).expect("a box picked")
+            };
+            let before = picked(&state);
+            assert_eq!((before.fill, before.gradient), (None, None));
+            // None, the eight colours, any colour, and last the ramp.
+            let keys = row_keys(&mut state, &theme, "BEHIND");
+            assert_eq!(keys.len(), 11, "{keys:?}");
+            // White: the box's own fill, part see-through as a new fill is. The words' look,
+            // with the band behind their lines, is not touched.
+            click_point(&ctx, &mut time, &mut state, &theme, keys[1].center());
+            let filled = picked(&state);
+            assert_eq!(filled.fill, Some(Rgba { r: 255, g: 255, b: 255, a: 160 }));
+            assert_eq!(filled.gradient, None);
+            assert_eq!(filled.kind, before.kind, "the text's own look is as it was");
+            // The ramp opens the gradient's panel; a kind chosen there is the box's gradient.
+            click_point(&ctx, &mut time, &mut state, &theme, keys[10].center());
+            assert_eq!(state.inspector.panel, Some(Panel::BehindGradient));
+            click_in(&ctx, &mut time, &mut state, &theme, "Color");
+            click_in(&ctx, &mut time, &mut state, &theme, "Linear Gradient");
+            let ramped = picked(&state);
+            assert_eq!(ramped.gradient.map(|gradient| gradient.kind), Some(sp_model::GradientKind::Linear));
+            assert_eq!(ramped.fill, filled.fill);
+            assert_eq!(state.inspector.panel, Some(Panel::BehindGradient), "the panel stays open");
+        });
     }
 
     #[test]

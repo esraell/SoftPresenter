@@ -1656,9 +1656,21 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   in order before it moves on; Previous takes them back. Text can be delivered By Paragraph:
   one paragraph each click, or one after another with the slide.
 - A plus tile after the last slide adds a slide laid out like the one before it.
-- Text can have a background colour behind its lines (under each line's words, or across the
+- Text can have a band of colour behind its lines (under each line's words, or across the
   box), bullets or numbers before its lines, and can scroll through its box like a ticker
-  (left, right, up or down), from the Text tab.
+  (left, right, up or down), from the dots on the Text tab's Words row (Lines: Breaks, Bullets,
+  Scroll, Band, Covers).
+- **The Text tab fits one screen.** Its rows: Font with Weight beside it, Size, Style, Colour,
+  Align, Effects, Spacing, Fitting, Words, Behind, Shows (and Holds in a template). What is set
+  once opens from a key on its own row as a small panel laid over the rows under it (or over
+  those above it), so no row moves: the gradient of the words' colour from the ramp at the end
+  of Colour; Outline's width and colour and Shadow's throw, opacity and colour from the dots
+  joined to each switch; the margins, paragraph and baseline spacing and Reset spacing from
+  Spacing's dots; Lines from Words' dots. One panel is open at a time; its key again, its ×, a
+  click outside it or Escape closes it, and a change in it applies at once. A small dot in the
+  accent colour on a dots key says something inside is not as it comes. Behind is the colour of
+  the box itself (the same one value a box of any kind has), and the ramp at its end opens that
+  colour's gradient (Kind, Angle, To), upward.
 - **The inspector follows what is picked.** Its first tab is the object's own, named for what
   it is (Text, Shape, Picture, Web Page, NDI Source, AirPlay, Screen); then Box, the same
   for every kind (place, size, lining up, rotation, opacity, fill, outline, shadow, flip, order,
@@ -1666,8 +1678,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   object is picked. Every row has its name in small capitals at the left; colours are a row of
   swatches with a well for any other colour at its end; and a row that belongs to a switch
   (Shadow, Outline, a gradient, a build) stays in place, greyed, while the switch is off, so
-  nothing moves when a key is clicked. Copy style, Paste style and Back to theme are at the
-  foot of the Text tab. A shape's tab has a menu to change which shape it is. In a template, a
+  nothing moves when a key is clicked. Copy style and Paste style are at the foot of the Text
+  tab, with Back to theme and Clear word styles under the dots beside them. A shape's tab has a menu to change which shape it is. In a template, a
   text box's tab has Holds: which of a slide's words it takes (the main language, the
   translation, a reference). With nothing picked on a song's slide, the column
   shows the group the slide is in, with its colour and Change… (which opens the groups to choose

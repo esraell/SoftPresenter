@@ -11664,6 +11664,22 @@ impl App {
                     Ok("animation") => inspector::InspectorTab::Animation,
                     _ => inspector::InspectorTab::Own,
                 };
+                // Testing aid: SOFTPRESENTER_INSPECTOR_PANEL=<name> opens one of the inspector's
+                // small panels over its rows (text-gradient, text-outline, text-shadow, spacing,
+                // lines, behind-gradient, box-outline, box-shadow), for a picture of it.
+                let picked = running.home_state.editing.as_ref().map(|draft| draft.selection()).unwrap_or_default();
+                running.home_state.inspector.panel_for = (running.home_state.inspector.tab, picked);
+                running.home_state.inspector.panel = match std::env::var("SOFTPRESENTER_INSPECTOR_PANEL").as_deref() {
+                    Ok("text-gradient") => Some(inspector::Panel::TextGradient),
+                    Ok("text-outline") => Some(inspector::Panel::TextOutline),
+                    Ok("text-shadow") => Some(inspector::Panel::TextShadow),
+                    Ok("spacing") => Some(inspector::Panel::Spacing),
+                    Ok("lines") => Some(inspector::Panel::Lines),
+                    Ok("behind-gradient") => Some(inspector::Panel::BehindGradient),
+                    Ok("box-outline") => Some(inspector::Panel::BoxOutline),
+                    Ok("box-shadow") => Some(inspector::Panel::BoxShadow),
+                    _ => None,
+                };
             }
             // Testing aid: SOFTPRESENTER_RENAME=WHAT starts retyping a name where it is shown, as
             // a double click on it does, for a picture of it being retyped beside one without:

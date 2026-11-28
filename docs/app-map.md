@@ -197,12 +197,17 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   text box to type in it. The letter keys add objects (T for a text box, one key per shape).
 - **Inspector** (the whole right column; `inspector.rs`): its tabs follow what is picked. The
   object's own tab is first, named for what it is: Text (font, weight, size, B I U S, colour and
-  gradient, alignment, outline, shadow, margins, spacing, capitals, fitting, lines, the colour
-  behind them, and Shows: its own words or linked text such as a clock or a timer; its head says
+  alignment, effects, spacing, fitting, capitals, the colour behind the box, and Shows: its own
+  words or linked text such as a clock or a timer; it fits one screen, and what is set once
+  opens from a key on its row as a small panel over the rows (`Panel`, `panel_over`, kept as
+  `InspectorState::panel`; `more_key` is the dots, `ramp_swatch` a colour row's last swatch): the
+  words' gradient, Outline's and Shadow's looks, Margins and spacing, Lines (breaks, bullets,
+  scrolling, the band behind the lines), and the gradient of Behind, which sets the object's own
+  `fill` and `gradient`; its head says
   THE WHOLE BOX, or SELECTED WORDS and the words quoted while words are selected in a box being
   typed in, and font, size, B I U S and colour then change only those words, a half-lit key or
-  "Mixed" showing where they differ; Copy style, Paste style, Back to theme, Reset spacing and
-  Clear word styles are keys at its foot; in a template, Holds says which of a slide's words the box takes), Shape (which shape, fill, gradient, outline), Picture and Video (the file's name and how it
+  "Mixed" showing where they differ; Copy style and Paste style are keys at its foot, with Back
+  to theme and Clear word styles under the dots beside them; in a template, Holds says which of a slide's words the box takes), Shape (which shape, fill, gradient, outline), Picture and Video (the file's name and how it
   fits; a video's line says it plays from the start while the slide is on screen), Web Page, NDI Source, AirPlay, Screen. Then Box, the same for every kind (place
   and size, lining up, rotation with the two flips after the angle, opacity, fill and outline for all but shapes, shadow,
   order, Rename (which retypes the name in the Objects list), Duplicate and Delete (their names where the three fit one line, else all three as picture keys: `object_keys_named`), Undo, Redo, Reset to theme), and Animation (how an object comes on and
