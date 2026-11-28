@@ -837,8 +837,7 @@ impl NdiDownload {
         let shared = self.shared.clone();
         let work = move || {
             let removed = if way().installer() {
-                let protected = windows::program_files();
-                match sp_ndi::locate().and_then(|runtime| windows::uninstaller_for(&runtime, &protected)) {
+                match windows::uninstaller() {
                     Some(uninstaller) => windows::open_and_wait(&uninstaller, &[], &shared.cancel, None)
                         .map_err(|problem| problem.to_string()),
                     None => Err("NDI's uninstaller isn't where NDI's installer puts it".to_owned()),
@@ -858,8 +857,7 @@ impl NdiDownload {
     /// on Windows the NDI that NDI's runtime installer put there (never NDI Tools).
     pub fn removable(&mut self) -> bool {
         if way().installer() {
-            return sp_ndi::locate()
-                .is_some_and(|runtime| windows::uninstaller_for(&runtime, &windows::program_files()).is_some());
+            return windows::uninstaller().is_some();
         }
         self.installed().is_some() || self.waiting().is_some()
     }

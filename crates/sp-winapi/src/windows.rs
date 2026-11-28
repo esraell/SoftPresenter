@@ -28,7 +28,8 @@ use windows_sys::Win32::System::Console::{
 };
 use windows_sys::Win32::System::Ole::{OleInitialize, OleUninitialize};
 use windows_sys::Win32::System::Registry::{
-    HKEY_CURRENT_USER, REG_EXPAND_SZ, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW, RegSetKeyValueW,
+    HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_EXPAND_SZ, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
+    RegGetValueW, RegSetKeyValueW,
 };
 use windows_sys::Win32::System::Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy};
 use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId, GetCurrentThreadId};
@@ -135,6 +136,43 @@ fn user_path() -> Result<String, String> {
         }
     }
     Err("the PATH kept changing while it was read".to_owned())
+}
+
+/// A text value under the computer's own part of the registry (`HKEY_LOCAL_MACHINE`), which
+/// only an administrator can write; none where there is no such value, or it isn't plain text.
+pub fn machine_text(key: &str, name: &str) -> Option<String> {
+    let (key, name) = (wide(key), wide(name));
+    let mut room = 0u32;
+    // The value may grow between asking its size and reading it: then ask again.
+    for _ in 0..3 {
+        let mut data = vec![0u16; (room as usize).div_ceil(2).max(1)];
+        let mut bytes = (data.len() * 2) as u32;
+        // SAFETY: the key and value names are NUL-terminated and live through the call; `data`
+        // has room for `bytes` bytes, which the call is told and writes no more than.
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                key.as_ptr(),
+                name.as_ptr(),
+                RRF_RT_REG_SZ,
+                null_mut(),
+                data.as_mut_ptr().cast(),
+                &mut bytes,
+            )
+        };
+        match status {
+            ERROR_SUCCESS => {
+                data.truncate(bytes as usize / 2);
+                while data.last() == Some(&0) {
+                    data.pop();
+                }
+                return Some(String::from_utf16_lossy(&data));
+            }
+            ERROR_MORE_DATA => room = bytes,
+            _ => return None,
+        }
+    }
+    None
 }
 
 pub fn add_to_user_path(folder: &str) -> Result<bool, String> {

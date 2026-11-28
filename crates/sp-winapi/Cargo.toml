@@ -8,7 +8,8 @@ license.workspace = true
 # The few Windows calls the app can't make safely: finding a parent console to print to, asking
 # a monitor for the part of it the taskbar leaves free, asking Windows the names the monitors give
 # themselves, renaming a file into place written through to the disk, putting a folder on the
-# user's PATH, reading and setting who may open the
+# user's PATH, reading what an installed program noted of itself for every user, reading and
+# setting who may open the
 # control socket's folder, keeping keys in the user's Credential Manager, holding the named mutex
 # that keeps the app to one copy per data folder, letting the copy running come to the front
 # when another start asks and asking the user's display languages for the message such a start

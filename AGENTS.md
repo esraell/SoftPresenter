@@ -216,7 +216,7 @@ process, and nextest gives each test a process of its own). One test alone:
   asking Windows the names the monitors give themselves and the country the user's location is set to, reading how much processor time and
   memory the app, the programs it started and the computer use (its `stats` part, for the
   anonymous reports), putting a folder on the user's PATH and
-  taking it off again, holding a named mutex that keeps the app to one copy per data folder,
+  taking it off again, reading a text an installed program noted of itself for every user (where NDI's uninstaller is), holding a named mutex that keeps the app to one copy per data folder,
   letting the copy running come to the front when another start asks and asking Windows the
   user's display languages for the message such a start shows when that copy doesn't answer, for the app's file windows, setting up OLE on the thread that shows one, bringing it back to the front and giving the operator's window the front back when it closes, asking Windows to keep the display on and the computer awake while the screens are on (a power request: `PowerCreateRequest`, `PowerSetRequest` and `PowerClearRequest`), in its `security` part, reading and setting who owns and may open the
   control socket's folder and finding the user the app runs as, and, in its `credentials` part,

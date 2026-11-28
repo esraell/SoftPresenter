@@ -191,6 +191,21 @@ pub fn remove_from_user_path(folder: &str) -> Result<bool, String> {
     }
 }
 
+/// A text value under the computer's own part of the registry (`HKEY_LOCAL_MACHINE`, which only
+/// an administrator can write): what an installed program noted of itself for every user. None
+/// where there is no such value, and on other systems.
+pub fn machine_text(key: &str, name: &str) -> Option<String> {
+    #[cfg(windows)]
+    {
+        windows::machine_text(key, name)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (key, name);
+        None
+    }
+}
+
 /// Whether `folder` is on the signed-in user's own PATH (false where it can't be read, and on
 /// other systems).
 pub fn on_user_path(folder: &str) -> bool {

@@ -14,8 +14,9 @@
 //! the installer's Authenticode signature, which must be valid, name NDI's company and come
 //! from its certificate authority. It is checked when it is downloaded and again right before
 //! it runs, the file held against any change from that check until it has started; it is
-//! never hidden. NDI's uninstaller carries no signature, so it is run only from Windows'
-//! Program Files, where only an administrator can have put it.
+//! never hidden. NDI's uninstaller carries no signature, so the one run is the one NDI's own
+//! entry among the programs installed for every user names (a part of the registry only an
+//! administrator can write), never one found beside a runtime or through the environment.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -128,30 +129,38 @@ pub fn open_and_wait(
     }
 }
 
-/// The folders only an administrator can write to where NDI's installer puts NDI.
-pub fn program_files() -> Vec<PathBuf> {
-    ["ProgramFiles", "ProgramW6432"].iter().filter_map(std::env::var_os).map(PathBuf::from).collect()
+/// Where NDI's runtime installer notes itself among the programs installed for every user:
+/// its own entry in the computer's part of the registry, which only an administrator can
+/// write (read off a PC it had installed on, 27 November 2026).
+const INSTALLED_ENTRY: &str =
+    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{71AFF296-ED43-4166-8301-4649285EE712}_is1";
+
+/// NDI's own uninstaller, as NDI's installer noted it for Windows: the program its entry among
+/// the installed programs names, and nothing else. Where NDI is, or what the environment says
+/// of it, is never used to find it: those a user's own programs can set, and NDI's uninstaller
+/// carries no signature to tell it by (read on NDI's own, 27 November 2026). None where NDI's
+/// runtime installer has installed nothing (NDI Tools, say, which SoftPresenter leaves alone).
+pub fn uninstaller() -> Option<PathBuf> {
+    let noted = sp_winapi::machine_text(INSTALLED_ENTRY, "UninstallString")?;
+    uninstaller_noted(&noted).filter(|uninstaller| uninstaller.is_file())
 }
 
-/// NDI's own uninstaller for a runtime its installer put at `runtime`
-/// (`…\NDI 6 Runtime\v6\Processing.NDI.Lib.x64.dll`): `unins000.exe` in the folder named for
-/// the runtime. None for a runtime that came some other way (with NDI Tools, say), which
-/// SoftPresenter leaves alone, and none for one outside `protected` (Windows' Program Files).
-/// NDI's uninstaller is not signed (read on NDI's own, 27 November 2026), so its signature
-/// can't be asked for: what stands for it is that only an administrator can have put a file
-/// there, so the uninstaller found there is the one NDI's installer left.
-pub fn uninstaller_for(runtime: &Path, protected: &[PathBuf]) -> Option<PathBuf> {
-    let folder = runtime.ancestors().skip(1).take(2).find(|folder| {
-        folder
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with("NDI ") && name.ends_with(" Runtime"))
-    })?;
-    if !protected.iter().any(|root| folder.starts_with(root)) {
-        return None;
-    }
-    let uninstaller = folder.join("unins000.exe");
-    uninstaller.is_file().then_some(uninstaller)
+/// The uninstaller an installed-programs entry names (`"C:\…\NDI 6 Runtime\unins000.exe"`,
+/// in quotes or bare): a whole path from a drive's top, with no step back up (`..`) in it,
+/// to a file named `unins000.exe` in any case. Anything else is refused.
+pub fn uninstaller_noted(noted: &str) -> Option<PathBuf> {
+    let noted = noted.trim();
+    let path = match noted.strip_prefix('"') {
+        Some(rest) => rest.split_once('"')?.0,
+        None => noted,
+    };
+    let parts: Vec<&str> = path.split(['\\', '/']).collect();
+    let from_a_drive = parts
+        .first()
+        .is_some_and(|drive| drive.len() == 2 && drive.ends_with(':') && drive.as_bytes()[0].is_ascii_alphabetic());
+    let plain = parts.iter().skip(1).all(|part| !part.is_empty() && *part != ".." && *part != ".");
+    let named = parts.last().is_some_and(|name| name.eq_ignore_ascii_case("unins000.exe"));
+    (from_a_drive && parts.len() >= 2 && plain && named).then(|| PathBuf::from(path))
 }
 
 #[cfg(test)]
@@ -238,36 +247,33 @@ mod tests {
     }
 
     #[test]
-    fn only_the_runtimes_own_uninstaller_in_program_files_is_found() {
-        let folder = std::env::temp_dir().join(format!("softpresenter-ndi-windows-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&folder);
-        let files = folder.join("Program Files");
-        let runtime = files.join("NDI").join("NDI 6 Runtime").join("v6");
-        let tools = files.join("NDI").join("NDI 6 Tools").join("Runtime");
-        let elsewhere = folder.join("Users/someone/NDI 6 Runtime/v6");
-        for place in [&runtime, &tools, &elsewhere] {
-            std::fs::create_dir_all(place).unwrap();
-        }
-        for uninstaller in [
-            files.join("NDI/NDI 6 Runtime/unins000.exe"),
-            files.join("NDI/NDI 6 Tools/unins000.exe"),
-            folder.join("Users/someone/NDI 6 Runtime/unins000.exe"),
+    fn only_the_uninstaller_ndis_own_entry_names_is_taken() {
+        // As NDI's installer wrote it on a PC.
+        let noted = r#""C:\Program Files\NDI\NDI 6 Runtime\unins000.exe""#;
+        assert_eq!(uninstaller_noted(noted), Some(PathBuf::from(r"C:\Program Files\NDI\NDI 6 Runtime\unins000.exe")));
+        // Bare, and in another case: the same file to Windows.
+        assert!(uninstaller_noted(r"c:\PROGRAM FILES\ndi\NDI 6 Runtime\UNINS000.EXE").is_some());
+        for refused in [
+            // A step back up, which would lead out of where it says it is.
+            r#""C:\Program Files\..\Users\someone\x\NDI 6 Runtime\unins000.exe""#,
+            r"C:\Program Files\NDI\.\unins000.exe",
+            // Not a whole path from a drive, another program, or nothing.
+            r"unins000.exe",
+            r"\\server\share\unins000.exe",
+            r"..\unins000.exe",
+            r#""C:\Program Files\NDI\NDI 6 Runtime\setup.exe""#,
+            r#""C:\Program Files\NDI\NDI 6 Runtime\unins000.exe.cmd""#,
+            r#""C:\Program Files\NDI"#,
+            "",
         ] {
-            std::fs::write(uninstaller, b"stand-in").unwrap();
+            assert_eq!(uninstaller_noted(refused), None, "{refused}");
         }
-        let protected = [files.clone()];
-        assert_eq!(
-            uninstaller_for(&runtime.join("Processing.NDI.Lib.x64.dll"), &protected),
-            Some(files.join("NDI/NDI 6 Runtime/unins000.exe"))
-        );
-        assert_eq!(
-            uninstaller_for(&tools.join("Processing.NDI.Lib.x64.dll"), &protected),
-            None,
-            "NDI Tools is left alone"
-        );
-        // A runtime somewhere anyone can write to: whatever calls itself its uninstaller is not run.
-        assert_eq!(uninstaller_for(&elsewhere.join("Processing.NDI.Lib.x64.dll"), &protected), None);
-        assert_eq!(uninstaller_for(&runtime.join("Processing.NDI.Lib.x64.dll"), &[]), None);
-        let _ = std::fs::remove_dir_all(&folder);
+        // Words after the program (as some entries have) are left off, never run.
+        let with_words = r#""C:\Program Files\NDI\NDI 6 Runtime\unins000.exe" /SILENT"#;
+        assert_eq!(uninstaller_noted(with_words), uninstaller_noted(noted));
+        // On a computer where NDI's runtime installer installed nothing, there is none.
+        if !cfg!(windows) {
+            assert_eq!(uninstaller(), None);
+        }
     }
 }
