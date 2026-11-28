@@ -33,7 +33,7 @@ song packs with words written for them.
 ## Offered in development builds only
 
 Until the source has answered the owner's email (24 November 2026), the windows that offer the
-catalog (the setup's Free Songs step, Settings › Integrations › Worship Leader App) are shown
+catalog (the setup's Songs step, Settings › Integrations › Worship Leader App) are shown
 only in development builds: those compiled with `SOFTPRESENTER_DEV_VERSION` set
 (`catalog::offered`). A release shows none of them. The `sp catalog` commands are in every build.
 

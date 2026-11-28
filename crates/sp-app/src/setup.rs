@@ -1,21 +1,30 @@
 //! The setup a fresh install starts with, so a church gets going on any computer without
-//! knowing where things are: which display the congregation sees, bringing its songs in, which
-//! Bibles go on top and below, and what the system will ask permission for (a Mac and Windows
-//! ask; on Linux nothing does, and that step is left out). It is shown once, on the first start,
-//! and can be opened again from Settings (and the SoftPresenter menu on a Mac). Every choice is
-//! the same one the Screens window, the import menu and the Bible page make, so nothing here is
-//! kept apart from them. Its words fit the system it runs on (`System`).
+//! knowing where things are. A welcome, then five numbered steps: the languages the church
+//! shows (they choose which songbooks and Bibles are recommended), its songs (those already on
+//! this computer, and free songbooks), its Bibles, the screens, and Ready, which says what is
+//! set, what the system will ask permission for (a Mac and Windows ask; on Linux nothing does)
+//! and how anonymous reports stand. It is shown once, on the first start, filling the window,
+//! and can be opened again from Settings (and the SoftPresenter menu on a Mac), as a sheet over
+//! the window. Every choice is the same one Settings, the import menu and the Bible page make,
+//! so nothing here is kept apart from them, and a step left with Skip or Back changes nothing.
+//! Its words fit the system it runs on (`System`).
 
-use std::path::PathBuf;
+mod bibles;
+mod languages;
+mod ready;
+mod screens;
+mod songs;
+#[cfg(test)]
+mod tests;
 
-use egui::{Align, Align2, Color32, Frame, Layout, RichText, Sense, Stroke, vec2};
+use egui::{Align2, Color32, FontId, Frame, Rect, Sense, Stroke, pos2, vec2};
 use sp_engine::{Command, Show, SlideRef};
 
-use crate::displays::{DisplayInfo, kept_for_operator};
 use crate::home::HomeState;
-use crate::i18n::{t, tf, tn};
-use crate::screens::{Kind, Output, Screen};
-use crate::studio::{CARD, HOVER, READY, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
+use crate::i18n::t;
+use crate::studio::{CARD, Flat, HOVER, LINE, READY, SELECTED, TEXT, TEXT_DIM, TEXT_FAINT, semibold};
+
+pub use bibles::place_downloaded;
 
 /// The system the setup speaks of: what it asks permission for, what its menus are, what the
 /// computer is called. A value rather than a build switch, so each system's words can be tried
@@ -38,105 +47,133 @@ impl System {
     };
 }
 
-/// The steps.
+/// The steps: the welcome, which has no number, then the five along the top.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
     Welcome,
-    Screens,
+    /// Which languages the church shows: they choose the songbooks and Bibles recommended.
+    Languages,
+    /// The songs already on this computer (`find_songs`) and free songbooks (`free_songbooks`,
+    /// and the song catalog's where it is offered, `songbooks`).
     Songs,
-    /// Free songbooks: those shared by churches (`free_songbooks`), and the song catalog's
-    /// where it is offered (`songbooks`).
-    FreeSongs,
     Bibles,
-    Permissions,
-    /// Anonymous reports: on, with the key that turns them off (`reports::ui::setup_step`).
-    Reports,
-    Done,
+    Screens,
+    /// What is set, what the system will ask, and anonymous reports (`reports::ui`).
+    Ready,
 }
+
+/// The steps in order, the same on every system.
+pub const STEPS: [Step; 6] = [Step::Welcome, Step::Languages, Step::Songs, Step::Bibles, Step::Screens, Step::Ready];
 
 impl Step {
     /// Its name along the top.
     fn name(self) -> &'static str {
         match self {
             Step::Welcome => t("setup.step.welcome", "Welcome"),
-            Step::Screens => t("setup.step.screens", "Screens"),
+            Step::Languages => t("setup.step.languages", "Languages"),
             Step::Songs => t("setup.step.songs", "Songs"),
-            Step::FreeSongs => t("setup.step.free_songs", "Free Songs"),
             Step::Bibles => t("setup.step.bibles", "Bibles"),
-            Step::Permissions => t("setup.step.permissions", "Permissions"),
-            Step::Reports => t("setup.step.reports", "Reports"),
-            Step::Done => t("setup.step.done", "Done"),
+            Step::Screens => t("setup.step.screens", "Screens"),
+            Step::Ready => t("setup.step.ready", "Ready"),
         }
+    }
+
+    /// Its place in [`STEPS`]: the number it has along the top (the welcome's is 0, not shown).
+    fn at(self) -> usize {
+        STEPS.iter().position(|step| *step == self).unwrap_or(0)
     }
 }
 
-/// The steps on `system`, in order. Linux has no Permissions step: nothing there asks. Free
-/// Songs follows Songs: the songbooks shared by churches, and the song catalog's too where it is
-/// offered (`catalog::offered`). Reports is the last before Done on every system: anonymous
-/// reports are on unless they are turned off there.
-fn steps(system: System) -> Vec<Step> {
-    let mut steps = vec![Step::Welcome, Step::Screens, Step::Songs, Step::FreeSongs];
-    steps.push(Step::Bibles);
-    if system != System::Linux {
-        steps.push(Step::Permissions);
-    }
-    steps.push(Step::Reports);
-    steps.push(Step::Done);
-    steps
+/// The languages the Languages step offers, in the order of its cards: those SoftPresenter has
+/// free songs to start with in, or speaks.
+pub const LANGUAGES: [&str; 4] = ["en", "es", "ru", "uk"];
+
+/// One of Ready's two folds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fold {
+    /// What macOS, or Windows, will ask.
+    Asks,
+    /// What the reports send.
+    Reports,
 }
 
 /// The setup while it is open.
 #[derive(Clone, Debug)]
 pub struct Setup {
     pub step: Step,
-    /// A library folder of another presentation program found on this computer, how many song
-    /// documents are in it, and in how many libraries.
-    pub library_found: Option<(PathBuf, usize, usize)>,
-    /// True once the Documents folder has been looked in for one. It is looked in only when
-    /// asked on the Songs step: on a Mac the first look at Documents makes macOS ask permission,
-    /// and the app waits for the answer, so it mustn't happen as the app opens with nothing said.
-    pub looked: bool,
-    /// What bringing songs in came to, in plain words.
+    /// True when it was opened again from Settings (the setup had been seen): a sheet over the
+    /// window, its answers filled in as things stand. Known at its first drawing.
+    again: Option<bool>,
+    /// The furthest step reached: the steps along the top up to it can be clicked.
+    seen: usize,
+    /// The steps left with Skip, which changed nothing.
+    skipped: Vec<Step>,
+    /// The languages the church shows, the one on top first, as chosen on the Languages step.
+    /// They are saved, and choose the recommendations outside the setup too, once that step is
+    /// passed with Continue.
+    pub languages: Vec<String>,
+    /// What bringing chosen song files in came to, in plain words.
     pub songs_said: Option<String>,
-    /// The song catalog's songbooks ticked on the Free Songs step.
+    /// The song catalog's songbooks ticked on the Songs step.
     pub free_songs: crate::songbooks::Picked,
-    /// The free songbooks shared by churches ticked on the Free Songs step.
+    /// The free songbooks shared by churches ticked on the Songs step.
     pub shared: crate::free_songbooks::Picked,
+    /// The Bibles chosen on the Bibles step, given to the Bible page when it is passed.
+    bibles: bibles::Choice,
+    /// Which of Ready's folds is open, and whether it was opened by this drawing's click (it is
+    /// then brought into view).
+    fold: Option<Fold>,
+    fold_opened: bool,
+    /// How reports stood when last known, for the moments the reporter is busy.
+    reports: Option<crate::reports::Standing>,
 }
 
 impl Setup {
     pub fn new() -> Setup {
         Setup {
             step: Step::Welcome,
-            library_found: None,
-            looked: false,
+            again: None,
+            seen: 0,
+            skipped: Vec::new(),
+            languages: Vec::new(),
             songs_said: None,
             free_songs: crate::songbooks::Picked::default(),
             shared: crate::free_songbooks::Picked::default(),
+            bibles: bibles::Choice::default(),
+            fold: None,
+            fold_opened: false,
+            reports: None,
         }
     }
 
-    /// The setup opened at the step a testing aid names (`free-songs`, `bibles`…), or at its
-    /// start for any other value.
+    /// The setup opened at the step a testing aid names (`languages`, `songs`, `bibles`,
+    /// `screens`, `ready`, or its number), or at its start for any other value. `ready-asks` and
+    /// `ready-reports` open Ready with that fold open. The names of the steps there were before
+    /// still open where their part went: `free-songs` Songs, `permissions` Ready with what the
+    /// system will ask opened, `reports` and `done` Ready, `reports-open` Ready with what the
+    /// reports send opened.
     pub fn opened_at(name: &str) -> Setup {
         let wanted = name.trim().to_ascii_lowercase().replace(['-', '_', ' '], "");
-        // `reports-open`: the Reports step with See what's sent opened (`reports::ui`).
-        let wanted = wanted.strip_suffix("open").filter(|step| *step == "reports").unwrap_or(&wanted).to_owned();
         let mut setup = Setup::new();
-        let all = [
-            Step::Welcome,
-            Step::Screens,
-            Step::Songs,
-            Step::FreeSongs,
-            Step::Bibles,
-            Step::Permissions,
-            Step::Reports,
-            Step::Done,
-        ];
-        if let Some(step) = all.into_iter().find(|step| format!("{step:?}").to_ascii_lowercase() == wanted) {
-            setup.step = step;
-        }
+        let (step, fold) = match wanted.as_str() {
+            "languages" | "1" => (Step::Languages, None),
+            "songs" | "freesongs" | "2" => (Step::Songs, None),
+            "bibles" | "3" => (Step::Bibles, None),
+            "screens" | "4" => (Step::Screens, None),
+            "ready" | "done" | "reports" | "5" => (Step::Ready, None),
+            "readyasks" | "permissions" => (Step::Ready, Some(Fold::Asks)),
+            "readyreports" | "reportsopen" => (Step::Ready, Some(Fold::Reports)),
+            _ => (Step::Welcome, None),
+        };
+        setup.step = step;
+        setup.seen = step.at();
+        setup.fold = fold;
         setup
+    }
+
+    /// True when the setup was opened again from Settings.
+    fn again(&self) -> bool {
+        self.again.unwrap_or(false)
     }
 }
 
@@ -149,241 +186,557 @@ impl Default for Setup {
 /// What the setup asks of the app: things that need more than the window's own state.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SetupRequest {
-    /// Import a folder of song documents, each folder inside it becoming a library.
-    ImportLibrary(PathBuf),
     /// Ask which song files to import.
     ChooseSongFiles,
 }
 
-/// The other presentation program's libraries folder in the home folder, if it is there, with how many song
-/// documents it holds and in how many libraries. (Windows names the home folder USERPROFILE.)
-fn library_found() -> Option<(PathBuf, usize, usize)> {
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    let folder = PathBuf::from(home).join("Documents").join("ProPresenter").join("Libraries");
-    let mut songs = 0;
-    let mut libraries = 0;
-    for library in std::fs::read_dir(&folder).ok()?.flatten().map(|entry| entry.path()).filter(|p| p.is_dir()) {
-        let count = std::fs::read_dir(&library)
-            .map(|read| read.flatten().filter(|e| crate::load::is_song_document(&e.path())).count())
-            .unwrap_or(0);
-        if count > 0 {
-            songs += count;
-            libraries += 1;
+/// What the setup is told of the computer and the build, so each can be tried on any computer:
+/// the system, how anonymous reports stand (`None` in a build without them), whether the song
+/// catalog is offered, and whether Bibles can be downloaded.
+#[derive(Clone, Debug)]
+pub struct Env {
+    pub system: System,
+    pub reports: Option<crate::reports::Standing>,
+    pub catalog: bool,
+    pub bibles_download: bool,
+    /// The version, as the build shows it: a pre-release says so on the welcome.
+    pub version: String,
+}
+
+impl Env {
+    /// As things are now. `last`: how reports stood when last known, for a moment the
+    /// reporter's own thread holds them.
+    fn now(last: Option<&crate::reports::Standing>) -> Env {
+        Env {
+            system: System::THIS,
+            reports: crate::reports::offered()
+                .then(|| crate::reports::standing().or_else(|| last.cloned()).unwrap_or_default()),
+            catalog: crate::catalog::offered(),
+            bibles_download: crate::bible_store::download_base().is_some(),
+            version: crate::updates::VERSION.to_owned(),
         }
     }
-    (songs > 0).then_some((folder, songs, libraries))
+}
+
+/// How large the setup's card is in a window of `screen`: on a first start, most of the window
+/// (940 by 720 at the most); opened again, the narrower sheet (780 by 660 at the most). The
+/// same on every step, so the keys at its foot never move.
+fn card_size(screen: egui::Vec2, again: bool) -> egui::Vec2 {
+    if again {
+        vec2((screen.x - 32.0).min(780.0), (screen.y - 32.0).min(660.0))
+    } else {
+        vec2((screen.x - 48.0).min(940.0), (screen.y - 48.0).min(720.0))
+    }
+}
+
+/// The room inside the card's edge: at its sides, above and below.
+fn card_margin(again: bool) -> egui::Margin {
+    if again {
+        egui::Margin { left: 28, right: 28, top: 20, bottom: 20 }
+    } else {
+        egui::Margin { left: 40, right: 40, top: 24, bottom: 22 }
+    }
+}
+
+/// How tall the steps along the top are, and the foot's keys.
+const BAR: f32 = 30.0;
+const FOOT: f32 = 30.0;
+
+/// Where the last drawing put a step's content, for the checks that every step fits: how tall
+/// what the step drew is, and how tall the room it has.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Fit {
+    pub content: f32,
+    pub room: f32,
+}
+
+fn fit_id() -> egui::Id {
+    egui::Id::unique("setup fit")
 }
 
 /// Draws the setup over the window while it is open. Closing it, at the end or early, marks
 /// the setup done, so it isn't shown at the next start.
 pub fn setup_ui(ctx: &egui::Context, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
+    let env = Env::now(state.setup.as_ref().and_then(|setup| setup.reports.as_ref()));
+    setup_ui_in(ctx, show, state, commands, &env);
+}
+
+/// [`setup_ui`], told of the computer and the build (`env`).
+pub fn setup_ui_in(ctx: &egui::Context, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>, env: &Env) {
     let Some(mut setup) = state.setup.take() else { return };
+    // The first drawing: whether it is a first start, and the answers as things stand.
+    if setup.again.is_none() {
+        setup.again = Some(state.setup_done);
+        setup.languages = languages::starting(&state.church_languages, &crate::i18n::computer_tags());
+        setup.bibles = bibles::Choice::starting(state, &setup.languages, setup.again(), env.bibles_download);
+    }
+    if env.reports.is_some() {
+        setup.reports.clone_from(&env.reports);
+    }
+    let again = setup.again();
     let mut open = true;
-    let frame = Frame::new()
-        .fill(Color32::from_rgb(40, 40, 42))
-        .stroke(Stroke::new(1.0, Color32::from_white_alpha(22)))
-        .corner_radius(16.0)
-        .inner_margin(egui::Margin { left: 28, right: 28, top: 22, bottom: 20 })
-        .shadow(egui::Shadow { offset: [0, 18], blur: 50, spread: 0, color: Color32::from_black_alpha(160) });
-    let area = egui::Modal::default_area(egui::Id::unique("setup")).anchor(Align2::CENTER_CENTER, vec2(0.0, -10.0));
-    egui::Modal::new(egui::Id::unique("setup"))
-        .area(area)
-        .backdrop_color(Color32::from_black_alpha(110))
-        .frame(frame)
-        .show(ctx, |ui| {
-            let system = System::THIS;
-            let mut steps = steps(system);
-            // The Reports step belongs to a build that has the anonymous reports.
-            steps.retain(|step| *step != Step::Reports || crate::reports::offered());
-            // A step this system doesn't have (Permissions on Linux) is never shown.
-            if !steps.contains(&setup.step) {
-                setup.step = steps[0];
-            }
-            ui.set_width(540.0);
-            steps_bar(ui, setup.step, &steps);
-            ui.add_space(18.0);
-            let mut not_now = false;
-            match setup.step {
-                Step::Welcome => welcome(ui, system),
-                Step::Screens => screens(ui, state),
-                Step::Songs => songs(ui, &mut setup, state, system),
-                Step::FreeSongs => not_now = free_songs(ui, &mut setup, state),
-                Step::Bibles => bibles(ui, state),
-                Step::Permissions => permissions(ui, system),
-                Step::Reports => crate::reports::ui::setup_step(ui, state),
-                Step::Done => done(ui, show, state, commands),
-            }
-            ui.add_space(20.0);
-            let at = steps.iter().position(|step| *step == setup.step).unwrap_or(0);
-            if not_now && at + 1 < steps.len() {
-                setup.step = steps[at + 1];
-            }
-            ui.horizontal(|ui| {
-                if at == 0 {
-                    if link(ui, t("setup.skip", "Skip setup")).clicked() {
-                        open = false;
-                    }
-                } else if button(ui, t("setup.back", "Back"), false).clicked() {
-                    setup.step = steps[at - 1];
+    let screen = ctx.content_rect().size();
+    let size = card_size(screen, again);
+    let margin = card_margin(again);
+    let frame = if again {
+        Frame::new()
+            .fill(Color32::from_rgb(40, 40, 42))
+            .stroke(Stroke::new(1.0, Color32::from_white_alpha(22)))
+            .corner_radius(16.0)
+            .inner_margin(margin)
+            .shadow(egui::Shadow { offset: [0, 18], blur: 50, spread: 0, color: Color32::from_black_alpha(160) })
+    } else {
+        Frame::new()
+            .fill(Color32::from_rgb(18, 18, 18))
+            .stroke(Stroke::new(1.0, Color32::from_rgb(42, 42, 42)))
+            .corner_radius(16.0)
+            .inner_margin(margin)
+            .shadow(egui::Shadow { offset: [0, 30], blur: 80, spread: 0, color: Color32::from_black_alpha(180) })
+    };
+    // A first start fills the window in the brand's dark, so nothing behind it is read first;
+    // opened again, the window stays in view behind the sheet.
+    let backdrop = if again { Color32::from_black_alpha(110) } else { Color32::from_rgb(5, 5, 5) };
+    let area = egui::Modal::default_area(egui::Id::unique("setup")).anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0));
+    egui::Modal::new(egui::Id::unique("setup")).area(area).backdrop_color(backdrop).frame(frame).show(ctx, |ui| {
+        let inner = vec2(
+            size.x - f32::from(margin.left) - f32::from(margin.right),
+            size.y - f32::from(margin.top) - f32::from(margin.bottom),
+        );
+        ui.set_width(inner.x);
+        ui.set_height(inner.y);
+        ui.spacing_mut().item_spacing = vec2(8.0, 0.0);
+        let top = ui.cursor().min;
+        // The steps along the top, numbered from Languages; the welcome has none.
+        let mut go_to = None;
+        if setup.step != Step::Welcome {
+            let bar = Rect::from_min_size(top, vec2(inner.x, BAR));
+            go_to = steps_bar(ui, bar, &setup);
+        }
+        let body =
+            Rect::from_min_max(pos2(top.x, top.y + BAR + 10.0), pos2(top.x + inner.x, top.y + inner.y - FOOT - 14.0));
+        let step = setup.step;
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).id_salt(("setup step", step.at())));
+        child.set_clip_rect(body.expand(2.0));
+        let out = egui::ScrollArea::vertical()
+            .id_salt(("setup body", step.at()))
+            .max_height(body.height())
+            .auto_shrink([false, false])
+            .show(&mut child, |ui| {
+                ui.set_width(body.width());
+                match step {
+                    Step::Welcome => welcome(ui, again, env),
+                    Step::Languages => languages::step(ui, &mut setup, again),
+                    Step::Songs => songs::step(ui, &mut setup, state, env, body.height()),
+                    Step::Bibles => bibles::step(ui, &mut setup, state, env),
+                    Step::Screens => screens::step(ui, state),
+                    Step::Ready => go_to = go_to.or(ready::step(ui, &mut setup, state, env)),
                 }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let last = at + 1 == steps.len();
-                    let label = match setup.step {
-                        Step::Welcome => t("setup.get_started", "Get Started"),
-                        _ if last => t("setup.start_using", "Start Using SoftPresenter"),
-                        _ => t("setup.continue", "Continue"),
-                    };
-                    if button(ui, label, true).clicked() {
-                        // Continue on Free Songs: what is ticked downloads once the setup closes.
-                        if setup.step == Step::FreeSongs {
-                            setup.free_songs.confirmed = true;
-                            setup.shared.confirmed = true;
-                        }
-                        // Continue on Reports: the person has seen that reports are on, and
-                        // how to turn them off.
-                        if setup.step == Step::Reports {
+            });
+        ui.data_mut(|data| {
+            data.insert_temp(fit_id(), Fit { content: out.content_size.y, room: out.inner_rect.height() })
+        });
+        let foot = Rect::from_min_size(pos2(top.x, top.y + inner.y - FOOT), vec2(inner.x, FOOT));
+        match foot_keys(ui, foot, &setup, state, show) {
+            Some(Pressed::Leave) => open = false,
+            Some(Pressed::Back) => go(&mut setup, state, step.at().saturating_sub(1)),
+            Some(Pressed::Skip) => {
+                if !setup.skipped.contains(&step) {
+                    setup.skipped.push(step);
+                }
+                let next = step.at() + 1;
+                setup.step = STEPS[next.min(STEPS.len() - 1)];
+                setup.seen = setup.seen.max(setup.step.at());
+            }
+            Some(Pressed::TestSlide) => {
+                commands.push(Command::GoTo(SlideRef { presentation: show.selected(), slide: 0 }));
+                state.bible_open = false;
+            }
+            Some(Pressed::On) => {
+                if passed(&mut setup, state, env, ui.ctx()) {
+                    if step == Step::Ready {
+                        // Ready was read, with its Reports line: the person has been told.
+                        if env.reports.is_some() {
                             crate::reports::ui::passed_setup_step();
                         }
-                        if last {
-                            open = false;
-                        } else {
-                            setup.step = steps[at + 1];
-                        }
+                        open = false;
+                    } else {
+                        setup.step = STEPS[step.at() + 1];
+                        setup.seen = setup.seen.max(setup.step.at());
                     }
-                });
-            });
-        });
+                }
+            }
+            None => {}
+        }
+        if let Some(to) = go_to {
+            go(&mut setup, state, to);
+        }
+    });
     if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         open = false;
     }
     if open {
         state.setup = Some(setup);
     } else {
+        // A first start left early says where the setup lives.
+        if !again && setup.step != Step::Ready {
+            state.notices.info(t(
+                "setup.skipped.notice",
+                "The setup is in Settings whenever you want it: Set up SoftPresenter\u{2026}",
+            ));
+        }
         state.setup_done = true;
         state.identify = false;
-        crate::songbooks::setup_closed(&setup.free_songs, &mut state.songbooks);
-        crate::free_songbooks::setup_closed(&setup.shared, &mut state.free_songbooks);
     }
 }
 
-/// The Free Songs step: the songbooks shared by churches, under the song catalog's where that
-/// is offered. True when Not Now was clicked (nothing of either is downloaded).
-fn free_songs(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState) -> bool {
-    let not_now = if crate::catalog::offered() {
-        setup.shared.confirmed = false;
-        let (shared, view) = (&mut setup.shared, &mut state.free_songbooks);
-        crate::songbooks::setup_step(ui, &mut setup.free_songs, &mut state.songbooks, |ui| {
-            crate::free_songbooks::setup_section(ui, shared, view, true);
-        })
-    } else {
-        crate::free_songbooks::setup_step(ui, &mut setup.shared, &mut state.free_songbooks)
-    };
-    // The catalog's Not Now clears its own ticks; the shared songbooks' go with them.
-    if not_now {
-        setup.shared.not_now();
-    }
-    not_now
+/// How well the step last drawn fits its room (see [`Fit`]).
+#[cfg(test)]
+pub fn fit(ctx: &egui::Context) -> Fit {
+    ctx.data(|data| data.get_temp::<Fit>(fit_id()).unwrap_or_default())
 }
 
-/// The dots along the top: one for each step, the one now lit.
-fn steps_bar(ui: &mut egui::Ui, now: Step, steps: &[Step]) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 14.0;
-        let at = steps.iter().position(|step| *step == now).unwrap_or(0);
-        for (index, name) in steps.iter().map(|step| step.name()).enumerate() {
-            let ink = if index == at {
-                TEXT
-            } else if index < at {
-                TEXT_DIM
-            } else {
-                TEXT_FAINT
-            };
-            let dot = if index < at {
-                "●"
-            } else if index == at {
-                "◉"
-            } else {
-                "○"
-            };
-            ui.label(RichText::new(format!("{dot} {name}")).size(11.5).color(ink));
+/// Goes to another step from the steps along the top, a Change key or Back. Going on from
+/// Languages this way takes its answer, as Continue does, and needs one language chosen.
+fn go(setup: &mut Setup, state: &mut HomeState, to: usize) {
+    let to = to.min(STEPS.len() - 1);
+    if setup.step == Step::Languages && to > Step::Languages.at() {
+        if setup.languages.is_empty() {
+            return;
         }
-    });
+        languages::passed(setup, state);
+    }
+    setup.step = STEPS[to];
+    setup.seen = setup.seen.max(to);
+    setup.fold_opened = false;
 }
 
-pub(crate) fn title(ui: &mut egui::Ui, text: &str) {
-    ui.label(RichText::new(text).font(semibold(20.0)).color(Color32::WHITE));
-    ui.add_space(6.0);
+/// Continue on a step: what it chose is done. False when the step can't be left yet (no
+/// language chosen).
+fn passed(setup: &mut Setup, state: &mut HomeState, env: &Env, ctx: &egui::Context) -> bool {
+    let step = setup.step;
+    match step {
+        Step::Welcome | Step::Screens | Step::Ready => {}
+        Step::Languages => {
+            if setup.languages.is_empty() {
+                return false;
+            }
+            languages::passed(setup, state);
+        }
+        Step::Songs => songs::passed(setup, state),
+        Step::Bibles => bibles::passed(setup, state, env, ctx),
+    }
+    setup.skipped.retain(|skipped| *skipped != step);
+    true
 }
 
-pub(crate) fn say(ui: &mut egui::Ui, text: &str) {
-    ui.add(egui::Label::new(RichText::new(text).size(13.0).color(TEXT_DIM)).wrap());
+/// What a click at the foot asked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pressed {
+    /// Skip Setup, or Close: the setup closes.
+    Leave,
+    Back,
+    Skip,
+    TestSlide,
+    /// The way on: Get Started, Continue, Bring In and Continue, Start Using SoftPresenter.
+    On,
 }
 
-/// A rounded button; `main` for the one that goes on.
-pub(crate) fn button(ui: &mut egui::Ui, label: &str, main: bool) -> egui::Response {
-    let font = if main { semibold(13.0) } else { egui::FontId::proportional(13.0) };
-    let width = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), TEXT).size().x + 32.0;
-    let (place, response) = ui.allocate_exact_size(vec2(width.max(90.0), 30.0), Sense::click());
-    let fill = match (main, response.hovered()) {
-        (true, true) => Color32::from_rgb(70, 140, 255),
-        (true, false) => Color32::from_rgb(10, 110, 245),
-        (false, true) => HOVER,
-        (false, false) => CARD,
+fn skip_setup_words() -> &'static str {
+    t("setup.skip", "Skip Setup")
+}
+
+/// The words of the way on, on each step: the Songs step's say that songs come in when some
+/// found on this computer are ticked.
+fn on_words(step: Step, again: bool, bringing: bool) -> &'static str {
+    match step {
+        Step::Welcome if again => t("setup.continue", "Continue"),
+        Step::Welcome => t("setup.get_started", "Get Started"),
+        Step::Songs if bringing => t("setup.songs.bring_in", "Bring In and Continue"),
+        Step::Ready => t("setup.start_using", "Start Using SoftPresenter"),
+        _ => t("setup.continue", "Continue"),
+    }
+}
+
+/// Every wording the way on can have, so its key is as wide as the longest of them on every
+/// step (190 points at least), and the side keys' (88 at least).
+fn on_wordings() -> [&'static str; 4] {
+    [
+        t("setup.get_started", "Get Started"),
+        t("setup.continue", "Continue"),
+        t("setup.songs.bring_in", "Bring In and Continue"),
+        t("setup.start_using", "Start Using SoftPresenter"),
+    ]
+}
+
+fn side_wordings() -> [&'static str; 4] {
+    [skip_setup_words(), t("setup.close", "Close"), t("setup.back", "Back"), t("setup.skip_step", "Skip")]
+}
+
+/// The widest of `wordings` in `font`, with `pad` each side, `least` at least.
+fn key_width(ui: &egui::Ui, wordings: &[&str], font: &FontId, pad: f32, least: f32) -> f32 {
+    crate::studio::flat_button_width(ui, wordings, font, pad).max(least).ceil()
+}
+
+/// The keys at the foot, the same sizes and places on every step: Back (Skip Setup or Close on
+/// the welcome), Skip (Show a Test Slide on Ready), and the way on at the right; what is
+/// downloading at the left.
+fn foot_keys(ui: &mut egui::Ui, foot: Rect, setup: &Setup, state: &HomeState, show: &Show) -> Option<Pressed> {
+    let step = setup.step;
+    let plain = FontId::proportional(13.0);
+    let on_width = key_width(ui, &on_wordings(), &semibold(13.0), 16.0, 190.0);
+    let side_width = key_width(ui, &side_wordings(), &plain, 13.0, 88.0);
+    let mut pressed = None;
+    let on = Rect::from_min_max(pos2(foot.max.x - on_width, foot.min.y), foot.max);
+    let can_go_on = step != Step::Languages || !setup.languages.is_empty();
+    let words = on_words(step, setup.again(), songs::bringing(state));
+    if crate::studio::flat_button(ui, on, ui.scope_id().with("setup on"), words, semibold(13.0), Flat::Main, can_go_on)
+        .clicked()
+    {
+        pressed = Some(Pressed::On);
+    }
+    // The key beside it: Skip on the middle steps, Show a Test Slide on Ready, none on the welcome.
+    let mut left = on.min.x - 8.0;
+    match step {
+        Step::Welcome => {}
+        Step::Ready => {
+            let words = t("setup.done.test_slide", "Show a Test Slide");
+            let width = key_width(ui, &[words], &plain, 13.0, 88.0);
+            let rect = Rect::from_min_max(pos2(left - width, foot.min.y), pos2(left, foot.max.y));
+            let can = !show.presentations().is_empty();
+            if crate::studio::flat_button(
+                ui,
+                rect,
+                ui.scope_id().with("setup test"),
+                words,
+                plain.clone(),
+                Flat::Plain,
+                can,
+            )
+            .clicked()
+            {
+                pressed = Some(Pressed::TestSlide);
+            }
+            left = rect.min.x - 8.0;
+        }
+        _ => {
+            let rect = Rect::from_min_max(pos2(left - side_width, foot.min.y), pos2(left, foot.max.y));
+            let words = t("setup.skip_step", "Skip");
+            if crate::studio::flat_button(
+                ui,
+                rect,
+                ui.scope_id().with("setup skip"),
+                words,
+                plain.clone(),
+                Flat::Plain,
+                true,
+            )
+            .clicked()
+            {
+                pressed = Some(Pressed::Skip);
+            }
+            left = rect.min.x - 8.0;
+        }
+    }
+    // Back, in one place on every step: beside Skip's place, whether or not Skip is there.
+    let back_right = on.min.x - 8.0 - side_width - 8.0;
+    let back_right = if step == Step::Ready { left } else { back_right };
+    let rect = Rect::from_min_max(pos2(back_right - side_width, foot.min.y), pos2(back_right, foot.max.y));
+    let (words, what) = match step {
+        Step::Welcome if setup.again() => (t("setup.close", "Close"), Pressed::Leave),
+        Step::Welcome => (skip_setup_words(), Pressed::Leave),
+        _ => (t("setup.back", "Back"), Pressed::Back),
     };
-    ui.painter().rect_filled(place, 8.0, fill);
-    ui.painter().text(place.center(), Align2::CENTER_CENTER, label, font, Color32::WHITE);
-    response
+    if crate::studio::flat_button(ui, rect, ui.scope_id().with("setup back"), words, plain, Flat::Plain, true).clicked()
+    {
+        pressed = Some(what);
+    }
+    // What is downloading, at the left, on every step.
+    if let Some(words) = songs::downloading_words(state) {
+        let room = rect.min.x - foot.min.x - 12.0;
+        let galley = crate::home::settings::parts::one_line(ui, &words, FontId::proportional(12.0), TEXT_DIM, room);
+        ui.painter().galley(pos2(foot.min.x, foot.center().y - galley.size().y / 2.0), galley, TEXT_DIM);
+    }
+    pressed
 }
 
+/// The steps along the top, numbered from Languages: the one now in ink on the well, those done
+/// with a tick, those skipped with a dash. A step already reached can be clicked; the step
+/// clicked, if any.
+fn steps_bar(ui: &mut egui::Ui, bar: Rect, setup: &Setup) -> Option<usize> {
+    let mut clicked = None;
+    let mut x = bar.min.x;
+    let now = setup.step.at();
+    for step in STEPS.iter().skip(1) {
+        let at = step.at();
+        let font = FontId::proportional(12.0);
+        let name = ui.painter().layout_no_wrap(step.name().to_owned(), font, TEXT);
+        let width = 5.0 + 20.0 + 7.0 + name.size().x + 10.0;
+        let rect = Rect::from_min_size(pos2(x, bar.min.y), vec2(width, BAR));
+        let reached = at <= setup.seen;
+        let sense = if reached { Sense::click() } else { Sense::hover() };
+        let response = ui.interact(rect, ui.scope_id().with(("setup step key", at)), sense);
+        if response.clicked() && at != now {
+            clicked = Some(at);
+        }
+        let skipped = setup.skipped.contains(step) && at != now;
+        let done = at < now && !skipped;
+        let ink = if at == now {
+            TEXT
+        } else if at < now {
+            TEXT_DIM
+        } else {
+            TEXT_FAINT
+        };
+        if at == now {
+            ui.painter().rect_filled(rect, BAR / 2.0, CARD);
+        } else if reached && response.hovered() {
+            ui.painter().rect_filled(rect, BAR / 2.0, HOVER);
+        }
+        let centre = pos2(rect.min.x + 15.0, rect.center().y);
+        if at == now {
+            ui.painter().circle_filled(centre, 10.0, TEXT);
+        } else if done || skipped {
+            ui.painter().circle_filled(centre, 10.0, SELECTED);
+        } else {
+            ui.painter().circle_stroke(centre, 9.5, Stroke::new(1.0, LINE));
+        }
+        let mark_ink = if at == now { crate::studio::PANEL } else { ink };
+        if done {
+            tick(ui.painter(), centre, 4.0, Stroke::new(1.6, TEXT));
+        } else {
+            let mark = if skipped { "\u{2013}".to_owned() } else { at.to_string() };
+            ui.painter().text(centre, Align2::CENTER_CENTER, mark, semibold(10.5), mark_ink);
+        }
+        ui.painter().galley_with_override_text_color(
+            pos2(rect.min.x + 32.0, rect.center().y - name.size().y / 2.0),
+            name,
+            ink,
+        );
+        x += width + 6.0;
+    }
+    clicked
+}
+
+/// A tick drawn around `centre`, `size` from its middle to its ends.
+pub(crate) fn tick(painter: &egui::Painter, centre: egui::Pos2, size: f32, stroke: Stroke) {
+    let points =
+        vec![centre + vec2(-size, 0.0), centre + vec2(-size * 0.3, size * 0.7), centre + vec2(size, -size * 0.7)];
+    painter.add(egui::Shape::line(points, stroke));
+}
+
+/// A step's title, and the line under it.
+pub(crate) fn head(ui: &mut egui::Ui, title: &str, line: &str) {
+    words(ui, title, semibold(24.0), TEXT, 30.0, 1);
+    ui.add_space(4.0);
+    if !line.is_empty() {
+        words(ui, line, FontId::proportional(13.5), TEXT_DIM, 19.0, 1);
+    }
+    ui.add_space(14.0);
+}
+
+/// Words wrapped at the room there is, every line `line` tall, keeping the room of `least`
+/// lines whatever they come to, so what follows never moves as they change. Where they went.
+pub(crate) fn words(ui: &mut egui::Ui, text: &str, font: FontId, ink: Color32, line: f32, least: usize) -> Rect {
+    let width = ui.available_width();
+    let galley = crate::home::settings::parts::lines(ui, text, font, ink, width, line);
+    let height = galley.size().y.max(least as f32 * line);
+    let (place, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+    ui.painter().galley(place.min, galley, ink);
+    place
+}
+
+/// Small faint words, as the design's captions and notes are, keeping `least` lines' room.
+pub(crate) fn small(ui: &mut egui::Ui, text: &str, least: usize) -> Rect {
+    words(ui, text, FontId::proportional(12.0), TEXT_FAINT, 17.0, least)
+}
+
+/// A caption in small capitals, as the cards' are.
+pub(crate) fn cap(ui: &mut egui::Ui, text: &str) {
+    words(ui, &text.to_uppercase(), semibold(10.5), TEXT_FAINT, 16.0, 1);
+}
+
+/// A plain key as wide as its words (`least` at least), 30 high, at the cursor.
+pub(crate) fn key(ui: &mut egui::Ui, salt: &str, label: &str, least: f32, enabled: bool) -> egui::Response {
+    let font = FontId::proportional(12.5);
+    let width = key_width(ui, &[label], &font, 13.0, least);
+    let (place, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
+    crate::studio::flat_button(ui, place, ui.scope_id().with(("setup key", salt)), label, font, Flat::Plain, enabled)
+}
+
+/// Faint words that take a click, for a way out to a page.
 pub(crate) fn link(ui: &mut egui::Ui, label: &str) -> egui::Response {
-    ui.add(egui::Label::new(RichText::new(label).size(12.5).color(TEXT_FAINT)).sense(Sense::click()))
+    ui.add(egui::Label::new(egui::RichText::new(label).size(12.5).color(TEXT_FAINT)).sense(Sense::click()))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// A choice in a list, lit when chosen.
-fn choice(ui: &mut egui::Ui, chosen: bool, label: &str, detail: &str) -> egui::Response {
-    let width = ui.available_width();
-    let (place, response) = ui.allocate_exact_size(vec2(width, 40.0), Sense::click());
-    let fill = if chosen {
-        SELECTED
-    } else if response.hovered() {
-        HOVER
-    } else {
-        CARD
-    };
-    ui.painter().rect_filled(place, 9.0, fill);
-    let mark = if chosen { "◉" } else { "○" };
-    let ink = if chosen { READY } else { TEXT_FAINT };
-    ui.painter().text(
-        place.left_center() + vec2(16.0, 0.0),
-        Align2::LEFT_CENTER,
-        mark,
-        egui::FontId::proportional(14.0),
-        ink,
-    );
-    ui.painter().text(place.left_center() + vec2(40.0, -7.0), Align2::LEFT_CENTER, label, semibold(13.0), TEXT);
-    ui.painter().text(
-        place.left_center() + vec2(40.0, 9.0),
-        Align2::LEFT_CENTER,
-        detail,
-        egui::FontId::proportional(11.0),
-        TEXT_DIM,
-    );
-    response
+/// "Recommended", as the Songs and Bibles steps mark what the church's languages choose.
+pub(crate) fn recommended_words() -> &'static str {
+    t("setup.recommended", "Recommended")
 }
 
-/// What the setup is for, and where each thing can be changed later: songs come in from the
-/// File menu on a Mac, and from the import button in the left column where there is no menu bar.
-fn welcome_about(system: System) -> &'static str {
-    match system {
-        System::Mac => t(
-            "setup.welcome.about",
-            "A minute to get ready for Sunday: which screen the congregation sees, bringing your songs in, and your Bibles. Everything can be changed later, in the Screens window, the File menu and the Bible page.",
-        ),
-        System::Windows | System::Linux => t(
-            "setup.welcome.about_no_menu_bar",
-            "A minute to get ready for Sunday: which screen the congregation sees, bringing your songs in, and your Bibles. Everything can be changed later: in the Screens window, with the \u{2193} button in the left column, and on the Bible page.",
-        ),
+/// What a songbook's row says under its name, with Recommended after it.
+pub(crate) fn recommended_detail(detail: &str) -> String {
+    format!("{detail} \u{b7} {}", recommended_words())
+}
+
+/// A language written in itself (Русский), for the cards, the menus and Ready's lines.
+pub(crate) fn language_own_name(code: &str) -> String {
+    match crate::catalog::songbook(code) {
+        Some(book) => book.name().to_owned(),
+        None => crate::bible::language_name(code),
+    }
+}
+
+/// A slide-shaped picture, 16 by 9, as wide as `width`: black, with lines of words in its
+/// middle, each (its words, its size at a slide 1920 wide, its ink). The window's own painter
+/// draws it, so it shows the order and the languages, not the theme's look.
+pub(crate) fn slide_picture(ui: &mut egui::Ui, width: f32, lines: &[(String, f32, Color32)]) -> Rect {
+    let (place, _) = ui.allocate_exact_size(vec2(width, (width * 9.0 / 16.0).round()), Sense::hover());
+    let painter = ui.painter().with_clip_rect(place);
+    painter.rect_filled(place, 6.0, Color32::BLACK);
+    painter.rect_stroke(place, 6.0, Stroke::new(1.0, LINE), egui::StrokeKind::Inside);
+    let scale = width / 1920.0;
+    let galleys: Vec<_> = lines
+        .iter()
+        .map(|(text, size, ink)| {
+            let mut job = egui::text::LayoutJob::simple(
+                text.clone(),
+                FontId::proportional((size * scale).max(7.0)),
+                *ink,
+                width - 28.0,
+            );
+            job.halign = egui::Align::Center;
+            ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
+        })
+        .collect();
+    let gap = 6.0;
+    let total: f32 =
+        galleys.iter().map(|galley| galley.size().y).sum::<f32>() + gap * galleys.len().saturating_sub(1) as f32;
+    let mut y = place.center().y - total / 2.0;
+    for galley in galleys {
+        let height = galley.size().y;
+        painter.galley(pos2(place.center().x, y), galley, TEXT);
+        y += height + gap;
+    }
+    place
+}
+
+/// What the welcome says under its title: on a first start, what the minute is for; opened
+/// again, that the answers stand.
+fn welcome_words(again: bool) -> (&'static str, &'static str) {
+    if again {
+        (
+            t("setup.again.title", "Set up SoftPresenter"),
+            t("setup.again.about", "Your answers are filled in. Change what you like; nothing else changes."),
+        )
+    } else {
+        (
+            t("setup.welcome.title", "Welcome to SoftPresenter"),
+            t(
+                "setup.welcome.lead",
+                "A minute to get ready for Sunday: your languages, your songs, your Bibles and the screens. Everything can be changed later, in Settings.",
+            ),
+        )
     }
 }
 
@@ -397,818 +750,81 @@ fn pre_release_note(version: &str) -> Option<(String, String)> {
     Some((heading, format!("{about} {updates}")))
 }
 
-fn welcome(ui: &mut egui::Ui, system: System) {
-    title(ui, t("setup.welcome.title", "Welcome to SoftPresenter"));
-    say(ui, welcome_about(system));
-    // The words of the app itself, first of all, so the rest of the setup is read in them.
-    ui.add_space(12.0);
-    ui.label(t("setup.welcome.language", "Language of SoftPresenter"));
-    ui.add_space(4.0);
-    crate::home::language_menu(ui);
-    // A pre-release says so, calmly, in a small card at the foot (the owner, 2026-11-25).
-    if let Some((heading, words)) = pre_release_note(crate::updates::VERSION) {
-        ui.add_space(18.0);
-        Frame::new().fill(CARD).corner_radius(9.0).inner_margin(egui::Margin::symmetric(14, 11)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(RichText::new(heading).font(semibold(13.0)).color(TEXT));
-            ui.add_space(3.0);
-            ui.add(egui::Label::new(RichText::new(words).size(12.5).color(TEXT_DIM)).wrap());
-        });
-    }
-}
-
-/// The displays the audience may be given, with their sizes: each one the operator doesn't work
-/// on (`displays::kept_for_operator`). None with one display.
-fn audience_displays(displays: &[DisplayInfo], operator: &[usize]) -> Vec<(String, String)> {
-    displays
-        .iter()
-        .filter(|display| kept_for_operator(displays, operator, display.index).is_none())
-        .map(|display| (display.name.clone(), format!("{} × {}", display.w, display.h)))
-        .collect()
-}
-
-/// What the Screens step says when only one display is connected (`name`, when it is known):
-/// that is where the operator works, and the congregation sees SoftPresenter on a TV or
-/// projector, or over NDI (`ndi`, when it is installed). What happens until one is plugged in
-/// depends on the choice, so each choice says it.
-fn one_display_words(name: Option<&str>, ndi: bool) -> String {
-    let mut words = match name {
-        Some(name) => tf(
-            "setup.screens.one.named",
-            "Only one display is connected ({name}). This is where you work, so the audience screen never covers it: the congregation sees it on a TV or projector.",
-            &[("name", name)],
-        ),
-        None => t(
-            "setup.screens.one",
-            "Only one display is connected. This is where you work, so the audience screen never covers it: the congregation sees it on a TV or projector.",
-        )
-        .to_owned(),
-    };
-    if ndi {
-        words.push(' ');
-        words.push_str(t("setup.screens.one.ndi", "It can also be sent over NDI, to a stream or a video switcher."));
-    }
-    words
-}
-
-/// The Screens step's choices with one display.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OneDisplayChoice {
-    /// In a window for now, and on a TV or projector as soon as one is plugged in (Automatic).
-    Automatic,
-    /// Only in a window, even with a TV or projector plugged in: shown only while it is the
-    /// screen's output (an earlier setup gave it, and the Screens window can).
-    Window,
-    Ndi,
-    /// Shown nowhere for now: off, or anything the Screens window gave that the step doesn't offer.
-    NotNow,
-}
-
-/// Which one-display choice is lit for the audience's `output`: exactly one, whatever it is.
-/// NDI counts only while it is installed (`ndi`): without it the screen shows nowhere.
-fn one_display_choice(output: &Output, ndi: bool) -> OneDisplayChoice {
-    match output {
-        Output::Automatic => OneDisplayChoice::Automatic,
-        Output::Window => OneDisplayChoice::Window,
-        Output::Ndi(_) if ndi => OneDisplayChoice::Ndi,
-        _ => OneDisplayChoice::NotNow,
-    }
-}
-
-/// What the Screens step says with several displays: which one is kept for SoftPresenter's own
-/// window. Where the window system doesn't say which display is the main one (Wayland), it is
-/// the one the window is on, and those displays aren't offered.
-fn several_displays_words(main: Option<&str>) -> String {
-    match main {
-        Some(name) => tf(
-            "setup.screens.several.main",
-            "The main display ({name}) is kept for SoftPresenter's own window. Choose the projector or TV; the screen goes there straight away so you can check.",
-            &[("name", name)],
-        ),
-        None => t(
-            "setup.screens.several.window",
-            "The display SoftPresenter's own window is on is kept for it. Choose the projector or TV; the screen goes there straight away so you can check.",
-        )
-        .to_owned(),
-    }
-}
-
-/// Which display the congregation sees, and a stage display for the band if there is another.
-/// Choosing one puts the screen there at once, so the person can look at it. With one display
-/// the audience screen is left to choose for itself (Automatic) unless told otherwise: in a
-/// window until a TV or projector is plugged in, which it then fills at once (`screens::settle`).
-fn screens(ui: &mut egui::Ui, state: &mut HomeState) {
-    title(ui, t("setup.screens.title", "Which screen does the congregation see?"));
-    let others = audience_displays(&state.displays, &state.operator_displays);
-    let audience = match state.screens.iter().position(|screen| screen.kind == Kind::Audience) {
-        Some(at) => at,
-        None => {
-            state.screens.insert(0, Screen::new("Screen 1".to_owned(), Output::Off));
-            0
-        }
-    };
-    if others.is_empty() {
-        // The audience on the one display (given by a version that offered it, as on Wayland,
-        // where no display is the main one) shows nowhere: it goes back to choosing for itself,
-        // which shows it in a window and covers nothing.
-        if let Output::Display(name) = &state.screens[audience].output
-            && let Some(display) = state.displays.iter().find(|d| d.is_named(name))
-            && kept_for_operator(&state.displays, &state.operator_displays, display.index).is_some()
-        {
-            state.screens[audience].output = Output::Automatic;
-            state.screens_changed = true;
-        }
-        say(ui, &one_display_words(state.displays.first().map(|d| d.name.as_str()), state.ndi_available));
-        ui.add_space(10.0);
-        let lit = one_display_choice(&state.screens[audience].output, state.ndi_available);
-        let set = |output: Output, state: &mut HomeState| {
-            state.screens[audience].go_to(output);
-            state.screens_changed = true;
-        };
-        if choice(
-            ui,
-            lit == OneDisplayChoice::Automatic,
-            t("setup.screens.automatic", "In a window for now"),
-            t("setup.screens.automatic.detail", "On a TV or projector as soon as one is plugged in"),
-        )
-        .clicked()
-        {
-            set(Output::Automatic, state);
-        }
-        ui.add_space(6.0);
-        if lit == OneDisplayChoice::Window {
-            choice(
-                ui,
-                true,
-                t("setup.screens.window", "Only in a window"),
-                t("setup.screens.window.detail", "Stays in a window, even with a TV or projector plugged in"),
-            );
-            ui.add_space(6.0);
-        }
-        if state.ndi_available
-            && choice(
-                ui,
-                lit == OneDisplayChoice::Ndi,
-                t("setup.screens.ndi", "Send over NDI"),
-                t("setup.screens.ndi.detail", "For a stream or a video switcher"),
-            )
-            .clicked()
-        {
-            set(Output::Ndi("SoftPresenter Audience".to_owned()), state);
-        }
-        if state.ndi_available {
-            ui.add_space(6.0);
-        }
-        if choice(
-            ui,
-            lit == OneDisplayChoice::NotNow,
-            t("setup.screens.not_now", "Not now"),
-            t("setup.screens.not_now.detail", "Choose in the Screens window later"),
-        )
-        .clicked()
-        {
-            set(Output::Off, state);
-        }
-        return;
-    }
-    say(ui, &several_displays_words(state.displays.iter().find(|d| d.main).map(|d| d.name.as_str())));
-    ui.add_space(10.0);
-    // The display the audience has, among those offered: on one kept for the operator it shows
-    // nowhere, so "Not now" is lit, and it is left for the person to choose (nothing moves to
-    // another display without a click).
-    let current = match &state.screens[audience].output {
-        Output::Display(name) => state
-            .displays
-            .iter()
-            .find(|d| {
-                d.is_named(name) && kept_for_operator(&state.displays, &state.operator_displays, d.index).is_none()
-            })
-            .map(|d| d.name.clone()),
-        _ => None,
-    };
-    for (name, size) in &others {
-        if choice(ui, current.as_deref() == Some(name), name, size).clicked() {
-            state.screens[audience].go_to(Output::Display(name.clone()));
-            state.screens_changed = true;
-        }
-        ui.add_space(6.0);
-    }
-    if choice(
-        ui,
-        current.is_none(),
-        t("setup.screens.not_now", "Not now"),
-        t("setup.screens.not_now.display", "Choose a display later in the Screens window"),
-    )
-    .clicked()
-    {
-        state.screens[audience].output = Output::Off;
-        state.screens_changed = true;
-    }
-    // A stage display for the band, on a display the audience isn't using.
-    let free: Vec<&(String, String)> = others.iter().filter(|(name, _)| current.as_deref() != Some(name)).collect();
-    if !free.is_empty() {
-        ui.add_space(14.0);
-        ui.label(
-            RichText::new(t("setup.screens.stage", "A screen for the band (stage display)?"))
-                .font(semibold(13.5))
-                .color(TEXT),
-        );
-        ui.add_space(6.0);
-        let stage = state.screens.iter().position(|screen| screen.kind == Kind::Stage);
-        let stage_on = stage.and_then(|at| match &state.screens[at].output {
-            Output::Display(name) => Some(name.clone()),
-            _ => None,
-        });
-        for (name, size) in free {
-            if choice(ui, stage_on.as_deref() == Some(name), name, size).clicked() {
-                match stage {
-                    Some(at) => state.screens[at].go_to(Output::Display(name.clone())),
-                    None => state.screens.push(Screen::stage(
-                        t("setup.screens.stage.name", "Stage").to_owned(),
-                        Output::Display(name.clone()),
-                    )),
-                }
-                state.screens_changed = true;
-            }
-            ui.add_space(6.0);
-        }
-        if choice(ui, stage_on.is_none(), t("setup.screens.stage.none", "No stage display"), "").clicked()
-            && let Some(at) = stage
-        {
-            state.screens[at].output = Output::Off;
-            state.screens_changed = true;
-        }
-    }
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        let identify = if state.identify {
-            t("setup.screens.identify.stop", "Stop Identifying")
-        } else {
-            t("setup.screens.identify", "Identify Screens")
-        };
-        if button(ui, identify, false).clicked() {
-            state.identify = !state.identify;
-        }
-        // NDI beside it: the key that opens the Install NDI window (the setup is back at this
-        // step when it is left), or, once NDI is here, that it is, with a green light.
-        if state.ndi_available {
-            let wake = {
-                let ctx = ui.ctx().clone();
-                move || ctx.request_repaint()
-            };
-            state.ndi_download.ask_version(true, wake);
-            let words = ndi_installed_words(state.ndi_download.version().as_deref());
-            let (light, _) = ui.allocate_exact_size(vec2(13.0, 30.0), Sense::hover());
-            crate::studio::paint_light(ui.painter(), light.center(), Some(READY));
-            ui.label(RichText::new(words).size(12.5).color(TEXT_DIM));
-        } else if button(ui, crate::ndi_download::install_key(), false)
-            .on_hover_text(t(
-                "setup.screens.ndi.install.hover",
-                "NDI sends the slides over your network, to a live stream or another computer. It\u{2019}s free.",
-            ))
-            .clicked()
-        {
-            state.ndi_download.open(crate::ndi_download::Place::Home);
-        }
-    });
-    ui.add_space(4.0);
-    ui.add(
-        egui::Label::new(RichText::new(identify_and_ndi_words(state.ndi_available)).size(11.5).color(TEXT_FAINT))
-            .wrap(),
-    );
-}
-
-/// "NDI 6.1.1 is installed", in the place of the Install NDI… key once NDI is here.
-fn ndi_installed_words(version: Option<&str>) -> String {
-    match version {
-        Some(version) => tf("setup.screens.ndi.installed", "NDI {version} is installed", &[("version", version)]),
-        None => t("setup.screens.ndi.installed.unversioned", "NDI is installed").to_owned(),
-    }
-}
-
-/// The one line under Identify Screens and NDI: what each is for.
-fn identify_and_ndi_words(ndi: bool) -> &'static str {
-    if ndi {
-        t(
-            "setup.screens.identify.with_ndi",
-            "Identify shows each screen\u{2019}s name on it. A screen can be sent over your network: choose NDI for it in Settings \u{203a} Screens.",
-        )
-    } else {
-        t(
-            "setup.screens.identify.without_ndi",
-            "Identify shows each screen\u{2019}s name on it. NDI sends the slides over your network, for a live stream; it can be added later too.",
-        )
-    }
-}
-
-/// What the Songs step says before looking: a Mac asks before the Documents folder is read.
-fn songs_look_words(system: System) -> &'static str {
-    match system {
-        System::Mac => t(
-            "setup.songs.look.mac",
-            "SoftPresenter can look in your Documents folder for a library of song documents (.pro files) to bring across. macOS may ask whether SoftPresenter can use the Documents folder: choose OK.",
-        ),
-        System::Windows | System::Linux => t(
-            "setup.songs.look",
-            "SoftPresenter can look in your Documents folder for a library of song documents (.pro files) to bring across.",
-        ),
-    }
-}
-
-/// What the Songs step says after looking: what was found, or which song files come in (Word
-/// files only on a Mac, whose own converter reads them).
-fn songs_found_words(system: System, found: Option<(usize, usize)>) -> String {
-    let mac = system == System::Mac;
-    match found {
-        Some((songs, libraries)) => {
-            let songs = crate::i18n::count(songs as u64);
-            let libraries = libraries as u64;
-            if mac {
-                tn(
-                    "setup.songs.found.mac",
-                    libraries,
-                    "A library of song documents was found on this Mac: {songs} songs in {n} library. Each library comes across as a library of the same name, with its groups, arrangements and both languages.",
-                    "A library of song documents was found on this Mac: {songs} songs in {n} libraries. Each library comes across as a library of the same name, with its groups, arrangements and both languages.",
-                    &[("songs", &songs)],
-                )
-            } else {
-                tn(
-                    "setup.songs.found",
-                    libraries,
-                    "A library of song documents was found on this computer: {songs} songs in {n} library. Each library comes across as a library of the same name, with its groups, arrangements and both languages.",
-                    "A library of song documents was found on this computer: {songs} songs in {n} libraries. Each library comes across as a library of the same name, with its groups, arrangements and both languages.",
-                    &[("songs", &songs)],
-                )
-            }
-        }
-        None if mac => t(
-            "setup.songs.none.mac",
-            "No library of song documents was found in the Documents folder. Song files from anywhere come in: text, lyric files from song services, ChordPro, Word, and .pro song documents.",
-        )
-        .to_owned(),
-        None => t(
-            "setup.songs.none",
-            "No library of song documents was found in the Documents folder. Song files from anywhere come in: text, lyric files from song services, ChordPro, and .pro song documents.",
-        )
-        .to_owned(),
-    }
-}
-
-fn songs(ui: &mut egui::Ui, setup: &mut Setup, state: &mut HomeState, system: System) {
-    title(ui, t("setup.songs.title", "Bring your songs in"));
-    if !setup.looked {
-        say(ui, songs_look_words(system));
-        ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            if button(ui, t("setup.songs.look_for", "Look for a Song Library"), true).clicked() {
-                setup.library_found = library_found();
-                setup.looked = true;
-            }
-            if button(ui, t("setup.songs.choose", "Choose Song Files…"), false).clicked() {
-                state.setup_request = Some(SetupRequest::ChooseSongFiles);
-            }
-        });
-        ui.add_space(8.0);
-        say(
-            ui,
-            t(
-                "setup.songs.skip",
-                "Or skip this and start with the sample song. Songs can be imported at any time with the \u{2193} button in the left column, or dropped on the window.",
-            ),
-        );
-        if let Some(said) = &setup.songs_said {
-            ui.add_space(10.0);
-            ui.label(RichText::new(said).size(12.5).color(READY));
-        }
-        return;
-    }
-    let found = setup.library_found.as_ref().map(|(_, songs, libraries)| (*songs, *libraries));
-    say(ui, &songs_found_words(system, found));
-    ui.add_space(10.0);
-    if let Some((folder, _, _)) = &setup.library_found {
-        if button(ui, t("setup.songs.import", "Import This Library"), true).clicked() {
-            state.setup_request = Some(SetupRequest::ImportLibrary(folder.clone()));
-        }
-        ui.add_space(10.0);
-    }
-    if button(ui, t("setup.songs.choose", "Choose Song Files…"), false).clicked() {
-        state.setup_request = Some(SetupRequest::ChooseSongFiles);
-    }
-    ui.add_space(8.0);
-    say(
-        ui,
-        t(
-            "setup.songs.skip",
-            "Or skip this and start with the sample song. Songs can be imported at any time with the \u{2193} button in the left column, or dropped on the window.",
-        ),
-    );
-    if let Some(said) = &setup.songs_said {
-        ui.add_space(10.0);
-        ui.label(RichText::new(said).size(12.5).color(READY));
-    }
-}
-
-/// Which translation goes on top (the main words) and which below (the translation).
-fn bibles(ui: &mut egui::Ui, state: &mut HomeState) {
-    title(ui, t("setup.bibles.title", "Your Bibles"));
-    say(
-        ui,
-        t(
-            "setup.bibles.about",
-            "Bible passages show two translations, one above the other. Choose which goes on top and which below.",
-        ),
-    );
-    ui.add_space(12.0);
-    let names: Vec<String> = state.bible.shelf.bibles.iter().map(|b| format!("{} ({})", b.name, b.short)).collect();
-    if names.is_empty() || state.bible.rows.is_empty() {
-        say(
-            ui,
-            t(
-                "setup.bibles.none_installed",
-                "No Bibles are installed yet. Open the Bible page's Options to download one.",
-            ),
-        );
-        return;
-    }
-    let mut changed = false;
-    egui::Grid::new("setup bibles").num_columns(2).spacing([14.0, 10.0]).show(ui, |ui| {
-        ui.label(RichText::new(t("setup.bibles.top", "On top")).color(TEXT));
-        let top = state.bible.rows[0].bible.unwrap_or(0).min(names.len() - 1);
-        egui::ComboBox::from_id_salt("setup top bible").width(340.0).selected_text(names[top].clone()).show_ui(
-            ui,
-            |ui| {
-                for (at, name) in names.iter().enumerate() {
-                    if ui.selectable_label(at == top, name).clicked() {
-                        state.bible.rows[0].bible = Some(at);
-                        changed = true;
-                    }
-                }
-            },
-        );
-        ui.end_row();
-        ui.label(RichText::new(t("setup.bibles.below", "Below")).color(TEXT));
-        let below = state.bible.rows.get(1).and_then(|row| row.bible);
-        let none = t("setup.bibles.none", "None (one translation)");
-        let shown = below.and_then(|at| names.get(at).cloned()).unwrap_or_else(|| none.to_owned());
-        egui::ComboBox::from_id_salt("setup second bible").width(340.0).selected_text(shown).show_ui(ui, |ui| {
-            if ui.selectable_label(below.is_none(), none).clicked() {
-                if let Some(row) = state.bible.rows.get_mut(1) {
-                    row.bible = None;
-                }
-                changed = true;
-            }
-            for (at, name) in names.iter().enumerate() {
-                if ui.selectable_label(below == Some(at), name).clicked() {
-                    if state.bible.rows.len() < 2 && state.bible.add_row() {
-                        state.bible.assign_boxes();
-                    }
-                    if let Some(row) = state.bible.rows.get_mut(1) {
-                        row.bible = Some(at);
-                    }
-                    changed = true;
-                }
-            }
-        });
-        ui.end_row();
-    });
-    if changed {
-        state.bible.made_with.clear();
-    }
-    ui.add_space(10.0);
-    say(ui, t("setup.bibles.more", "More translations can be downloaded from the Bible page's Options."));
-}
-
-/// What the system will ask permission for: the Permissions step's title, what it says first,
-/// each question with when it comes, and what to do after a wrong answer.
-struct Asks {
-    title: &'static str,
-    intro: &'static str,
-    questions: Vec<(&'static str, &'static str)>,
-    after: &'static str,
-}
-
-/// What `system` asks, from what SoftPresenter does there: on a Mac, the network for NDI, the
-/// Documents folder and controlling the app that draws a presentation as pictures (by script);
-/// on Windows only the firewall, the first time SoftPresenter listens on the network (NDI and
-/// Remote Control), as the app that draws a presentation is asked through its own automation,
-/// which Windows doesn't ask about. Nothing asks on Linux, which has no such step.
-fn asks(system: System) -> Option<Asks> {
-    match system {
-        System::Mac => Some(Asks {
-            title: t("setup.asks.mac.title", "What macOS will ask"),
-            intro: t(
-                "setup.asks.mac.intro",
-                "macOS asks before an app does some things. When these come up, choose Allow or OK:",
-            ),
-            questions: vec![
-                (
-                    t("setup.asks.mac.network", "Local Network"),
-                    t(
-                        "setup.asks.mac.network.why",
-                        "When a screen is sent over NDI (to a stream or a video switcher). Without it, NDI can't be seen on the network.",
-                    ),
-                ),
-                (
-                    t("setup.asks.mac.documents", "Files in your Documents folder"),
-                    t(
-                        "setup.asks.mac.documents.why",
-                        "When SoftPresenter looks for a library of song documents or opens songs, pictures and videos kept there.",
-                    ),
-                ),
-                (
-                    t("setup.asks.mac.automation", "Controlling the app that opens a presentation"),
-                    t(
-                        "setup.asks.mac.automation.why",
-                        "The first time you bring a presentation in as pictures, SoftPresenter asks an app on this Mac that can open it to draw its slides. macOS asks once, to allow that.",
-                    ),
-                ),
-            ],
-            after: t(
-                "setup.asks.mac.after",
-                "SoftPresenter never asks for your password. If you chose Don't Allow by mistake, change it in System Settings › Privacy & Security.",
-            ),
-        }),
-        System::Windows => Some(Asks {
-            title: t("setup.asks.windows.title", "What Windows will ask"),
-            intro: t(
-                "setup.asks.windows.intro",
-                "Windows asks once, before other computers and phones can reach SoftPresenter. When it comes up, choose Allow:",
-            ),
-            questions: vec![(
-                t("setup.asks.windows.firewall", "Windows Defender Firewall"),
-                t(
-                    "setup.asks.windows.firewall.why",
-                    "The first time a screen is sent over NDI, or Remote Control is switched on, Windows asks whether to allow SoftPresenter. Choose Allow for private networks. Without it, NDI can't be seen on the network, and phones on the church network can't reach Remote Control.",
-                ),
-            )],
-            after: t(
-                "setup.asks.windows.after",
-                "If you chose Cancel by mistake, allow SoftPresenter in the Windows firewall's settings.",
-            ),
-        }),
-        System::Linux => None,
-    }
-}
-
-fn permissions(ui: &mut egui::Ui, system: System) {
-    let Some(asks) = asks(system) else { return };
-    title(ui, asks.title);
-    say(ui, asks.intro);
-    ui.add_space(10.0);
-    for (what, why) in &asks.questions {
-        ui.label(RichText::new(*what).font(semibold(13.0)).color(TEXT));
-        say(ui, why);
-        ui.add_space(8.0);
-    }
-    say(ui, asks.after);
-}
-
-fn done(ui: &mut egui::Ui, show: &Show, state: &mut HomeState, commands: &mut Vec<Command>) {
-    title(ui, t("setup.done.title", "You're ready"));
-    say(
-        ui,
-        t(
-            "setup.done.about",
-            "Click a slide to put it on screen, press the arrow keys or the space bar to go on, and Escape to clear. The Bible page looks passages up as you type, such as \"John 3 16\" or \"Ин 3:16\".",
-        ),
-    );
-    ui.add_space(12.0);
-    if !show.presentations().is_empty() && button(ui, t("setup.done.test_slide", "Show a Test Slide"), false).clicked()
-    {
-        commands.push(Command::GoTo(SlideRef { presentation: show.selected(), slide: 0 }));
-        state.bible_open = false;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::i18n::{Language, with_language};
-
-    /// Every word the steps say on `system` that doesn't need a window, in English.
-    fn all_words(system: System) -> String {
-        with_language(Language::English, || {
-            let mut words = vec![
-                welcome_about(system).to_owned(),
-                songs_look_words(system).to_owned(),
-                songs_found_words(system, Some((12, 1))),
-                songs_found_words(system, None),
-                one_display_words(Some("DP-1"), true),
-                several_displays_words(Some("Built-in")),
-                several_displays_words(None),
-            ];
-            if let Some(asks) = asks(system) {
-                words.extend([asks.title, asks.intro, asks.after].map(str::to_owned));
-                words.extend(asks.questions.iter().flat_map(|(what, why)| [what.to_string(), why.to_string()]));
-            }
-            words.extend(steps(system).iter().map(|step| step.name().to_owned()));
-            words.push(crate::free_songbooks::later_words().to_owned());
-            if let Some((heading, about)) = pre_release_note("0.9.0-dev.16") {
-                words.extend([heading, about]);
-            }
-            words.join("\n")
-        })
-    }
-
-    #[test]
-    fn the_welcome_says_a_pre_release_is_one_and_a_release_says_nothing() {
-        with_language(Language::English, || {
-            let (heading, words) = pre_release_note("0.9.0-dev.16").expect("a pre-release says so");
-            assert_eq!(heading, "This is a pre-release (0.9.0-dev.16)");
-            assert_eq!(
-                words,
-                "Things may still change: the core of how SoftPresenter works and looks will stay, and bugs will be fixed in the versions that come next. Check for updates (Settings \u{203a} About) tells you when one is out."
-            );
-            assert!(!heading.contains('!') && !words.contains('!'), "calm, not alarming");
-        });
-        for language in [Language::Spanish, Language::Russian, Language::Ukrainian] {
-            let said = with_language(language, || pre_release_note("1.0.0-beta.1"));
-            let (heading, words) = said.expect("a pre-release says so in every language");
-            assert!(heading.contains("1.0.0-beta.1"), "{language:?}: {heading}");
-            assert!(!words.contains("Things may"), "{language:?} has its own words: {words}");
-        }
-        assert_eq!(pre_release_note("0.9.0"), None);
-        assert_eq!(pre_release_note("1.0.0"), None);
-    }
-
-    #[test]
-    fn off_a_mac_the_setup_never_speaks_of_one() {
-        for system in [System::Windows, System::Linux] {
-            let words = all_words(system);
-            for mac in
-                ["Mac", "macOS", "Finder", "System Settings", "\u{2318}", "Command-", "menu bar", "File menu", "Word"]
-            {
-                assert!(!words.contains(mac), "{system:?} says {mac:?}:\n{words}");
-            }
-        }
-    }
-
-    #[test]
-    fn a_mac_hears_what_macos_asks_as_before() {
-        let words = all_words(System::Mac);
-        for said in ["macOS may ask", "on this Mac", "the File menu", "Word", "What macOS will ask", "Local Network"] {
-            assert!(words.contains(said), "a Mac doesn't hear {said:?}:\n{words}");
-        }
-        assert_eq!(steps(System::Mac).len(), 8);
-    }
-
-    #[test]
-    fn free_songs_follows_songs_in_every_build() {
-        // The songbooks shared by churches are offered in every build, the song catalog's too
-        // where it is offered: the step follows Songs on every system.
-        for system in [System::Mac, System::Windows, System::Linux] {
-            let steps = steps(system);
-            let songs = steps.iter().position(|step| *step == Step::Songs);
-            assert_eq!(steps.get(songs.map_or(0, |at| at + 1)), Some(&Step::FreeSongs), "{system:?}");
-        }
-        // A testing aid opens it at a step by name.
-        assert_eq!(Setup::opened_at("free-songs").step, Step::FreeSongs);
-        assert_eq!(Setup::opened_at("Bibles").step, Step::Bibles);
-        assert_eq!(Setup::opened_at("1").step, Step::Welcome);
-    }
-
-    #[test]
-    fn windows_hears_only_of_its_firewall_and_linux_of_nothing() {
-        let windows = all_words(System::Windows);
-        for said in ["What Windows will ask", "Windows Defender Firewall", "private networks", "NDI", "Remote Control"]
-        {
-            assert!(windows.contains(said), "Windows doesn't hear {said:?}:\n{windows}");
-        }
-        assert!(windows.contains("this computer") && windows.contains("\u{2193} button in the left column"));
-        assert!(steps(System::Windows).contains(&Step::Permissions));
-        // Nothing asks on Linux, so it has no Permissions step.
-        assert!(asks(System::Linux).is_none());
-        assert_eq!(
-            steps(System::Linux),
-            [Step::Welcome, Step::Screens, Step::Songs, Step::FreeSongs, Step::Bibles, Step::Reports, Step::Done]
-        );
-        assert!(!all_words(System::Linux).contains("Permissions"));
-    }
-
-    fn display(index: usize, name: &str, main: bool) -> DisplayInfo {
-        DisplayInfo { index, name: name.to_owned(), main, w: 1920, h: 1080, ..Default::default() }
-    }
-
-    #[test]
-    fn one_display_is_never_offered_to_the_audience() {
-        // The owner's Wayland computer: one display, which nothing says is the main one.
-        let one = [display(0, "DP-1", false)];
-        assert!(audience_displays(&one, &[]).is_empty());
-        assert!(audience_displays(&one, &[0]).is_empty());
-        let words = with_language(Language::English, || one_display_words(Some("DP-1"), false));
-        assert!(words.contains("(DP-1)") && words.contains("where you work") && words.contains("TV or projector"));
-        assert!(!words.contains("NDI"), "{words}");
-        assert!(one_display_words(None, true).contains("NDI"));
-        // What happens until a TV is plugged in depends on the choice, so the words don't say it.
-        assert!(!words.contains("window") && !words.contains("straight away"), "{words}");
-    }
-
-    #[test]
-    fn with_one_display_exactly_the_right_choice_is_lit() {
-        use OneDisplayChoice::*;
-        let ndi = || Output::Ndi("SoftPresenter Audience".to_owned());
-        for (output, installed, lit) in [
-            (Output::Automatic, true, Automatic),
-            // An earlier setup's "In a window": shown as what it is, never as Automatic.
-            (Output::Window, true, Window),
-            (ndi(), true, Ndi),
-            // NDI without NDI installed shows nowhere.
-            (ndi(), false, NotNow),
-            (Output::Off, true, NotNow),
-            // A projector that isn't plugged in.
-            (Output::Display("Projector".to_owned()), true, NotNow),
-        ] {
-            assert_eq!(one_display_choice(&output, installed), lit, "{output:?}");
-        }
-    }
-
-    #[test]
-    fn several_displays_offer_all_but_the_operators() {
-        let mac = [display(0, "Built-in", true), display(1, "Projector", false)];
-        assert_eq!(audience_displays(&mac, &[0]), [("Projector".to_owned(), "1920 × 1080".to_owned())]);
-        // Wayland: the display the home window is on stands for the main one, once it is known.
-        let wayland = [display(0, "DP-1", false), display(1, "HDMI-1", false)];
-        let names = |list: Vec<(String, String)>| list.into_iter().map(|(name, _)| name).collect::<Vec<_>>();
-        assert_eq!(names(audience_displays(&wayland, &[0])), ["HDMI-1"]);
-        assert_eq!(names(audience_displays(&wayland, &[])), ["DP-1", "HDMI-1"]);
-        let (main, window) = with_language(Language::English, || {
-            (several_displays_words(Some("Built-in")), several_displays_words(None))
-        });
-        assert!(main.starts_with("The main display (Built-in) is kept"));
-        assert!(window.starts_with("The display SoftPresenter's own window is on is kept"));
-    }
-
-    fn setup_at_screens(ndi: bool, name: &str) -> HomeState {
-        let display = |index: usize, name: &str, main: bool| DisplayInfo {
-            index,
-            name: name.into(),
-            x: 1920 * index as i32,
-            w: 1920,
-            h: 1080,
-            main,
+/// The welcome: the mark, the name and one line, in the middle; the app's own language first of
+/// all, so the rest of the setup is read in it; and, in a pre-release, the card that says so.
+fn welcome(ui: &mut egui::Ui, again: bool, env: &Env) {
+    let (title, lead) = welcome_words(again);
+    let note = pre_release_note(&env.version);
+    let width = ui.available_width().min(560.0);
+    let room = ui.available_height();
+    // Laid out once to know its height, so it sits in the middle of the step.
+    let lead_galley = {
+        let mut job = egui::text::LayoutJob::default();
+        let format = egui::TextFormat {
+            font_id: FontId::proportional(15.5),
+            color: TEXT_DIM,
+            line_height: Some(23.0),
             ..Default::default()
         };
-        let data = std::env::temp_dir().join(format!("softpresenter-setup-ndi-{name}-{}", std::process::id()));
-        HomeState {
-            ndi_available: ndi,
-            ndi_download: crate::ndi_download::NdiDownload::in_folder(data),
-            displays: vec![display(0, "Built-in", true), display(1, "Projector", false), display(2, "Stage TV", false)],
-            setup: Some(Setup::opened_at("screens")),
-            ..HomeState::default()
-        }
-    }
-
-    #[test]
-    fn the_screens_step_has_ndi_beside_identify_and_still_fits_a_small_window() {
-        with_language(Language::English, || {
-            let show = Show::new(Vec::new());
-            for (ndi, key, line) in [
-                (false, "Install NDI\u{2026}", "NDI sends the slides over your network, for a live stream"),
-                (true, "NDI is installed", "choose NDI for it in Settings \u{203a} Screens"),
-            ] {
-                let ctx = egui::Context::default();
-                let mut state = setup_at_screens(ndi, "fit");
-                let mut draw = |ui: &mut egui::Ui| {
-                    let mut commands = Vec::new();
-                    setup_ui(ui.ctx(), &show, &mut state, &mut commands);
-                };
-                crate::ndi_download::testing::drawn(&ctx, Vec::new(), &mut draw);
-                let words = crate::ndi_download::testing::drawn(&ctx, Vec::new(), &mut draw);
-                let said = |wanted: &str| words.iter().any(|(text, _)| text.contains(wanted));
-                assert!(said("Identify Screens") && said(key) && said(line), "{ndi}: {words:?}");
-                assert!(said("Identify shows each screen\u{2019}s name on it."));
-                // Identify and NDI share one row: the key (or the line that NDI is here) starts
-                // level with Identify Screens, to its right.
-                let place =
-                    |wanted: &str| words.iter().find(|(text, _)| text.contains(wanted)).map(|(_, place)| *place);
-                let (identify, beside) = (place("Identify Screens").unwrap(), place(key).unwrap());
-                assert!(beside.min.x > identify.max.x, "{identify:?} {beside:?}");
-                assert!((beside.center().y - identify.center().y).abs() < 4.0, "{identify:?} {beside:?}");
-                // The whole setup stays inside a window of 1100 by 700, with nothing to scroll.
-                let whole = ctx.memory(|memory| memory.area_rect(egui::Id::unique("setup"))).unwrap();
-                assert!(whole.min.y >= 0.0 && whole.max.y <= 700.0, "{ndi}: {whole:?}");
-                assert!(whole.min.x >= 0.0 && whole.max.x <= 1100.0, "{ndi}: {whole:?}");
-                for (text, at) in &words {
-                    assert!(at.max.y <= whole.max.y + 0.5 || !whole.contains(at.center()), "{text:?} is cut off");
-                }
-            }
-        });
-    }
-
-    #[test]
-    fn install_ndi_in_the_setup_opens_the_window_over_the_home_window() {
-        with_language(Language::English, || {
-            let show = Show::new(Vec::new());
-            let ctx = egui::Context::default();
-            let mut state = setup_at_screens(false, "open");
-            let clicked = crate::ndi_download::testing::click(&ctx, "Install NDI\u{2026}", &mut |ui| {
-                let mut commands = Vec::new();
-                setup_ui(ui.ctx(), &show, &mut state, &mut commands);
+        job.append(lead, 0.0, format);
+        job.wrap.max_width = width.min(440.0);
+        job.halign = egui::Align::Center;
+        ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
+    };
+    let note_height = note.as_ref().map_or(0.0, |(_, words)| {
+        let galley =
+            crate::home::settings::parts::lines(ui, words, FontId::proportional(12.5), TEXT_DIM, width - 28.0, 18.0);
+        18.0 + 22.0 + 4.0 + galley.size().y + 18.0
+    });
+    let height = 54.0 + 20.0 + 46.0 + 12.0 + lead_galley.size().y + 22.0 + 30.0 + note_height;
+    ui.add_space(((room - height) / 2.0).max(0.0));
+    ui.vertical_centered(|ui| {
+        ui.set_width(ui.available_width());
+        // The mark: the brand's light key with its one orange light.
+        let (mark, _) = ui.allocate_exact_size(vec2(84.0, 54.0), Sense::hover());
+        ui.painter().rect_filled(mark, 14.0, TEXT);
+        ui.painter().circle_filled(pos2(mark.max.x - 21.5, mark.min.y + 19.5), 8.5, crate::studio::TALLY);
+        ui.add_space(20.0);
+        ui.label(egui::RichText::new(title).font(semibold(38.0)).color(Color32::WHITE));
+        ui.add_space(12.0);
+        let (place, _) = ui.allocate_exact_size(lead_galley.size(), Sense::hover());
+        // Its lines are centred on where it is drawn from.
+        ui.painter().galley(pos2(place.center().x, place.min.y), lead_galley, TEXT_DIM);
+        ui.add_space(22.0);
+        ui.allocate_ui(vec2(ui.available_width(), 30.0), |ui| {
+            ui.horizontal(|ui| {
+                let label = t("setup.welcome.language", "Language of SoftPresenter");
+                let label_width =
+                    ui.painter().layout_no_wrap(label.to_owned(), FontId::proportional(13.0), TEXT_DIM).size().x;
+                // In the middle: the label, a gap, and the menu, about as wide as it gets.
+                ui.add_space(((ui.available_width() - label_width - 12.0 - 240.0) / 2.0).max(0.0));
+                ui.label(egui::RichText::new(label).size(13.0).color(TEXT_DIM));
+                ui.add_space(4.0);
+                crate::home::language_menu(ui);
             });
-            assert!(clicked, "the key is drawn");
-            assert_eq!(state.ndi_download.shown_in(), Some(crate::ndi_download::Place::Home));
-            // The setup keeps its step, to come back to when the window is left.
-            assert!(state.setup.as_ref().is_some_and(|setup| setup.step == Step::Screens));
         });
-    }
+        // A pre-release says so, calmly, in a small card at the foot (the owner, 2026-11-25).
+        if let Some((heading, words)) = note {
+            ui.add_space(18.0);
+            ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                Frame::new().fill(CARD).corner_radius(9.0).inner_margin(egui::Margin::symmetric(14, 11)).show(
+                    ui,
+                    |ui| {
+                        ui.set_width(width - 28.0);
+                        ui.label(egui::RichText::new(heading).font(semibold(13.0)).color(TEXT));
+                        ui.add_space(4.0);
+                        self::words(ui, &words, FontId::proportional(12.5), TEXT_DIM, 18.0, 1);
+                    },
+                );
+            });
+        }
+    });
 }
+
+/// A light in `colour` at the left of a row, in a box 18 square.
+pub(crate) fn light(ui: &egui::Ui, centre: egui::Pos2, colour: Color32) {
+    crate::studio::paint_light(ui.painter(), centre, Some(colour));
+}
+
+/// The green of what is in order, for the marks the steps share.
+pub(crate) const OK: Color32 = READY;

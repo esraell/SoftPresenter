@@ -468,15 +468,14 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   free songs from Worship Leader App, a songbook for each language, downloaded from the source
   by each church and kept in `Catalog/worshipleaderapp/<language>/` of the data folder, apart
   from the library. **In development builds only**, until Worship Leader App has answered: the
-  setup's Free Songs step (after Songs) lists the songbooks, each named in its own language
-  (Latin and Cyrillic names; the others in English, which every system can draw), with the
-  download's size as the source gives it and the songs once downloaded; the operator's own
-  language (SoftPresenter's, from the first step) is ticked to start with, and every other
-  language the source publishes is a click away (Other languages…). Continue downloads what is
-  ticked in the background once the setup closes (by its last button or Escape), with a notice
-  when each starts and ends; Not Now downloads nothing, nor does leaving the setup before that
-  step's Continue; with the source out of reach it says so, with Try Again, and nothing is
-  ticked. Settings › Integrations › Worship Leader App downloads more
+  setup's Songs step lists, in its Free songbooks card, the songbooks of the four languages
+  its Languages step offers and any on this computer, each named in its own language, with the
+  download's size as the source gives it and the songs once downloaded; the songbooks of the
+  languages the church shows are ticked to start with and marked Recommended (not the
+  operator's own language, which says what they read, not what the church sings). The step's
+  key downloads what is ticked in the background at once, with a notice when each starts and
+  ends; Skip, Back or leaving the setup downloads nothing; with the source out of reach it says
+  so, with Try Again, and nothing is ticked. Settings › Integrations › Worship Leader App downloads more
   later or removes one (asking first; songs already in the library stay), the recommended ones
   listed first. The languages are built in, from the source's table of 24 November 2026: it
   publishes no list to fetch. The pack is kept as downloaded (about 1.3 MB for Ukrainian, 16 MB for Russian), with an
@@ -524,10 +523,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   Czech, Slovak or German computer sees its songbooks after the English ones), each with its songs
   and download size, Install (with how far its download has got), or Remove once installed
   (asking first); under the list, that the songs belong to their writers and a church's licence
-  (such as CCLI) covers showing them. The setup's Free Songs step lists them too, in every build
-  (under the song catalog's in a development build), with the first songbook of the operator's
-  language ticked (Песнь Возрождения 3300 for Russian, Євангельські Пісні for Ukrainian), every
-  other a click away; Continue installs what is ticked once the setup closes, Not Now nothing. A
+  (such as CCLI) covers showing them. The setup's Songs step lists them all too, in every build
+  (under the song catalog's in a development build), those of the languages the church shows
+  first, with the first songbook of each of those languages ticked and marked Recommended
+  (Песнь Возрождения 3300 for Russian, Євангельські Пісні for Ukrainian); the step's key
+  installs what is ticked at once, Skip nothing. The Free Songbooks window lists the church's
+  languages first afterwards. A
   songbook is downloaded **only when chosen**, straight from the site of the page that shares
   it (SoftPresenter keeps no copy), over HTTPS only (redirects too), on a thread of its own, and
   installed only when it is byte for byte the file this version expects: a length other than the
@@ -1456,7 +1457,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   be downloaded, grouped by language and written in it, with its terms and an Install button
   that shows the download going on. **The languages you use come first**, under Your
   languages, then the rest under Other languages, in the order they were: the languages the
-  church shows (once the setup asks), the app's language as chosen in Settings › Language (with
+  church shows (the setup's Languages step, kept as `church_languages`), the app's language as chosen in Settings › Language (with
   This computer's, the computer's own), the computer's other preferred languages (a Mac's
   preferred languages, Windows' language list, `LANGUAGE` elsewhere), then the languages of the
   Bibles you installed (the four built in don't count, as every copy has them). Languages are
@@ -1865,21 +1866,38 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 
 ## Getting started
 - The first start (and the first start after updating, on a Mac set up before there was a
-  setup) opens a short setup: which display the congregation sees (by name, never the main
+  setup) opens a short setup that fills the window: a welcome (with the app's own language),
+  then five steps numbered along the top, each fitting a window of 1100 by 700 with nothing to
+  scroll, its keys in the same places on every step (Back, Skip, and the way on). **1
+  Languages:** which languages the church shows (English, Español, Русский, Українська, the
+  computer's own chosen to start with) and which is on top, beside a slide that shows the
+  order; the answer is kept (`church_languages`) and chooses what the next two steps recommend.
+  **2 Songs:** Already on this computer (the search Settings › Song files › Find songs on this
+  computer makes, with Look on This Computer and Choose Song Files…; what it finds is listed,
+  ticked to bring in) beside Free songbooks (those shared by churches, and in a development
+  build the song catalog's, the church's languages' first and marked Recommended); the step's
+  key reads Bring In and Continue while found songs are ticked, and nothing comes in before it
+  is pressed. **3 Bibles:** the recommended Bible for each of the church's languages (the
+  first in it, one on this computer before one to download) under For your languages, every
+  other under More Bibles, by language, the church's first, then Other languages; with two
+  languages each row has On top and Below (the two swap; Below again leaves one), with one
+  language a plain choice of one; John 3:16 shows beside them; one not on the computer says
+  Downloads with Continue, starts downloading then and takes its row on the Bible page once it
+  is here. **4 Screens:** which display the congregation sees (by name, never the main
   display; the screen goes there at once, and Identify shows each screen's name) and an
   optional stage display; with one display, which is where the operator works and is never
   offered, the audience screen shows in a window until a TV or projector is plugged in (it
-  then fills it at once), or goes over NDI; bringing songs in (one click for a library of
-  `.pro` song documents found in the Documents folder, "Look for a Song Library", or song
-  files); free songbooks shared by churches to start with (and in a development build the song
-  catalog's); which
-  Bible goes on top and which below; and what the system will ask permission
-  for and why: on a Mac the local network, the Documents folder and the app that draws a
-  presentation as pictures; on Windows the firewall, the first time a screen is sent over NDI
-  or Remote Control is switched on (choose Allow for private networks). Linux asks nothing, so
-  the setup has no such step there. Its words fit the system: no Mac names, menus or Word files
-  off a Mac. Settings › Set up SoftPresenter… opens it again. In a pre-release (a version with
-  a part after its three numbers, such as 0.9.0-dev.16) the first step says so in a small card
+  then fills it at once), or goes over NDI. **5 Ready:** what is set, a line each with Change
+  (Languages, Songs, Bibles, Screens; no screen chosen is said in amber, with Choose), anonymous
+  reports as the last line, and two folds, one open at a time: What macOS will ask (the local
+  network, the Documents folder and the app that draws a presentation as pictures) or What
+  Windows will ask (the firewall, the first time a screen is sent over NDI or Remote Control is
+  switched on: choose Allow for private networks), and What the reports send. Linux asks
+  nothing, so it has only the second fold. Its words fit the system: no Mac names or menus
+  off a Mac. A step left with Skip or Back changes nothing, and Skip Setup (or Escape) says
+  where the setup lives. Settings › Set up SoftPresenter… opens it again, as a sheet over the
+  window with the answers as they stand; closing it there changes nothing. In a pre-release (a version with
+  a part after its three numbers, such as 0.9.0-dev.16) the welcome says so in a small card
   under the language: "This is a pre-release (0.9.0-dev.16)", then "Things may still change: the
   core of how SoftPresenter works and looks will stay, and bugs will be fixed in the versions
   that come next. Check for updates (Settings › About) tells you when one is out." Settings ›
@@ -1896,18 +1914,18 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   people, the computer's name, addresses, passwords or the log. On a computer whose region
   (never its language: a Mac's region, Windows' Country or region, the territory of a Linux
   locale) is in the European Union, Iceland, Liechtenstein, Norway or the United Kingdom they
-  are **off unless turned on**: the Reports step shows the switch Off with a line inviting to
+  are **off unless turned on**: the Reports line of the setup's Ready step shows the switch Off with a line inviting to
   turn it on, there is no notice, and nothing is counted or sent until they are switched on.
   Everywhere else, and where the computer doesn't say where it is, they are **on unless turned
-  off**: the setup's last step before Done, Reports, shows them on with the On/Off key, one line
-  on what is and isn't sent, See what's sent and the way to the privacy page; an install that
-  never passed that step (one updated from an earlier version, or whose setup was skipped) gets
+  off**: the last line of the setup's last step, Ready, shows them on with the On/Off key (which acts at once) and one line
+  on what is and isn't sent, with the next report whole and the way to the privacy page in the fold What the reports send; an install that
+  never finished the setup there (one updated from an earlier version, or whose setup was skipped) gets
   a notice once, "Anonymous reports are on…", opened so that it is read, with Turn off and Keep
   on. Nothing is counted, kept or sent until the step has been passed or the notice shown, and
   nothing in the first minute after. Then one report every fifteen minutes, one as the app
   quits (waited for for two seconds at the most) and one for a crash (at the next start if it
   could not go); with no network they wait on disk, 256 KB at the most. A choice made (the
-  key, `sp reports on|off`, or Continue on the setup's step) is kept and wins over how reports
+  key, `sp reports on|off`, or Start Using SoftPresenter on the setup's Ready step) is kept and wins over how reports
   start, wherever the computer is taken. At quit the last report goes from its own thread
   while the library's files are saved, and the window still answers. Settings › About ›
   Anonymous reports has the On/Off key (off stops at once and deletes what waited), Reset my

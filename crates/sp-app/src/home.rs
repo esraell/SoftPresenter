@@ -669,6 +669,9 @@ pub struct HomeState {
     pub setup_request: Option<crate::setup::SetupRequest>,
     /// True once the setup has been seen, so it isn't shown again at the next start.
     pub setup_done: bool,
+    /// The languages the church shows, as the setup's Languages step was answered, the one on
+    /// top first; empty until it is (`songbooks::church_languages`).
+    pub church_languages: Vec<String>,
     /// The song catalog's songbooks as the setup and Settings show them (`songbooks`).
     pub songbooks: crate::songbooks::View,
     /// The free songbooks shared by churches, as their window and the setup show them
@@ -881,6 +884,9 @@ pub struct BiblePage {
     pub template: Option<sp_model::Uuid>,
     /// Bibles being downloaded.
     pub downloads: crate::bible_store::Downloads,
+    /// Bibles the setup's Bibles step chose that were still to download, each with the row it
+    /// is for (0 on top, 1 below): the row takes it once it is on the shelf (`setup::place_downloaded`).
+    pub wanted: Vec<(String, usize)>,
     /// The two places among the show's presentations kept for Bible passages. A new passage
     /// goes into the one that is not on screen, so looking up the next verses never changes
     /// what the audience sees.
@@ -989,6 +995,7 @@ impl Default for BiblePage {
             box_labels: layout_labels(&Theme::builtin_bible(), 0),
             template: None,
             downloads: crate::bible_store::Downloads::default(),
+            wanted: Vec::new(),
             slots: None,
             showing: 0,
             shown: String::new(),
@@ -2159,6 +2166,7 @@ impl Default for HomeState {
             setup: None,
             setup_request: None,
             setup_done: false,
+            church_languages: Vec::new(),
             songbooks: crate::songbooks::View::default(),
             free_songbooks: crate::free_songbooks::View::default(),
             catalog: crate::catalog_songs::CatalogSongs::default(),
@@ -2659,6 +2667,7 @@ impl HomeState {
             start_audience_off: false,
             stage_off: !self.stage_on,
             setup_done: self.setup_done,
+            church_languages: self.church_languages.clone(),
             bible_lists_hidden: !self.bible.lists_open,
             bible_rows_open: self.bible.rows_open,
             bible_view: match self.bible.view {
@@ -2707,6 +2716,8 @@ impl HomeState {
         self.ccli_licence = prefs.ccli_licence.clone();
         self.stage_on = !prefs.stage_off;
         self.setup_done = prefs.setup_done;
+        self.church_languages = prefs.church_languages.clone();
+        crate::songbooks::set_church_languages(&self.church_languages);
         self.bible.lists_open = !prefs.bible_lists_hidden;
         self.bible.rows_open = prefs.bible_rows_open;
         self.bible.view = if prefs.bible_view == "slides" { BibleView::Slides } else { BibleView::Page };
@@ -2873,6 +2884,8 @@ fn home_view(
     {
         let bible = &mut state.bible;
         crate::bible::collect_downloads(&mut bible.options, &mut bible.shelf, &mut bible.downloads);
+        // One the setup chose takes its row once it is here.
+        crate::setup::place_downloaded(bible);
         if bible.options.manage_open {
             crate::bible::manage_bibles(ui.ctx(), &mut bible.options, &mut bible.shelf, &mut bible.downloads);
         }

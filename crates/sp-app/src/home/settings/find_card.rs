@@ -17,7 +17,7 @@ use crate::studio::{CARE, LINE, PANEL, TEXT, TEXT_DIM, TEXT_FAINT, fixed_semibol
 use unicode_segmentation::UnicodeSegmentation;
 
 /// How many songbooks and libraries were found, as the card says it.
-fn found_words(n: usize) -> String {
+pub(crate) fn found_words(n: usize) -> String {
     tn("settings.find.found", n as u64, "{n} songbook or library found", "{n} songbooks and libraries found", &[])
 }
 
@@ -308,7 +308,7 @@ fn done(ui: &mut egui::Ui, state: &mut Card) {
 
 /// A line saying what is under way, at the left, with a key at its right when given. True
 /// when the key was clicked.
-fn progress_line(ui: &mut egui::Ui, words: &str, key: Option<&str>) -> bool {
+pub(crate) fn progress_line(ui: &mut egui::Ui, words: &str, key: Option<&str>) -> bool {
     let width = ui.available_width();
     let key_size = key.map(|key| parts::key_size(ui, key));
     let room = width - key_size.map_or(0.0, |size| size.x + 12.0);
@@ -368,7 +368,7 @@ fn foot(ui: &mut egui::Ui, lead: &str, also: &[&str], keys: &[Key]) -> Option<us
 /// may find thousands, and the page is drawn many times a second. A row out of view takes the
 /// room it took when last laid out at this width, or the last row's until then (worked out when
 /// it comes into view). `can_tick`: as for [`source_row`]. The row clicked, if any.
-fn rows(ui: &mut egui::Ui, state: &mut Card, chosen: Option<&[usize]>, can_tick: bool) -> Option<usize> {
+pub(crate) fn rows(ui: &mut egui::Ui, state: &mut Card, chosen: Option<&[usize]>, can_tick: bool) -> Option<usize> {
     let Card { sources, ticked, heights, .. } = state;
     let width = ui.available_width();
     if heights.width != width {

@@ -9286,24 +9286,14 @@ impl App {
         });
     }
 
-    /// Carries out what the setup asked: importing songs, which needs more than the window.
+    /// Carries out what the setup asked: choosing song files to import, which needs more than
+    /// the window. (The songs found on this computer come in as Settings' Find songs brings
+    /// them: `handle_find_songs`.)
     fn handle_setup(&mut self) {
         let Some(request) = self.running.as_mut().and_then(|r| r.home_state.setup_request.take()) else { return };
-        let mark = self.running.as_ref().map_or(0, |r| r.home_state.notices.mark());
         match request {
-            setup::SetupRequest::ImportLibrary(folder) => {
-                self.import_songs(&[folder]);
-            }
             // The answer comes later: its page says how it went then (`import_songs_chosen`).
-            setup::SetupRequest::ChooseSongFiles => return self.choose_songs_to_import(true),
-        }
-        if let Some(running) = self.running.as_mut() {
-            // The setup's own page says how bringing songs in went, as the notices do.
-            let said = running.home_state.notices.said_since(mark).map(str::to_owned);
-            if let Some(setup) = running.home_state.setup.as_mut() {
-                setup.songs_said = said;
-            }
-            running.home_window.request_redraw();
+            setup::SetupRequest::ChooseSongFiles => self.choose_songs_to_import(true),
         }
     }
 
@@ -13181,7 +13171,8 @@ impl ApplicationHandler<AppEvent> for App {
                 running.home_state.apply_prefs(&prefs);
                 // The setup opens once on every Mac that hasn't seen it yet, a fresh install or
                 // one set up before there was a setup. Testing aid: SOFTPRESENTER_SETUP=1 shows
-                // it in a quiet run too, and SOFTPRESENTER_SETUP=<step> (free-songs, bibles…)
+                // it in a quiet run too, and SOFTPRESENTER_SETUP=<step> (languages, songs,
+                // bibles, screens, ready; ready-asks and ready-reports with that fold open)
                 // opens it at that step.
                 if let Ok(step) = std::env::var("SOFTPRESENTER_SETUP") {
                     running.home_state.setup = Some(setup::Setup::opened_at(&step));
@@ -14034,6 +14025,8 @@ impl ApplicationHandler<AppEvent> for App {
                 self.handle_setup();
                 self.handle_songbooks();
                 self.handle_free_songbooks();
+                // The setup's Songs step may have asked for a search, or for what it found.
+                self.handle_find_songs();
                 self.handle_catalog_songs();
                 // Show Selected pressed in the find box or Scripture Lookup, or a verse
                 // double-clicked in the Bible view's keypad or lists: once what it opened is in

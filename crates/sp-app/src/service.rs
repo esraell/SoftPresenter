@@ -884,6 +884,11 @@ pub struct Prefs {
     /// True once the setup a fresh install starts with has been seen.
     #[serde(default)]
     pub setup_done: bool,
+    /// The languages the church shows, as the setup's Languages step was answered (`ru`, `en`),
+    /// the one on top first. Empty until it is answered: the songbooks and Bibles recommended
+    /// then follow the app's and the computer's languages, as before there was such a step.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub church_languages: Vec<String>,
     /// True when the Bible page's book, chapter and verse lists were put away.
     #[serde(default)]
     pub bible_lists_hidden: bool,
@@ -983,6 +988,7 @@ impl Default for Prefs {
             end_mark: false,
             start_with: StartWith::Nothing,
             setup_done: false,
+            church_languages: Vec::new(),
             bible_lists_hidden: false,
             bible_rows_open: false,
             bible_view: String::new(),

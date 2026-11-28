@@ -11,11 +11,11 @@ goes wrong, so problems on computers we never see get found and fixed.
 **Whether they start on or off depends on where your computer says it is.**
 
 - **In the European Union, Iceland, Liechtenstein, Norway and the United Kingdom they are off
-  unless you turn them on.** The setup's Reports step shows the switch Off and invites you to
+  unless you turn them on.** The setup's last step, Ready, shows their switch Off and invites you to
   turn it on; an install updated from a version without them stays off and is told nothing,
   since nothing is on. Nothing is counted, kept or sent unless you switch them on.
-- **Everywhere else they are on unless you turn them off.** The setup shows them on its
-  Reports step, with the key that turns them off. An install updated from a version without
+- **Everywhere else they are on unless you turn them off.** The setup shows them on, on its
+  last step (Ready), with the key that turns them off. An install updated from a version without
   them gets a notice once, "Anonymous reports are on…", with **Turn off** beside it. Nothing
   is counted, kept or sent until you have passed that step or been shown that notice, and
   nothing goes in the first minute after it: turn them off there and nothing ever left your
@@ -32,7 +32,7 @@ choice is kept and always wins, wherever the computer is taken.
 
 - **Settings › About › Anonymous reports**: the On/Off key. Off stops at once, and deletes any
   report that was waiting to be sent.
-- **See what's sent**, in the same place and on the setup's step, shows the next report exactly
+- **See what's sent**, in the same place (What the reports send, on the setup's last step), shows the next report exactly
   as it would go, all of it. `sp reports show` prints the same in a terminal; `sp reports off`
   and `sp reports on` switch them.
 - **Reset my anonymous id** gives the install a new random number.

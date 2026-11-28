@@ -2048,7 +2048,7 @@ pub fn manage_bibles(
 
 /// An offered Bible's terms as the window shows them: "Public domain" in the language set, a
 /// licence by its own name (CC BY 4.0) as it is.
-fn terms_shown(terms: &'static str) -> &'static str {
+pub(crate) fn terms_shown(terms: &'static str) -> &'static str {
     if terms == "Public domain" { t("bibles.terms.public_domain", "Public domain") } else { terms }
 }
 

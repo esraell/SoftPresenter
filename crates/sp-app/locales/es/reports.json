@@ -9,9 +9,6 @@
   "reports.see.about": "El próximo informe, tal como está ahora. Esto es todo: no se envía nada más con él.",
   "reports.see.making": "Preparándolo…",
   "reports.copy": "Copiar",
-  "reports.setup.title": "Informes anónimos",
-  "reports.setup.note": "Activados mientras no los desactives. Puedes cambiarlo después en Ajustes › Acerca de.",
-  "reports.setup.note_off": "Desactivados mientras no los actives. Activarlos nos ayuda a encontrar y arreglar problemas. Puedes cambiarlo después en Ajustes › Acerca de.",
   "reports.privacy.read": "Leer la página de privacidad",
   "reports.card": "Informes anónimos",
   "reports.card.about": "Cómo funciona la aplicación, nunca lo que muestras",
@@ -23,5 +20,9 @@
   "reports.privacy.about": "Qué se envía, qué no se envía nunca, adónde va y cuánto tiempo se guarda",
   "reports.turned_off": "Los informes anónimos están desactivados. No se envió nada.",
   "reports.turn_off": "Desactivar",
-  "reports.keep_on": "Dejar activados"
+  "reports.keep_on": "Dejar activados",
+  "reports.setup.line": "Anónimos: velocidad y cierres inesperados. Nunca tus canciones, el texto de la Biblia, los nombres de tus archivos ni nada sobre ti.",
+  "reports.setup.line_off": "Desactivados hasta que los actives; nos ayudan a arreglar problemas. Nunca tus canciones, el texto de la Biblia, los nombres de tus archivos ni nada sobre ti.",
+  "reports.setup.fold": "Qué envían los informes",
+  "reports.setup.fold.about": "Informes anónimos: el tipo de ordenador, la velocidad y los cierres inesperados. El próximo informe, tal como está ahora: esto es todo, no se envía nada más con él. Puedes cambiarlo después en Ajustes › Acerca de."
 }

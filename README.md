@@ -90,7 +90,8 @@ under Settings › About › What's new. In short:
 
 ## A service from start to finish
 
-1. **Set up the screens.** The first start opens a short setup: choose the display the
+1. **Set up the screens.** The first start opens a short setup (your languages, your songs,
+   your Bibles, the screens): on its Screens step, choose the display the
    congregation sees (the projector or TV) and a stage display if there is one. The Mac's main
    display, where you work, is never filled; on a Mac with one display, the screen opens in a
    window. Later, the Screens window (Option-Command-1) changes them and adds more, including
@@ -199,9 +200,10 @@ It leaves `target/linux-deb/softpresenter_<version>_amd64.deb`, with the program
 for Linux (`scripts/build-ffmpeg.sh linux`), the sample backgrounds, the menu entry and icons,
 and the licences in `/usr/share/doc/softpresenter`.
 
-The first start opens a short setup: the screens, bringing songs in, which Bibles to show, and
-what the system will ask permission for and why (macOS, or Windows' firewall; nothing asks on
-Linux). Settings › Set Up SoftPresenter… opens it again.
+The first start opens a short setup, in five steps: the languages your church shows, bringing
+songs in, which Bibles to show, the screens, and a last page that says what is set, what the
+system will ask permission for and why (macOS, or Windows' firewall; nothing asks on Linux) and
+how anonymous reports stand. Settings › Set Up SoftPresenter… opens it again.
 
 Two things are optional:
 

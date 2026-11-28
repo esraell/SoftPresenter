@@ -1,4 +1,5 @@
-//! What a person sees of the anonymous reports: the setup's step, the card in Settings ›
+//! What a person sees of the anonymous reports: the line of the setup's Ready step and its
+//! fold, the card in Settings ›
 //! About, and the one-time notice. All drawn with the window's own parts (the On/Off key, rows,
 //! flat keys, the fold); every one of them says the same thing in the same words.
 
@@ -9,7 +10,7 @@ use crate::home::settings::parts;
 use crate::home::{HomeState, Page, open_page};
 use crate::i18n::t;
 
-/// What is sent and what isn't, in one plain line: the setup's step and Settings say it alike.
+/// What is sent and what isn't, in one plain line, as Settings says it.
 /// While reports are off it says what they would be.
 pub fn about_words(on: bool) -> &'static str {
     if on {
@@ -25,7 +26,7 @@ pub fn about_words(on: bool) -> &'static str {
     }
 }
 
-/// The one-time notice of an install that never passed the setup's step.
+/// The one-time notice of an install that never finished the setup on its Ready step.
 pub fn notice_words() -> &'static str {
     t(
         "reports.notice",
@@ -113,42 +114,93 @@ fn preview_stale(ctx: &egui::Context) {
     ctx.data_mut(|data| data.insert_temp(asked_id(), false));
 }
 
-/// The setup's step: reports shown on, with the On/Off key, the one line on what is and isn't
-/// sent, See what's sent, and the way to the privacy page. Passing the step (Continue) is what
-/// counts as having been told; the setup does that (`passed_setup_step`).
-pub fn setup_step(ui: &mut egui::Ui, state: &mut HomeState) {
-    crate::setup::title(ui, t("reports.setup.title", "Anonymous reports"));
-    let standing = super::standing().unwrap_or_default();
-    crate::setup::say(ui, about_words(standing.enabled));
-    ui.add_space(12.0);
-    // Where reports start off (the EU, the EEA and the UK), the line invites turning them on.
-    let note = if standing.starts_on {
-        t("reports.setup.note", "On unless you turn it off. You can change it later in Settings \u{203a} About.")
+/// The Reports line of the setup's Ready step: what reports are, by how they start where the
+/// computer is (on; or, in the EU, the EEA and the UK, off until turned on). It follows the
+/// region, never the switch, so switching never changes the line or its height.
+pub fn setup_line(starts_on: bool) -> &'static str {
+    if starts_on {
+        t(
+            "reports.setup.line",
+            "Anonymous: speeds and crashes. Never your songs, Bible text, file names or anything about you.",
+        )
     } else {
         t(
-            "reports.setup.note_off",
-            "Off unless you turn it on. Turning it on helps us find and fix problems. You can change it later in Settings \u{203a} About.",
+            "reports.setup.line_off",
+            "Off until turned on; they help us fix problems. Never your songs, Bible text, file names or anything about you.",
         )
-    };
-    if let Some(on) = switch_row(ui, standing.enabled, note) {
-        super::set_enabled(on);
-        preview_stale(ui.ctx());
-    }
-    ui.add_space(12.0);
-    // Testing aid: SOFTPRESENTER_SETUP=reports-open shows the step with See what's sent opened.
-    let open = std::env::var("SOFTPRESENTER_SETUP").is_ok_and(|step| step == "reports-open");
-    see_whats_sent(ui, "setup anonymous reports", open);
-    if crate::setup::link(ui, t("reports.privacy.read", "Read the privacy page")).clicked() {
-        open_page(state, Page::Privacy);
-    }
-    if !standing.may_send {
-        ui.add_space(8.0);
-        crate::setup::say(ui, test_copy_words());
     }
 }
 
-/// The setup's step was passed with Continue: the person has seen how reports stand, and left
-/// them so.
+/// What the Ready step's switch is called for a screen reader and the tests.
+pub fn setup_switch_id() -> egui::Id {
+    egui::Id::unique("setup anonymous reports switch")
+}
+
+/// The Ready step's switch was pressed: reports go on or off at once, as Settings' switch does.
+pub fn setup_switched(ctx: &egui::Context, on: bool) {
+    super::set_enabled(on);
+    preview_stale(ctx);
+}
+
+/// The title of the Ready step's fold that shows what is sent.
+pub fn setup_fold_title() -> &'static str {
+    t("reports.setup.fold", "What the reports send")
+}
+
+/// What the Ready step's fold says first.
+pub fn setup_fold_words() -> &'static str {
+    t(
+        "reports.setup.fold.about",
+        "Anonymous reports: the kind of computer, speeds and crashes. The next report, as it stands now: this is all of it, nothing else is sent with it. Change it later in Settings \u{203a} About.",
+    )
+}
+
+/// The Ready step's fold, opened: what the reports are, the next report whole in a box that
+/// scrolls with Copy beside it, and the way to the privacy page. A test copy says here, not on
+/// the row, that it never sends.
+pub fn setup_fold(ui: &mut egui::Ui, state: &mut HomeState, may_send: bool) {
+    parts::note(ui, setup_fold_words());
+    let asked = ui.data(|data| data.get_temp::<bool>(asked_id()).unwrap_or(false));
+    if !asked {
+        super::ask_preview();
+        ui.data_mut(|data| data.insert_temp(asked_id(), true));
+    }
+    match super::preview() {
+        Some(report) => {
+            let words = t("reports.copy", "Copy");
+            let key = parts::key_size(ui, words);
+            ui.horizontal_top(|ui| {
+                let width = ui.available_width() - key.x - 10.0;
+                ui.allocate_ui(egui::vec2(width, 150.0), |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("setup anonymous report")
+                        .max_height(150.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| parts::code(ui, &report));
+                });
+                let (place, _) = ui.allocate_exact_size(key, egui::Sense::hover());
+                if parts::key(ui, place, ui.scope_id().with("setup report copy"), words, false).clicked() {
+                    ui.ctx().copy_text(report);
+                }
+            });
+        }
+        None => {
+            parts::note(ui, t("reports.see.making", "Making it\u{2026}"));
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
+    ui.add_space(8.0);
+    if crate::setup::link(ui, t("reports.privacy.read", "Read the privacy page")).clicked() {
+        open_page(state, Page::Privacy);
+    }
+    if !may_send {
+        ui.add_space(6.0);
+        parts::note(ui, test_copy_words());
+    }
+}
+
+/// The setup was finished on its Ready step, where the Reports line stands: the person has seen
+/// how reports stand, and left them so.
 pub fn passed_setup_step() {
     super::confirm_shown();
 }

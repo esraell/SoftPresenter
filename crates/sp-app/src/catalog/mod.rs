@@ -13,7 +13,7 @@
 //! This module is the engine, with no window of its own: `books` (the songbooks the source
 //! publishes, and which to recommend), `read` (the song pack), `fold` (searching alike), `store`
 //! (the files), `search`, `fetch` (the network), `present` (making a song and judging an
-//! update). The windows that show it (the setup's Free Songs step, Settings › Integrations) are
+//! update). The windows that show it (the setup's Songs step, Settings › Integrations) are
 //! in `songbooks`, and its songs in the find box and the slides area in `catalog_songs`; all are
 //! offered only in development builds for now ([`offered`]).
 
@@ -50,7 +50,7 @@ use std::sync::{Arc, OnceLock};
 /// about the app offering its songs (the owner, 24 November 2026); a release shows none of them.
 pub const DEV_BUILD: bool = option_env!("SOFTPRESENTER_DEV_VERSION").is_some();
 
-/// Whether the windows offer the catalog: the setup's Free Songs step and Settings ›
+/// Whether the windows offer the catalog: the setup's Songs step and Settings ›
 /// Integrations › Worship Leader App. The `sp catalog` commands are there in every build.
 pub fn offered() -> bool {
     static OFFERED: OnceLock<bool> = OnceLock::new();

@@ -236,7 +236,7 @@ pub fn start(quiet_run: bool) {
 }
 
 /// Whether this build has the anonymous reports at all: their reporter was started. Where it
-/// wasn't, the setup has no Reports step and nothing here is drawn or counted.
+/// wasn't, the setup's Ready step has no Reports line and nothing here is drawn or counted.
 pub fn offered() -> bool {
     SHARED.get().is_some()
 }
@@ -326,7 +326,7 @@ pub fn mark_seen() {
     }
 }
 
-/// The setup's Reports step was passed with Continue: the person has seen how reports stand
+/// The setup was finished on its Ready step, where the Reports line is: the person has seen how reports stand
 /// (on, or off where they start off) and left them so. That is kept as their choice, so a
 /// computer taken to another region later doesn't change it unasked.
 pub fn confirm_shown() {

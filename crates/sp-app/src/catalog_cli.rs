@@ -493,7 +493,7 @@ impl crate::App {
         })
     }
 
-    /// Carries out what the songbook windows (the setup's Free Songs step, Settings ›
+    /// Carries out what the songbook windows (the setup's Songs step, Settings ›
     /// Integrations) asked, and tells them what is known: the songbooks on this computer, the
     /// downloads under way and the sizes the source gave. Called after each drawing of a window;
     /// does nothing where the catalog isn't offered.

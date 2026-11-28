@@ -14,7 +14,7 @@
 //! nobody changed and nothing else uses (to the Trash), and the songbook can be installed again.
 //!
 //! This module is the list, the download, the marks and the windows (the Free Songbooks window,
-//! and the setup's part of the Free Songs step); the app's side, which runs the downloads on
+//! and the setup's part of the Songs step); the app's side, which runs the downloads on
 //! threads of their own and brings the songs into the library, is `free_songbooks_cli`.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -276,10 +276,43 @@ pub fn languages_in_order(recommended: &[&'static str]) -> Vec<&'static str> {
     out
 }
 
-/// The songbooks recommended now, the first of each language first: the app's language and the
-/// computer's.
+/// The languages to recommend songbooks in for a church that shows `church` (the setup's
+/// Languages step, the one on top first): those, each once and only where a songbook is offered,
+/// and nothing else.
+pub fn church_languages_offered(church: &[String]) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    for tag in church {
+        let code = base_language(tag);
+        if let Some(book) = OFFERED.iter().find(|book| book.language == code)
+            && !out.contains(&book.language)
+        {
+            out.push(book.language);
+        }
+    }
+    out
+}
+
+/// The languages recommended, given what the church shows: the church's languages first, then
+/// the app's and the computer's ([`recommended_languages`]), which alone count until the setup's
+/// Languages step is answered.
+pub fn recommended_with(church: &[String], app: &str, computer: Option<&str>) -> Vec<&'static str> {
+    let mut out = church_languages_offered(church);
+    for language in recommended_languages(app, computer) {
+        if !out.contains(&language) {
+            out.push(language);
+        }
+    }
+    out
+}
+
+/// The languages recommended now, the church's first: the Free Songbooks window lists them
+/// before the rest.
 pub fn recommended_now() -> Vec<&'static str> {
-    recommended_languages(crate::i18n::current().code(), crate::i18n::computer_tag().as_deref())
+    recommended_with(
+        &crate::songbooks::church_languages(),
+        crate::i18n::current().code(),
+        crate::i18n::computer_tag().as_deref(),
+    )
 }
 
 /// The songbooks of a language, the one to recommend first at the front.
@@ -763,17 +796,16 @@ pub fn window(ctx: &egui::Context, view: &mut View) {
     }
 }
 
-/// The setup's choice of these songbooks on its Free Songs step.
+/// The setup's choice of these songbooks on its Songs step.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Picked {
     /// The songbooks ticked.
     pub ticked: Vec<&'static str>,
     /// Ticked or unticked by hand: the recommendation no longer changes the ticks.
     touched: bool,
-    /// The step was left with Continue, so what is ticked is installed when the setup closes.
+    /// The step was left with Continue, so what is ticked is installed. Leaving it any other
+    /// way (Skip, Back, Escape, Skip Setup) installs nothing.
     pub confirmed: bool,
-    /// The step lists every songbook, not only the recommended languages'.
-    others: bool,
 }
 
 impl Picked {
@@ -800,14 +832,7 @@ impl Picked {
         }
     }
 
-    /// Not Now: nothing is installed.
-    pub fn not_now(&mut self) {
-        self.ticked.clear();
-        self.touched = true;
-        self.confirmed = true;
-    }
-
-    /// What is to be installed when the setup closes: nothing unless the step was left with
+    /// What is to be installed once the step is passed: nothing unless it was left with
     /// Continue, and nothing installed or on its way already.
     pub fn to_install(&self, known: &Known) -> Vec<&'static str> {
         if !self.confirmed {
@@ -817,99 +842,43 @@ impl Picked {
     }
 }
 
-/// The setup closed: what was ticked and confirmed starts downloading.
+/// The setup's Songs step was passed: what was ticked and confirmed starts downloading.
 pub fn setup_closed(picked: &Picked, view: &mut View) {
     for id in picked.to_install(&view.known) {
         view.install(id);
     }
 }
 
-/// The free songbooks on the setup's Free Songs step: the recommended languages' songbooks (the
-/// first of each ticked to start with), every other a click away, and whose songs they are.
-/// With `heading`, a caption says what they are (under the song catalog's list).
-pub fn setup_section(ui: &mut egui::Ui, picked: &mut Picked, view: &mut View, heading: bool) {
-    let languages = recommended_now();
-    picked.recommend(&languages, &view.known);
-    if heading {
-        crate::studio::caption(
-            ui,
-            &t("freesongbooks.setup.heading", "Free songbooks shared by churches").to_uppercase(),
-        );
-    }
-    let mut shown: Vec<&'static Offered> = Vec::new();
-    let wanted = languages
-        .iter()
-        .flat_map(|language| of_language(language))
-        .chain(OFFERED.iter().filter(|book| view.known.here(book.id) || picked.ticked.contains(&book.id)));
-    for book in wanted {
-        if !shown.contains(&book) {
-            shown.push(book);
+/// The songbooks as the setup's Songs step lists them: every one offered, those of the church's
+/// languages (`languages`, from [`church_languages_offered`]) first, a language at a time.
+pub fn in_setup_order(languages: &[&'static str]) -> Vec<&'static Offered> {
+    languages_in_order(languages).into_iter().flat_map(of_language).collect()
+}
+
+/// The free songbooks on the setup's Songs step: every songbook, the church's languages'
+/// first, the first of each ticked to start with and marked Recommended, and whose songs they
+/// are. The step's card scrolls them.
+pub fn setup_rows(ui: &mut egui::Ui, picked: &mut Picked, view: &mut View, languages: &[&'static str]) {
+    picked.recommend(languages, &view.known);
+    let recommended: Vec<&'static str> =
+        languages.iter().filter_map(|language| of_language(language).next()).map(|book| book.id).collect();
+    for book in in_setup_order(languages) {
+        let here = view.known.here(book.id);
+        let ticked = here || picked.ticked.contains(&book.id);
+        let mut detail = format!("{} \u{b7} {}", language_name(book.language), view.detail(book));
+        if recommended.contains(&book.id) {
+            detail = crate::setup::recommended_detail(&detail);
         }
-    }
-    let others: Vec<&'static Offered> = OFFERED.iter().filter(|book| !shown.contains(book)).collect();
-    // The list never makes the setup taller than a small window: past five rows it scrolls.
-    egui::ScrollArea::vertical().max_height(264.0).id_salt("free songbooks to start with").show(ui, |ui| {
-        let listed = if picked.others { [shown.as_slice(), others.as_slice()].concat() } else { shown.clone() };
-        for book in listed {
-            tick_row(ui, book, picked, view);
-            ui.add_space(6.0);
+        if crate::songbooks::tick_card(ui, book.name, &detail, ticked, here, !here).clicked() {
+            picked.toggle(book.id);
         }
-    });
-    if !picked.others
-        && !others.is_empty()
-        && crate::setup::link(ui, t("freesongbooks.setup.others", "Other songbooks\u{2026}")).clicked()
-    {
-        picked.others = true;
+        ui.add_space(6.0);
     }
     ui.add_space(4.0);
     ui.add(egui::Label::new(egui::RichText::new(rights_words()).size(11.0).color(TEXT_FAINT)).wrap());
     if view.waiting() {
         ui.ctx().request_repaint_after(Duration::from_millis(250));
     }
-}
-
-/// A songbook in the setup's list, with its language: a tick box, its name and what it is. One
-/// installed, or on its way, shows a tick that can't be taken away.
-fn tick_row(ui: &mut egui::Ui, book: &'static Offered, picked: &mut Picked, view: &View) {
-    let here = view.known.here(book.id);
-    let ticked = here || picked.ticked.contains(&book.id);
-    let detail = format!("{} \u{b7} {}", language_name(book.language), view.detail(book));
-    if crate::songbooks::tick_card(ui, book.name, &detail, ticked, here, !here).clicked() {
-        picked.toggle(book.id);
-    }
-}
-
-/// The setup's Free Songs step where the song catalog isn't offered: these songbooks alone, and
-/// Not Now. True when Not Now was clicked.
-pub fn setup_step(ui: &mut egui::Ui, picked: &mut Picked, view: &mut View) -> bool {
-    // Only Continue or Not Now, in this frame, confirms the choice.
-    picked.confirmed = false;
-    crate::setup::title(ui, t("setup.free_songs.title", "Songs to start with"));
-    crate::setup::say(
-        ui,
-        t(
-            "freesongbooks.setup.about",
-            "Free songbooks shared by churches. Each is downloaded from the page that shares it, and its songs come into your library, in a library of its own.",
-        ),
-    );
-    ui.add_space(10.0);
-    setup_section(ui, picked, view, false);
-    ui.add_space(8.0);
-    crate::setup::say(ui, later_words());
-    ui.add_space(10.0);
-    if crate::setup::button(ui, t("setup.free_songs.not_now", "Not Now"), false).clicked() {
-        picked.not_now();
-        return true;
-    }
-    false
-}
-
-/// When ticked songbooks come in, and where more are.
-pub fn later_words() -> &'static str {
-    t(
-        "freesongbooks.setup.later",
-        "Ticked songbooks are downloaded once setup is done. More can be installed, or removed, later: Free Songbooks\u{2026} under the \u{2193} button in the left column.",
-    )
 }
 
 #[cfg(test)]
@@ -985,6 +954,20 @@ mod tests {
         let known = Known { installed: [("pv3300", 3301)].into(), ..Known::default() };
         picked.recommend(&["ru", "uk"], &known);
         assert_eq!(picked.ticked, ["evangelski-pisni"]);
+        // The church's languages come first, and alone decide what the setup ticks: an English
+        // app in a Russian and Ukrainian church recommends those two, not English.
+        let church = ["ru".to_owned(), "uk-UA".to_owned(), "es".to_owned()];
+        assert_eq!(church_languages_offered(&church), ["ru", "uk"]);
+        assert_eq!(recommended_with(&church, "en", Some("cs-CZ")), ["ru", "uk", "en", "cs"]);
+        // Until the setup has asked, today's rule stands.
+        assert_eq!(recommended_with(&[], "en", Some("cs-CZ")), ["en", "cs"]);
+        // The setup lists every songbook, the church's languages' first.
+        let listed = in_setup_order(&["uk", "ru"]);
+        assert_eq!(listed.len(), OFFERED.len());
+        assert_eq!(listed[0].language, "uk");
+        assert!(
+            listed.iter().skip_while(|book| book.language == "uk").next().is_some_and(|book| book.language == "ru")
+        );
         // Once ticked by hand, the recommendation leaves the ticks alone.
         picked.toggle("pv2001");
         picked.recommend(&["en"], &Known::default());
@@ -1003,11 +986,10 @@ mod tests {
         view.known.busy.insert("laudate", None);
         setup_closed(&picked, &mut view);
         assert_eq!(view.asks, [Ask::Install("pv3300")]);
-        // Not Now: nothing.
-        let mut not_now = picked.clone();
-        not_now.not_now();
+        // Skipped (never confirmed): nothing, whatever is ticked.
+        let skipped = Picked { confirmed: false, ..picked.clone() };
         let mut view = View::default();
-        setup_closed(&not_now, &mut view);
+        setup_closed(&skipped, &mut view);
         assert!(view.asks.is_empty());
     }
 

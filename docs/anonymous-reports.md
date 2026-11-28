@@ -36,13 +36,13 @@ file, so the two can't drift apart.
 ## What the app must do (the server can't check these)
 
 - Reports are **on unless the person turns them off**, but **nothing is sent, and nothing is
-  queued for sending, until the person has seen** the setup step that says so (or, in an
+  queued for sending, until the person has seen** the setup's last step, Ready, whose Reports line says so (or, in an
   install updated from an earlier build, the one-time notice with its Turn off key). A first
   start that quits before then sends nothing.
 - On a computer whose **region** (not its language) is in the European Union, the rest of the
   European Economic Area (Iceland, Liechtenstein, Norway) or the United Kingdom, reports are
-  **off unless the person turns them on**: the setup's step shows the switch Off with a line
-  inviting them to turn it on, and there is no one-time notice (nothing is on). The region is
+  **off unless the person turns them on**: the Reports line of the setup's Ready step shows the
+  switch Off with a line inviting them to turn it on, and there is no one-time notice (nothing is on). The region is
   asked of the system (`crates/sp-app/src/reports/region.rs`: a Mac's `AppleLocale`, Windows'
   `GetUserDefaultGeoName`, elsewhere the territory of `LC_ALL`, `LC_MESSAGES` or `LANG`), is
   never sent and is not kept; a region that can't be read counts as one where reports start

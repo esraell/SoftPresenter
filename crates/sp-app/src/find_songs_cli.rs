@@ -184,6 +184,10 @@ impl crate::App {
             for panel in running.panels.iter().filter(|panel| panel.kind == crate::Panel::Settings) {
                 panel.window.request_redraw();
             }
+            // The setup's Songs step shows the same search, over the home window.
+            if running.home_state.setup.is_some() {
+                running.home_window.request_redraw();
+            }
         }
     }
 
@@ -518,7 +522,8 @@ impl crate::App {
     }
 
     /// Carries out what the card asked: Find, Stop, Choose a Folder… (or Search Another Folder…)
-    /// and Import. Called after each drawing of the Settings window.
+    /// and Import. Called after each drawing of the Settings window, and of the home window (the
+    /// setup's Songs step asks the same).
     pub(crate) fn handle_find_songs(&mut self) {
         let Some(running) = self.running.as_mut() else { return };
         let asks = std::mem::take(&mut running.home_state.find_songs.asks);

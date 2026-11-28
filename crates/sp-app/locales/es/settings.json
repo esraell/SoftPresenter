@@ -12,8 +12,6 @@
   "settings.pane.about": "Acerca de",
   "settings.set_up": "Configurar SoftPresenter…",
   "settings.set_up.short": "Configurar…",
-  "settings.set_up.hint": "Volver a hacer la configuración del primer inicio: pantallas, canciones, Biblias",
-  "settings.set_up.hint_permissions": "Volver a hacer la configuración del primer inicio: pantallas, canciones, Biblias, permisos",
   "settings.about.version": "Versión {version} · libre y de código abierto, GPL-3.0-or-later",
   "settings.about.whats_new": "Novedades",
   "settings.about.guide": "Abrir la guía",
@@ -405,5 +403,6 @@
   "settings.endlook.place.under": "Bajo la última línea",
   "settings.endlook.place.bottom": "Abajo en la pantalla",
   "settings.endlook.note": "En una última diapositiva llena, la marca baja hasta donde la pantalla lo permite. Si aun así no hay sitio, la letra se hace un poco más pequeña por ella, o se hace más pequeña la marca.",
-  "settings.endlook.note.off": "La marca está desactivada en Ajustes › Diapositivas. Su aspecto se guarda para cuando esté activada."
+  "settings.endlook.note.off": "La marca está desactivada en Ajustes › Diapositivas. Su aspecto se guarda para cuando esté activada.",
+  "settings.set_up.hint_five": "Volver a hacer la configuración del primer inicio: idiomas, canciones, Biblias, pantallas"
 }

@@ -8,7 +8,7 @@ use sp_engine::Show;
 
 use super::{HomeState, Page, open_page};
 
-mod find_card;
+pub(crate) mod find_card;
 pub(crate) mod keys_card;
 pub(crate) mod parts;
 mod screens_page;
@@ -338,14 +338,7 @@ fn pane_list(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
         let wide = ui.painter().layout_no_wrap(words.clone(), font.clone(), TEXT).size().x + 26.0;
         let (place, _) = ui.allocate_exact_size(vec2(panel.width(), 30.0), Sense::hover());
         let button = Rect::from_min_size(pos2(left + 10.0, place.min.y), vec2(wide, 30.0));
-        let hint = if crate::setup::System::THIS == crate::setup::System::Linux {
-            t("settings.set_up.hint", "Run the first-start setup again: screens, songs, Bibles")
-        } else {
-            t(
-                "settings.set_up.hint_permissions",
-                "Run the first-start setup again: screens, songs, Bibles, permissions",
-            )
-        };
+        let hint = t("settings.set_up.hint_five", "Run the first-start setup again: languages, songs, Bibles, screens");
         if flat_button(ui, button, ui.scope_id().with("set up"), &words, font, Flat::Plain, true)
             .on_hover_text(hint)
             .clicked()

@@ -1,4 +1,4 @@
-//! The song catalog's songbooks in the windows: the setup's Free Songs step, and the page
+//! The song catalog's songbooks in the windows: the setup's Songs step, and the page
 //! Settings › Integrations › Worship Leader App (drawn in `integrations`). Both are offered only
 //! where [`crate::catalog::offered`] says, in development builds for now.
 //!
@@ -140,18 +140,16 @@ pub fn songs_words(songs: usize) -> String {
     tn("integrations.songbooks.songs", songs as u64, "{n} song", "{n} songs", &[])
 }
 
-/// The setup's choice on its Free Songs step.
+/// The setup's choice of the catalog's songbooks on its Songs step.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Picked {
     /// The songbooks ticked, recommended ones first.
     pub ticked: Vec<String>,
     /// Ticked or unticked by hand: the recommendation no longer changes the ticks.
     touched: bool,
-    /// The step was left with Continue or Not Now, so what is ticked downloads when the setup
-    /// closes. Leaving the setup any other way (Escape, Skip Setup) downloads nothing.
+    /// The Songs step was left with Continue, so what is ticked downloads. Leaving it any
+    /// other way (Skip, Back, Escape, Skip Setup) downloads nothing.
     pub confirmed: bool,
-    /// The step lists every language, not only the recommended ones.
-    others: bool,
 }
 
 impl Picked {
@@ -191,11 +189,40 @@ impl Picked {
     }
 }
 
-/// The languages the church shows, the one on top first. The setup doesn't ask yet, so none
-/// are known and only the operator's language is recommended; when it asks, its answer is
-/// given here.
+/// The languages the church shows, as the setup's Languages step was answered and the
+/// preferences keep them, the one on top first. Kept here for the places that recommend
+/// songbooks and Bibles outside the setup (`set_church_languages` when the preferences are read
+/// and when the step is passed); the rules themselves take the languages as they are given.
+#[cfg(not(test))]
+static CHURCH: std::sync::RwLock<Vec<String>> = std::sync::RwLock::new(Vec::new());
+
+// In the tests each thread has its own, so one test's church never recommends in another's.
+#[cfg(test)]
+thread_local! {
+    static CHURCH: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The languages the church shows, the one on top first. None until the setup's Languages step
+/// is answered: only the operator's language is recommended then, as before the step was there.
+#[cfg(not(test))]
 pub fn church_languages() -> Vec<String> {
-    Vec::new()
+    CHURCH.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+}
+
+/// The church's languages were read from the preferences, or answered in the setup.
+#[cfg(not(test))]
+pub fn set_church_languages(languages: &[String]) {
+    *CHURCH.write().unwrap_or_else(std::sync::PoisonError::into_inner) = languages.to_vec();
+}
+
+#[cfg(test)]
+pub fn church_languages() -> Vec<String> {
+    CHURCH.with(|church| church.borrow().clone())
+}
+
+#[cfg(test)]
+pub fn set_church_languages(languages: &[String]) {
+    CHURCH.with(|church| *church.borrow_mut() = languages.to_vec());
 }
 
 /// The songbooks recommended now: the operator's language (SoftPresenter's own, as chosen in
@@ -204,30 +231,32 @@ pub fn recommended_now() -> Vec<&'static str> {
     catalog::recommended(crate::i18n::current().code(), &church_languages())
 }
 
-/// The setup's Free Songs step: the recommended songbooks ticked, every other language a click
-/// away, and Not Now; `more` draws what follows the list (the free songbooks shared by
-/// churches, `free_songbooks`). True when Not Now was clicked, so the setup goes on with
-/// nothing to download.
-pub fn setup_step(ui: &mut egui::Ui, picked: &mut Picked, view: &mut View, more: impl FnOnce(&mut egui::Ui)) -> bool {
-    // Only Continue or Not Now, in this frame, confirms the choice.
-    picked.confirmed = false;
-    let recommended = recommended_now();
+/// The songbooks the setup recommends for a church that shows `church`: one for each of its
+/// languages the source publishes, the one on top first, and nothing else (the app's own
+/// language says what the operator reads, not what the church sings).
+pub fn recommended_for(church: &[String]) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    for book in church.iter().filter_map(|code| catalog::songbook(code)) {
+        if !out.contains(&book.code) {
+            out.push(book.code);
+        }
+    }
+    out
+}
+
+/// The song catalog's rows on the setup's Songs step: the songbooks of the church's languages
+/// (`church`), ticked to start with and marked Recommended, then the setup's other languages
+/// (`offered`), and any on this computer or ticked already. While the source can't be reached,
+/// its line and Try Again stand above them.
+pub fn setup_rows(ui: &mut egui::Ui, picked: &mut Picked, view: &mut View, church: &[String], offered: &[&str]) {
+    let recommended = recommended_for(church);
     picked.recommend(&recommended, &view.known);
-    crate::setup::title(ui, t("setup.free_songs.title", "Songs to start with"));
-    crate::setup::say(
-        ui,
-        t(
-            "setup.free_songs.about",
-            "Free songs from Worship Leader App, a songbook for each language. They are kept on this computer, apart from your own songs, and join your library only when you use one.",
-        ),
-    );
-    ui.add_space(8.0);
     status(ui, view);
-    // The recommended ones, those on the computer and those ticked, then the rest on request.
     let mut shown: Vec<&'static Songbook> = Vec::new();
     let wanted = recommended
         .iter()
         .copied()
+        .chain(offered.iter().copied())
         .chain(view.known.installed.keys().map(String::as_str))
         .chain(view.known.busy.keys().map(String::as_str))
         .chain(picked.ticked.iter().map(String::as_str));
@@ -240,45 +269,24 @@ pub fn setup_step(ui: &mut egui::Ui, picked: &mut Picked, view: &mut View, more:
     }
     view.ask_sizes(shown.iter().map(|book| book.code));
     for book in &shown {
-        tick_row(ui, book, picked, view);
+        let here = view.known.installed.contains_key(book.code) || view.known.busy.contains_key(book.code);
+        let ticked = here || (!view.known.offline && picked.ticked.iter().any(|code| code == book.code));
+        let can = !here && !view.known.offline;
+        let mut detail = view.detail(book.code);
+        if recommended.contains(&book.code) {
+            detail = crate::setup::recommended_detail(&detail);
+        }
+        if tick_card(ui, book.name(), &detail, ticked, here, can).clicked() {
+            picked.toggle(book.code);
+        }
         ui.add_space(6.0);
     }
-    let others: Vec<&'static Songbook> =
-        catalog::in_name_order().into_iter().filter(|book| !shown.contains(book)).collect();
-    if picked.others {
-        egui::ScrollArea::vertical().max_height(176.0).id_salt("other songbooks").show(ui, |ui| {
-            for book in &others {
-                tick_row(ui, book, picked, view);
-                ui.add_space(6.0);
-            }
-        });
-    } else if crate::setup::link(ui, t("setup.free_songs.others", "Other languages\u{2026}")).clicked() {
-        picked.others = true;
-    }
-    ui.add_space(12.0);
-    more(ui);
-    ui.add_space(8.0);
-    crate::setup::say(
-        ui,
-        t(
-            "setup.free_songs.later",
-            "Ticked songbooks download in the background once setup is done. More can be downloaded, or removed, in Settings \u{203a} Integrations.",
-        ),
-    );
-    ui.add_space(10.0);
     if view.waiting() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
     }
-    if crate::setup::button(ui, t("setup.free_songs.not_now", "Not Now"), false).clicked() {
-        picked.ticked.clear();
-        picked.touched = true;
-        picked.confirmed = true;
-        return true;
-    }
-    false
 }
 
-/// The setup closed: what was ticked and confirmed starts downloading.
+/// The setup's Songs step was passed: what was ticked and confirmed starts downloading.
 pub fn setup_closed(picked: &Picked, view: &mut View) {
     let langs = picked.to_download(&view.known);
     if !langs.is_empty() {
@@ -319,17 +327,6 @@ pub fn status(ui: &mut egui::Ui, view: &mut View) {
     }
 }
 
-/// A songbook in the setup's list: a card with a tick box, its name and what it is. One on
-/// this computer, or downloading, shows a tick that can't be taken away.
-fn tick_row(ui: &mut egui::Ui, book: &Songbook, picked: &mut Picked, view: &View) {
-    let here = view.known.installed.contains_key(book.code) || view.known.busy.contains_key(book.code);
-    let ticked = here || (!view.known.offline && picked.ticked.iter().any(|code| code == book.code));
-    let can = !here && !view.known.offline;
-    if tick_card(ui, book.name(), &view.detail(book.code), ticked, here, can).clicked() {
-        picked.toggle(book.code);
-    }
-}
-
 /// A card in a setup list of songbooks (the catalog's, and the free ones shared by churches,
 /// `free_songbooks`): a tick box, the name and what it is. `here` (on this computer, or on its
 /// way) shows a tick that can't be taken away; `can` says a click ticks or unticks it.
@@ -349,27 +346,24 @@ pub(crate) fn tick_card(
     } else if can && response.hovered() {
         HOVER
     } else {
-        CARD
+        // A shade darker than the card the list sits on.
+        crate::studio::PANEL
     };
     ui.painter().rect_filled(place, 9.0, fill);
     let tick = egui::Rect::from_center_size(place.left_center() + vec2(20.0, 0.0), vec2(16.0, 16.0));
     paint_tick_box(ui.painter(), tick, ticked, here, can);
     let (name_at, detail_at) = if detail.is_empty() { (0.0, 0.0) } else { (-7.0, 9.0) };
-    ui.painter().text(
-        place.left_center() + vec2(40.0, name_at),
-        Align2::LEFT_CENTER,
-        name,
-        semibold(13.0),
-        if can || here { TEXT } else { TEXT_FAINT },
-    );
+    // In one line each, cut short with "…" where the card is narrower than the words.
+    let room = width - 40.0 - 12.0;
+    let one_line = crate::home::settings::parts::one_line;
+    let name_ink = if can || here { TEXT } else { TEXT_FAINT };
+    let name = one_line(ui, name, semibold(13.0), name_ink, room);
+    let at = place.left_center() + vec2(40.0, name_at - name.size().y / 2.0);
+    ui.painter().galley(at, name, name_ink);
     if !detail.is_empty() {
-        ui.painter().text(
-            place.left_center() + vec2(40.0, detail_at),
-            Align2::LEFT_CENTER,
-            detail,
-            egui::FontId::proportional(11.0),
-            TEXT_DIM,
-        );
+        let detail = one_line(ui, detail, egui::FontId::proportional(11.0), TEXT_DIM, room);
+        let at = place.left_center() + vec2(40.0, detail_at - detail.size().y / 2.0);
+        ui.painter().galley(at, detail, TEXT_DIM);
     }
     response
 }
