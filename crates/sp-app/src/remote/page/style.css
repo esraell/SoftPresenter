@@ -1824,7 +1824,7 @@ body.login { display: grid; grid-template: 1fr / 1fr; place-items: center; heigh
 .st-aicard { background: var(--panel); box-shadow: inset 0 0 0 1px var(--line); min-height: 124px; padding: 14px; }
 .st-icard:hover:not(:disabled) { background: #282828; } .st-aicard:hover { box-shadow: inset 0 0 0 1px var(--faint); }
 .st-icard.soon { cursor: default; opacity: .7; }
-.st-icard.more { cursor: default; background: none; border: 1px dashed var(--key-hi); align-items: center; justify-content: center; gap: 4px; text-align: center; color: var(--faint); font-size: 13px; } .st-icard.more b { color: var(--dim); font-weight: 600; }
+.st-icard.more { cursor: pointer; background: none; border: 1px dashed var(--key-hi); align-items: center; justify-content: center; gap: 4px; text-align: center; color: var(--faint); font-size: 13px; } .st-icard.more b { color: var(--dim); font-weight: 600; }
 .st-icard .itop, .st-aicard .itop, .st-ihead { display: flex; gap: 12px; align-items: flex-start; }
 .st-icard .tx, .st-aicard .tx, .st-ihead .tx { display: grid; gap: 3px; min-width: 0; } .st-icard .tx b, .st-aicard .tx b { font-size: 16px; font-weight: 650; } .st-icard .tx span, .st-aicard .tx span { font-size: 13px; line-height: 1.4; color: var(--dim); } .st-aicard .tx span { font-size: 12px; }
 .st-icard .ifoot { display: flex; align-items: center; gap: 9px; padding-top: 12px; border-top: 1px solid var(--line); } .st-icard .ifoot .st-rd { flex: 1; color: var(--dim); }
@@ -2372,3 +2372,28 @@ textarea.ed-notes { width: 100%; min-height: 140px; resize: vertical; font: inhe
 .ni-rowbar::-webkit-progress-bar { background: var(--key); } .ni-rowbar::-webkit-progress-value { background: var(--ink); border-radius: 2px; } .ni-rowbar::-moz-progress-bar { background: var(--ink); }
 /* Install NDI, a Mac's Licence step: the licence is on NDI's site, so a box names it with a key to read it */
 .ni-licbox { margin-top: 6px; padding: 14px; border-radius: 9px; background: var(--well); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--dim); } .ni-licbox span { flex: 1; min-width: 160px; }
+/* Pair a Device (Stream Deck and Companion): one window size in every state; the code and its time in fixed-width figures */
+.dp-body { height: 352px; padding-top: 4px; display: flex; flex-direction: column; gap: 10px; }
+.dp-code { display: grid; justify-items: center; gap: 4px; padding: 12px 0 10px; border-radius: 9px; background: var(--well); }
+.dp-digits { font-size: 34px; font-weight: 700; letter-spacing: .08em; font-variant-numeric: tabular-nums; color: var(--ink); line-height: 1.1; }
+.dp-left { font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); font-variant-numeric: tabular-nums; }
+.dp-row { display: flex; align-items: center; gap: 14px; padding: 2px 0; } .dp-row > div { flex: 1; min-width: 0; display: grid; gap: 2px; } .dp-row b { font-size: 13.5px; } .dp-row > div > span { font-size: 12.5px; line-height: 1.4; color: var(--dim); min-height: 2.8em; }
+.dp-cap { margin: 2px 0 -4px; } .dp-fp { margin: 0; font-size: 11px; padding: 8px 12px; text-align: center; }
+.dp-steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 12.5px; line-height: 1.4; } .dp-steps li { display: grid; grid-template-columns: 116px 1fr; gap: 10px; min-height: 2.8em; } .dp-steps span { color: var(--dim); }
+.dp-off .st-line > div:first-child > b, .dp-off b { color: var(--next); }
+.dp-row > .btn { flex: none; align-self: center; }
+/* Request an Integration: the dashed card is a key now; its window keeps one size in every state */
+.st-icard.more { gap: 8px; padding: 16px 24px; } .st-icard.more > span:not(.btn) { line-height: 1.4; } .st-icard.more .btn { margin-top: 8px; color: var(--ink); align-self: center; } .st-icard.more:hover { border-color: var(--faint); background: none; }
+.ra-body { height: 356px; display: flex; flex-direction: column; gap: 10px; padding-top: 2px; }
+.ra-f { display: grid; gap: 5px; font-size: 12.5px; color: var(--dim); } .ra-f i { font-style: normal; color: var(--faint); margin-left: 4px; } .ra-f .field { color: var(--ink); font-size: 13.5px; }
+.ra-t { height: auto; padding: 7px 10px; line-height: 1.4; resize: none; } .ra-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.ra-note { margin: 0; font-size: 12px; line-height: 1.4; color: var(--faint); } .ra-say { margin: 0; min-height: 2.8em; font-size: 13px; line-height: 1.4; color: var(--dim); } .ra-say.care { color: var(--next); }
+.ui-sheet.ra .ui-sf > span:first-child { display: none; } .ui-sheet.ra .ui-sf .btn:first-of-type:not(:last-of-type) { margin-right: auto; }
+.ni-held { color: var(--next); margin-top: auto; }
+/* a window's greyed key looks greyed, the white one too */
+.ui-sf .btn:disabled, .ui-sf .btn.primary:disabled { opacity: .38; cursor: default; pointer-events: auto; }
+.ui-sheet.ra .ui-sf { justify-content: flex-end; }
+/* the Box tab, redrawn: Opacity's number keeps one width; the degree sign sits tight to its number */
+.iread { width: 44px; text-align: right; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; flex: none; } .ideg { margin-left: -4px; margin-right: 6px; }
+.ifill { display: flex; flex-wrap: nowrap; gap: 3px; } .ifill .swt { width: 18px; height: 18px; flex: none; }
+.st-picks.c6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }

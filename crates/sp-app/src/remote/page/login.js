@@ -5,6 +5,418 @@
 // The remote page's words in the app's languages: built by translation-review/es/build-remote-table.js from the app's
 // own tables (crates/sp-app/locales) and remote-map.json. Don't edit by hand: rebuild. Read by remote-lang.js.
 const REMOTE_WORDS = {
+ "de": {
+  "exact": {
+   "A Bible passage…": "Bibelstelle…",
+   "A header…": "Überschrift…",
+   "A Library Folder…": "Bibliotheksordner…",
+   "A media playlist": "Medienliste",
+   "A picture or video": "Bild oder Video",
+   "A placeholder…": "Platzhalter…",
+   "A playlist is the running order of a service: songs, Bible passages, pictures and videos, in the order they come.": "Ein Ablauf ist das Programm eines Gottesdienstes: Lieder, Bibelstellen, Bilder und Videos in der Reihenfolge, in der sie drankommen.",
+   "A question is waiting: click to answer it": "Eine Frage wartet: Klicke, um sie zu beantworten",
+   "a service, in order": "ein Gottesdienst, der Reihe nach",
+   "A small tag beside each button with its key. Also in Settings › Keys.": "Ein kleines Schild neben jeder Schaltfläche mit ihrer Taste. Auch unter Einstellungen › Tasten.",
+   "A Song Bundle…": "Liedbündel…",
+   "A song…": "Lied…",
+   "A–Z": "A–Z",
+   "Actions": "Aktionen",
+   "Add a Bible passage": "Bibelstelle hinzufügen",
+   "Add a header": "Überschrift hinzufügen",
+   "Add a song": "Lied hinzufügen",
+   "Add a track to this playlist": "Füge dieser Liste einen Track hinzu",
+   "Add pictures or videos": "Bilder oder Videos hinzufügen",
+   "Add pictures or videos to show behind the words": "Füge Bilder oder Videos hinzu, die hinter dem Text gezeigt werden",
+   "Add Slide": "Folie hinzufügen",
+   "Add the Sample Backgrounds": "Beispielhintergründe hinzufügen",
+   "Add to playlist": "Zum Ablauf hinzufügen",
+   "Add to Playlist": "Zu einem Ablauf hinzufügen",
+   "Adding music is done at the computer for now.": "Musik wird vorerst am Computer hinzugefügt.",
+   "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Bilder und Videos von hier aus hinzufügen kommt mit dem nächsten Schritt. Füge sie vorerst am Computer hinzu.",
+   "Advanced": {
+    "in": [
+     [
+      ".st-navg",
+      "Erweitert"
+     ]
+    ],
+    "else": "Mehr"
+   },
+   "All Media": "Alle Medien",
+   "Announce": "Ankündigungen",
+   "Arrangement": "Arrangement: die Teile des Lieds in anderer Reihenfolge spielen",
+   "As listed": "Original",
+   "Audience": "Saal",
+   "Audience screens on or off (⇧⌘1)": "Bildschirme im Saal ein- oder ausschalten (⇧⌘1)",
+   "Audience screens, stage screens, on or off": "Bildschirme im Saal, Bildschirme auf der Bühne ein- oder ausschalten",
+   "Audio": "Audio",
+   "Audio playlist": "Audioliste",
+   "Back 15 seconds": "15 Sekunden zurück",
+   "Bible": "Bibel",
+   "Bible, too (Bold while editing a slide)": "Auch Bibel (beim Bearbeiten einer Folie: Fett)",
+   "Blinds": "Jalousie",
+   "Cancel": "Abbrechen",
+   "Changing songs, playlists and settings is done at the computer for now. Running the show works from here.": "Lieder, Abläufe und Einstellungen werden vorerst am Computer geändert. Den Gottesdienst kannst du von hier aus fahren.",
+   "Changing things": "Ändern",
+   "Checkerboard": "Schachbrett",
+   "Choose": "Wählen",
+   "Choose a library or playlist (⌘P)": "Ablauf oder Bibliothek wählen (⌘P)",
+   "Choose a song…": "Lied wählen…",
+   "Choosing from the menu bar is done at the computer, not from the remote page.": "Punkte in der Menüleiste wählst du am Computer, nicht über die Fernsteuerung.",
+   "Choosing the stage layouts": "Die Auswahl der Bühnenlayouts",
+   "CLEAR": "LEER",
+   "Clear All": "Alles ausblenden",
+   "Clear everything": "Alles ausblenden",
+   "Clear it": "Ausblenden",
+   "Clear the slide, media, props, audio or messages: the layer keys under the preview": "Folie, Medien, Grafiken, Audio oder Nachrichten ausblenden: die Ebenentasten unter der Vorschau",
+   "Clearing": "Ausblenden",
+   "Click to show it": "Zum Zeigen klicken",
+   "Clock": "Uhr",
+   "Close": "Schließen",
+   "comes to the remote page with the next step. Use the computer for now.": "kommt mit dem nächsten Schritt auf die Fernsteuerungsseite. Nutze vorerst den Computer.",
+   "Connect": "Verbinden",
+   "Connected": "Verbunden",
+   "Connecting…": "Wird verbunden…",
+   "Continuous": "Durchgehend",
+   "Copy": "Kopieren",
+   "Copy Style": "Stil kopieren",
+   "Copy, cut, paste the picked slides (objects in Edit)": "Ausgewählte Folien kopieren, ausschneiden, einfügen (im Editor: Objekte)",
+   "Could not sign in.": "Die Anmeldung hat nicht geklappt.",
+   "Crossfade": "Überblenden",
+   "Cut": {
+    "in": [
+     [
+      "#foot",
+      "Schnitt"
+     ]
+    ],
+    "else": "Ausschneiden"
+   },
+   "Delete": {
+    "in": [
+     [
+      ".ui-keys",
+      "Entf"
+     ]
+    ],
+    "else": "Löschen"
+   },
+   "Delete Song from Library…": "Lied aus der Bibliothek löschen…",
+   "Delete what is picked: what Undo brings back goes at once (playlist items, slides, a media playlist’s items); songs in a library, pictures in the bin and screens ask first": "Ausgewähltes löschen: Was „Widerrufen“ zurückholt, ist sofort weg (Einträge im Ablauf, Folien, Einträge einer Medienliste); bei Liedern in einer Bibliothek, Bildern in der Mediathek und Bildschirmen wird erst nachgefragt",
+   "Delete…": "Löschen…",
+   "Details": "Details: Autor, Verlag und CCLI-Nummer des Lieds",
+   "Disable": "Folie deaktivieren",
+   "Disconnected at the computer: click to connect again": "Am Computer getrennt: Klick, um wieder zu verbinden",
+   "Dissolve": "Blende",
+   "Done": "Fertig",
+   "Door": "Tür",
+   "Drag it into a playlist": "Zieh es in einen Ablauf",
+   "Drag it into a playlist or a library": "Zieh es in einen Ablauf oder eine Bibliothek",
+   "Duplicate": "Duplizieren",
+   "Edit": {
+    "in": [
+     [
+      "#modes",
+      "Editor"
+     ]
+    ],
+    "else": "Bearbeiten"
+   },
+   "Edit this slide": "Diese Folie bearbeiten",
+   "Edit Words": "Text bearbeiten",
+   "Every key (press ?)": "Alle Tasten (drücke ?)",
+   "Every other transition": "Alle anderen Übergänge und wie lange sie dauern",
+   "every song you keep": "alle deine Lieder",
+   "Fade": "Verblassen",
+   "Fade Black": "Über Schwarz",
+   "Fade White": "Über Weiß",
+   "Fill with Song…": "Mit Lied füllen…",
+   "Filter": "Filtern",
+   "Find a song, a line or a verse": "Lied, Zeile oder Vers suchen",
+   "Find a song, a line, or a verse": "Lied, Zeile oder Vers suchen",
+   "First slide of the song, or verse in Bible": "Erste Folie des Lieds, oder erster Vers in der Bibel",
+   "Flip": "Umdrehen",
+   "Fly In": "Einfliegen",
+   "Forward 15 seconds": "15 Sekunden vor",
+   "Go to Next": "Automatisch weiter",
+   "Go to the slide on screen": "Zur Folie gehen, die gerade live ist",
+   "Going places": "Gehe zu",
+   "Grid": "Raster",
+   "Group": "Teil",
+   "Hide": "Ausblenden",
+   "Hide the media strip": "Medienleiste verbergen",
+   "Hot Key…": "Tastenkürzel…",
+   "How long one track fades into the next": "Wie lange ein Track in den nächsten überblendet",
+   "Import Songs": "Lieder importieren",
+   "Import songs or slides": "Lieder oder Folien importieren",
+   "Import…": "Importieren…",
+   "In Edit: a new text box, duplicate, pick everything": "Im Editor: neues Textfeld, duplizieren, alles auswählen",
+   "In Edit: nudge the picked object (Shift for one pixel)": "Im Editor: ausgewähltes Objekt verschieben (mit Umschalt um ein Pixel)",
+   "Iris": "Iris",
+   "is empty": "ist leer",
+   "Jump to a group (C for the chorus), or a slide’s own hot key": "Zu einem Liedteil springen (C für den Refrain) oder zur eigenen Schnelltaste einer Folie",
+   "Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)": "Weiterspielen, bis gestoppt wird: nach dem letzten Track wieder mit dem ersten beginnen (ist „Nacheinander“ aus, diesen Track wiederholen)",
+   "Keys": "Tasten",
+   "Label": "Bezeichnung",
+   "Last slide of the song, or verse in Bible": "Letzte Folie des Lieds, oder letzter Vers in der Bibel",
+   "Library": "Bibliothek",
+   "Longest": "Längste",
+   "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Das Nachschlagen in der Bibel kommt mit dem nächsten Schritt auf die Fernsteuerungsseite. Nutze vorerst die Bibel-Ansicht am Computer.",
+   "Loop": {
+    "in": [
+     [
+      ".lv-audio",
+      "Schleife"
+     ]
+    ],
+    "else": "Schleife"
+   },
+   "Macros": "Makros",
+   "Media": "Medien",
+   "Media Playlists": "Medienlisten",
+   "Menus and windows": "Menüs und Fenster",
+   "Messages": "Nachrichten",
+   "More": "Mehr",
+   "Move": "Auswahl bewegen",
+   "Move Down": "Nach unten",
+   "Move In": "Hereinfahren",
+   "Move Up": "Nach oben",
+   "Mute": "Stummschalten",
+   "New": "Neuer Timer",
+   "New library": "Neue Bibliothek",
+   "New Media Playlist…": "Neue Medienliste…",
+   "New playlist": "Neuer Ablauf",
+   "New song": "Neues Lied",
+   "Next": "Weiter",
+   "Next at the end of a song goes on to the next song": "„Weiter“ am Ende eines Lieds geht zum nächsten Lied",
+   "Next slide": "Nächste Folie",
+   "Next track": "Nächster Track",
+   "No song is open": "Kein Lied geöffnet",
+   "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Hier sind noch keine Lieder. Erstelle eins, importiere welche oder ziehe Lieder auf den Namen dieser Bibliothek.",
+   "No tracks yet. Add music files from this computer.": "Noch keine Tracks. Füge Musikdateien von diesem Computer hinzu.",
+   "Notes": "Notizen",
+   "Nothing found": "Nichts gefunden",
+   "Nothing showing": "Nichts aktiv",
+   "Nothing to play": "Nichts zum abspielen",
+   "Nothing to redo": "Nichts zu wiederholen",
+   "Nothing to tell you. Trouble, questions, and what happens out of sight (added to another playlist, a file read or written) come here.": "Nichts zu melden. Hier erscheinen Probleme, Fragen und was außer Sicht geschieht (etwas zu einem anderen Ablauf hinzugefügt, eine Datei gelesen oder geschrieben).",
+   "Nothing to undo": "Nichts zu widerrufen",
+   "Notices": "Meldungen",
+   "Off": {
+    "in": [
+     [
+      ".ui-sw",
+      "Aus"
+     ],
+     [
+      "#outAudience, #outStage",
+      "Aus"
+     ]
+    ],
+    "else": "Aus"
+   },
+   "ON": "EIN",
+   "ON SCREEN": "LIVE",
+   "Open": "Öffnen",
+   "Open a group of choices; go back": "Untermenü öffnen; zurück",
+   "Open Timers, Messages, Props, Macros, Stage, Audio, VoxLive": "Timer, Nachrichten, Grafiken, Makros, Bühne, Audio, VoxLive öffnen",
+   "Or use the sample backgrounds": "Oder Beispielhintergründe",
+   "Order": "Ordnen",
+   "Password": "Passwort",
+   "Paste": "Einfügen",
+   "Paste Style": "Stil einfügen",
+   "Pause": "Pause",
+   "Pick several in the left column: grow the pick, or pick them all": "Mehrere in der linken Spalte auswählen: die Auswahl erweitern oder alle auswählen",
+   "Picture": "Bild",
+   "Placeholder": "Platzhalter",
+   "Play": "Abspielen",
+   "Play on Announcements Layer": "Auf der Ankündigungsebene abspielen",
+   "Play the tracks in a random order": "Die Tracks in zufälliger Reihenfolge abspielen",
+   "Play through": "Nacheinander",
+   "Playing": "Läuft",
+   "Playlist": "Ablauf",
+   "Playlists": "Abläufe",
+   "Playlists and libraries": "Abläufe und Bibliotheken",
+   "Press / to search from anywhere": "Drück /, um von überall zu suchen",
+   "Prev": "Zurück",
+   "Previous": "Zurück",
+   "Previous slide": "Vorherige Folie",
+   "Props": "Grafiken",
+   "Push": "Schieben",
+   "Ready": "Bereit",
+   "Reconnecting…": "Verbindung wird wiederhergestellt …",
+   "Redo": "Wiederholen",
+   "Remote Control": "Fernsteuerung",
+   "Remove from Playlist": "Aus dem Ablauf entfernen",
+   "Rename": "Umbenennen",
+   "Reset": "Zurücksetzen",
+   "Reveal": "Aufdecken",
+   "Running the slides": "Folien steuern",
+   "s": "s",
+   "Scaling": "Skalierung",
+   "Service": "Ablauf",
+   "Service (⌥S)": "Ablauf (⌥S)",
+   "Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)": "Ablauf, Bibel (bereit für eine Bibelstelle), Editor (in der App ⌘1 ⌘2 ⌘3; ein Browser behält diese für sich)",
+   "Settings": "Einstellungen",
+   "Settings are changed at the computer.": "Einstellungen werden am Computer geändert.",
+   "Show": "Zeigen",
+   "Show a message": "Eine Nachricht zeigen",
+   "Show keys on buttons": "Tasten an Schaltflächen anzeigen",
+   "Show that picture or video": "Dieses Bild oder Video zeigen",
+   "Shuffle": "Zufällig",
+   "Sign In": "Anmelden",
+   "Sign Out of This Device…": "Von diesem Gerät abmelden …",
+   "Signing in…": "Anmeldung läuft …",
+   "Slide": "Folie",
+   "Slide size": "Foliengröße",
+   "Slides…": "Folien…",
+   "SoftPresenter Remote Control": "SoftPresenter Fernsteuerung",
+   "Something went wrong: click to see": "Etwas ist schiefgegangen: Klicke, um es anzusehen",
+   "Song": "Lied",
+   "Song Files…": "Lieddateien…",
+   "Song libraries": "Liedbibliotheken",
+   "Split": "Teilen",
+   "Stage": "Bühne",
+   "Stage screens on or off (⇧⌘2)": "Bildschirme auf der Bühne ein- oder ausschalten (⇧⌘2)",
+   "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track": "Diesen Timer starten, diese Nachricht oder Grafik zeigen, dieses Makro ausführen, die Bühne auf dieses Layout umschalten, diesen Track abspielen",
+   "Swap": "Tauschen",
+   "Table": "Tabelle",
+   "Template": "Vorlage",
+   "The car with the lights on, please": "Das Auto mit eingeschaltetem Licht, bitte",
+   "The computer didn't answer.": "Der Computer hat nicht geantwortet.",
+   "The item above or below, picked at its first slide; in Bible, the verse before or after": "Eintrag darüber oder darunter; in der Bibel den Vers davor oder danach auswählen",
+   "The keys listed in Settings › Keys do what it says there. Any other key can be added.": "Die Tasten unter Einstellungen › Tasten tun, was dort steht. Jede andere Taste lässt sich hinzufügen.",
+   "The live tools": "Live-Werkzeuge",
+   "The menu for the slide on screen": "Das Menü der Folie, die gerade live ist",
+   "The picked slide or verse goes on screen (after a search, or ↑ ↓)": "Die ausgewählte Folie oder der ausgewählte Vers geht auf die Bildschirme (nach einer Suche oder ↑ ↓)",
+   "then 1–9": "dann 1 … 9",
+   "This device is remembered once it signs in, until it is forgotten in Settings › Phone remote on the computer.": "Dieses Gerät wird nach der Anmeldung gemerkt, bis es am Computer unter Einstellungen › Fernbedienung vergessen wird.",
+   "This library has no songs yet.": "Diese Bibliothek hat noch keine Lieder.",
+   "This list": "Diese Liste (unten: „Tasten an Schaltflächen anzeigen“)",
+   "This sample only has": "Dieses Beispiel hat nur",
+   "Timers": "Timer",
+   "track": "Track",
+   "Transition": "Übergang",
+   "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "Beim Tippen in einem Feld: fett, kursiv, unterstrichen, für den markierten Text (oder das ganze Feld)",
+   "Undo": "Widerrufen",
+   "Undo, redo": "Widerrufen, wiederholen",
+   "Volume": "Lautstärke",
+   "VoxLive": "VoxLive",
+   "Waiting for SoftPresenter": "Warten auf SoftPresenter",
+   "Waiting for SoftPresenter to answer. Try again in a moment.": "SoftPresenter hat noch nicht geantwortet. Versuch es gleich noch einmal.",
+   "When a track ends, go on to the next": "Wenn ein Track endet, zum nächsten gehen",
+   "Wipe": "Wischen",
+   "With nothing on screen, move the pick; Space or Page Down or Enter puts it on": "Ist nichts auf den Bildschirmen, bewegst du die Auswahl; Leertaste, Bild ab oder Enter zeigt sie",
+   "Words": {
+    "in": [
+     [
+      ".ui-sheet",
+      "Text"
+     ]
+    ],
+    "else": "Text"
+   },
+   "Words from Text…": "Liedtexte aus Textdateien…",
+   "Words once…": "Schnellnachricht…",
+   "Words only": "Nur Text",
+   "Zoom In": "Hineinzoomen",
+   "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Ob ein Handy, iPad oder Mac seinen Bildschirm zeigen darf, entscheidest du am Computer, nicht über die Fernsteuerung.",
+   "There is no track to play. Add music at the computer.": "Es gibt keinen Track zum Abspielen. Füge am Computer Musik hinzu.",
+   "Not connected to SoftPresenter.": "Keine Verbindung zu SoftPresenter."
+  },
+  "patterns": [
+   {
+    "re": "^(.+) \\(⌥(\\d), then 1 to 9 for what is in it\\)$",
+    "to": "{1t} (⌥{2}, dann 1 bis 9 für das, was darin ist)",
+    "key": "page.tool_tab.hint"
+   },
+   {
+    "re": "^Running SoftPresenter as (.+)$",
+    "to": "SoftPresenter wird gesteuert als {1}",
+    "key": "page.conn.as"
+   },
+   {
+    "re": "^Notices: (\\d+) need you$",
+    "to": "Meldungen: {1} brauchen dich",
+    "key": "page.notices.many"
+   },
+   {
+    "re": "^Counts down from (.+?)$",
+    "to": "Countdown ab {1}",
+    "key": "tools.timer.down_from"
+   },
+   {
+    "re": "^(.+) (\\d+(?:\\.\\d+)?)s$",
+    "to": "{1t} {2} s",
+    "key": "page.transition.time"
+   },
+   {
+    "re": "^Notices: 1 needs you$",
+    "to": "Meldungen: 1 braucht dich",
+    "key": "page.notices.one"
+   },
+   {
+    "re": "^(\\d+(?:\\.\\d+)?) s$",
+    "to": "{1} s",
+    "key": "common.seconds_unit"
+   },
+   {
+    "re": "^(\\d+(?:\\.\\d+)?)s$",
+    "to": "{1} s",
+    "key": "common.seconds_unit"
+   },
+   {
+    "re": "^Bible · (.+)$",
+    "to": "Bibel · {1}",
+    "key": "page.find.bible_tag"
+   },
+   {
+    "re": "^Add to (.+?)$",
+    "to": "Zum Ablauf {1} hinzufügen",
+    "key": "left.song.add_to"
+   },
+   {
+    "re": "^(.+?) tracks$",
+    "to": "{1} Tracks",
+    "key": "tools.audio.tracks"
+   },
+   {
+    "re": "^Song · (.+)$",
+    "to": "Lied · {1}",
+    "key": "find.tag.song_group"
+   },
+   {
+    "re": "^(.+?) items$",
+    "to": "{1} Einträge",
+    "key": "media.items"
+   },
+   {
+    "re": "^(.+?) songs$",
+    "to": "{1} Lieder",
+    "key": "integrations.songbooks.songs"
+   },
+   {
+    "re": "^(.+?) track$",
+    "to": "{1} Track",
+    "key": "tools.audio.tracks"
+   },
+   {
+    "re": "^Start (.+?)$",
+    "to": "Starten: {1}",
+    "key": "tools.steps.timer_start"
+   }
+  ],
+  "keys": {
+   "Shift": "Umschalt"
+  },
+  "format": {
+   "decimal": ",",
+   "group": ".",
+   "group_from": 4,
+   "quote_open": "„",
+   "quote_close": "“"
+  }
+ },
  "es": {
   "exact": {
    "A Bible passage…": "Un pasaje de la Biblia…",
@@ -241,6 +653,7 @@ const REMOTE_WORDS = {
    "Prev": "Ant.",
    "Previous": "Anterior",
    "Previous slide": "Diapositiva anterior",
+   "Previous track": "Pista anterior",
    "Props": "Gráficos",
    "Push": "Empujar",
    "Ready": "Listo",
@@ -653,6 +1066,7 @@ const REMOTE_WORDS = {
    "Prev": "Назад",
    "Previous": "Назад",
    "Previous slide": "Предыдущий слайд",
+   "Previous track": "Предыдущий трек",
    "Props": "Накладки",
    "Push": "Выталкивание",
    "Ready": "ГОТОВО",
@@ -1065,6 +1479,7 @@ const REMOTE_WORDS = {
    "Prev": "Назад",
    "Previous": "Назад",
    "Previous slide": "Попередній слайд",
+   "Previous track": "Попередній трек",
    "Props": "Накладки",
    "Push": "Виштовхування",
    "Ready": "ГОТОВО",
@@ -1252,7 +1667,7 @@ const REMOTE_WORDS = {
 // Each word keeps its English, so switching back, or to another language, starts from the English every time.
 // With English, or a language the table doesn't have, nothing changes at all.
 
-const UI_LANGS = ['en', 'es', 'ru', 'uk'];
+const UI_LANGS = ['en', 'de', 'es', 'ru', 'uk'];
 // What is content: langtool's list (less the keys: a key's name is a word of the page's, "Space" is Espacio, Shift is
 // Mayús), and the remote page's own (a message's words, a header's name, a group's name on a
 // slide, the running timer's name and time). The harvest of the page's words reads this same line.

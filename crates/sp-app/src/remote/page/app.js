@@ -592,7 +592,7 @@ function renderSheet(keep = false) {
   setTimeout(() => fitAll(el), 0);
   put(el, html`<div class="ui-sheet ${s.wide ? 'wide' : ''} ${s.cls || ''}"><div class="ui-sh"><b>${s.title}</b><button class="iconbtn" data-a="sheetClose" aria-label="Close">${I.x}</button></div>
     <div class="ui-sb">${s.body}</div><div class="ui-sf">${s.note ? html`<span class="sub">${s.note}</span>` : html`<span></span>`}
-      ${(s.buttons || [{ t: 'Done' }]).map((b, n) => html`<button class="btn ${b.primary ? 'primary' : ''}" data-a="sheetBtn:${n}">${b.t}</button>`)}</div></div>`);
+      ${(s.buttons || [{ t: 'Done' }]).map((b, n) => html`<button class="btn ${b.primary ? 'primary' : ''}" data-a="sheetBtn:${n}" ${{ disabled: !!b.off, title: b.off && b.why ? b.why : null }}>${b.t}</button>`)}</div></div>`);      // off: greyed, with why as its hover
   if (at) el.querySelector('.ui-sb').scrollTop = at;
   if (hk) { const g = el.querySelector(`[data-a="${CSS.escape(hk)}"], [data-c="${CSS.escape(hk)}"]`); if (g) g.focus({ preventScroll: true }); }
 }
@@ -1276,7 +1276,8 @@ const APPLE = OS_ASKED === 'linux' || OS_ASKED === 'windows' ? false : (k => k =
 // NDI goes out); ?keys=pc counts as Windows. Linux is the rest: no NDI Tools there, so the app downloads NDI itself.
 const WINDOWS = !APPLE && OS_ASKED !== 'linux' && (OS_ASKED === 'windows' || new URLSearchParams(location.search).get('keys') === 'pc' || /win/i.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent));
 const LINUX = !APPLE && !WINDOWS;
-const keyWords = s => String(s).replace(/[⌃⌥⇧⌘]+/g, m => [(m.includes('⌃') || m.includes('⌘')) && 'Ctrl', m.includes('⌥') && 'Alt', m.includes('⇧') && 'Shift'].filter(Boolean).join('+') + '+');
+// In German a keyboard's keys are Strg and Umschalt (the app's German writes them so)
+const keyWords = s => { const de = typeof UI === 'object' && UI.lang === 'de'; return String(s).replace(/[⌃⌥⇧⌘]+/g, m => [(m.includes('⌃') || m.includes('⌘')) && (de ? 'Strg' : 'Ctrl'), m.includes('⌥') && 'Alt', m.includes('⇧') && (de ? 'Umschalt' : 'Shift')].filter(Boolean).join('+') + '+'); };
 const keyText = s => APPLE ? String(s) : keyWords(s);
 
 // NDI: what the finder sees ('none' when the NDI runtime isn't installed on this computer), and whether a source is sending now
@@ -2128,7 +2129,7 @@ const bookByName = n => BOOKS.find(b => b.name === n);
 // What language the operator reads the Bible page in: book names, the reference field, the page's verse text, the find list's
 // Bible rows. Auto: the language typed, else the last one typed, else the computer's; only languages with a Bible in use.
 // It never changes the slides on screen; those follow the translations line.
-const LANG_NAMES = { en: 'English', ru: 'Русский', uk: 'Українська' }, LANG_CODES = { en: 'EN', ru: 'RU', uk: 'UK' };
+const LANG_NAMES = { en: 'English', de: 'Deutsch', ru: 'Русский', uk: 'Українська' }, LANG_CODES = { en: 'EN', de: 'DE', ru: 'RU', uk: 'UK' };
 const bibleLang = id => (BIBLE_DATA.bibles[id] || {}).lang;
 const langsInUse = () => [...new Set(B().rows.filter(x => BIBLE_DATA.text[x.bible]).map(x => bibleLang(x.bible)))];
 const bibleIn = lang => (B().rows.find(x => BIBLE_DATA.text[x.bible] && bibleLang(x.bible) === lang) || {}).bible;
@@ -2474,7 +2475,7 @@ function bibleFileSheet(file) {
   const lang = /укр|ukr|ogienko|огієнк/i.test(base) ? 'uk' : /[а-яё]|rus|synod/i.test(base) ? 'ru' : 'en';
   openSheet({ title: `Install a Bible${bibleQueue.length ? ` · ${bibleQueue.length} more waiting` : ''}`, body: html`<p class="ui-p">From “${file}”. Check its names: the short name shows on slides and in the find list.</p>
     <label class="ui-f"><span>Name</span><input class="field" id="bfName" value="${base}"></label><label class="ui-f"><span>Short name</span><input class="field" id="bfShort" value="${short}"></label>
-    <label class="ui-f"><span>Language</span><select class="sel" id="bfLang">${options([['en', 'English'], ['ru', 'Русский'], ['uk', 'Українська'], ['other', 'Another language']], lang)}</select></label>`,
+    <label class="ui-f"><span>Language</span><select class="sel" id="bfLang">${options([['en', 'English'], ['de', 'Deutsch'], ['ru', 'Русский'], ['uk', 'Українська'], ['other', 'Another language']], lang)}</select></label>`,
     buttons: [{ t: 'Cancel', f: () => { if (!bibleNext()) A.biblesSheet(); return false; } }, { t: 'Install', primary: true, f: () => { const n = $('bfName').value.trim(); if (!n) { refuse('A Bible needs a name'); return false; }
       const inst = B().installed, again = inst.includes(n); if (!again) inst.push(n); toast(again ? `Replaced your earlier ${n}; the earlier copy is in the Trash` : `Installed ${n}`); if (!bibleNext()) A.biblesSheet(); return false; } }] });
 }
@@ -2941,7 +2942,9 @@ function renderInspector() {
         row('Fitting', sel('style.scaling', ['None', 'Text down', 'Text up', 'Text up or down', 'Box up or down'], s.scaling)),
         rowp('Words', [sel('style.caps', [['none', 'As typed'], ['upper', 'ALL CAPITALS'], ['lower', 'all small'], ['title', 'Each Word'], ['titlecase', 'Like a Title']], s.caps), more('lines', 'Lines: breaks, bullets, scrolling, what the colour behind covers', (s.bullets && s.bullets !== 'none') || (s.scroll && s.scroll !== 'none') || d('breaks', 'none') !== 'none' || d('covers', 'lines') !== 'lines')],
           pop('lines', 'Lines', [prow('Breaks', sel('style.breaks', [['none', 'As typed'], ['join', 'Run together'], ['slash', 'Run together, with / between lines'], ['word', 'A word on each line'], ['letter', 'A letter on each line']], d('breaks', 'none'))), prow('Bullets', sel('style.bullets', [['none', 'Plain'], ['bullets', 'Bullets'], ['numbers', 'Numbers']], s.bullets)), prow('Scroll', sel('style.scroll', [['none', 'Still'], ['left', 'Scrolls left'], ['right', 'Scrolls right'], ['up', 'Scrolls up'], ['down', 'Scrolls down']], s.scroll)), prow('Behind', sel('style.covers', [['lines', 'Covers the lines only'], ['box', 'Covers the whole box']], d('covers', 'lines')))], true)),
-        row('Behind', sw('style.bg', s.bg, true)),
+        // one place for a text box's background (the owner, 28 November: "b"): its colour here, and its gradient from the last swatch
+        rowp('Behind', html`<span class="ifill">${sw('style.bg', s.bg, true)}<button class="swt grad ${o.gradient ? 'on' : ''} ${open('boxgrad') ? 'open' : ''}" data-a="ipop:boxgrad" aria-expanded="${open('boxgrad')}" title="Gradient${o.gradient ? ' (on)' : ''}"></button></span>`,
+          pop('boxgrad', 'Gradient', [prow('Kind', html`<select class="sel" data-c="edIn:gradient.kind">${options([['', 'None'], ['linear', 'Linear'], ['radial', 'Radial']], o.gradient ? o.gradient.kind : '')}</select>`), o.gradient && o.gradient.kind === 'linear' ? prow('Angle', [num('gradient.angle', o.gradient.angle, { step: '15' }), html`<span class="sub">degrees</span>`]) : '', o.gradient ? prow('To', sw('gradient.to', o.gradient.to)) : ''], true)),
         row('Shows', html`<select class="sel" data-c="edIn:linked">${options([['', 'Its own words'], ...Object.entries(LINKS)], o.linked || '')}</select>${o.linked === 'timer' ? html`<select class="sel" data-c="edIn:timer">${options(DOC.timers.map(x => x.name), o.timer)}</select>` : ''}`),
         t.type === 'template' ? row('Holds', html`<select class="sel" data-c="edIn:role">${options(['main', 'translation', 'verse1', 'ref1', 'verse2', 'ref2'], o.role || 'main')}</select>`) : '',
         html`<div class="ctl istyle"><button class="btn" data-a="edStyle:copy">Copy Style</button><button class="btn" data-a="edStyle:paste">Paste Style</button><span class="sp"></span><button class="btn sq imore" data-a="menu:edStyleMore" title="More: back to the theme, clear word styles">⋯</button></div>`];
@@ -2977,6 +2980,23 @@ function renderInspector() {
       row('Effects', html`<button class="btn ${o.shadow ? 'onkey' : ''}" data-a="edToggle:shadow">Shadow</button><button class="btn ${o.flipH ? 'onkey' : ''}" data-a="edToggle:flipH">Flip ↔</button><button class="btn ${o.flipV ? 'onkey' : ''}" data-a="edToggle:flipV">Flip ↕</button>`),
       row('Order', html`<button class="btn" data-a="edObj:front">Forward</button><button class="btn" data-a="edObj:back">Back</button>`),
       row('Object', html`<button class="btn" data-a="edObj:rename">Rename</button><button class="btn" data-a="edObj:dup">Duplicate</button><button class="btn" data-a="edObj:del">Delete</button>`)];
+    // The Box tab, redrawn to the Text tab's pattern (28 November; ?boxold=1 shows the rows above for comparison): what is set
+    // once opens from a key on its row as a small panel over the rows; no row moves; the two flips sit with Rotate; Opacity
+    // reads its number; Outline is no longer a row of its own; a text box's fill and gradient are on the Text tab only.
+    if (state.boxNew !== false) { const open = n => state.ipop === n, pct = Math.round((o.opacity == null ? 1 : o.opacity) * 100), media = kinds.some(k => k !== 'text' && k !== 'shape');
+      const more = (n, title, set) => html`<button class="btn sq imore ${open(n) ? 'onkey' : ''} ${set ? 'set' : ''}" data-a="ipop:${n}" aria-expanded="${open(n)}" title="${title}${set ? ' (changed)' : ''}">⋯</button>`;
+      const pop = (n, title, rows, up) => open(n) ? html`<div class="ipop ${up ? 'up' : ''}" role="group" aria-label="${title}"><div class="ipop-h"><span class="cap">${title}</span><button class="iconbtn" data-a="ipop:${n}" aria-label="Close">${I.x}</button></div>${rows}</div>` : '';
+      const prow = (label, ctl) => html`<div class="irow"><span class="cap">${label}</span><div class="ctl">${ctl}</div></div>`;
+      const rowp = (label, ctl, p) => html`<div class="irow ${p ? 'haspop' : ''}"><span class="cap">${label}</span><div class="ctl">${ctl}</div>${p || ''}</div>`;
+      body = [eff.length > 1 ? html`<div class="iscope"><span class="cap">${eff.length} objects</span><span class="sub">${kinds.map(k => what[k] || k).join(', ')}</span></div>` : '',
+        row('Place', html`<div class="num4">${['x', 'y', 'w', 'h'].map(p => html`<label>${p.toUpperCase()}${num('frame.' + p, Math.round(f[p]))}</label>`)}</div>`),
+        row('Align', [['left', 'center', 'right', 'top', 'middle', 'bottom'].map(a => key(I[a], false, `edAlign:${a}`, `Align ${a}${eff.length > 1 ? '' : ' on the slide'}`)), eff.length > 2 ? html`<button class="btn" data-a="edAlign:spreadh">Spread ↔</button><button class="btn" data-a="edAlign:spreadv">Spread ↕</button>` : '']),
+        row('Rotate', [num('rotation', o.rotation || 0, { step: '5', min: '-180', max: '180' }), html`<span class="sub ideg">°</span>`, key('↔', !!o.flipH, 'edToggle:flipH', 'Flip left to right'), key('↕', !!o.flipV, 'edToggle:flipV', 'Flip top to bottom')]),
+        row('Opacity', [html`<input type="range" min="0" max="1" step="0.05" value="${o.opacity == null ? 1 : o.opacity}" data-c="edIn:opacity" aria-label="Opacity" style="flex:1">`, html`<span class="iread mono">${pct}%</span>`]),
+        rowp('Effects', [kinds.includes('shape') ? '' : html`<span class="isplit"><button class="btn ${st.w > 0 ? 'onkey' : ''}" data-a="edBump:stroke.w,${st.w > 0 ? -st.w : 4}">Outline</button>${more('boxoutline', 'Outline', st.w > 0)}</span>`, html`<button class="btn ${o.shadow ? 'onkey' : ''}" data-a="edToggle:shadow">Shadow</button>`],
+          pop('boxoutline', 'Outline', [prow('Width', [num('stroke.w', st.w, { min: '0', max: '60' }), html`<span class="sub">points</span>`]), prow('Colour', SWATCHES.slice(0, 9).map(c => html`<button class="swt ${st.color === c ? 'on' : ''}" style="background:${c}" data-a="edSet:stroke.color,${c}"></button>`))])),
+        row('Order', html`<button class="btn" data-a="edObj:front">Forward</button><button class="btn" data-a="edObj:back">Back</button>`),
+        row('Object', html`<button class="btn" data-a="edObj:rename">Rename</button><button class="btn" data-a="edObj:dup">Duplicate</button><button class="btn" data-a="edObj:del">Delete</button>`)]; }
   } else if (state.itab !== 'Animation') { const g = o.gradient, st = o.stroke || { w: 0, color: '#ffffff' }, m = (o.kind === 'image' || o.kind === 'video') && mediaById(o.media);      // the object's own tab
     body = o.kind === 'shape' ? [row('Shape', sel('shape', Object.entries(SHAPES), o.shape)), row('Fill', sw('fill', o.fill, true)), row('Gradient', html`<select class="sel" data-c="edIn:gradient.kind">${options([['', 'None'], ['linear', 'Linear'], ['radial', 'Radial']], g ? g.kind : '')}</select>${g && g.kind === 'linear' ? num('gradient.angle', g.angle, { step: '15' }) : ''}`), g ? row('To', sw('gradient.to', g.to)) : '',
         row('Outline', [num('stroke.w', st.w, { min: '0', max: '60' }), SWATCHES.slice(0, 5).map(c => html`<button class="swt ${st.color === c ? 'on' : ''}" style="background:${c}" data-a="edSet:stroke.color,${c}"></button>`)])]
@@ -3166,14 +3186,19 @@ const ST_ICON = { Screens: svg('M1.500 2.500h10v6.500h-10zM4.500 11.500h4'), 'Ai
   'Phone remote': svg('M3.500 1.500h4v10h-4zM9.500 4.500a3 3 0 0 1 0 4'), Keys: svg('M1.500 3.500h10v6h-10zM3.500 5.500h.010M6.500 5.500h.010M9.500 5.500h.010M4.500 7.500h4', 1.2), 'Command line': svg('M2 3.500l3 3-3 3M6.500 9.500h4.500'),
   'Song files': svg('M3 1.500h4.500l2.500 2.500v7.500H3zM7.500 1.500V4H10'), About: svg('M6.500 1.500a5 5 0 1 0 0 10a5 5 0 0 0 0-10M6.500 6v3M6.500 4h.010', 1.2), Coverage: svg('M2.500 6.500l3 3 5-6') };
 // A flag stands for a language here, not a country: the one most people know that language by.
-const FLAGS = { en: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect y="0.0" width="24" height="2.29" fill="#b22234"/><rect y="2.29" width="24" height="2.29" fill="#fff"/><rect y="4.57" width="24" height="2.29" fill="#b22234"/><rect y="6.86" width="24" height="2.29" fill="#fff"/><rect y="9.14" width="24" height="2.29" fill="#b22234"/><rect y="11.43" width="24" height="2.29" fill="#fff"/><rect y="13.71" width="24" height="2.29" fill="#b22234"/><rect width="10.5" height="9.14" fill="#3c3b6e"/></svg>`, es: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="24" height="16" fill="#aa151b"/><rect y="4" width="24" height="8" fill="#f1bf00"/></svg>`, ru: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="24" height="16" fill="#fff"/><rect y="5.33" width="24" height="5.34" fill="#0039a6"/><rect y="10.67" width="24" height="5.33" fill="#d52b1e"/></svg>`, uk: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="24" height="8" fill="#0057b7"/><rect y="8" width="24" height="8" fill="#ffd700"/></svg>`,
+const FLAGS = { de: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="24" height="5.34" fill="#000"/><rect y="5.33" width="24" height="5.34" fill="#dd0000"/><rect y="10.66" width="24" height="5.34" fill="#ffce00"/></svg>`,
+  en: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect y="0.0" width="24" height="2.29" fill="#b22234"/><rect y="2.29" width="24" height="2.29" fill="#fff"/><rect y="4.57" width="24" height="2.29" fill="#b22234"/><rect y="6.86" width="24" height="2.29" fill="#fff"/><rect y="9.14" width="24" height="2.29" fill="#b22234"/><rect y="11.43" width="24" height="2.29" fill="#fff"/><rect y="13.71" width="24" height="2.29" fill="#b22234"/><rect width="10.5" height="9.14" fill="#3c3b6e"/></svg>`, es: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="24" height="16" fill="#aa151b"/><rect y="4" width="24" height="8" fill="#f1bf00"/></svg>`, ru: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="24" height="16" fill="#fff"/><rect y="5.33" width="24" height="5.34" fill="#0039a6"/><rect y="10.67" width="24" height="5.33" fill="#d52b1e"/></svg>`, uk: html`<svg class="st-flag" viewBox="0 0 24 16" shape-rendering="crispEdges" aria-hidden="true"><rect width="24" height="8" fill="#0057b7"/><rect y="8" width="24" height="8" fill="#ffd700"/></svg>`,
   auto: html`<svg class="st-flag plain" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="1.500" width="16" height="10" rx="1.500"/><path d="M9 14.500h6"/></svg>` };
 const LOGOS = { vox: html`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none"><g transform="translate(15 24)" stroke="#F3F0E8" stroke-linecap="round" fill="none"><path d="M0 -8 Q6 0 0 8" stroke-width="2.2"/><path d="M6 -11 Q14 0 6 11" stroke-width="2"/><path d="M13 -14 Q23 0 13 14" stroke-width="1.8" opacity="0.55"/></g><circle cx="13" cy="24" r="2.4" fill="#D4A24A"/></svg>`, timely: html`<img alt="" src="logos/timelychurch.png">`,
   grok: html`<img alt="" src="logos/grok.svg">`, canva: html`<img alt="" src="logos/canva.svg">`,
   // used without these companies' approval, on the owner's decision of 2026-11-25; removed on his request or theirs (handoff/logos.md)
   claude: html`<img alt="" src="logos/claude.svg">`, chatgpt: html`<img alt="" src="logos/chatgpt.svg">`, wla: html`<img alt="" src="logos/worship-leader-app.png">`,
   // NDI's own logo, the light one for dark grounds, from NDI's logo package (docs.ndi.video/brand); its safety margins are in the file
-  ndi: html`<img class="wide" alt="" src="logos/ndi.svg">` };      // each as its company provides it, unaltered (handoff/logos.md)
+  ndi: html`<img class="wide" alt="" src="logos/ndi.svg">`,
+  // Home Assistant's own logomark, in colour, from the Open Home Foundation's brand files. Their guide says not to put it in a
+  // square or other container; the owner chose the same tile as every other card (28 November: "every integraion card has a
+  // rounded box around the logo … it should have right"). Removed on his request or the foundation's (handoff/logos.md)
+  ha: html`<img alt="" src="logos/home-assistant.svg">` };      // each as its company provides it, unaltered (handoff/logos.md)
 
 /* ═════════ settings.js ═════════ */
 // Settings: a page of its own behind the gear. The on-screen column stays.
@@ -3185,23 +3210,31 @@ VIEWS.settings = { left: renderSettingsLeft, centre: renderSettings };
 // assistants and phones. Advanced: the rest, out of everyone else's way. General and Integrations' long lists are gone.
 const GROUPS = [['The room', ['Screens', 'AirPlay', 'Sound']], ['On screen', ['Slides', 'Groups', 'Language']], ['Connect', ['Integrations', 'AI assistants', 'Phone remote']], ['Advanced', ['Keys', 'Command line', 'Song files', 'About', 'Coverage']]];
 const SECTIONS = GROUPS.flatMap(g => g[1]), SEC_WAS = { General: 'Slides', 'Web control': 'Phone remote', 'Phone Screens': 'AirPlay' };
-const UI_LANG_OWN = { en: 'English', es: 'Español', ru: 'Русский', uk: 'Українська' };
+const UI_LANG_OWN = { en: 'English', de: 'Deutsch', es: 'Español', ru: 'Русский', uk: 'Українська' };      // the app's order
 // What a row says at its end, so a problem shows before anything is opened: [words, lit]
 const secState = x => { const st = DOC.settings;
   if (x === 'Screens') { const n = DOC.screens.filter(goingOut).length; return [`${n} of ${DOC.screens.length} on`, n > 0]; }
   if (x === 'AirPlay') return [mirrorSet().on ? 'On' : 'Off', mirrorSet().on];
   if (x === 'Slides') return [st.transition.kind, false];
   if (x === 'Language') return [UI_LANG_OWN[st.uiLang] || 'Auto', false];
-  if (x === 'Integrations') { const n = INTEGRATIONS.filter(i => integState(i).tone === 'on').length; return [`${n} connected`, n > 0]; }
+  if (x === 'Integrations') { const n = [...INTEGRATIONS, ...DEVICES].filter(i => integState(i).tone === 'on').length; return [`${n} connected`, n > 0]; }
   if (x === 'AI assistants') return [{ off: 'Off', prep: 'Can prepare', run: 'Runs screens' }[mcpLevel()], mcpLevel() !== 'off'];
-  if (x === 'Phone remote') { const r = rmSet(); return [st.remote ? `${r.pages.length} ${r.pages.length === 1 ? 'person' : 'people'}` : 'Off', !!st.remote]; }
+  if (x === 'Phone remote') { const r = rmSet(); const n = r.pages.filter(g => !deckDevs().some(d => d.name === g.name)).length; return [st.remote ? `${n} ${n === 1 ? 'person' : 'people'}` : 'Off', !!st.remote]; }      // people at pages; a Stream Deck isn't one
   return null; };
 // Phone remote, as the app has it (remote.rs, redrawn 26 November): one password; devices remembered until forgotten; the pages
 // open now. The words are the app's own (remote.*), so its tables already carry them. Times are minutes ago, for the sample.
-const rmSet = () => DOC.settings.rm || (DOC.settings.rm = { password: true, short: false, wrong: 0, port: '4316', name: 'church-mac.local', ip: '192.168.1.20',
+const rmSet0 = () => DOC.settings.rm || (DOC.settings.rm = { password: true, short: false, wrong: 0, port: '4316', name: 'church-mac.local', ip: '192.168.1.20',
   fingerprint: '3F:A2:91:0C:7E:55:D4:18:B6:2A:E0:73:9C:41:F8:06:5B:C3:27:9A:D1:64:0E:BF:82:4C:13:F5:A7:68:2D:90',
   pages: [{ id: 1, name: 'Safari on an iPhone', ip: '192.168.1.31', since: 3 }, { id: 2, name: 'Chrome on a Mac', ip: '192.168.1.44', since: 26 }],
   devices: [{ id: 'k3f9', name: 'Safari on an iPhone', first: '24 Nov 2026', last: 3, ip: '192.168.1.31' }, { id: 'p7a2', name: 'Chrome on a Mac', first: '25 Nov 2026', last: 26, ip: '192.168.1.44' }, { id: 'w1c8', name: 'Safari on an iPad', first: '20 Nov 2026', last: 60 * 24 * 2, ip: '192.168.1.52' }] });
+// Stream Deck and Companion pair with a code and are remembered in the same list as the pages (one list, shown in two places:
+// Settings › Phone remote, and the Stream Deck and Companion card). kind: 'paired' for those; role: 'show' runs the show only
+// (the app's Buttons role), 'all' is what a signed-in page has. A page has no kind and may do everything.
+const rmSet = () => { const r = rmSet0(); if (!r.deck) { r.deck = true; r.devices.push({ id: 'c5d1', kind: 'paired', role: 'show', name: 'Companion on studio-pc', first: '27 Nov 2026', last: 2, ip: '192.168.1.60' },
+  { id: 's8e4', kind: 'paired', role: 'all', name: 'Stream Deck plugin on a Mac', first: '27 Nov 2026', last: 0, ip: '127.0.0.1' });
+    r.pages.push({ id: 3, name: 'Companion on studio-pc', ip: '192.168.1.60', since: 2 }); } return r; };      // a paired device connects as a page does, so it shows under Connected now
+const DECK_ROLE = { show: 'Runs the show', all: 'Everything' };
+const deckDevs = () => rmSet().devices.filter(d => d.kind === 'paired');
 const rmAgo = m => m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 60 * 24 ? `${Math.floor(m / 60)} h ago` : `${Math.floor(m / 1440)} days ago`;
 const KEYS = [['Space  →', 'Next slide'], ['←', 'Previous slide'], ['↑  ↓', 'The item above or below in the playlist; in Bible, the verse before or after'], ['Home  End', 'First or last slide of the song'], ['Esc', 'Clear all'], ['F2 F3 F4 F5 F6', 'Clear the slide, media, props, audio, message'],
   ['A letter', 'The slide with that hot key, or the group it stands for'], ['/', 'Find a song, a line or a verse'], ['⌘B', 'The Bible page, ready for a reference'], ['⌘Z  ⇧⌘Z', 'Undo and redo'], ['⌘C ⌘X ⌘V', 'Copy, cut and paste slides, or objects in Edit'],
@@ -3258,11 +3291,13 @@ function updViews() { const u = updSt(), v = updV(), N = UPD_NEW, C = v.cur, liv
   const when = u.at ? `Checked at ${u.at}` : 'Not checked yet', wait = live ? { off: true, under: 'Something is on screen' } : {};
   const V = {
     idle: { t: `SoftPresenter ${C} is the newest.`, m: when, key: 'Check Now', a: 'updCheck' },
+    // after Cancel the row says so and stays: "is the newest" would be untrue while a newer version exists (the app's port)
+    cancelled: { t: 'The update was cancelled.', m: 'What was downloaded has been deleted.', key: 'Check Now', a: 'updCheck' },
     off: { t: 'Updates are checked only when you ask.', m: when, key: 'Check Now', a: 'updCheck' },
     checking: { t: 'Checking…', key: 'Check Now', a: 'updCheck', off: true },
     downloading: { t: `Downloading ${N}… ${u.pct}%`, m: `${Math.round(UPD_MB * u.pct / 100)} of ${UPD_MB} MB. Nothing changes until it is ready.`, bar: u.pct, key: 'Cancel', a: 'updCancel' },
     preparing: { t: `Getting ${N} ready…`, m: live ? 'Waiting until nothing is on screen.' : '' },
-    ready: { t: `${N} is ready. ${updSet().atQuit ? 'It goes in when you quit, or now.' : 'It goes in when you choose Update and Restart.'}`, m: 'What’s new, below, says what it brings.', key: 'Update and Restart', a: 'updNow', amber: true, ...wait },
+    ready: { t: `${N} is ready. ${updSet().atQuit ? 'It goes in when you quit, or now.' : 'It goes in when you choose Update and Restart.'}`, key: 'Update and Restart', a: 'updNow', amber: true, ...wait },      // no second line: What's new still opens this version's notes (the app's port)
     installing: { t: `Updating to ${N}…` },
     updated: { t: `Updated to ${N}.`, m: `${v.prev} is kept until the next update, in case something is wrong.`, key: `Go Back to ${v.prev}`, a: 'updBack', ...wait },
     wentback: { t: `The update to ${N} didn’t start properly. This is ${C} again.`, m: `${N} won’t be tried again. The next version will.`, key: 'Report a Problem', a: 'updReport' },
@@ -3305,7 +3340,7 @@ const updAnswer = () => { updSt().at = updClock(); if (!state.updNewer) return u
 const updRun = () => { clearTimeout(updT); updT = setTimeout(() => { const u = updSt();
   if (u.phase === 'downloading') { if (u.pct < 100) updGo('downloading', { pct: Math.min(100, u.pct + 14) }); else updGo('preparing'); return updRun(); }
   if (u.phase === 'preparing') { if (updLive()) return updRun(); updGo('ready'); } }, 350); };      // getting ready waits until nothing is on screen
-A.updCancel = () => { clearTimeout(updT); updGo('idle'); toast('The update was cancelled. What was downloaded has been deleted.'); };
+A.updCancel = () => { clearTimeout(updT); updGo('cancelled'); };
 A.updPage = () => toast('The download page opens in your browser.');
 A.updCheck = () => { updGo('checking'); clearTimeout(updT); updT = setTimeout(updAnswer, 500); };
 A.updNow = () => { if (updLive()) return refuse('Something is on screen'); updGo('installing'); clearTimeout(updT); updT = setTimeout(() => updGo('updated'), 1800); };
@@ -3411,7 +3446,7 @@ function renderSettings() {
   if (sec === 'Language') { const cur = st.uiLang || 'auto', auto = UI_LANG_OWN[(navigator.language || 'en').slice(0, 2)] || 'English';
     // The app's own words (designed 23 November). Each language is named in itself; the remote page follows this choice.
     body = card('Language', 'The words of SoftPresenter itself: buttons, menus and messages. Changes at once', html`
-      <div class="st-picks c5" role="radiogroup" aria-label="Language">${pick(cur === 'auto', 'setPick:uiLang,auto', FLAGS.auto, 'This computer’s', auto)}${Object.entries(UI_LANG_OWN).map(([k, n]) => pick(cur === k, `setPick:uiLang,${k}`, FLAGS[k], n))}</div>
+      <div class="st-picks c6" role="radiogroup" aria-label="Language">${pick(cur === 'auto', 'setPick:uiLang,auto', FLAGS.auto, 'This computer’s', auto)}${Object.entries(UI_LANG_OWN).map(([k, n]) => pick(cur === k, `setPick:uiLang,${k}`, FLAGS[k], n))}</div>
       <p class="sc-note">Songs and Bibles keep their own languages: Set up SoftPresenter › Languages. The Bible page has its own reading language (Аа).</p>`); }
   if (sec === 'Song files') body = [findSongsCard(card), card('Song files', 'Songs are plain files that can be changed outside the app', html`
       ${stLine('Read them again', html`<button class="btn" data-a="say:Every changed song and theme was read again">Reload songs</button>`, 'Brings in songs and themes changed outside the app')}
@@ -3445,7 +3480,7 @@ function renderSettings() {
     const cli = card('Command line', 'The sp command controls SoftPresenter from a terminal or a script.', html`
       ${stLine('The sp command', spBtns, spLine)}${state.cliSaid ? html`<p class="sc-note">${state.cliSaid}</p>` : ''}`);
     body = cli; }
-  if (sec === 'Integrations') { const v = DOC.voxlive, it = INTEGRATIONS.find(x => x.id === state.integ);
+  if (sec === 'Integrations') { const v = DOC.voxlive, it = [...INTEGRATIONS, ...DEVICES].find(x => x.id === state.integ && !x.soon);
     // Other services, each the same card (the owner, 25 November: "the integration cards should be the same and that goes
     // for voxlive"): its logo, name, one line, a light with its state, one key. A card opens that service's own page, in
     // the same order for all: logo and state, what it brings, the account, then More options. A new service is a new card.
@@ -3456,7 +3491,8 @@ function renderSettings() {
           <span class="ifoot"><i class="led ${sa.tone}"></i><span class="st-rd mono">${sa.text}</span><span class="btn">${x.soon ? 'Soon' : sa.tone === 'off' && x.id !== 'wla' && x.id !== 'ndi' ? 'Connect' : 'Open'}</span></span></button>`; };
       body = html`<p class="sc-sum">Connect what your church already uses. What each one does is chosen in the Add action menus of macros, slides and media.</p>
         <span class="cap st-igrp">Services</span><div class="st-integ">${INTEGRATIONS.map(icard)}</div>
-        <span class="cap st-igrp">Devices</span><div class="st-integ">${DEVICES.map(icard)}</div>`; }
+        <span class="cap st-igrp">Devices</span><div class="st-integ">${DEVICES.map(icard)}
+          <button class="st-icard more" data-a="integAsk"><b>Don’t see what your church uses?</b><span>Tell us which app or device, and what it should do.</span><span class="btn">Request an Integration…</span></button></div>`; }
     else { const sa = integState(it);
       const head = html`<button class="st-back" data-a="integ:">${I.back || '‹'} Integrations</button>
         <div class="st-ihead">${integLogo(it, 'big')}<div class="tx"><h3>${it.name}</h3><span><i class="led ${sa.tone}"></i><span class="st-rd mono">${sa.text}</span>${it.what}</span></div></div>`;
@@ -3543,7 +3579,8 @@ function renderSettings() {
   if (sec === 'Phone remote') { const r = rmSet(), on = !!st.remote, addr = `https://${r.name}:${r.port}`, pairs = r.fingerprint.split(':'), changing = !r.password || state.rmChange;
     body = [card('Remote Control', '', html`
       ${stLine('Turn on Remote Control', onoff(on, 'rmOn'), 'Run the show from another computer, a tablet or a phone on the church’s network: open the address below in its browser and sign in with the password. Each device is remembered until you forget it here.', r.password || on ? '' : 'Set a password first')}
-      ${on ? stLine('Open', html`<span class="st-key mono st-rmaddr">${addr}</span><button class="btn" data-a="say:Address copied">Copy</button>`, `By address: https://${r.ip}:${r.port}. The browser warns again if the computer’s address changes; the name above doesn’t.`) : ''}
+      ${on ? stLine('Open', html`<span class="st-key mono st-rmaddr">${r.local ? `https://localhost:${r.port}` : addr}</span><button class="btn" data-a="say:Address copied">Copy</button>`, r.local ? 'Only this computer can open it. Phones, tablets and other computers can’t.' : `By address: https://${r.ip}:${r.port}. The browser warns again if the computer’s address changes; the name above doesn’t.`) : ''}
+      ${stLine('Who can connect', html`<button class="btn ${r.local ? '' : 'onkey'}" data-a="rmLocal:0">The Network</button><button class="btn ${r.local ? 'onkey' : ''}" data-a="rmLocal:1">This Computer Only</button>`, r.local ? 'Only programs on this computer, such as the Stream Deck app. For a church whose only remote is a Stream Deck plugged into this computer.' : 'Any phone, tablet or computer on the church’s network, with the password or a pairing code.')}
       <details class="st-fold st-rmmore"><summary>Port and certificate</summary>
         ${stLine('Port', html`<input class="field st-rmport" id="rmPort" value="${r.port}" inputmode="numeric" aria-label="Port"><button class="btn" data-a="rmPort">Use</button>`, 'A port is a number from 1024 to 65535.')}
         ${stLine('Key fingerprint (SHA-256)', '', 'The browser warns the first time, as nobody but this computer vouches for its certificate. Check that the key fingerprint is this one before going on (docs/remote-api.md says how). A certificate made again keeps the key, so this stays the same.')}
@@ -3558,9 +3595,9 @@ function renderSettings() {
         <div class="st-rmacts">${r.password ? html`<button class="btn" data-a="rmChange">Cancel</button>` : ''}<button class="btn primary" data-a="rmSetPw">${keepWidth(r.password ? 1 : 0, ['Set Password', 'Change Password'])}</button></div>`
       : stLine('Password', html`<button class="btn" data-a="rmChange">Change Password…</button>`, 'A new password forgets every device: each signs in again with it.')}
       ${r.wrong ? html`<p class="${r.wrong >= 3 ? 'st-rmwarn' : 'st-rmnote'}">${r.wrong === 1 ? 'A wrong password was tried in the last hour.' : `${r.wrong} wrong passwords were tried in the last hour.`}</p>` : ''}`),
-    card('Connected now', on && r.pages.length ? 'Disconnect closes a page; the device stays remembered' : '', on && r.pages.length ? r.pages.map(g => stLine(g.name, html`<button class="btn" data-a="rmDrop:${g.id}">Disconnect</button>`, `${g.ip} · since ${rmAgo(g.since)}`))
-      : html`<p class="st-rmnote">${on ? 'No page is connected.' : 'Remote Control is off.'}</p>`),
-    card('Devices remembered', r.devices.length ? 'A device forgotten signs in again with the password' : '', r.devices.length ? r.devices.map(d => stLine(d.name, html`<button class="btn" data-a="rmForget:${d.id}">Forget</button>`, `First seen ${d.first} · last seen ${rmAgo(d.last)} · ${d.ip}`))
+    card('Connected now', on && r.pages.length ? 'Disconnect closes its connection; the device stays remembered' : '', on && r.pages.length ? r.pages.map(g => stLine(g.name, html`<button class="btn" data-a="rmDrop:${g.id}">Disconnect</button>`, `${g.ip} · since ${rmAgo(g.since)}`))
+      : html`<p class="st-rmnote">${on ? 'No device is connected.' : 'Remote Control is off.'}</p>`),
+    card('Devices remembered', r.devices.length ? 'A forgotten device signs in or pairs again' : '', r.devices.length ? r.devices.map(d => stLine(d.name, html`<button class="btn" data-a="rmForget:${d.id}">Forget</button>`, `${DECK_ROLE[d.role || 'all']} · first seen ${d.first} · last seen ${rmAgo(d.last)} · ${d.ip}`))
       : html`<p class="st-rmnote">None yet: a device is remembered when it signs in.</p>`, r.devices.length > 1 ? html`<button class="btn sm" data-a="rmForgetAll">Forget All</button>` : '')]; }
   if (sec === 'Coverage') body = coverageHTML();
   put('slides', html`<div class="reader-h"><h1>${sec}</h1></div>${body}`);
@@ -3605,7 +3642,7 @@ const timelySt = () => DOC.settings.timely || (DOC.settings.timely = { offered: 
   services: [{ name: 'Sunday Morning', when: 'Sunday 30 November', songs: 5, row: 'in_step' }, { name: 'Prayer Meeting', when: 'Wednesday 3 December', songs: 3, row: 'changed' },
     { name: 'Sunday Morning', when: 'Sunday 7 December', songs: 6, row: 'newer' }] });
 // Devices: coming, one card each, so a church sees its gear is planned for (spec 2026-11-26, slices 3–6)
-const DEVICES = [{ id: 'midi', name: 'MIDI', mark: 'MI', what: 'Cues in and out, and playback rigs', soon: true }, { id: 'deck', name: 'Stream Deck and Companion', mark: 'SD', what: 'Buttons your volunteers already use', soon: true },
+const DEVICES = [{ id: 'midi', name: 'MIDI', mark: 'MI', what: 'Cues in and out, and playback rigs', soon: true }, { id: 'deck', name: 'Stream Deck and Companion', mark: 'SD', what: 'Buttons your volunteers already use' },
   { id: 'osc', name: 'OSC', mark: 'OSC', what: 'Lighting desks, mixers and show control', soon: true }, { id: 'dmx', name: 'Lighting', mark: 'DMX', what: 'DMX over Art-Net and sACN', soon: true }];
 // Home Assistant: the address, a long-lived token kept in the computer's secure store, and what it found
 const haSt = () => DOC.settings.ha || (DOC.settings.ha = { on: false, addr: 'http://homeassistant.local:8123', version: '2026.11.3', unreachable: false, refused: null,
@@ -3693,7 +3730,9 @@ const integWarn = t => t ? html`<p class="st-iwarn">${t}</p>` : '';
 // NDI's window may ask for the computer's password; SoftPresenter never does. NDI publishes no list of versions, so the row
 // says a newer one "may be available", never its number.
 const ndiUp = () => state.ndiUp || (state.ndiUp = { phase: 'idle', pct: 0, v: '6.1.1', at: '' });
-function ndiRow() { const n = ndiUp(), none = ndiState() === 'none';
+const NDI_HELD = 'NDI’s installer resets this computer’s network settings. Install it when nothing is on screen.';
+const ndiHeld = () => ndiVia() && updLive();
+function ndiRow() { const n = ndiUp(), none = ndiState() === 'none', held = ndiHeld();
   const V = { none: { t: 'NDI isn’t installed on this computer.', m: ndiVia() ? 'SoftPresenter downloads NDI’s own installer and opens it.' : 'SoftPresenter downloads it and keeps it in its own folder.', key: 'Install NDI', a: 'ndiIn:open' },
     idle: { t: `NDI ${n.v} is installed.`, m: n.updated ? `Updated at ${n.at}.` : n.at ? `Checked at ${n.at}. No newer NDI was found.` : 'Not checked yet', key: 'Check for Updates', a: 'ndiUp:check' },
     checking: { t: 'Checking…', key: 'Check for Updates', off: true },
@@ -3702,13 +3741,18 @@ function ndiRow() { const n = ndiUp(), none = ndiState() === 'none';
     // licence is read and accepted; an update whose licence differs from the one accepted opens the window at its Licence step.
     newer: { t: `A newer NDI may be available. You have ${n.v}.`, key: 'Install Update', a: 'ndiUp:update' },
     updating: { t: `Updating NDI… ${n.pct}%`, m: `${Math.round(NDI_MB * n.pct / 100)} of ${NDI_MB} MB`, bar: n.pct, key: 'Cancel', a: 'ndiUp:cancel' },
+    downloaded: { t: 'The NDI update is downloaded.', m: held ? 'NDI’s installer resets this computer’s network settings. Install it when nothing is on screen.' : 'Install opens NDI’s installer. It resets this computer’s network settings.', key: 'Install', a: 'ndiUp:install', ...(held ? { off: true, under: 'Something is on screen' } : {}) },
     finishing: ndiVia() ? { t: 'NDI’s installer is open. Follow its steps.', m: 'Windows asks for an administrator’s permission.', key: 'Cancel', off: true } : { t: 'Installing NDI…', key: 'Cancel', off: true },
     upfailed: { t: `NDI couldn’t be updated: ${NDI_WHY[n.why] || NDI_WHY.network}.`, m: `NDI ${n.v} is still installed.`, key: 'Try Again', a: 'ndiUp:update' },
     busy: { t: 'NDI is being installed…', m: 'Its window is open.', key: 'Show…', a: 'ndiIn:show' } };
+  if (held) for (const k of ['none', 'newer', 'upfailed']) Object.assign(V[k], { m: NDI_HELD, off: true, under: 'Something is on screen' });
   const now = state.ndiIn && state.ndiIn.phase !== 'about' && state.ndiIn.phase !== 'done' ? 'busy' : none && n.phase === 'idle' ? 'none' : n.phase, w = V[now] || V.idle, ids = Object.keys(V), keys = [...new Set(ids.map(i => V[i].key))];
   return html`<div class="sline up-row ${now === 'newer' ? 'ni-newer' : ''}" data-ndi="${now}"><div><b>NDI</b><span class="up-stack">${ids.map(i => html`<span class="${i === now ? 'now' : 'alt'}"><span class="up-t">${V[i].t}</span><span class="up-m">${V[i].m || ''}</span></span>`)}</span>${w.bar != null ? html`<progress class="ni-rowbar" max="100" value="${w.bar}" aria-label="Downloading"></progress>` : ''}</div>
-    <div class="ctl up-ctl"><button class="btn ${now === 'newer' || now === 'upfailed' ? 'ni-amber' : ''}" data-a="${w.a || 'ndiUp:check'}" ${{ disabled: !!w.off }}>${keepWidth(keys.indexOf(w.key), keys)}</button><span class="up-under"></span></div></div>`; }
+    <div class="ctl up-ctl"><button class="btn ${now === 'newer' || now === 'upfailed' || now === 'downloaded' ? 'ni-amber' : ''}" data-a="${w.a || 'ndiUp:check'}" ${{ disabled: !!w.off }}>${keepWidth(keys.indexOf(w.key), keys)}</button><span class="up-under">${w.under || ''}</span></div></div>`; }
 let ndiUpT = 0;
+// the last step of an update: on Windows NDI's installer opens here, so it happens only on the operator's click or straight after
+// the download they started, never by itself when the screens clear (the security review, 28 November)
+const ndiUpFinish = () => { const n = ndiUp(); n.phase = 'finishing'; render(); clearTimeout(ndiUpT); ndiUpT = setTimeout(() => { state.ndiNewer = false; Object.assign(n, { phase: 'idle', v: NDI_NEW, at: updClock(), updated: true }); render(); toast(`NDI is updated to ${NDI_NEW}. Screens sent over NDI use it from the next start.`); }, 1100); };
 A.ndiUp = ([what]) => { const n = ndiUp(), go = (phase, more = {}) => { Object.assign(n, { phase }, more); if (state.mode === 'settings') render(); }, clock = () => { const d = new Date(); return `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}`; };
   clearTimeout(ndiUpT);
   if (what === 'check') { go('checking', { updated: false }); ndiUpT = setTimeout(() => go(state.ndiNewer ? 'newer' : 'idle', { at: clock() }), 500); }
@@ -3716,7 +3760,9 @@ A.ndiUp = ([what]) => { const n = ndiUp(), go = (phase, more = {}) => { Object.a
     go('updating', { pct: 0 }); const fail = state.ndiFail, run = () => { ndiUpT = setTimeout(() => { if (n.phase !== 'updating') return;
       if (fail && n.pct >= 34) { state.ndiFail = null; return go('upfailed', { why: fail }); }
       if (n.pct < 100) { go('updating', { pct: Math.min(100, n.pct + 9) }); return run(); }
-      go('finishing'); ndiUpT = setTimeout(() => { /* on Windows: when NDI's installer finishes */ state.ndiNewer = false; go('idle', { v: NDI_NEW, at: clock(), updated: true }); toast(`NDI is updated to ${NDI_NEW}. Screens sent over NDI use it from the next start.`); }, 1100); }, 260); }; run(); }
+      if (ndiHeld()) return go('downloaded');      // Windows, something on screen: it waits for a click, and never opens by itself
+      ndiUpFinish(); }, 260); }; run(); }
+  if (what === 'install') { if (ndiHeld()) return refuse('Something is on screen'); ndiUpFinish(); }
   if (what === 'cancel') { go(state.ndiNewer ? 'newer' : 'idle'); toast('The update was cancelled. What was downloaded has been deleted.'); }
   if (what === 'remove') confirmDo('Remove NDI?', ndiVia() ? 'This runs NDI’s own uninstaller, which takes NDI off this PC for every program. Windows asks for an administrator’s permission.' : 'This deletes the NDI that SoftPresenter downloaded. Screens sent over NDI stop the next time SoftPresenter starts.', 'Remove', () => { state.ndiInstalled = false; state.ndi = 'none'; go('idle'); toast('NDI was removed. Restart SoftPresenter to stop using it.'); }); };
 
@@ -3734,7 +3780,7 @@ const ndiVia = () => WINDOWS || !!state.ndiInstaller;      // NDI's own installe
 function ndiInSheet() { const n = ndiIn(), up = ndiState() !== 'none', ph = n.phase, own = !ndiVia(), steps = own ? ['Download', 'Licence', 'Install'] : ['Download', 'Install'], last = steps.length - 1, at = { about: -1, downloading: 0, licence: 1, installing: last, installer: last, done: last + 1, failed: Math.min(n.failedAt ?? 0, last) }[ph];
   const bar = html`<div class="ni-steps" aria-hidden="true">${steps.map((t, i) => html`<span class="${i < at ? 'done' : i === at ? 'on' : ''}"><i>${i < at ? I.check : i + 1}</i>${t}</span>`)}</div>`;
   const body = { about: html`<p class="ni-lead">NDI sends video over your network: a screen to a live stream, or a camera into a slide.</p>
-      <ul class="ni-facts"><li>It is free, and made by NDI, not by SoftPresenter.</li><li>The download is about ${NDI_MB} MB, from NDI’s own server.</li><li>${own ? 'You accept NDI’s licence before anything is installed.' : 'NDI’s installer shows you NDI’s licence before it installs anything.'}</li><li>${own ? 'SoftPresenter keeps NDI in its own folder, and can remove it again.' : 'NDI’s own installer does the installing. Windows asks for an administrator’s permission; SoftPresenter never asks for a password.'}</li></ul>`,
+      <ul class="ni-facts"><li>It is free, and made by NDI, not by SoftPresenter.</li><li>The download is about ${NDI_MB} MB, from NDI’s own server.</li><li>${own ? 'You accept NDI’s licence before anything is installed.' : 'NDI’s installer shows you NDI’s licence before it installs anything.'}</li><li>${own ? 'SoftPresenter keeps NDI in its own folder, and can remove it again.' : 'NDI’s own installer does the installing. Windows asks for an administrator’s permission; SoftPresenter never asks for a password.'}</li></ul>${ndiHeld() ? html`<p class="ni-sub ni-held">${NDI_HELD}</p>` : ''}`,
     downloading: html`<p class="ni-lead">Downloading NDI… ${n.pct}%</p><progress class="up-bar ni-bar" max="100" value="${n.pct}" aria-label="Downloading"></progress><p class="ni-sub mono">${Math.round(NDI_MB * n.pct / 100)} of ${NDI_MB} MB</p>`,
     // Linux has NDI's licence text (it comes in the download) and shows it whole. A Mac's download carries none, so the step
     // names the licence and links to NDI's own page for it; Accept is the same.
@@ -3749,7 +3795,7 @@ function ndiInSheet() { const n = ndiIn(), up = ndiState() !== 'none', ph = n.ph
       <ul class="ni-next"><li><b>Send a screen over your network</b><span>Settings › Screens: choose NDI for where a screen goes.</span></li><li><b>Show a camera in a slide</b><span>Edit: add an NDI Source box to a slide.</span></li></ul>`,
     failed: html`<p class="ni-lead care">NDI ${n.why === 'closed' ? 'wasn’t installed' : n.why === 'disk' ? 'couldn’t be saved' : 'couldn’t be downloaded'}: ${NDI_WHY[n.why] || NDI_WHY.network}.</p><p class="ni-sub">${n.why === 'blocked' ? 'Try another network, such as a phone’s hotspot.' : n.why === 'closed' ? 'Nothing was changed. Try Again opens NDI’s installer again.' : 'Nothing was installed.'}</p>` }[ph];
   const cancel = { t: 'Cancel', f: () => { clearTimeout(ndiInT); state.ndiIn = null; if (ph !== 'about') toast('NDI wasn’t installed. What was downloaded has been deleted.'); return ndiInLeave(); } };
-  const buttons = { about: [cancel, { t: 'Download', primary: true, keep: true, f: () => ndiInGo('downloading', { pct: 0 }) }], downloading: [cancel],
+  const buttons = { about: [cancel, { t: 'Download', primary: true, keep: true, off: ndiHeld(), why: 'Something is on screen', f: () => ndiInGo('downloading', { pct: 0 }) }], downloading: [cancel],
     licence: [cancel, { t: 'Accept', primary: true, keep: true, f: () => ndiInGo('installing') }], installing: [], installer: [{ ...cancel, t: 'Stop Waiting' }],
     done: [{ t: 'Done', primary: true, f: () => { state.ndiIn = null; return ndiInLeave(); } }], failed: [{ ...cancel, t: 'Close' }, { t: 'Try Again', primary: true, keep: true, f: () => ndiInGo(n.why === 'closed' ? 'installer' : 'downloading', { pct: 0 }) }] }[ph];
   openSheet({ key: 'ndiInstall', title: up || n.wasUpdate ? 'Update NDI' : 'Install NDI', cls: 'ni', body: html`${bar}<div class="ni-body" data-ni="${ph}">${body}</div>`, buttons }); }
@@ -3763,7 +3809,66 @@ function ndiInDone() { const n = ndiIn(), was = ndiState() !== 'none'; state.ndi
 // Opened from the setup, the window goes back to the setup's step when it is left
 const ndiInLeave = () => { if (state.ndiBack) { state.ndiBack = false; suOpen(); return false; } render(); };
 A.ndiIn = ([what]) => { if (what === 'open') { clearTimeout(ndiInT); state.ndiIn = null; ndiIn(); state.ndiBack = !!(state.sheet && /^su\b/.test(state.sheet.cls || '')); } ndiInSheet(); };
+// Stream Deck and Companion (the owner's choices, 27 November: "App side, Companion, Elgato"; "Choose at pairing"; "A code shown
+// in the app"; and on 26 November "they have streamdeck and their volunteers rely on that"). This card only connects: the
+// buttons are set up in Companion or the Stream Deck app. Pairing never uses the Remote Control password.
+const DECK_SECS = 120, DECK_DEMO_PAIRS_AT = 8; let deckT = 0;
+const deckP = () => state.deckPair || (state.deckPair = { phase: 'code', code: '482 913', left: DECK_SECS, edit: false, name: rmSet().local ? 'Stream Deck plugin on a Mac' : 'Companion on studio-pc' });
+const deckClock = n => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+const deckStop = () => { clearTimeout(deckT); deckT = 0; };
+const deckTick = () => { deckStop(); deckT = setTimeout(() => { const p = state.deckPair; if (!p || p.phase !== 'code') return; p.left -= 1;
+  if (p.left <= 0) p.phase = 'expired';
+  else if (p.left === DECK_SECS - DECK_DEMO_PAIRS_AT) deckDone();      // the prototype's stand-in for a device typing the code
+  if (state.sheet && state.sheet.key === 'deckPair') deckSheet(); if (p.phase === 'code') deckTick(); }, 1000); };
+const deckDone = () => { const p = deckP(), r = rmSet(); p.phase = 'paired'; r.devices.push({ id: 'n' + (r.devices.length + 1) + 'x7', kind: 'paired', role: p.edit ? 'all' : 'show', name: p.name, first: 'today', last: 0, ip: r.local ? '127.0.0.1' : '192.168.1.60' }); };
+function deckSheet() { const p = deckP(), r = rmSet(), pairs = r.fingerprint.split(':'), ph = p.phase;
+  const fresh = { t: 'New Code', primary: true, keep: true, f: () => { state.deckPair = null; deckP(); deckTick(); deckSheet(); return false; } };
+  const body = {
+    // the code and its time left in fixed-width figures, so nothing moves each second; the switch's two lines are the same length
+    code: html`<div class="dp-code"><span class="dp-digits mono" aria-label="Pairing code">${p.code}</span><span class="dp-left mono">Valid for ${deckClock(p.left)}, for one device</span></div>
+      <div class="dp-row"><div><b>Also allow editing</b><span>${p.edit ? 'On: it can do everything the phone remote can, editing and deleting included.' : 'Off: it runs the show. It can’t edit or delete songs, playlists, themes, screens or settings.'}</span></div>${onoff(p.edit, 'deckEdit')}</div>
+      <span class="cap dp-cap">It must show this key fingerprint</span><div class="st-rmfp mono dp-fp">${pairs.slice(0, 16).join(':')}<br>${pairs.slice(16).join(':')}</div>
+      <ul class="dp-steps">${r.local ? html`<li><b>Stream Deck app</b><span>On this computer: drag a SoftPresenter key onto the deck, then type the code in its settings.</span></li><li><b>Companion</b><span>On another computer it can’t pair while Remote Control listens on this computer only.</span></li>`
+        : html`<li><b>Companion</b><span>Add a connection, search for SoftPresenter, pick this computer, type the code.</span></li><li><b>Stream Deck app</b><span>Drag a SoftPresenter key onto the deck, then type the code in its settings.</span></li>`}</ul>`,
+    paired: html`<div class="ni-done"><span class="ni-tick" aria-hidden="true">${I.check}</span><p class="ni-lead">Paired: ${p.name}</p><p class="ni-sub">${p.edit ? 'It can do everything, editing included.' : 'It runs the show. It can’t edit or delete anything.'}</p></div>
+      <ul class="ni-next"><li><b>Set up its buttons</b><span>In Companion or the Stream Deck app, pick from SoftPresenter’s actions and macros.</span></li><li><b>Forget it any time</b><span>Settings › Integrations › Stream Deck and Companion.</span></li></ul>`,
+    expired: html`<p class="ni-lead care">The code ran out.</p><p class="ni-sub">Nothing was paired. A code is good for 2 minutes and for one device.</p>`,
+    closed: html`<p class="ni-lead care">Pairing closed after five wrong codes.</p><p class="ni-sub">Nothing was paired. If nobody here was typing a code, someone on the network was guessing it: check who is on the network before pairing again.</p>` }[ph];
+  const buttons = { code: [{ t: 'Cancel' }], paired: [{ t: 'Done', primary: true }], expired: [{ t: 'Close' }, fresh], closed: [{ t: 'Close' }, fresh] }[ph];
+  openSheet({ key: 'deckPair', title: 'Pair a Device', cls: 'ni dp', body: html`<div class="dp-body" data-dp="${ph}">${body}</div>`, buttons, shut: () => { deckStop(); state.deckPair = null; if (state.mode === 'settings') render(); } }); }
+A.deckPair = () => { if (!DOC.settings.remote) return refuse('Remote Control is off'); state.deckPair = null; deckP(); deckTick(); deckSheet(); };
+A.deckEdit = () => { const p = deckP(); if (p.phase !== 'code') return; p.edit = !p.edit; deckSheet(); };
+// Request an Integration (the owner, 28 November: "the card beside that says 'more to come' can we put in so people can request
+// integrations, and then have a popup with the necessary info for them to fill out of what they want and also how we can
+// contact them if so"). What is typed stays until it is sent, however the window is left. No contact details: asked who would write back, he said
+// "nobody writes back, it just shows in an update", so none are collected.
+const ASK_WHY = { network: 'there is no internet connection', server: 'the server didn’t answer' }; let askT = 0;
+const askSt = () => state.integAsk || (state.integAsk = { phase: 'form', app: '', what: '', how: '', why: null });
+const askRead = () => { const a = askSt(); for (const k of ['app', 'what', 'how']) { const el = $('ask-' + k); if (el) a[k] = el.value; } return a; };
+function askSheet() { const a = askSt(), ph = a.phase, busy = ph === 'sending', os = APPLE ? 'macOS' : WINDOWS ? 'Windows' : 'Linux', off = { disabled: busy };
+  const form = html`<label class="ra-f"><span>App, service or device</span><input class="field" id="ask-app" value="${a.app}" placeholder="Its name" maxlength="80" ${off}></label>
+      <label class="ra-f"><span>What should it do in SoftPresenter?</span><textarea class="field ra-t" id="ask-what" rows="3" placeholder="For example: bring this week’s set list in as a playlist" maxlength="600" ${off}>${a.what}</textarea></label>
+      <label class="ra-f"><span>How does your church use it? <i>Optional</i></span><textarea class="field ra-t" id="ask-how" rows="2" maxlength="600" ${off}>${a.how}</textarea></label>
+      <p class="ra-note">Only this is sent: what you typed, SoftPresenter ${APP_VERSION} and ${os}. No name, no email, no logs, no songs. Nobody writes back: if it’s built, What’s new says so.</p>
+      <p class="ra-say ${ph === 'failed' ? 'care' : ''}" aria-live="polite">${busy ? 'Sending…' : ph === 'failed' ? `It couldn’t be sent: ${ASK_WHY[a.why] || ASK_WHY.network}. What you typed is kept.` : ''}</p>`;
+  const body = ph === 'sent' ? html`<div class="ni-done"><span class="ni-tick" aria-hidden="true">${I.check}</span><p class="ni-lead">Sent. Thank you.</p><p class="ni-sub">We read every request. If it’s built, What’s new will say so.</p></div>
+      <ul class="ni-next"><li><b>What happens next</b><span>Requests are weighed together: the more churches ask for one, the sooner it comes.</span></li></ul>` : form;
+  const send = { t: ph === 'failed' ? 'Try Again' : 'Send', primary: true, keep: true, f: () => { askGo(); return false; } };
+  const buttons = ph === 'sent' ? [{ t: 'Done', primary: true }] : busy ? [] : [{ t: 'Open an Issue on GitHub ↗', f: () => { askRead(); toast('GitHub opens in your browser, with a new issue'); return false; }, keep: true }, { t: 'Cancel', f: () => { askRead(); } }, send];
+  openSheet({ key: 'integAsk', title: 'Request an Integration', cls: 'ni ra', body: html`<div class="ra-body" data-ra="${ph}">${body}</div>`, buttons, shut: () => { clearTimeout(askT); const x = state.integAsk; if (x && (x.phase === 'sent')) state.integAsk = null; else if (x) { askRead(); if (x.phase === 'sending') x.phase = 'form'; } } }); }
+const askGo = () => { const a = askRead(); if (!a.app.trim() || !a.what.trim()) return refuse('Say which app or device, and what it should do');
+  a.phase = 'sending'; askSheet(); clearTimeout(askT); askT = setTimeout(() => { if (!state.integAsk || a.phase !== 'sending') return;
+    if (state.integAskFail) { a.phase = 'failed'; a.why = state.integAskFail; state.integAskFail = null; } else a.phase = 'sent';
+    if (state.sheet && state.sheet.key === 'integAsk') askSheet(); }, 1100); };
+A.integAsk = () => { const a = askSt(); if (a.phase === 'sent') state.integAsk = null; askSheet(); };
 function integPage(it, card) {
+  if (it.id === 'deck') { const r = rmSet(), on = !!DOC.settings.remote, devs = deckDevs();
+    return [integLead('Run the show from the buttons your volunteers already use. The buttons are set up in Companion or the Stream Deck app; here you only pair them.'),
+      card('Paired devices', devs.length ? 'What each may do is chosen when it is paired' : '', html`${on ? '' : html`<div class="dp-off">${stLine('Remote Control is off', html`<button class="btn" data-a="section:Phone remote">Phone Remote</button>`,
+          r.password ? 'Stream Deck and Companion connect through it. Until it is on, paired devices can’t connect and no new one can pair.' : 'Stream Deck and Companion connect through it. It needs its password set first, then switching on. Pairing never uses that password.')}</div>`}${devs.length ? devs.map(d => stLine(d.name, html`<button class="btn" data-a="rmForget:${d.id}">Forget</button>`, `${DECK_ROLE[d.role]} · last seen ${rmAgo(d.last)} · ${d.ip}`)) : html`<p class="st-rmnote">None yet.</p>`}
+        ${stLine('Pair a device', html`<button class="btn ${devs.length || !on ? '' : 'primary'}" data-a="deckPair" ${{ disabled: !on }}>Pair a Device…</button>`, devs.length ? 'Shows a one-time code to type into Companion or the Stream Deck app. To change what a device may do, forget it and pair it again.' : 'Shows a one-time code to type into Companion or the Stream Deck app', on ? '' : 'Remote Control is off')}`),
+      html`${r.local ? html`<p class="sc-note">Remote Control listens on this computer only (Settings › Phone remote), so only a Stream Deck plugged into this computer can connect. A Companion on another computer can’t.</p>` : ''}
+        <p class="sc-note">Anyone who can open Companion can press its buttons, so set Companion’s own admin password.</p>`].filter(Boolean); }
   if (it.id === 'ndi') return [card('NDI', 'Video over the network: screens out, cameras in', html`${ndiRow()}
       ${stLine('Where it’s used', html`<button class="btn" data-a="section:Screens">Screens</button>`, 'A screen’s “Where does it go?” can be NDI. In Edit, an NDI Source box shows a camera or another computer in a slide.')}
       ${ndiState() === 'none' ? '' : stLine('Remove NDI', html`<button class="btn quiet" data-a="ndiUp:remove">Remove…</button>`, ndiVia() ? 'Runs NDI’s own uninstaller. Windows asks for an administrator’s permission.' : 'Deletes the NDI that SoftPresenter downloaded')}
@@ -3861,6 +3966,7 @@ A.timelyConnect = () => { const a = ($('timelyAddr') || {}).value || '', c = ($(
 A.timelyDisconnect = () => confirmDo('Disconnect TimelyChurch?', 'This computer stops following TimelyChurch and forgets its connection. The songs and playlists it made stay as they are.', 'Disconnect', () => mutate(() => { timelySt().on = false; }));
 const integState = x => { if (x.soon) return { tone: 'soon', text: x.id === 'timely' ? 'Coming soon' : 'Coming' };
   if (x.id === 'ndi') { const n = ndiUp(); return ndiState() === 'none' ? { tone: 'off', text: 'Not installed' } : n.phase === 'newer' ? { tone: 'warn', text: 'Update may be out' } : { tone: 'on', text: `Installed · ${n.v}` }; }
+  if (x.id === 'deck') { const n = deckDevs().length; return !n ? { tone: 'off', text: 'Not paired' } : !DOC.settings.remote ? { tone: 'warn', text: 'Remote Control is off' } : { tone: 'on', text: `${n} paired` }; }
   if (x.id === 'ha') { const h = haSt(); return !h.on ? { tone: 'off', text: 'Not connected' } : h.unreachable ? { tone: 'warn', text: 'Can’t reach it' } : { tone: 'on', text: 'Connected' }; }
   if (x.id === 'wla') { const n = Object.keys(catHave()).length; return Object.keys(catState().dl).length ? { tone: 'off', text: 'Downloading…' } : n ? { tone: 'on', text: `${n} songbook${n === 1 ? '' : 's'}` } : { tone: 'off', text: 'Not downloaded' }; }      // the app's state_words
   if (x.id === 'vox') return DOC.voxlive.connected ? { tone: 'on', text: `Connected · ${DOC.voxlive.screens.length} screens` } : { tone: 'off', text: 'Not connected' };
@@ -3916,7 +4022,7 @@ A.cliDo = ([what]) => { const shell = WINDOWS ? null : '~/.zshrc', folder = WIND
   else { state.cli = 'here'; state.cliSaid = what === 'use' ? null      // the state line then says where sp is
     : WINDOWS ? `Installed in ${folder}, which is on your PATH. Open a new Command Prompt and type: sp status (in PowerShell: softpresenter status)` : `Installed in ${folder}, and SoftPresenter added a line for it to ${shell}. Open a new terminal window and type: sp status`; }
   render(); };
-const uiLangMenu = () => { const own = { en: 'English', es: 'Español', ru: 'Русский', uk: 'Українська' };
+const uiLangMenu = () => { const own = UI_LANG_OWN;
   const choices = [['auto', `The computer’s language (${own[(navigator.language || 'en').slice(0, 2)] || 'English'})`], ...Object.entries(own)];
   return html`<select class="sel" data-c="setVal:uiLang">${options(choices, DOC.settings.uiLang || 'auto')}</select>`; };
 // Sound: the outputs this computer has (a sample), and where music and video sound are sent
@@ -3940,6 +4046,8 @@ A.rmPort = () => { const v = (($('rmPort') || {}).value || '').trim(), n = +v;
   if (!/^\d+$/.test(v) || n < 1024 || n > 65535) return refuse('A port is a number from 1024 to 65535.'); mutate(() => { rmSet().port = String(n); }); };
 A.rmDrop = ([id]) => mutate(() => { const r = rmSet(); r.pages = r.pages.filter(g => String(g.id) !== id); });
 A.rmForget = ([id]) => mutate(() => { const r = rmSet(), d = r.devices.find(x => x.id === id); r.devices = r.devices.filter(x => x.id !== id); if (d) r.pages = r.pages.filter(g => g.name !== d.name); });
+A.rmLocal = ([v]) => { const r = rmSet(), to = v === '1'; if (!!r.local === to) return; const go = () => mutate(() => { r.local = to; if (to) r.pages = []; });
+  if (to && DOC.settings.remote && r.pages.length) return confirmDo('Listen on this computer only?', `${r.pages.length === 1 ? 'The page connected now is' : `The ${r.pages.length} pages connected now are`} disconnected, and a Companion on another computer can’t connect until this is set back.`, 'This Computer Only', go); go(); };
 A.rmForgetAll = () => mutate(() => { const r = rmSet(); r.devices = []; r.pages = []; });
 A.rmNewCert = () => toast('A new certificate and key: devices see a new fingerprint and a warning again.');
 
@@ -4014,7 +4122,11 @@ function scrFineHTML(x) {
       stLine('Soft edges', scrSwitch(x, 'alpha', [['straight', 'Straight'], ['premultiplied', 'Premultiplied']], 'straight'), 'How a see-through edge is sent: try the other if the words’ edges look dark', mode === 'clear' ? '' : 'Only for a see-through screen'),
       scrNote(s, 'pic', why)]);
   const allShown = x.layers.length === 5 && (x.colour || '#000000') === '#000000' && !(x.edges || []).some(Number), E = Array.isArray(x.edges) ? x.edges : [0, 0, 0, 0];
-  const shows = sec('What it shows', stLine('Layers', ALL_LAYERS.map(l => html`<button class="tg ${x.layers.includes(l) ? 'act' : ''} ${l === 'media' && clear ? 'na' : ''}" data-a="scrLayer:${x.id},${l}" ${{ title: l === 'media' && clear ? 'Not drawn on a see-through screen' : null }}>${LAYER_NAMES[l]}</button>`), 'A lobby screen might show only media and announcements'),
+  // VoxLive captions, per screen (the owner, 28 November: a livestream output must not carry the captions). Shown only while
+  // VoxLive is connected and has screens. On unless switched off; both lines fit one line, so the switch moves nothing.
+  const voxRow = DOC.voxlive && DOC.voxlive.connected && DOC.voxlive.screens.length ? stLine('VoxLive captions', onoff(x.vox !== false, `scrVox:${x.id}`),
+    x.vox !== false ? 'On: this screen shows the captions while VoxLive is live.' : 'Off: while captions are live elsewhere, this screen shows nothing in place of the slide.') : '';
+  const shows = sec('What it shows', [stLine('Layers', ALL_LAYERS.map(l => html`<button class="tg ${x.layers.includes(l) ? 'act' : ''} ${l === 'media' && clear ? 'na' : ''}" data-a="scrLayer:${x.id},${l}" ${{ title: l === 'media' && clear ? 'Not drawn on a see-through screen' : null }}>${LAYER_NAMES[l]}</button>`), 'A lobby screen might show only media and announcements'), voxRow],
     html`<button class="btn sm" data-a="scrAll:${x.id}" ${{ disabled: allShown || key }} title="Every layer, black, nothing covered. Keeps the theme, the background and the key.">Show everything</button>`, key ? 'Not used by a key screen' : '');
   const fit = sec('Fit to the screen', [stLine('Colour', html`<input class="sc-colour" type="color" data-c="scr:${x.id},colour" value="${x.colour || '#000000'}" aria-label="Colour">`, 'Shown where nothing is drawn: around the slide, and when the screen is clear', clear ? 'Clear on a see-through screen' : ''),
     stLine('Cover edges', html`<div class="sc-edges">${['Left', 'Top', 'Right', 'Bottom'].map((n, i) => html`<input class="num e${i}" type="number" min="0" max="540" data-c="scr:${x.id},edge${i}" value="${E[i]}" aria-label="${n}" title="${n}">`)}<div class="sc-ebox"><i style="border-width:${E[1] / 1080 * 40}px ${E[2] / 1920 * 72}px ${E[3] / 1080 * 40}px ${E[0] / 1920 * 72}px"></i></div></div>`, `In the slide’s pixels (it is 1920 × 1080), for a screen that cuts its edges off${clear ? '; cut clear on a see-through screen' : ''}`)], '', key ? 'Not used by a key screen' : '');
@@ -4095,6 +4207,7 @@ C.scr = (v, [id, prop]) => mutate(() => { const x = byId(DOC.screens, id);
 const scrSwitch = (x, prop, list, def) => seg(list.map(([v, t]) => [`${x.id},${prop}=${v}`, t]), `${x.id},${prop}=${x[prop] || def}`, 'scrPick');
 A.scrPick = ([id, pv]) => mutate(() => { const [prop, v] = pv.split('='); byId(DOC.screens, id)[prop] = v; if (prop === 'format') byId(DOC.screens, id).formatFrom = 'chosen'; });
 A.scrSet = ([id, prop, ...v]) => mutate(() => { const sc = byId(DOC.screens, id); if (prop === 'to') scrSetTo(sc, v.join(',')); else sc[prop] = v.join(','); });
+A.scrVox = ([id]) => mutate(() => { const x = byId(DOC.screens, id); x.vox = x.vox === false; });
 A.scrLayer = ([id, l]) => mutate(() => { const L = byId(DOC.screens, id).layers; L.includes(l) ? L.splice(L.indexOf(l), 1) : L.push(l); });
 M.groupColour = ([n]) => ['#4285f4', '#cc4eb4', '#f4a000', '#34a86e', '#9b59b6', '#00acc1', '#78909c', '#8d6e63'].map(c => ({ t: c, on: DOC.groups[+n].color === c, f: () => mutate(() => { DOC.groups[+n].color = c; }) }));
 A.groupEdit = ([n, prop]) => { const g = DOC.groups[+n]; ask(prop === 'key' ? `Key for ${g.name}` : 'Rename group', prop === 'key' ? 'A letter' : 'Name', g[prop], v => mutate(() => { const old = g.name; g[prop] = prop === 'key' ? v.slice(0, 1).toUpperCase() : v;
@@ -4324,7 +4437,7 @@ const endLookBody = th => { const em = endMarkOf(th), eg = DOC.songs.find(s => s
       <div class="em-row"><span class="cap">Size</span><div class="em-size"><button class="btn sq" data-a="endLookSize:${th.id},-10" title="Smaller" ${em.size <= 40 ? 'disabled' : ''}>A−</button><span class="em-pct">${em.size}%</span><button class="btn sq" data-a="endLookSize:${th.id},10" title="Bigger" ${em.size >= 160 ? 'disabled' : ''}>A+</button><span class="sub">of the words’ size</span></div></div>
       <div class="em-row"><span class="cap">Colour</span><div class="em-col">${pick(!em.color, `endLookSet:${th.id},color,`, 'Same as the words')}${SWATCHES.map(c => html`<button class="swt ${em.color === c ? 'on' : ''}" style="background:${c}" data-a="endLookSet:${th.id},color,${c}" title="${c}"></button>`)}</div></div>
       <div class="em-row"><span class="cap">Place</span><div class="em-chips">${pick(em.at === 'under', `endLookSet:${th.id},at,under`, 'Under the last line')}${pick(em.at === 'bottom', `endLookSet:${th.id},at,bottom`, 'Bottom of the screen')}</div></div>
-      <p class="em-note">${DOC.settings.endMark ? 'Where there is no room for the mark under the words, it isn’t drawn. The words are never moved or made smaller for it.' : 'The mark is switched off in Settings › Slides. Its look is kept for when it is on.'}</p>
+      <p class="em-note">${DOC.settings.endMark ? 'On a full last slide the mark moves down, as far as the screen allows. If there is still no room, the words are made a little smaller for it, or the mark is.' : 'The mark is switched off in Settings › Slides. Its look is kept for when it is on.'}</p>
     </div></div>`; };
 A.endLook = ([id] = []) => { const th = themeFor(null, id); openSheet({ key: 'endLook', title: `The end of a song · ${th.name}`, wide: true, cls: 'em-sheet', body: endLookBody(th), buttons: [{ t: 'Done', primary: true }] }); };
 A.endLookSet = ([id, prop, v]) => { mutate(() => { const th = themeFor(null, id); th.endMark = { ...endMarkOf(th), [prop]: v || '' }; }); A.endLook([id]); };
@@ -4925,6 +5038,418 @@ function addAudioFiles(files) {
 // The remote page's words in the app's languages: built by translation-review/es/build-remote-table.js from the app's
 // own tables (crates/sp-app/locales) and remote-map.json. Don't edit by hand: rebuild. Read by remote-lang.js.
 const REMOTE_WORDS = {
+ "de": {
+  "exact": {
+   "A Bible passage…": "Bibelstelle…",
+   "A header…": "Überschrift…",
+   "A Library Folder…": "Bibliotheksordner…",
+   "A media playlist": "Medienliste",
+   "A picture or video": "Bild oder Video",
+   "A placeholder…": "Platzhalter…",
+   "A playlist is the running order of a service: songs, Bible passages, pictures and videos, in the order they come.": "Ein Ablauf ist das Programm eines Gottesdienstes: Lieder, Bibelstellen, Bilder und Videos in der Reihenfolge, in der sie drankommen.",
+   "A question is waiting: click to answer it": "Eine Frage wartet: Klicke, um sie zu beantworten",
+   "a service, in order": "ein Gottesdienst, der Reihe nach",
+   "A small tag beside each button with its key. Also in Settings › Keys.": "Ein kleines Schild neben jeder Schaltfläche mit ihrer Taste. Auch unter Einstellungen › Tasten.",
+   "A Song Bundle…": "Liedbündel…",
+   "A song…": "Lied…",
+   "A–Z": "A–Z",
+   "Actions": "Aktionen",
+   "Add a Bible passage": "Bibelstelle hinzufügen",
+   "Add a header": "Überschrift hinzufügen",
+   "Add a song": "Lied hinzufügen",
+   "Add a track to this playlist": "Füge dieser Liste einen Track hinzu",
+   "Add pictures or videos": "Bilder oder Videos hinzufügen",
+   "Add pictures or videos to show behind the words": "Füge Bilder oder Videos hinzu, die hinter dem Text gezeigt werden",
+   "Add Slide": "Folie hinzufügen",
+   "Add the Sample Backgrounds": "Beispielhintergründe hinzufügen",
+   "Add to playlist": "Zum Ablauf hinzufügen",
+   "Add to Playlist": "Zu einem Ablauf hinzufügen",
+   "Adding music is done at the computer for now.": "Musik wird vorerst am Computer hinzugefügt.",
+   "Adding pictures and videos from here comes with the next step. Add them at the computer for now.": "Bilder und Videos von hier aus hinzufügen kommt mit dem nächsten Schritt. Füge sie vorerst am Computer hinzu.",
+   "Advanced": {
+    "in": [
+     [
+      ".st-navg",
+      "Erweitert"
+     ]
+    ],
+    "else": "Mehr"
+   },
+   "All Media": "Alle Medien",
+   "Announce": "Ankündigungen",
+   "Arrangement": "Arrangement: die Teile des Lieds in anderer Reihenfolge spielen",
+   "As listed": "Original",
+   "Audience": "Saal",
+   "Audience screens on or off (⇧⌘1)": "Bildschirme im Saal ein- oder ausschalten (⇧⌘1)",
+   "Audience screens, stage screens, on or off": "Bildschirme im Saal, Bildschirme auf der Bühne ein- oder ausschalten",
+   "Audio": "Audio",
+   "Audio playlist": "Audioliste",
+   "Back 15 seconds": "15 Sekunden zurück",
+   "Bible": "Bibel",
+   "Bible, too (Bold while editing a slide)": "Auch Bibel (beim Bearbeiten einer Folie: Fett)",
+   "Blinds": "Jalousie",
+   "Cancel": "Abbrechen",
+   "Changing songs, playlists and settings is done at the computer for now. Running the show works from here.": "Lieder, Abläufe und Einstellungen werden vorerst am Computer geändert. Den Gottesdienst kannst du von hier aus fahren.",
+   "Changing things": "Ändern",
+   "Checkerboard": "Schachbrett",
+   "Choose": "Wählen",
+   "Choose a library or playlist (⌘P)": "Ablauf oder Bibliothek wählen (⌘P)",
+   "Choose a song…": "Lied wählen…",
+   "Choosing from the menu bar is done at the computer, not from the remote page.": "Punkte in der Menüleiste wählst du am Computer, nicht über die Fernsteuerung.",
+   "Choosing the stage layouts": "Die Auswahl der Bühnenlayouts",
+   "CLEAR": "LEER",
+   "Clear All": "Alles ausblenden",
+   "Clear everything": "Alles ausblenden",
+   "Clear it": "Ausblenden",
+   "Clear the slide, media, props, audio or messages: the layer keys under the preview": "Folie, Medien, Grafiken, Audio oder Nachrichten ausblenden: die Ebenentasten unter der Vorschau",
+   "Clearing": "Ausblenden",
+   "Click to show it": "Zum Zeigen klicken",
+   "Clock": "Uhr",
+   "Close": "Schließen",
+   "comes to the remote page with the next step. Use the computer for now.": "kommt mit dem nächsten Schritt auf die Fernsteuerungsseite. Nutze vorerst den Computer.",
+   "Connect": "Verbinden",
+   "Connected": "Verbunden",
+   "Connecting…": "Wird verbunden…",
+   "Continuous": "Durchgehend",
+   "Copy": "Kopieren",
+   "Copy Style": "Stil kopieren",
+   "Copy, cut, paste the picked slides (objects in Edit)": "Ausgewählte Folien kopieren, ausschneiden, einfügen (im Editor: Objekte)",
+   "Could not sign in.": "Die Anmeldung hat nicht geklappt.",
+   "Crossfade": "Überblenden",
+   "Cut": {
+    "in": [
+     [
+      "#foot",
+      "Schnitt"
+     ]
+    ],
+    "else": "Ausschneiden"
+   },
+   "Delete": {
+    "in": [
+     [
+      ".ui-keys",
+      "Entf"
+     ]
+    ],
+    "else": "Löschen"
+   },
+   "Delete Song from Library…": "Lied aus der Bibliothek löschen…",
+   "Delete what is picked: what Undo brings back goes at once (playlist items, slides, a media playlist’s items); songs in a library, pictures in the bin and screens ask first": "Ausgewähltes löschen: Was „Widerrufen“ zurückholt, ist sofort weg (Einträge im Ablauf, Folien, Einträge einer Medienliste); bei Liedern in einer Bibliothek, Bildern in der Mediathek und Bildschirmen wird erst nachgefragt",
+   "Delete…": "Löschen…",
+   "Details": "Details: Autor, Verlag und CCLI-Nummer des Lieds",
+   "Disable": "Folie deaktivieren",
+   "Disconnected at the computer: click to connect again": "Am Computer getrennt: Klick, um wieder zu verbinden",
+   "Dissolve": "Blende",
+   "Done": "Fertig",
+   "Door": "Tür",
+   "Drag it into a playlist": "Zieh es in einen Ablauf",
+   "Drag it into a playlist or a library": "Zieh es in einen Ablauf oder eine Bibliothek",
+   "Duplicate": "Duplizieren",
+   "Edit": {
+    "in": [
+     [
+      "#modes",
+      "Editor"
+     ]
+    ],
+    "else": "Bearbeiten"
+   },
+   "Edit this slide": "Diese Folie bearbeiten",
+   "Edit Words": "Text bearbeiten",
+   "Every key (press ?)": "Alle Tasten (drücke ?)",
+   "Every other transition": "Alle anderen Übergänge und wie lange sie dauern",
+   "every song you keep": "alle deine Lieder",
+   "Fade": "Verblassen",
+   "Fade Black": "Über Schwarz",
+   "Fade White": "Über Weiß",
+   "Fill with Song…": "Mit Lied füllen…",
+   "Filter": "Filtern",
+   "Find a song, a line or a verse": "Lied, Zeile oder Vers suchen",
+   "Find a song, a line, or a verse": "Lied, Zeile oder Vers suchen",
+   "First slide of the song, or verse in Bible": "Erste Folie des Lieds, oder erster Vers in der Bibel",
+   "Flip": "Umdrehen",
+   "Fly In": "Einfliegen",
+   "Forward 15 seconds": "15 Sekunden vor",
+   "Go to Next": "Automatisch weiter",
+   "Go to the slide on screen": "Zur Folie gehen, die gerade live ist",
+   "Going places": "Gehe zu",
+   "Grid": "Raster",
+   "Group": "Teil",
+   "Hide": "Ausblenden",
+   "Hide the media strip": "Medienleiste verbergen",
+   "Hot Key…": "Tastenkürzel…",
+   "How long one track fades into the next": "Wie lange ein Track in den nächsten überblendet",
+   "Import Songs": "Lieder importieren",
+   "Import songs or slides": "Lieder oder Folien importieren",
+   "Import…": "Importieren…",
+   "In Edit: a new text box, duplicate, pick everything": "Im Editor: neues Textfeld, duplizieren, alles auswählen",
+   "In Edit: nudge the picked object (Shift for one pixel)": "Im Editor: ausgewähltes Objekt verschieben (mit Umschalt um ein Pixel)",
+   "Iris": "Iris",
+   "is empty": "ist leer",
+   "Jump to a group (C for the chorus), or a slide’s own hot key": "Zu einem Liedteil springen (C für den Refrain) oder zur eigenen Schnelltaste einer Folie",
+   "Keep playing until stopped: after the last track, start again from the first (with Play through off, play this track again)": "Weiterspielen, bis gestoppt wird: nach dem letzten Track wieder mit dem ersten beginnen (ist „Nacheinander“ aus, diesen Track wiederholen)",
+   "Keys": "Tasten",
+   "Label": "Bezeichnung",
+   "Last slide of the song, or verse in Bible": "Letzte Folie des Lieds, oder letzter Vers in der Bibel",
+   "Library": "Bibliothek",
+   "Longest": "Längste",
+   "Looking up the Bible comes to the remote page with the next step. Use the Bible page at the computer for now.": "Das Nachschlagen in der Bibel kommt mit dem nächsten Schritt auf die Fernsteuerungsseite. Nutze vorerst die Bibel-Ansicht am Computer.",
+   "Loop": {
+    "in": [
+     [
+      ".lv-audio",
+      "Schleife"
+     ]
+    ],
+    "else": "Schleife"
+   },
+   "Macros": "Makros",
+   "Media": "Medien",
+   "Media Playlists": "Medienlisten",
+   "Menus and windows": "Menüs und Fenster",
+   "Messages": "Nachrichten",
+   "More": "Mehr",
+   "Move": "Auswahl bewegen",
+   "Move Down": "Nach unten",
+   "Move In": "Hereinfahren",
+   "Move Up": "Nach oben",
+   "Mute": "Stummschalten",
+   "New": "Neuer Timer",
+   "New library": "Neue Bibliothek",
+   "New Media Playlist…": "Neue Medienliste…",
+   "New playlist": "Neuer Ablauf",
+   "New song": "Neues Lied",
+   "Next": "Weiter",
+   "Next at the end of a song goes on to the next song": "„Weiter“ am Ende eines Lieds geht zum nächsten Lied",
+   "Next slide": "Nächste Folie",
+   "Next track": "Nächster Track",
+   "No song is open": "Kein Lied geöffnet",
+   "No songs here yet. Make one, import some, or drag songs onto this library’s name.": "Hier sind noch keine Lieder. Erstelle eins, importiere welche oder ziehe Lieder auf den Namen dieser Bibliothek.",
+   "No tracks yet. Add music files from this computer.": "Noch keine Tracks. Füge Musikdateien von diesem Computer hinzu.",
+   "Notes": "Notizen",
+   "Nothing found": "Nichts gefunden",
+   "Nothing showing": "Nichts aktiv",
+   "Nothing to play": "Nichts zum abspielen",
+   "Nothing to redo": "Nichts zu wiederholen",
+   "Nothing to tell you. Trouble, questions, and what happens out of sight (added to another playlist, a file read or written) come here.": "Nichts zu melden. Hier erscheinen Probleme, Fragen und was außer Sicht geschieht (etwas zu einem anderen Ablauf hinzugefügt, eine Datei gelesen oder geschrieben).",
+   "Nothing to undo": "Nichts zu widerrufen",
+   "Notices": "Meldungen",
+   "Off": {
+    "in": [
+     [
+      ".ui-sw",
+      "Aus"
+     ],
+     [
+      "#outAudience, #outStage",
+      "Aus"
+     ]
+    ],
+    "else": "Aus"
+   },
+   "ON": "EIN",
+   "ON SCREEN": "LIVE",
+   "Open": "Öffnen",
+   "Open a group of choices; go back": "Untermenü öffnen; zurück",
+   "Open Timers, Messages, Props, Macros, Stage, Audio, VoxLive": "Timer, Nachrichten, Grafiken, Makros, Bühne, Audio, VoxLive öffnen",
+   "Or use the sample backgrounds": "Oder Beispielhintergründe",
+   "Order": "Ordnen",
+   "Password": "Passwort",
+   "Paste": "Einfügen",
+   "Paste Style": "Stil einfügen",
+   "Pause": "Pause",
+   "Pick several in the left column: grow the pick, or pick them all": "Mehrere in der linken Spalte auswählen: die Auswahl erweitern oder alle auswählen",
+   "Picture": "Bild",
+   "Placeholder": "Platzhalter",
+   "Play": "Abspielen",
+   "Play on Announcements Layer": "Auf der Ankündigungsebene abspielen",
+   "Play the tracks in a random order": "Die Tracks in zufälliger Reihenfolge abspielen",
+   "Play through": "Nacheinander",
+   "Playing": "Läuft",
+   "Playlist": "Ablauf",
+   "Playlists": "Abläufe",
+   "Playlists and libraries": "Abläufe und Bibliotheken",
+   "Press / to search from anywhere": "Drück /, um von überall zu suchen",
+   "Prev": "Zurück",
+   "Previous": "Zurück",
+   "Previous slide": "Vorherige Folie",
+   "Props": "Grafiken",
+   "Push": "Schieben",
+   "Ready": "Bereit",
+   "Reconnecting…": "Verbindung wird wiederhergestellt …",
+   "Redo": "Wiederholen",
+   "Remote Control": "Fernsteuerung",
+   "Remove from Playlist": "Aus dem Ablauf entfernen",
+   "Rename": "Umbenennen",
+   "Reset": "Zurücksetzen",
+   "Reveal": "Aufdecken",
+   "Running the slides": "Folien steuern",
+   "s": "s",
+   "Scaling": "Skalierung",
+   "Service": "Ablauf",
+   "Service (⌥S)": "Ablauf (⌥S)",
+   "Service, Bible (ready for a reference), Edit (in the app ⌘1 ⌘2 ⌘3; a browser keeps those)": "Ablauf, Bibel (bereit für eine Bibelstelle), Editor (in der App ⌘1 ⌘2 ⌘3; ein Browser behält diese für sich)",
+   "Settings": "Einstellungen",
+   "Settings are changed at the computer.": "Einstellungen werden am Computer geändert.",
+   "Show": "Zeigen",
+   "Show a message": "Eine Nachricht zeigen",
+   "Show keys on buttons": "Tasten an Schaltflächen anzeigen",
+   "Show that picture or video": "Dieses Bild oder Video zeigen",
+   "Shuffle": "Zufällig",
+   "Sign In": "Anmelden",
+   "Sign Out of This Device…": "Von diesem Gerät abmelden …",
+   "Signing in…": "Anmeldung läuft …",
+   "Slide": "Folie",
+   "Slide size": "Foliengröße",
+   "Slides…": "Folien…",
+   "SoftPresenter Remote Control": "SoftPresenter Fernsteuerung",
+   "Something went wrong: click to see": "Etwas ist schiefgegangen: Klicke, um es anzusehen",
+   "Song": "Lied",
+   "Song Files…": "Lieddateien…",
+   "Song libraries": "Liedbibliotheken",
+   "Split": "Teilen",
+   "Stage": "Bühne",
+   "Stage screens on or off (⇧⌘2)": "Bildschirme auf der Bühne ein- oder ausschalten (⇧⌘2)",
+   "Start that timer, show that message or prop, run that macro, switch the stage to that layout, play that track": "Diesen Timer starten, diese Nachricht oder Grafik zeigen, dieses Makro ausführen, die Bühne auf dieses Layout umschalten, diesen Track abspielen",
+   "Swap": "Tauschen",
+   "Table": "Tabelle",
+   "Template": "Vorlage",
+   "The car with the lights on, please": "Das Auto mit eingeschaltetem Licht, bitte",
+   "The computer didn't answer.": "Der Computer hat nicht geantwortet.",
+   "The item above or below, picked at its first slide; in Bible, the verse before or after": "Eintrag darüber oder darunter; in der Bibel den Vers davor oder danach auswählen",
+   "The keys listed in Settings › Keys do what it says there. Any other key can be added.": "Die Tasten unter Einstellungen › Tasten tun, was dort steht. Jede andere Taste lässt sich hinzufügen.",
+   "The live tools": "Live-Werkzeuge",
+   "The menu for the slide on screen": "Das Menü der Folie, die gerade live ist",
+   "The picked slide or verse goes on screen (after a search, or ↑ ↓)": "Die ausgewählte Folie oder der ausgewählte Vers geht auf die Bildschirme (nach einer Suche oder ↑ ↓)",
+   "then 1–9": "dann 1 … 9",
+   "This device is remembered once it signs in, until it is forgotten in Settings › Phone remote on the computer.": "Dieses Gerät wird nach der Anmeldung gemerkt, bis es am Computer unter Einstellungen › Fernbedienung vergessen wird.",
+   "This library has no songs yet.": "Diese Bibliothek hat noch keine Lieder.",
+   "This list": "Diese Liste (unten: „Tasten an Schaltflächen anzeigen“)",
+   "This sample only has": "Dieses Beispiel hat nur",
+   "Timers": "Timer",
+   "track": "Track",
+   "Transition": "Übergang",
+   "Typing in a box: bold, italic, underlined, for the words selected (or the whole box)": "Beim Tippen in einem Feld: fett, kursiv, unterstrichen, für den markierten Text (oder das ganze Feld)",
+   "Undo": "Widerrufen",
+   "Undo, redo": "Widerrufen, wiederholen",
+   "Volume": "Lautstärke",
+   "VoxLive": "VoxLive",
+   "Waiting for SoftPresenter": "Warten auf SoftPresenter",
+   "Waiting for SoftPresenter to answer. Try again in a moment.": "SoftPresenter hat noch nicht geantwortet. Versuch es gleich noch einmal.",
+   "When a track ends, go on to the next": "Wenn ein Track endet, zum nächsten gehen",
+   "Wipe": "Wischen",
+   "With nothing on screen, move the pick; Space or Page Down or Enter puts it on": "Ist nichts auf den Bildschirmen, bewegst du die Auswahl; Leertaste, Bild ab oder Enter zeigt sie",
+   "Words": {
+    "in": [
+     [
+      ".ui-sheet",
+      "Text"
+     ]
+    ],
+    "else": "Text"
+   },
+   "Words from Text…": "Liedtexte aus Textdateien…",
+   "Words once…": "Schnellnachricht…",
+   "Words only": "Nur Text",
+   "Zoom In": "Hineinzoomen",
+   "Letting a phone, iPad or Mac show its screen is decided at the computer, not from the remote page.": "Ob ein Handy, iPad oder Mac seinen Bildschirm zeigen darf, entscheidest du am Computer, nicht über die Fernsteuerung.",
+   "There is no track to play. Add music at the computer.": "Es gibt keinen Track zum Abspielen. Füge am Computer Musik hinzu.",
+   "Not connected to SoftPresenter.": "Keine Verbindung zu SoftPresenter."
+  },
+  "patterns": [
+   {
+    "re": "^(.+) \\(⌥(\\d), then 1 to 9 for what is in it\\)$",
+    "to": "{1t} (⌥{2}, dann 1 bis 9 für das, was darin ist)",
+    "key": "page.tool_tab.hint"
+   },
+   {
+    "re": "^Running SoftPresenter as (.+)$",
+    "to": "SoftPresenter wird gesteuert als {1}",
+    "key": "page.conn.as"
+   },
+   {
+    "re": "^Notices: (\\d+) need you$",
+    "to": "Meldungen: {1} brauchen dich",
+    "key": "page.notices.many"
+   },
+   {
+    "re": "^Counts down from (.+?)$",
+    "to": "Countdown ab {1}",
+    "key": "tools.timer.down_from"
+   },
+   {
+    "re": "^(.+) (\\d+(?:\\.\\d+)?)s$",
+    "to": "{1t} {2} s",
+    "key": "page.transition.time"
+   },
+   {
+    "re": "^Notices: 1 needs you$",
+    "to": "Meldungen: 1 braucht dich",
+    "key": "page.notices.one"
+   },
+   {
+    "re": "^(\\d+(?:\\.\\d+)?) s$",
+    "to": "{1} s",
+    "key": "common.seconds_unit"
+   },
+   {
+    "re": "^(\\d+(?:\\.\\d+)?)s$",
+    "to": "{1} s",
+    "key": "common.seconds_unit"
+   },
+   {
+    "re": "^Bible · (.+)$",
+    "to": "Bibel · {1}",
+    "key": "page.find.bible_tag"
+   },
+   {
+    "re": "^Add to (.+?)$",
+    "to": "Zum Ablauf {1} hinzufügen",
+    "key": "left.song.add_to"
+   },
+   {
+    "re": "^(.+?) tracks$",
+    "to": "{1} Tracks",
+    "key": "tools.audio.tracks"
+   },
+   {
+    "re": "^Song · (.+)$",
+    "to": "Lied · {1}",
+    "key": "find.tag.song_group"
+   },
+   {
+    "re": "^(.+?) items$",
+    "to": "{1} Einträge",
+    "key": "media.items"
+   },
+   {
+    "re": "^(.+?) songs$",
+    "to": "{1} Lieder",
+    "key": "integrations.songbooks.songs"
+   },
+   {
+    "re": "^(.+?) track$",
+    "to": "{1} Track",
+    "key": "tools.audio.tracks"
+   },
+   {
+    "re": "^Start (.+?)$",
+    "to": "Starten: {1}",
+    "key": "tools.steps.timer_start"
+   }
+  ],
+  "keys": {
+   "Shift": "Umschalt"
+  },
+  "format": {
+   "decimal": ",",
+   "group": ".",
+   "group_from": 4,
+   "quote_open": "„",
+   "quote_close": "“"
+  }
+ },
  "es": {
   "exact": {
    "A Bible passage…": "Un pasaje de la Biblia…",
@@ -5161,6 +5686,7 @@ const REMOTE_WORDS = {
    "Prev": "Ant.",
    "Previous": "Anterior",
    "Previous slide": "Diapositiva anterior",
+   "Previous track": "Pista anterior",
    "Props": "Gráficos",
    "Push": "Empujar",
    "Ready": "Listo",
@@ -5573,6 +6099,7 @@ const REMOTE_WORDS = {
    "Prev": "Назад",
    "Previous": "Назад",
    "Previous slide": "Предыдущий слайд",
+   "Previous track": "Предыдущий трек",
    "Props": "Накладки",
    "Push": "Выталкивание",
    "Ready": "ГОТОВО",
@@ -5985,6 +6512,7 @@ const REMOTE_WORDS = {
    "Prev": "Назад",
    "Previous": "Назад",
    "Previous slide": "Попередній слайд",
+   "Previous track": "Попередній трек",
    "Props": "Накладки",
    "Push": "Виштовхування",
    "Ready": "ГОТОВО",
@@ -6174,7 +6702,7 @@ const REMOTE_WORDS = {
 // Each word keeps its English, so switching back, or to another language, starts from the English every time.
 // With English, or a language the table doesn't have, nothing changes at all.
 
-const UI_LANGS = ['en', 'es', 'ru', 'uk'];
+const UI_LANGS = ['en', 'de', 'es', 'ru', 'uk'];
 // What is content: langtool's list (less the keys: a key's name is a word of the page's, "Space" is Espacio, Shift is
 // Mayús), and the remote page's own (a message's words, a header's name, a group's name on a
 // slide, the running timer's name and time). The harvest of the page's words reads this same line.
@@ -6375,6 +6903,7 @@ function remoteApply(all, changed = []) {
   // The app's language and its way of writing numbers (parts.app): the page's words follow it, live (remote-lang.js)
   if (has('app') && P.app && typeof UI === 'object') UI.set(P.app.language, P.app.format);
   if (has('bin')) {
+    REMOTE.mediaById = !!(P.bin || {}).by_id;
     DOC.media = ((P.bin || {}).items || []).filter(b => okId(b.id)).map(b => ({ id: b.id, num: b.number, name: b.name, bg: '#151515', poster: b.poster || null, video: b.kind === 'video', length: 0, loop: !!b.loop, scaling: b.fit === 'fit' ? 'Scale to Fit' : 'Scale to Fill' }));
     DOC.mediaPlaylists = ((P.bin || {}).playlists || []).filter(p => okId(p.id)).map(p => ({ id: p.id, name: p.name, items: [], follow: null }));
   }
@@ -6590,7 +7119,10 @@ remoteWrap('step', (orig, dir) => {
   remoteSend([dir > 0 ? 'next' : 'previous', ...(aim || [])]);
 });
 remoteWrap('clear', (orig, layer) => remoteSend(['clear', layer || 'all']));
-remoteWrap('showMedia', (orig, id) => { const m = mediaById(id); if (m) remoteSend(['media', 'show', m.num || m.name]); });
+// A media item is named to the app by its own id where the app takes one (its bin part says by_id), never by its place in the
+// bin: with tiles dragged to new places a number can be a second stale, and a tap would show a different picture (the app's
+// media-updates review, 28 November). An older app, which knows only numbers and names, gets those.
+remoteWrap('showMedia', (orig, id) => { const m = mediaById(id); if (m) remoteSend(['media', 'show', REMOTE.mediaById ? m.id : m.num || m.name]); });
 remoteWrap('playMediaPlaylist', (orig, id) => { const mp = byId(DOC.mediaPlaylists, id); if (mp) remoteSend(['media-playlist', 'play', mp.name]); });
 remoteWrap('versionUse', (orig, id, keep) => remoteSend(id ? ['version', 'use', versionName(id), ...(keep ? ['--keep'] : [])] : ['version', 'off']));
 remoteWrap('mutate', () => refuse(AT_THE_COMPUTER));
@@ -7094,6 +7626,7 @@ const DEMOS = {
   bible: () => { lookUp(parseRef('ps 23 1-4')); go('bible', null, 1); }, bibleRows: () => { state.mode = 'bible'; B().fold = false; B().view = 'slides'; render(); }, bibleOptions: () => { state.mode = 'bible'; render(); A.bibleOptions(); },
   bibles: () => { state.mode = 'bible'; render(); A.biblesSheet(); },
   biblenew: () => { state.bibleNew = true; DEMOS.bible(); }, biblesnew: () => { state.bibleNew = true; DEMOS.bible(); A.bbOpen(); }, biblenewone: () => { state.bibleNew = true; B().rows.splice(1); DEMOS.bible(); }, biblenewpassage: () => { state.bibleNew = true; B().opts.per = 'passage'; B().opts.refAt = 'none'; DEMOS.bible(); },
+  boxtab: () => { DEMOS.edit(); state.itab = 'Box'; render(); }, boxgrad: () => { DEMOS.edit(); state.ipop = 'boxgrad'; render(); }, boxoutline: () => { DEMOS.boxtab(); state.ipop = 'boxoutline'; render(); },
   edit: () => { enterEdit(DOC.playlists[0].items[3].id, 2); state.sels = [edTarget().holder.objects[0].id]; state.itab = 'Text'; render(); }, editShape: () => { enterEdit(DOC.playlists[0].items[3].id, 0); edInsert('shape', 'star'); }, textnew: () => { state.inspNew = true; DEMOS.edit(); }, textnewshadow: () => { state.inspNew = true; state.ipop = 'shadow'; DEMOS.edit(); }, textnewspacing: () => { state.inspNew = true; state.ipop = 'spacing'; DEMOS.edit(); }, textnewlines: () => { state.inspNew = true; state.ipop = 'lines'; DEMOS.edit(); }, textnewgrad: () => { state.inspNew = true; state.ipop = 'gradient'; DEMOS.edit(); },
   themes: () => { state.mode = 'themes'; render(); }, layout: () => editOther('layout', DOC.stageLayouts[0].id), prop: () => editOther('prop', DOC.props[1].id),
   settings: () => { state.mode = 'settings'; render(); }, integrations: () => { state.mode = 'settings'; state.section = 'Integrations'; render(); }, groups: () => { state.mode = 'settings'; state.section = 'Groups'; render(); },
@@ -7133,6 +7666,7 @@ const DEMOS = {
   dbg: () => { const sc = document.createElement('script'); sc.src = 'dbg.js'; document.body.appendChild(sc); },
   identify: () => { state.mode = 'settings'; state.identify = true; render(); }, ann: () => { state.ann = { song: DOC.songs[5].id, q: 0, left: 8 }; render(); },
 };
+if (q.get('boxold')) state.boxNew = false;      // the Box tab as it was, for comparison
 if (DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
 // The two screen switches are written in the page itself: their keys, as the computer names them
 for (const [id, k] of [['outAudience', '⇧⌘1'], ['outStage', '⇧⌘2']]) { const b = $(id); if (b) { b.title = b.title.replace(k, keyText(k)); const t = b.querySelector('.kh'); if (t) t.textContent = keyText(k); } }
@@ -7209,7 +7743,27 @@ Object.assign(DEMOS, {      // Testing aids: notices, the status button and its 
   notesnew: () => { toast('“Harbour Lights” added to Wednesday Evening'); trouble('SoftPresenter didn’t answer. Open it, then connect again.'); render(); },
   // A newer build installed over the running copy (as built, 24 November): said once, as information; nothing restarts by itself
   reports: () => { A.setup([4]); }, reportseu: () => { state.reportsEU = true; DOC.settings.reports = null; A.setup([4]); },
-  ndi: () => { state.mode = 'settings'; state.section = 'Integrations'; state.integ = 'ndi'; render(); }, ndinewer: () => { state.ndiNewer = true; DEMOS.ndi(); A.ndiUp(['check']); }, ndicardnone: () => { state.ndi = 'none'; DEMOS.ndi(); },
+  // Request an Integration: the card, and its window empty, filled, sending, sent, and failed
+  integask: () => { state.mode = 'settings'; state.section = 'Integrations'; state.integ = null; state.integAsk = null; render(); A.integAsk(); },
+  integaskcard: () => { state.mode = 'settings'; state.section = 'Integrations'; state.integ = null; render(); const el = document.querySelector('.st-icard.more'); if (el) el.scrollIntoView({ block: 'end' }); },
+  integaskfilled: () => { DEMOS.integask(); Object.assign(askSt(), { app: 'Planning Center', what: 'Bring this week’s plan in as a playlist, with its songs in order.', how: 'Our worship leader plans every Sunday there.' }); askSheet(); },
+  integasksending: () => { DEMOS.integaskfilled(); askSt().phase = 'sending'; askSheet(); }, integasksent: () => { DEMOS.integaskfilled(); askSt().phase = 'sent'; askSheet(); },
+  integaskfail: () => { DEMOS.integaskfilled(); Object.assign(askSt(), { phase: 'failed', why: 'network' }); askSheet(); },
+  // a screen's VoxLive captions switch (shown while VoxLive is connected and has screens)
+  scrvox: () => { DOC.voxlive.connected = true; state.mode = 'settings'; state.section = 'Screens'; state.scrOpen = DOC.screens[0].id; state.scrFine = true; render(); const el = document.querySelector('[data-a^="scrVox:"]'); if (el) el.scrollIntoView({ block: 'center' }); },
+  scrvoxoff: () => { DOC.screens[0].vox = false; DEMOS.scrvox(); },
+  // Stream Deck and Companion: the card's page in each state, the pairing window in each state, and the Phone remote page
+  deck: () => { DOC.settings.remote = true; rmSet(); state.mode = 'settings'; state.section = 'Integrations'; state.integ = 'deck'; render(); },
+  decknone: () => { const r = rmSet(); r.devices = r.devices.filter(d => d.kind !== 'paired'); DEMOS.deck(); },
+  deckoff: () => { DEMOS.deck(); DOC.settings.remote = false; render(); }, decknopw: () => { const r = rmSet(); r.devices = r.devices.filter(d => d.kind !== 'paired'); r.password = false; DEMOS.deck(); DOC.settings.remote = false; render(); },
+  decklocal: () => { rmSet().local = true; rmSet().pages = []; DEMOS.deck(); },
+  deckpair: () => { DEMOS.decknone(); A.deckPair(); }, deckedit: () => { DEMOS.deckpair(); A.deckEdit(); },
+  deckpaired: () => { DEMOS.deckpair(); deckStop(); deckDone(); deckSheet(); render(); }, deckexpired: () => { DEMOS.deckpair(); deckStop(); deckP().phase = 'expired'; deckSheet(); },
+  deckclosed: () => { DEMOS.deckpair(); deckStop(); deckP().phase = 'closed'; deckSheet(); }, deckpairlocal: () => { rmSet().local = true; rmSet().pages = []; DEMOS.decknone(); A.deckPair(); },
+  rmdevices: () => { DOC.settings.remote = true; rmSet(); state.mode = 'settings'; state.section = 'Phone remote'; render(); }, rmlocal: () => { rmSet().local = true; rmSet().pages = []; DEMOS.rmdevices(); },
+  ndi: () => { state.mode = 'settings'; state.section = 'Integrations'; state.integ = 'ndi'; render(); },
+  // Windows, with something on screen: installing waits (open with ?os=windows)
+  ndiheld: () => { state.ndi = 'none'; DEMOS.ndi(); }, ndiheldnewer: () => { state.ndiNewer = true; DEMOS.ndi(); Object.assign(ndiUp(), { phase: 'newer' }); render(); }, ndiheldwindow: () => { state.ndi = 'none'; DEMOS.ndi(); A.ndiIn(['open']); }, ndihelddownloaded: () => { state.ndiNewer = true; DEMOS.ndi(); Object.assign(ndiUp(), { phase: 'downloaded' }); render(); }, ndinewer: () => { state.ndiNewer = true; DEMOS.ndi(); A.ndiUp(['check']); }, ndicardnone: () => { state.ndi = 'none'; DEMOS.ndi(); },
   sundi: () => { state.ndi = 'none'; A.setup([SU_STEPS.indexOf('Screens')]); }, sundiok: () => { state.ndi = 'found'; A.setup([SU_STEPS.indexOf('Screens')]); },
   ndiinstall: () => { state.ndi = 'none'; DEMOS.ndi(); A.ndiIn(['open']); }, ndilicence: () => { state.ndi = 'none'; DEMOS.ndi(); state.ndiIn = null; ndiIn().phase = 'licence'; ndiInSheet(); }, ndiinstaller: () => { state.ndi = 'none'; state.ndiInstaller = true; DEMOS.ndi(); state.ndiIn = null; ndiIn().phase = 'installer'; ndiInSheet(); },
   ndidone: () => { state.ndi = 'none'; DEMOS.ndi(); state.ndiIn = null; ndiIn().phase = 'done'; ndiInSheet(); }, ndiupdate: () => { state.ndiNewer = true; DEMOS.ndi(); Object.assign(ndiUp(), { phase: 'newer' }); A.ndiUp(['update']); }, ndiupdatefail: () => { state.ndiNewer = true; state.ndiFail = 'blocked'; DEMOS.ndi(); Object.assign(ndiUp(), { phase: 'newer' }); A.ndiUp(['update']); },
@@ -7273,7 +7827,7 @@ Object.assign(DEMOS, {
   ndilost: () => { DEMOS.edit(); edInsert('ndi', 'STREAM-PC (Camera 1)'); state.ndiLost = ['STREAM-PC (Camera 1)']; trouble('NDI “Camera 1” stopped sending. Its slides show without it until it is back.'); render(); },
   webadd: () => { DEMOS.edit(); edInsert('web', ''); render(); },
 });
-if (/^(ndi|webadd)/.test(q.get('demo') || '') && DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
+if (/^(ndi|webadd|deck|rmdevices|rmlocal|integask|scrvox)/.test(q.get('demo') || '') && DEMOS[q.get('demo')]) DEMOS[q.get('demo')]();
 // Testing aid: the inspector's tabs for each kind: a picture, a web page's Box, and two kinds picked together
 Object.assign(DEMOS, {
   insppic: () => { DEMOS.edit(); edInsert('media', 'm1'); render(); },
