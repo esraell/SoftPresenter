@@ -444,5 +444,8 @@
   "integrations.ndi.row.hint": "Встановити NDI, перевірити, чи немає новішого, або видалити його",
   "integrations.ndi.held": "Інсталятор NDI скидає мережеві налаштування цього компʼютера. Встановлюйте його, коли на екранах нічого немає.",
   "integrations.ndi.held.key": "Щось на екрані",
-  "integrations.ndi.downloaded": "NDI завантажено."
+  "integrations.ndi.downloaded": "NDI завантажено.",
+  "integrations.ndi.key.install_now": "Встановити",
+  "integrations.ndi.downloaded.update": "Оновлення NDI завантажено.",
+  "integrations.ndi.install_opens": "«Встановити» відкриє інсталятор NDI. Він скидає мережеві налаштування цього компʼютера."
 }

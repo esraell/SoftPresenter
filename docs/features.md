@@ -1945,8 +1945,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     is on screen:** NDI's installer resets the computer's network settings, which would cut
     NDI, a stream or the phone remote, so while a slide or a video is on screen the keys that
     would open it (Install NDI, Install Update, Try Again, and the window's Download) are
-    greyed, with "Something is on screen" and the reason beside them, and an update whose
-    download finishes meanwhile opens NDI's installer only once the screens are clear.
+    greyed, with "Something is on screen" and the reason beside them. An update whose download
+    ends with nothing on screen all the while goes straight on to NDI's installer; if anything
+    came on screen meanwhile it waits ("The NDI update is downloaded.") for the operator's
+    Install, greyed while something is on screen, and nothing ever opens by itself (the screens
+    may clear only between two songs). The installer's signature is checked again right before
+    it runs, the file held against any change until it has started.
   - **Updates.** NDI publishes no list of versions, so Check for Updates (and, at most once a
     day, opening the card; never in the background) asks NDI's server only what it says of
     its download: when it was last changed, the mark that changes with its contents, and its
@@ -1962,11 +1966,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   - **Checked each time it is used.** The NDI in SoftPresenter's own folder is never taken on
     trust: that folder is in the library, which other programs and a syncing service can write
     to. Each time before it counts as installed or is opened, a Mac asks macOS whether the
-    library's code signature is whole and NDI's (`codesign`), and Linux, whose NDI library
-    isn't signed, compares the file's SHA-256 with the one noted when it was installed. A
-    library that doesn't pass is as if it weren't there: NDI "isn't installed", the log says
-    why, and Install NDI puts a good one in its place. The answer is kept while the file's size
-    and date stay the same, and is found on a thread of its own, never the window's.
+    library's code signature is whole and meets a requirement on its certificates (Apple's
+    root, the Developer ID authority, a Developer ID Application certificate of NDI's team:
+    `codesign --verify --strict -R`), and Linux, whose NDI library isn't signed, compares the
+    file's SHA-256 with the one noted beside it when it was installed (which tells a file
+    replaced or damaged, not one changed together with its note). A library that doesn't pass,
+    or can't be opened, is passed over: the computer's own NDI is used if it has one, else NDI
+    "isn't installed"; the log says why, and Install NDI puts a good one in its place. The
+    answer is kept only while the file is the very same one, unchanged, as the system tells it
+    (its inode and change time), and is found on a thread of its own, never the window's.
   NDI screens that found no NDI start at once after an install, without a restart.
 - **DeckLink outputs** (SoftPresenter for Blackmagic Design DeckLink). With Blackmagic's driver,
   Desktop Video 16.0 or later, installed, each output the card offers is a choice for any

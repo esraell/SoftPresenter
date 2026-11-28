@@ -444,5 +444,8 @@
   "integrations.ndi.row.hint": "Установить NDI, проверить, нет ли более нового, или удалить его",
   "integrations.ndi.held": "Установщик NDI сбрасывает сетевые настройки этого компьютера. Устанавливайте его, когда на экранах ничего нет.",
   "integrations.ndi.held.key": "Что-то на экране",
-  "integrations.ndi.downloaded": "NDI скачан."
+  "integrations.ndi.downloaded": "NDI скачан.",
+  "integrations.ndi.key.install_now": "Установить",
+  "integrations.ndi.downloaded.update": "Обновление NDI скачано.",
+  "integrations.ndi.install_opens": "«Установить» откроет установщик NDI. Он сбрасывает сетевые настройки этого компьютера."
 }

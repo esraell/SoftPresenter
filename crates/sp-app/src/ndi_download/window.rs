@@ -44,6 +44,8 @@ enum Asked {
     Begin,
     Accept,
     Finish,
+    /// Install, once a download has waited (Windows).
+    Install,
 }
 
 /// Which step the line marks: none before the download (-1), each step's place, or past the
@@ -83,7 +85,11 @@ fn foot_keys(stage: &Stage, held: bool, installer: bool) -> Vec<FootKey> {
             cancel,
             FootKey { words: t("integrations.ndi.key.download", "Download"), main: true, asks: Asked::Begin, held },
         ],
-        Stage::Fetching | Stage::Held(_) => vec![cancel],
+        Stage::Fetching => vec![cancel],
+        Stage::Held(_) => vec![
+            cancel,
+            FootKey { words: t("integrations.ndi.key.install_now", "Install"), main: true, asks: Asked::Install, held },
+        ],
         Stage::Licence(_) => {
             vec![
                 cancel,
@@ -236,6 +242,7 @@ pub fn window(ctx: &egui::Context, download: &mut NdiDownload, place: Place) {
         Some(Asked::Begin) => download.begin(wake),
         Some(Asked::Accept) => download.accept(wake),
         Some(Asked::Finish) => download.finish(),
+        Some(Asked::Install) => download.install_downloaded(wake),
         None if hide => download.hide(),
         None => {}
     }
@@ -346,7 +353,11 @@ fn step_body(ui: &mut egui::Ui, body: Rect, download: &mut NdiDownload) {
         }
         Stage::Held(_) => {
             lead(ui, super::row::downloaded_words(), TEXT);
-            ui.add(egui::Label::new(egui::RichText::new(super::row::held_words()).size(13.0).color(CARE)).wrap());
+            if download.held() {
+                ui.add(egui::Label::new(egui::RichText::new(super::row::held_words()).size(13.0).color(CARE)).wrap());
+            } else {
+                sub(ui, super::row::install_opens_words());
+            }
         }
         Stage::Fetching => {
             let shared = &download.shared;

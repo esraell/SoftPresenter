@@ -276,8 +276,10 @@ enum Stage {
     Fetching,
     /// Waiting for the operator to accept NDI's licence, or cancel.
     Licence(Box<Ready>),
-    /// Downloaded and checked, on Windows, while something is on screen: NDI's installer, which
-    /// resets the computer's network settings, is opened only once the screens are clear.
+    /// Downloaded and checked, on Windows, where something came on screen meanwhile: NDI's
+    /// installer, which resets the computer's network settings, is never opened by itself (the
+    /// screens may clear only between two songs). It waits for the operator's Install, which
+    /// is greyed while anything is on screen.
     Held(Box<Ready>),
     /// Unpacking into the app's folder, or NDI's own installer open.
     Installing,
@@ -410,6 +412,8 @@ pub struct NdiDownload {
     restart: bool,
     /// Whether anything is on the screens now, as the app last said.
     on_screen: bool,
+    /// Whether anything was on screen at any time since the download under way began.
+    came_on_screen: bool,
     /// For a test or a picture: whether NDI's own installer does the installing, whatever
     /// system this is.
     as_installer: Option<bool>,
@@ -441,6 +445,7 @@ impl Default for NdiDownload {
             changed: false,
             restart: false,
             on_screen: false,
+            came_on_screen: false,
             as_installer: None,
             data: None,
             demo_found: None,
@@ -492,6 +497,18 @@ impl NdiDownload {
     /// The app says, every frame, whether anything is on the screens.
     pub fn set_on_screen(&mut self, on_screen: bool) {
         self.on_screen = on_screen;
+        self.came_on_screen |= on_screen && matches!(self.stage, Stage::Fetching);
+    }
+
+    /// Install, once a download has waited (Windows): opens NDI's installer, unless anything
+    /// is on screen.
+    pub fn install_downloaded(&mut self, wake: impl FnOnce() + Send + 'static) {
+        if self.held() || !matches!(self.stage, Stage::Held(_)) {
+            return;
+        }
+        let Stage::Held(ready) = std::mem::replace(&mut self.stage, Stage::Installing) else { return };
+        crate::applog::event("ndi", "Install was pressed with nothing on screen: opening NDI's installer");
+        self.install(*ready, wake);
     }
 
     /// True while NDI must not be installed: on Windows, where NDI's installer resets the
@@ -620,6 +637,14 @@ impl NdiDownload {
                 Stage::Licence(Box::new(Ready { download: PathBuf::new(), taken, marks: Marks::default() }))
             }
             "installing" => Stage::Installing,
+            // Windows: an update downloaded, waiting for Install (greyed: something is on screen).
+            "helddownloaded" => {
+                self.as_installer = Some(true);
+                self.on_screen = true;
+                self.update = true;
+                let ready = Ready { download: PathBuf::new(), taken: Taken::Installer, marks: Marks::default() };
+                Stage::Held(Box::new(ready))
+            }
             // Windows with something on screen: the row's keys, and the window's Download, greyed.
             "held" | "heldnewer" | "heldwindow" => {
                 self.as_installer = Some(true);
@@ -707,6 +732,7 @@ impl NdiDownload {
         };
         self.shared = Arc::default();
         self.note = None;
+        self.came_on_screen = self.on_screen;
         let (shared, tx) = (self.shared.clone(), self.tx.clone());
         let (address, way, stand_in) = source().clone();
         crate::applog::event("ndi", "downloading NDI from NDI's server");
@@ -907,12 +933,6 @@ impl NdiDownload {
                 Finished::Version(version) => self.asked_version = Some(version),
             }
         }
-        // The screens are clear: NDI's installer, held back while something was on, opens.
-        if matches!(self.stage, Stage::Held(_)) && !self.held() {
-            let Stage::Held(ready) = std::mem::replace(&mut self.stage, Stage::Installing) else { return };
-            crate::applog::event("ndi", "the screens are clear: opening NDI's installer");
-            self.install(*ready, || {});
-        }
     }
 
     /// A download is read through: its licence is shown, or, where it is the one accepted
@@ -921,9 +941,11 @@ impl NdiDownload {
         crate::applog::event("ndi", &format!("NDI {} downloaded", ready.version().unwrap_or("")));
         let accepted = self.installed().map(|installed| installed.licence.clone()).unwrap_or_default();
         let same = self.update && !accepted.is_empty() && accepted == licence_mark(ready.licence());
-        if self.held() {
-            // NDI's installer waits until nothing is on screen (`poll` opens it then).
-            crate::applog::event("ndi", "something is on screen: NDI's installer waits until the screens are clear");
+        if self.installer() && (self.held() || self.came_on_screen) {
+            // Something is on screen, or was while it downloaded: NDI's installer waits for the
+            // operator's Install. (With nothing on screen all the while, it goes straight on:
+            // the operator has only just pressed the key.)
+            crate::applog::event("ndi", "something came on screen: NDI's installer waits for Install to be pressed");
             self.stage = Stage::Held(Box::new(ready));
         } else if self.installer() || same {
             // The install's thread wakes the window that the download's thread woke last.

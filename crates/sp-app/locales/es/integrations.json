@@ -465,5 +465,8 @@
   "integrations.ndi.row.hint": "Instala NDI, busca uno más nuevo o quítalo",
   "integrations.ndi.held": "El instalador de NDI restablece los ajustes de red de este ordenador. Instálalo cuando no haya nada en pantalla.",
   "integrations.ndi.held.key": "Hay algo en pantalla",
-  "integrations.ndi.downloaded": "NDI está descargado."
+  "integrations.ndi.downloaded": "NDI está descargado.",
+  "integrations.ndi.key.install_now": "Instalar",
+  "integrations.ndi.downloaded.update": "La actualización de NDI está descargada.",
+  "integrations.ndi.install_opens": "Instalar abre el instalador de NDI. Restablece los ajustes de red de este ordenador."
 }

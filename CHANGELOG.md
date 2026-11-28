@@ -17,8 +17,8 @@ Settings and playlists that couldn't be saved are tried again.
 ### Better
 
 - **NDI trouble in plain words.** When NDI can't be downloaded, SoftPresenter says whether there is no internet, the network blocked the secure connection, the disk is full or the download wasn't what NDI usually sends, with Try Again.
-- **NDI is checked before it is used.** The NDI that SoftPresenter keeps in its own folder is checked each time before it is used, so a file put there by anything else is never run; SoftPresenter then says NDI isn't installed, and Install NDI puts it right.
-- **NDI on Windows waits for clear screens.** NDI's own installer resets a PC's network settings, so on Windows the keys that install or update NDI are greyed while anything is on screen, and say so.
+- **NDI is checked before it is used.** The NDI that SoftPresenter keeps in its own folder is checked each time before it is used. On a Mac, macOS must find NDI's own signature on it. On Linux, where NDI's file isn't signed, it must still be the file SoftPresenter installed, by a fingerprint noted beside it; that catches a file that was replaced or damaged, not someone who can change both. A file that fails is not used: SoftPresenter uses the computer's own NDI if there is one, or says NDI isn't installed, and Install NDI puts it right.
+- **NDI on Windows waits for clear screens.** NDI's own installer resets a PC's network settings, so on Windows the keys that install or update NDI are greyed while anything is on screen, and say so. An update that finishes downloading after something came on screen waits for you to press Install; it never opens NDI's installer by itself.
 
 ### Fixed
 
