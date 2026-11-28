@@ -222,9 +222,9 @@ Two things are optional:
   accept NDI's licence: into SoftPresenter's own folder on a Mac and Linux, with no password;
   through NDI's own installer on Windows. An NDI already on the computer (NDI Tools) is used
   as it is.
-- **Desktop Video** 16.0 or later (free, from Blackmagic Design, for the Mac, Windows and
-  Linux) to play a screen out of a DeckLink card. Without it there are no DeckLink outputs to
-  choose.
+- **Desktop Video** 16.0 or later (free, from Blackmagic Design) to play a screen out of a
+  DeckLink card, on a Mac or Linux. The Windows version has no DeckLink outputs yet. Without
+  Desktop Video there are no DeckLink outputs to choose.
 - **An app that opens presentation files**, only to bring a presentation in as pictures of its
   slides (a `.key` file needs the app that made it). A `.pptx` can come in as editable slides
   with none installed, and PDFs and pictures need none either.
