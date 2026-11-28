@@ -5319,12 +5319,14 @@ impl App {
         }
     }
 
-    /// Enter: the slide picked goes on screen; otherwise the open item of the playlist from its
-    /// first slide, with a library listed the song chosen, and in the Bible view nothing (see
+    /// Enter: the slide picked goes on screen (at the place in the order sung it was clicked at:
+    /// `HomeState::pick_command`); otherwise the open item of the playlist from its first slide,
+    /// with a library listed the song chosen, and in the Bible view nothing (see
     /// `running::enter`).
     fn enter_key(&mut self) {
         let Some(state) = self.running.as_ref().map(|r| &r.home_state) else { return };
         let picked = state.pick(&self.show);
+        let picked_command = state.pick_command(&self.show);
         let listed = if state.bible_open {
             running::Listed::Bible
         } else if state.playlist_open {
@@ -5337,7 +5339,7 @@ impl App {
             _ => Vec::new(),
         };
         match running::enter(&stops, listed, picked) {
-            Some(running::Do::Show(command)) => self.apply(vec![command]),
+            Some(running::Do::Show(command)) => self.apply(vec![picked_command.unwrap_or(command)]),
             Some(running::Do::Start { item, last }) => self.start_item(item, last),
             Some(running::Do::Say(_) | running::Do::Stay(_)) | None => {}
         }
@@ -16359,8 +16361,9 @@ mod tests {
                 running::Listed::Library
             };
             self.entered.push(self.state.services.chosen);
+            let picked_command = self.state.pick_command(&self.show);
             if let Some(running::Do::Show(command)) = running::enter(&[], listed, picked) {
-                self.show.apply(command);
+                self.show.apply(picked_command.unwrap_or(command));
             }
         }
 

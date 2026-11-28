@@ -101,13 +101,15 @@ impl ItemPicks {
 }
 
 /// A slide picked to go on screen next by Enter (see [`HomeState::pick`]): where it is; in the
-/// Bible view, the passage it is in, as the page names what it shows; and the slide on screen
-/// when it was picked.
+/// Bible view, the passage it is in, as the page names what it shows; the slide on screen when
+/// it was picked; and, for a slide picked by a click on a tile under an arrangement, its place
+/// in the order sung (a group sung again is the same slide at several places).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Picked {
     pub at: SlideRef,
     pub passage: Option<String>,
     pub live_then: Option<SlideRef>,
+    pub step: Option<usize>,
 }
 
 /// A drag across a list that picks out what it passes over. It starts on an item (or, in the
@@ -2391,6 +2393,23 @@ impl HomeState {
         Some(SlideRef { presentation: slot, slide })
     }
 
+    /// What puts the slide picked on screen (Enter, Show Selected, Space taking the pick): to the
+    /// place in the order sung it was clicked at, while that place is still that slide, so the
+    /// next slide is the one after that place; otherwise the slide, as ever.
+    pub fn pick_command(&self, show: &Show) -> Option<Command> {
+        let at = self.pick(show)?;
+        let song = show.presentations().get(at.presentation);
+        let step = self
+            .picked
+            .as_ref()
+            .and_then(|picked| picked.step)
+            .filter(|step| song.is_some_and(|song| song.order().get(*step) == Some(&at.slide)));
+        Some(match step {
+            Some(step) => Command::GoToStep { presentation: at.presentation, step },
+            None => Command::GoTo(at),
+        })
+    }
+
     /// What the slide picked is, for the refusal's cue that says Enter puts it on screen.
     pub fn picked_word(&self, show: &Show) -> Option<&'static str> {
         self.pick(show)?;
@@ -2401,7 +2420,7 @@ impl HomeState {
     /// passage the Bible view shows (`bible`), or a slide of the song chosen.
     pub fn set_pick(&mut self, show: &Show, at: SlideRef, bible: bool) {
         let passage = bible.then(|| self.bible.shown.clone());
-        self.picked = Some(Picked { at, passage, live_then: show.live() });
+        self.picked = Some(Picked { at, passage, live_then: show.live(), step: None });
         self.pick_scroll = 12;
     }
 
@@ -2789,10 +2808,11 @@ impl HomeState {
     }
 
     /// Coming from SoftProjector (`true`) or not, as the first-time setup asks: the key layout
-    /// becomes Like SoftProjector (or Standard), and what puts a slide on screen goes back to
-    /// following it, a double-click (or one click), until the person chooses in Settings › Keys.
-    /// The layout is set only when it changes, so rows changed by hand in it stay.
-    #[cfg_attr(not(test), allow(dead_code))] // The first-time setup's question calls it.
+    /// becomes Like SoftProjector (or Standard), and Show a slide with goes back to following
+    /// it, a double-click (or one click), forgetting a choice made in Settings › Keys. A layout
+    /// already chosen is left as it is, with any rows changed by hand in it; changing the layout
+    /// sets every row to the new layout's, as the Key layout switch does.
+    #[cfg_attr(not(test), allow(dead_code))] // Called by the first-time setup's question.
     pub fn set_coming_from_softprojector(&mut self, coming: bool) {
         let style =
             if coming { crate::key_table::KeyStyle::SoftProjector } else { crate::key_table::KeyStyle::SoftPresenter };
@@ -14716,8 +14736,9 @@ mod tests {
         } else {
             crate::running::Listed::Library
         };
+        let picked_command = state.pick_command(show);
         if let Some(crate::running::Do::Show(command)) = crate::running::enter(&[], listed, state.pick(show)) {
-            show.apply(command);
+            show.apply(picked_command.unwrap_or(command));
         }
     }
 

@@ -68,8 +68,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   audience screen. Set to A Double-Click (Settings › Keys' Show a slide with), a click on a slide
   of the song, passage or presentation on screen still puts it on, but a click on a slide of
   anything else only picks it for Enter, and a double-click (both clicks on that slide) puts it
-  on; a double-click on the slide on screen does nothing more. A playlist's Bible passage that
-  isn't on screen opens its item with a click and goes on with a double-click. A slide in the grid is its picture with a strip under it: its number, its
+  on; a double-click on the slide on screen does nothing more. A click on a verse of a playlist's Bible
+  passage not on screen looks it up and picks that verse (Enter puts that verse on), and a
+  double-click puts it on. A click on a group an arrangement sings again picks it at that place
+  in the order sung, where Enter puts it (and the outline is drawn); the arrangement's pills still
+  go on with one click. A slide in the grid is its picture with a strip under it: its number, its
   group's dot and name (heavier on the group's first slide), small tags for a hot key, a time
   after which it goes on, actions, a transition of its own or being switched off, then a pencil
   (the editor) and ⋯ (its menu, as a right-click). The slide on screen has an orange ring and

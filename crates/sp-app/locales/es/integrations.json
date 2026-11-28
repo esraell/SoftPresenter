@@ -10,7 +10,7 @@
   "integrations.voxlive.row.hint": "Conecta VoxLive o mira sus pantallas",
   "integrations.canva.about.short": "El vídeo de anuncios, al día con tu presentación de Canva",
   "integrations.canva.row.hint": "Conecta Canva Sync, elige la presentación o sincroniza ahora",
-  "integrations.voxlive.about": "VoxLive traduce el sermón mientras se predica y lo muestra como subtítulos en sus pantallas. Una vez conectado, SoftPresenter muestra las pantallas de VoxLive de tu iglesia como las diapositivas de un elemento VoxLive (en BIBLIOTECA y en las listas) y en la pestaña VoxLive junto a las pantallas: un clic pone los subtítulos en pantalla en lugar de un versículo, y un clic en el versículo lo vuelve a poner.",
+  "integrations.voxlive.about": "VoxLive traduce el sermón mientras se predica y lo muestra como subtítulos en sus pantallas. Una vez conectado, SoftPresenter muestra las pantallas de VoxLive de tu iglesia como las diapositivas de un elemento VoxLive (en BIBLIOTECA y en las listas) y en la pestaña VoxLive junto a las pantallas: pon una en pantalla y sus subtítulos ocupan el lugar de un versículo; vuelve a poner el versículo para recuperarlo.",
   "integrations.voxlive.key": "Clave",
   "integrations.disconnect": "Desconectar",
   "integrations.voxlive.disconnect.line": "Desconectar olvida la clave en este ordenador (sigue en VoxLive hasta que la revoques allí)",

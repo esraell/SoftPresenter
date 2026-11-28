@@ -500,7 +500,7 @@ fn voxlive_page(ui: &mut egui::Ui, view: &mut View) {
         ui,
         t(
             "integrations.voxlive.about",
-            "VoxLive translates the sermon as it is preached, and shows it as captions on its screens. Connected, SoftPresenter shows your church's VoxLive screens as the slides of a VoxLive item (under LIBRARY, and in playlists) and in the VoxLive tab beside the screens: one click puts the captions on screen in place of a verse, and a click on the verse brings it back.",
+            "VoxLive translates the sermon as it is preached, and shows it as captions on its screens. Connected, SoftPresenter shows your church's VoxLive screens as the slides of a VoxLive item (under LIBRARY, and in playlists) and in the VoxLive tab beside the screens: put one on screen and its captions take the place of a verse; put the verse on again to bring it back.",
         ),
     );
     match (view.status.clone(), view.key_hint.clone()) {

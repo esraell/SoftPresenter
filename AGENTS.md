@@ -275,7 +275,7 @@ process, and nextest gives each test a process of its own). One test alone:
   Like SoftProjector, for the people coming from it, who look for it by name. The interface
   may name SoftProjector only for that layout (the switch, the line beside it and Reset to
   Defaults' hints, in every language), for the line beside Show a slide with's A Double-Click
-  under it (the owner's choice, 27 November 2026: a double-click as SoftProjector has it) and
+  under it (the design session's wording, 27 November 2026; the owner is confirming) and
   where the importers say what they read; the docs and
   the changelog may name it only where they describe that layout (Show a slide with, which
   follows it, too) or an import. SoftProjector

@@ -564,8 +564,17 @@ impl SlideDeck {
 
     /// Picks a slide of the deck for Enter, as a click does when set to a double-click (Settings
     /// › Keys): its song is chosen and its item opened, as when it goes on screen, but nothing
-    /// goes on screen. It is in view already, so the view stays where it is.
-    fn pick_slide(&self, show: &Show, state: &mut HomeState, here: SlideRef, commands: &mut Vec<Command>) {
+    /// goes on screen. Under an arrangement it keeps the place in the order sung clicked
+    /// (`step`), for Enter to go to (`HomeState::pick_command`). It is in view already, so the
+    /// view stays where it is.
+    fn pick_slide(
+        &self,
+        show: &Show,
+        state: &mut HomeState,
+        here: SlideRef,
+        step: Option<usize>,
+        commands: &mut Vec<Command>,
+    ) {
         let bible = state.bible_view_now();
         if !bible && show.selected() != here.presentation && !commands.contains(&Command::Select(here.presentation)) {
             commands.push(Command::Select(here.presentation));
@@ -574,7 +583,41 @@ impl SlideDeck {
             state.services.chosen = self.item;
         }
         state.set_pick(show, here, bible);
+        if let Some(picked) = state.picked.as_mut() {
+            picked.step = step;
+        }
         state.pick_scroll = 0;
+    }
+
+    /// Picks a slide of a playlist's Bible passage for Enter, as a click does when set to a
+    /// double-click: the passage is looked up as a click on its slide looks it up (into the Bible
+    /// page's place not on screen), and once the app has put it there its slide is the one
+    /// picked, the passage chosen and its item opened; nothing goes on screen.
+    fn pick_passage_slide(&self, show: &Show, state: &mut HomeState, slide: usize, commands: &mut Vec<Command>) {
+        if self.item.is_some() {
+            state.services.chosen = self.item;
+        }
+        let Some(saved) = &self.passage else { return };
+        state.bible.open_saved(saved, show.live().map(|at| at.presentation), crate::home::SlidesOf::Passage);
+        state.bible.go_live = None;
+        let made = state.bible.pending.as_ref().map(|(slot, passage)| (*slot, passage.slide_count()));
+        if let Some((slot, _)) = made.filter(|(_, count)| slide < *count) {
+            commands.push(Command::Select(slot));
+            state.set_pick(show, SlideRef { presentation: slot, slide }, false);
+            state.pick_scroll = 0;
+        }
+    }
+
+    /// Whether `at` is a slide of this deck when the deck is a playlist's Bible passage: in one
+    /// of the Bible page's places, made of the same passage (by its name, as `live_slide` knows
+    /// it on screen).
+    fn passage_holds(&self, show: &Show, state: &HomeState, at: SlideRef) -> bool {
+        self.at.is_none()
+            && state.bible.slots.is_some_and(|slots| slots.contains(&at.presentation))
+            && show
+                .presentations()
+                .get(at.presentation)
+                .is_some_and(|up| up.title == self.deck.title && at.slide < self.deck.slide_count())
     }
 }
 
@@ -1313,8 +1356,12 @@ fn draw_slides(
         }
     }
     let live = deck.live_slide(show, state);
-    // The slide picked to go on screen next by Enter: drawn picked out, never orange.
+    // The slide picked to go on screen next by Enter: drawn picked out, never orange. A
+    // playlist's passage picked is in a Bible page's place, which its tiles know by its name;
+    // a slide picked at a place in the order sung is drawn at that place.
     let cue = state.pick(show);
+    let passage_cue = cue.filter(|cue| deck.passage_holds(show, state, *cue)).map(|cue| cue.slide);
+    let cue_step = state.picked.as_ref().and_then(|picked| picked.step);
     // The tiles in the order they stand: as written, or in the order sung.
     let order = entries(song);
     let arranged = song.active_arrangement().is_some();
@@ -1445,7 +1492,7 @@ fn draw_slides(
                             }
                             None => deck.show_slide(show, state, index, commands),
                         },
-                        Some(ClickDoes::Pick) => deck.pick_slide(show, state, here, commands),
+                        Some(ClickDoes::Pick) => deck.pick_slide(show, state, here, entry.step, commands),
                         Some(ClickDoes::Nothing) | None => {}
                     }
                 }
@@ -1454,8 +1501,8 @@ fn draw_slides(
                 }
             }
             // A playlist's Bible passage: a click puts the slide on screen, and that is all. Set to
-            // a double-click, a click on one not on screen opens its item only (its slides are
-            // not among the show's yet, to be picked), and a double-click puts the slide on.
+            // a double-click, a click on one not on screen looks it up and picks the slide, for
+            // Enter, and a double-click puts the slide on.
             None => {
                 if response.clicked() {
                     let does = click_does(state, &response, live.is_some(), live == Some(index));
@@ -1465,8 +1512,8 @@ fn draw_slides(
                     state.picking = Picking::Nothing;
                     match does {
                         ClickDoes::Show => deck.show_slide(show, state, index, commands),
-                        ClickDoes::Pick if deck.item.is_some() => state.services.chosen = deck.item,
-                        ClickDoes::Pick | ClickDoes::Nothing => {}
+                        ClickDoes::Pick => deck.pick_passage_slide(show, state, index, commands),
+                        ClickDoes::Nothing => {}
                     }
                 }
             }
@@ -1486,7 +1533,15 @@ fn draw_slides(
         let is_live = live_at == Some(at);
         // The slide that waits for Enter: in ink, never orange, and not the blue of slides
         // picked out to change several at once.
-        let cued = !is_live && !entry.again && here.is_some() && cue == here;
+        let picked_here = match here {
+            Some(here) => cue == Some(here),
+            None => passage_cue == Some(index),
+        };
+        let at_its_place = match cue_step {
+            Some(step) => entry.step == Some(step),
+            None => !entry.again,
+        };
+        let cued = !is_live && picked_here && at_its_place;
         let picked =
             !cued && here.is_some_and(|here| state.selected_slide == Some(here) || state.picked_slides.contains(&here));
         // A slide of the passage asked for, among its chapter's on the Bible page: a fine faint
@@ -3728,7 +3783,7 @@ mod tests {
     }
 
     #[test]
-    fn set_to_a_double_click_a_playlists_passage_not_on_screen_opens_with_a_click_and_goes_on_with_a_double_click() {
+    fn set_to_a_double_click_a_click_on_a_playlists_passage_picks_that_verse_for_enter_and_a_double_click_shows_it() {
         let (mut show, mut state) = playlist(&[("Alpha", 1)]);
         state.choose_slide_click(crate::key_table::SlideClick::Double);
         let slots = [show.add_presentation(song("", 0)), show.add_presentation(song("", 0))];
@@ -3736,21 +3791,69 @@ mod tests {
         let saved = SavedPassage { lookup: "John 3:16-18".to_owned(), ..state.bible.settings() };
         state.services.add(Item::Passage(saved));
         state.services.chosen = Some(0);
-        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        let alpha_on = SlideRef { presentation: 0, slide: 0 };
+        show.apply(Command::GoTo(alpha_on));
         let ctx = egui::Context::default();
         frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.0);
         frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.1);
         let alpha = rect_of(&state, 0, 0);
         let second = alpha.center() + vec2(alpha.width() + GAP_X, alpha.height() + INSET + ITEM_BAR + INSET);
-        // One click: the passage's item opens; nothing is looked up or goes on screen.
+        // One click on John 3:17: the passage is looked up, its item opened; nothing goes on.
         let asked = press_and_release(&ctx, &mut show, &mut state, second, 0.5);
         assert!(!went_live(&asked), "{asked:?}");
-        assert!(state.bible.pending.is_none() && state.bible.go_live.is_none(), "nothing looked up");
+        assert!(state.bible.go_live.is_none(), "nothing to go on screen");
         assert_eq!(state.services.chosen, Some(1), "its item is the open one");
-        // The second click of a double-click: looked up, that verse to go on screen.
+        let (slot, passage) = state.bible.pending.take().expect("the passage was looked up");
+        assert!(asked.contains(&Command::Select(slot)), "{asked:?}");
+        // As the app does next: the passage goes into its place; the verse clicked is picked.
+        show.replace_presentation(slot, Arc::new(passage));
+        frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.55);
+        let verse = SlideRef { presentation: slot, slide: 1 };
+        assert_eq!(state.pick(&show), Some(verse), "John 3:17 picked");
+        assert_eq!(show.live(), Some(alpha_on), "Alpha stays on screen");
+        assert!(state.playlist_open, "the playlist stays");
+        // Enter (Show Selected, Space taking the pick) puts that verse on, not the passage's first.
+        assert_eq!(state.pick_command(&show), Some(Command::GoTo(verse)));
+        let listed = crate::running::Listed::Playlist(state.services.chosen);
+        assert_eq!(
+            crate::running::enter(&[], listed, state.pick(&show)),
+            Some(crate::running::Do::Show(Command::GoTo(verse)))
+        );
+        // The second click of a double-click on it: looked up again, that verse to go on screen.
         press_and_release(&ctx, &mut show, &mut state, second, 0.6);
         assert_eq!(state.bible.go_live, Some(1), "the second verse");
         assert!(state.bible.pending.is_some());
+    }
+
+    #[test]
+    fn set_to_a_double_click_a_group_sung_again_picked_by_a_click_goes_on_at_that_place() {
+        let (mut show, mut state) = arranged();
+        state.choose_slide_click(crate::key_table::SlideClick::Double);
+        // The song was on screen and was cleared: nothing is on screen, so a click only picks.
+        show.apply(Command::GoTo(SlideRef { presentation: 0, slide: 0 }));
+        show.apply(Command::ClearAll);
+        let ctx = egui::Context::default();
+        frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.0);
+        frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.1);
+        // Verse 2 is the fifth tile; the one before it is the chorus sung the third time.
+        let (_, place) = state.slide_rects.iter().find(|(at, _)| at.slide == 2).copied().expect("Verse 2's tile");
+        let third = Rect::from_min_size(place.min - vec2(place.width() + GAP_X, 0.0), place.size());
+        let asked = press_and_release(&ctx, &mut show, &mut state, third.center(), 0.5);
+        assert!(!went_live(&asked), "{asked:?}");
+        let chorus = SlideRef { presentation: 0, slide: 1 };
+        assert_eq!(state.pick(&show), Some(chorus));
+        // Enter goes to that place in the order sung …
+        let enter = state.pick_command(&show);
+        assert_eq!(enter, Some(Command::GoToStep { presentation: 0, step: 3 }));
+        show.apply(enter.expect("picked"));
+        assert_eq!(show.live(), Some(chorus));
+        assert_eq!(show.position().map(|(step, _)| step), Some(3));
+        // … so Next goes on to Verse 2, not to the chorus after the first.
+        show.apply(Command::Next);
+        assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 2 }));
+        // A slide picked by the keys has no place: Enter puts the slide on, as ever.
+        state.set_pick(&show, chorus, false);
+        assert_eq!(state.pick_command(&show), Some(Command::GoTo(chorus)));
     }
 
     #[test]
