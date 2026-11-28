@@ -296,7 +296,7 @@ pub struct Look {
     /// are on screen it shows nothing on the slide layer, as if that layer were cleared on it
     /// alone; its other layers are as ever, and once a verse or anything else is put up it shows
     /// that as usual. On unless switched off, so only "off" is written, and a look saved before
-    /// the switch shows the captions.
+    /// the switch shows the captions. Show Everything leaves it as it is.
     #[serde(skip_serializing_if = "is_on")]
     pub voxlive: bool,
     pub color: Rgba,
@@ -370,14 +370,15 @@ impl Look {
         *self == Look::default()
     }
 
-    /// Every layer and VoxLive's captions, black, nothing covered: the look given back by Show
-    /// Everything, which keeps whether the screen is see-through or a key, so a stream never
-    /// turns solid by it.
+    /// Every layer, black, nothing covered: the look given back by Show Everything, which keeps
+    /// whether the screen is see-through or a key, and whether it shows VoxLive's captions, so a
+    /// stream never turns solid by it, nor gets the captions back.
     pub fn everything(self) -> Look {
-        Look { see_through: self.see_through, key_of: self.key_of, ..Look::default() }
+        Look { see_through: self.see_through, key_of: self.key_of, voxlive: self.voxlive, ..Look::default() }
     }
 
-    /// True when it shows every layer, black, nothing covered, whatever its background.
+    /// True when it shows every layer, black, nothing covered, whatever its background and its
+    /// VoxLive captions switch.
     pub fn shows_everything(&self) -> bool {
         self.everything() == *self
     }
@@ -1098,9 +1099,12 @@ mod tests {
         let text = to_json(std::slice::from_ref(&stream));
         assert!(text.contains("\"voxlive\": false"), "{text}");
         assert_eq!(from_json(&text), Ok(vec![stream.clone()]));
-        // Show Everything switches it back on, with the layers.
-        assert!(!stream.look.shows_everything(), "a screen without the captions is changed");
-        assert!(stream.look.everything().voxlive && stream.look.everything().shows_everything());
+        // Show Everything gives back the layers only: it never puts the captions back on a stream.
+        assert!(stream.look.shows_everything(), "nothing there for Show Everything to give back");
+        let changed = Look { media: false, slides: false, ..stream.look };
+        let everything = changed.everything();
+        assert!(!changed.shows_everything() && everything.shows_everything());
+        assert!(everything.slides && everything.media && !everything.voxlive, "the layers back, the captions not");
     }
 
     #[test]

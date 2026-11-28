@@ -2244,10 +2244,11 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   place of the slide."; the line keeps the room of the longer of the two, so switching moves
   nothing). It is on for every screen until
   switched off, screens saved before it included, and is kept with the screen's look; Show
-  Everything switches it back on with the layers, and Settings › Screens' Details say "no
-  VoxLive captions" beside the layers. Off (a stream that carries the songs and the Bible, say),
-  while VoxLive's captions are on screen that screen shows nothing on the slide layer, as if it
-  alone were cleared, going there with the transition a clear has; its media, props, messages and
+  Everything gives back the layers and leaves it as it is, so it never puts the captions back on
+  a stream, and Settings › Screens' Details say "no VoxLive captions" beside the layers. Off (a stream that carries the songs and the Bible, say),
+  while VoxLive's captions are on screen (one of the VoxLive item's slides, or a slide whose own
+  boxes or layout behind it, in the theme version that is on, show a VoxLive screen's live
+  display) that screen shows nothing on the slide layer, as if it alone were cleared, going there with the transition a clear has; its media, props, messages and
   announcements are as ever, and once a verse or anything else is put up it shows that as usual.
   Switched while the captions are up, it changes at once. NDI and DeckLink outputs (fill and key
   too) send nothing of the captions, and a stage screen's picture of such a screen shows what it
@@ -2672,7 +2673,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   pattern. Once shown, it keeps running for 15 minutes after it leaves the screens (a screen's
   switch turned off counts as leaving them), so going back to the captions from a verse is at
   once, with no reload. A slide of your own with a web page box showing a VoxLive screen's live
-  display counts as VoxLive's captions too.
+  display, or one whose theme layout has such a box, counts as VoxLive's captions too.
 
 ## Remote Control
 - **Settings › Phone remote** is four cards in the look of the rest of Settings, every hint a

@@ -4944,8 +4944,7 @@ mod tests {
         let show = sp_engine::Show::new(vec![Arc::new(song), Arc::new(crate::voxlive::item(&[fake]))]);
         let usual = sp_model::Transition::of(sp_model::TransitionKind::Dissolve);
         let frame = move |show: &sp_engine::Show| Frame {
-            voxlive: show.live().is_some_and(|at| at.presentation == 1)
-                || show.live_slide().is_some_and(|(_, slide)| crate::shows_voxlive_display(slide)),
+            voxlive: crate::voxlive_captions(show, 1, None),
             ..frame_of(show, crate::slide_transition(show, usual))
         };
         (show, frame)

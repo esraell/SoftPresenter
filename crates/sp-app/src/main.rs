@@ -1016,13 +1016,32 @@ fn follow_voxlive_item(
     gone
 }
 
-/// True when a slide has a web page box (shown) whose page is a VoxLive screen's live display:
-/// VoxLive's captions, live.
-fn shows_voxlive_display(slide: &Slide) -> bool {
-    slide
-        .objects
+/// True when these objects (a slide's, or those of the layout behind it) have a web page box,
+/// shown, whose page is a VoxLive screen's live display: VoxLive's captions, live.
+fn shows_voxlive_display(objects: &[sp_model::Object]) -> bool {
+    objects
         .iter()
         .any(|object| !object.hidden && matches!(&object.kind, sp_model::ObjectKind::Web { url } if web_costs(url)))
+}
+
+/// The objects of the layout drawn behind a slide (`sp_render::layout_objects`) in its theme,
+/// in the theme version that is on, when the theme has that version for the slide.
+fn layout_behind(slide: &Slide, theme: &Theme, version: Option<Uuid>) -> Option<Slide> {
+    let shown = version.and_then(|version| theme.slide_in_version(slide, version));
+    sp_render::layout_objects(shown.as_ref().unwrap_or(slide), theme)
+}
+
+/// True while the slide on screen shows VoxLive's live captions: one of the VoxLive item's
+/// slides (its place among the presentations is `voxlive_slot`), or any slide with a web page
+/// box showing a VoxLive screen's live display (the page that joins the captions), its own or in
+/// the layout behind it (`behind`, as `layout_behind` gives it, in the theme version that is
+/// on). An audience screen whose look leaves VoxLive's captions out shows nothing on the slide
+/// layer meanwhile (`output::slide_shown`), and the live display is opened for the screens only
+/// while a screen going out shows them.
+fn voxlive_captions(show: &Show, voxlive_slot: usize, behind: Option<&Slide>) -> bool {
+    show.live().is_some_and(|at| at.presentation == voxlive_slot)
+        || show.live_slide().is_some_and(|(_, slide)| shows_voxlive_display(&slide.objects))
+        || behind.is_some_and(|behind| shows_voxlive_display(&behind.objects))
 }
 
 /// A web page box's page wanted: what its pictures are shown under (`sp_render::web_key`), its
@@ -3926,8 +3945,7 @@ impl App {
         let (at, (_, slide)) = (self.show.live()?, self.show.live_slide()?);
         let theme = self.theme_of(at.presentation);
         let version = self.running.as_ref().and_then(|running| running.home_state.version_switch.version());
-        let shown = version.and_then(|version| theme.slide_in_version(slide, version));
-        sp_render::layout_objects(shown.as_ref().unwrap_or(slide), theme)
+        layout_behind(slide, theme, version)
     }
 
     fn sync_slide_video(&mut self) {
@@ -3993,13 +4011,9 @@ impl App {
         }
     }
 
-    /// True while the slide on screen shows VoxLive's live captions: one of the VoxLive item's
-    /// slides, or any slide with a web page box showing a VoxLive screen's live display (the
-    /// page that joins the captions). An audience screen whose look leaves VoxLive's captions out
-    /// shows nothing on the slide layer meanwhile (`output::slide_shown`).
+    /// True while the slide on screen shows VoxLive's live captions (see `voxlive_captions`).
     fn voxlive_on_screen(&self) -> bool {
-        self.show.live().is_some_and(|at| at.presentation == self.voxlive_slot)
-            || self.show.live_slide().is_some_and(|(_, slide)| shows_voxlive_display(slide))
+        voxlive_captions(&self.show, self.voxlive_slot, self.live_layout_objects().as_ref())
     }
 
     /// Opens the pages web page boxes want, and closes the rest. The boxes on the slide on screen
@@ -4013,8 +4027,8 @@ impl App {
     /// when the pages on screen changed (the screens are then told of them by
     /// `refresh_output`).
     fn sync_web_pages(&mut self) -> bool {
-        let voxlive = self.voxlive_on_screen();
         let behind = self.live_layout_objects();
+        let voxlive = voxlive_captions(&self.show, self.voxlive_slot, behind.as_ref());
         let mut wanted = {
             let mut live: Vec<&[sp_model::Object]> = Vec::new();
             if let Some((_, slide)) = self.show.live_slide() {
@@ -15025,17 +15039,48 @@ mod tests {
     }
 
     #[test]
+    fn a_voxlive_box_in_the_layout_behind_the_slide_counts_as_captions_in_the_version_that_is_on() {
+        let live_url = "https://voxlive.app/listen/grace/screen/abc2345";
+        let song = sp_model::parse_song_text("Psalm", "The first verse\n");
+        let mut show = sp_engine::Show::new(vec![std::sync::Arc::new(song)]);
+        show.apply(sp_engine::Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
+        let slide = show.live_slide().map(|(_, slide)| slide.clone()).expect("a slide on screen");
+        // No VoxLive box anywhere: a song, not captions (the VoxLive item's place is elsewhere).
+        let mut theme = sp_model::Theme::builtin();
+        let behind = super::layout_behind(&slide, &theme, None);
+        assert!(!super::voxlive_captions(&show, 9, behind.as_ref()));
+        // A VoxLive box in the layout the slide is drawn with: captions.
+        let used = theme.template_for(&slide).expect("a layout for the slide").id;
+        let layout = theme.templates.iter_mut().find(|template| template.id == used).expect("the layout");
+        let mut usual = layout.clone();
+        layout.objects.push(sp_model::Object::web(live_url.to_owned()));
+        let behind = super::layout_behind(&slide, &theme, None);
+        assert!(super::voxlive_captions(&show, 9, behind.as_ref()), "the layout's box");
+        // A theme version with one: captions only while that version is on.
+        let mut plain = sp_model::Theme::builtin();
+        usual.id = sp_model::Uuid::new_v4();
+        usual.songs = true;
+        usual.objects.push(sp_model::Object::web(live_url.to_owned()));
+        let version = sp_model::Uuid::new_v4();
+        plain.versions.push(sp_model::ThemeVersion { id: version, name: "Stream".to_owned(), templates: vec![usual] });
+        let behind = super::layout_behind(&slide, &plain, None);
+        assert!(!super::voxlive_captions(&show, 9, behind.as_ref()), "the usual look has none");
+        let behind = super::layout_behind(&slide, &plain, Some(version));
+        assert!(super::voxlive_captions(&show, 9, behind.as_ref()), "the version's layout has one");
+    }
+
+    #[test]
     fn voxlives_captions_are_its_items_slides_and_any_box_showing_a_live_display() {
         let item = fake_voxlive_item();
         let (_, captions) = item.slide(0).expect("a slide");
-        assert!(super::shows_voxlive_display(captions));
+        assert!(super::shows_voxlive_display(&captions.objects));
         let page = |url: &str| sp_model::Slide::new(vec![sp_model::Object::web(url.to_owned())]);
-        assert!(super::shows_voxlive_display(&page("https://voxlive.app/listen/grace/screen/abc2345")));
-        assert!(!super::shows_voxlive_display(&page("https://voxlive.app/listen/grace/screen/abc2345?demo=1")));
-        assert!(!super::shows_voxlive_display(&page("https://example.com/clock")));
+        assert!(super::shows_voxlive_display(&page("https://voxlive.app/listen/grace/screen/abc2345").objects));
+        assert!(!super::shows_voxlive_display(&page("https://voxlive.app/listen/grace/screen/abc2345?demo=1").objects));
+        assert!(!super::shows_voxlive_display(&page("https://example.com/clock").objects));
         let mut hidden = page("https://voxlive.app/listen/grace/screen/abc2345");
         hidden.objects[0].hidden = true;
-        assert!(!super::shows_voxlive_display(&hidden), "a hidden box shows nothing");
+        assert!(!super::shows_voxlive_display(&hidden.objects), "a hidden box shows nothing");
         // The captions have no transition of their own: they go on as a clear goes off.
         let mut show = sp_engine::Show::new(vec![std::sync::Arc::new(item)]);
         show.apply(sp_engine::Command::GoTo(sp_engine::SlideRef { presentation: 0, slide: 0 }));
