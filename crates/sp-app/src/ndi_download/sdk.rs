@@ -533,7 +533,11 @@ fn each_entry(tar: &mut dyn Read, visit: &mut Visit<'_>) -> Result<(), Problem> 
             Some(size) => size,
             None => number(&header[124..136])?,
         };
-        let padding = size.next_multiple_of(512) - size;
+        // (A size so large its padding can't be worked out is no entry of NDI's.)
+        let padding = size
+            .checked_next_multiple_of(512)
+            .map(|padded| padded - size)
+            .ok_or_else(|| Problem::Damaged("a tar entry's size is beyond any file".to_owned()))?;
         let flag = header[156];
         match flag {
             b'L' => {
@@ -851,6 +855,25 @@ mod tests {
 
     fn read_bytes(name: &str, bytes: &[u8], processor: &str) -> Result<Contents, Problem> {
         read(&saved(name, bytes), processor, &AtomicBool::new(false))
+    }
+
+    #[test]
+    fn an_entry_whose_size_is_near_the_largest_number_is_refused_not_added_up() {
+        // A header in GNU's binary form saying the entry is 2^64 - 1 bytes long.
+        let mut header = [0u8; 512];
+        header[..4].copy_from_slice(b"huge");
+        header[100..108].copy_from_slice(b"0000644\0");
+        header[124] = 0x80;
+        header[128..136].copy_from_slice(&u64::MAX.to_be_bytes());
+        header[156] = b'0';
+        header[257..263].copy_from_slice(b"ustar\0");
+        header[148..156].copy_from_slice(b"        ");
+        let sum: u32 = header.iter().map(|b| u32::from(*b)).sum();
+        header[148..156].copy_from_slice(format!("{sum:06o}\0 ").as_bytes());
+        let mut tar = header.to_vec();
+        tar.extend_from_slice(&[0u8; 1024]);
+        let visited = each_entry(&mut tar.as_slice(), &mut |_: &Entry, _: &mut dyn Read| Ok(true));
+        assert!(matches!(visited, Err(Problem::Damaged(_))), "{visited:?}");
     }
 
     #[test]
