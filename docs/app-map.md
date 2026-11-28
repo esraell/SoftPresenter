@@ -208,16 +208,16 @@ show from here. Only the keys that clear reach the screens (`home_key_command` i
   typed in, and font, size, B I U S and colour then change only those words, a half-lit key or
   "Mixed" showing where they differ; Copy style and Paste style are keys at its foot, with Back
   to theme and Clear word styles under the dots beside them; in a template, Holds says which of a slide's words the box takes), Shape (which shape, fill, gradient, outline), Picture and Video (the file's name and how it
-  fits; a video's line says it plays from the start while the slide is on screen), Web Page, NDI Source, AirPlay, Screen. Then Box, the same for every kind (place
-  and size, lining up, rotation with the two flips after the angle, opacity, fill and outline for all but shapes, shadow,
-  order, Rename (which retypes the name in the Objects list), Duplicate and Delete (their names where the three fit one line, else all three as picture keys: `object_keys_named`), Undo, Redo, Reset to theme), and Animation (how an object comes on and
+  fits; a video's line says it plays from the start while the slide is on screen), Web Page, NDI Source, AirPlay, Screen (each of these that shows a picture ends with Behind, the object's `fill`; `fill_rows`). Then Box, the same seven rows for every kind (Place,
+  Align with the six line-up keys and, for three or more, the two that spread, Rotate with the two flips after the angle, Opacity, Effects: Outline (not for a shape) and Shadow, each a switch with dots that open its panel (`switch_with_more`, `Panel::BoxOutline`, `Panel::BoxShadow`),
+  Order, Object: Rename (which retypes the name in the Objects list), Duplicate and Delete (their names where the three fit one line, else all three as picture keys: `object_keys_named`), Undo, Redo, Reset to theme), and Animation (how an object comes on and
   goes off; not on a theme's template or a stage layout). Several objects of different kinds
   have Box and Animation only, under a line saying how many and what. With nothing picked the
   column has a plain heading (SLIDE, PROP, THEME SLIDE, LAYOUT); under SLIDE are the group the slide is in, with Change… (the song's groups to choose from, asked of the app as `SlideRequest::Group`, a step of the Edit view's Undo), and the slide's own Label, Template and Go to Next (`slide_panel`; its notes are the footer's Slide Notes). Every row is a caption in small
   capitals in a column at the left (`row`), then its controls: separate keys (`square_key`,
   `word_key`), numbers, menus, and colours as a row of swatches that always fits one line, ending
   in a well for any colour (`swatch_row`). A row that belongs to a switch on the same tab
-  (Shadow, Outline, a gradient's To, Covers, a build's rows) stays while the switch is off,
+  (a shape's gradient's To, a build's rows) stays while the switch is off,
   greyed, so no row moves on a click.
 - **Footer** (at the foot of the inspector): Slide Notes, Live Edit (changes reach the screens
   as they are made), Done.

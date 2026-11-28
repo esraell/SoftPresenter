@@ -103,9 +103,6 @@
   "inspector.shape.stroke.hint": "Dibujar una línea alrededor del cuadro o de la forma",
   "inspector.stroke.width": "Grosor",
   "inspector.shadow": "Sombra",
-  "inspector.shape.shadow.hint": "Poner una sombra suave bajo el cuadro o la forma",
-  "inspector.shadow.opacity": "Opacidad",
-  "inspector.shadow.colour": "Color de la sombra",
   "inspector.shadow.angle": "Ángulo",
   "inspector.shadow.offset": "Distancia",
   "inspector.shadow.blur": "Desenfoque",
@@ -196,7 +193,6 @@
   "inspector.row.to": "Hasta",
   "inspector.row.outline": "Contorno",
   "inspector.row.place": "Posición",
-  "inspector.row.arrange": "Organizar",
   "inspector.row.rotate": "Rotar",
   "inspector.row.effects": "Efectos",
   "inspector.row.order": "Orden",
@@ -296,5 +292,6 @@
   "inspector.spacing.title": "Márgenes y espaciado",
   "inspector.outline.off": "El contorno está desactivado. Su color se conserva para cuando se active.",
   "inspector.shadow.off": "La sombra está desactivada. Su aspecto se conserva para cuando se active.",
-  "inspector.panel.close": "Cerrar"
+  "inspector.panel.close": "Cerrar",
+  "inspector.box_shadow.off": "La sombra está desactivada. Actívala para ajustar su aspecto."
 }

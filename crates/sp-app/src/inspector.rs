@@ -230,11 +230,6 @@ fn typed_percent(typed: &str) -> Option<f64> {
     number.parse().ok()
 }
 
-/// A number box for a percentage from 0 to 100, written as the language writes it.
-fn percent_box(value: egui::DragValue<'_>) -> egui::DragValue<'_> {
-    value.range(0.0..=100.0).custom_formatter(|n, _| percent_text(n)).custom_parser(typed_percent)
-}
-
 /// How wide the box with a slider's percentage is: room for "100 %", so the slider stays as long
 /// whatever it says.
 const PERCENT_BOX: f32 = 59.0;
@@ -1594,9 +1589,15 @@ fn tabs_for(state: &HomeState) -> Vec<(InspectorTab, &'static str)> {
 /// when it is left (with https:// put in front of a bare name). An address that isn't https is
 /// refused, and says so. A box just added hands the field the keyboard, so the address can be
 /// typed at once; `address` says so, and for how long (see [`AddressField`]).
-fn web_address(ui: &mut egui::Ui, object: sp_model::Uuid, url: &mut String, address: &mut Option<AddressField>) {
+fn web_address(
+    ui: &mut egui::Ui,
+    object: sp_model::Uuid,
+    url: &mut String,
+    address: &mut Option<AddressField>,
+    also: &[&str],
+) -> f32 {
     let caption = t("inspector.row.address", "Address");
-    let column = caption_column(ui, &[caption]);
+    let column = caption_column(ui, &[&[caption][..], also].concat());
     let id = ui.make_persistent_id(("web address", object));
     let bad_id = id.with("refused");
     let mut typed = ui.data_mut(|data| data.get_temp::<String>(id)).unwrap_or_else(|| url.clone());
@@ -1608,7 +1609,7 @@ fn web_address(ui: &mut egui::Ui, object: sp_model::Uuid, url: &mut String, addr
             .align(Align2::LEFT_CENTER);
         field = Some(ui.add_sized([control_room(column), KEY], edit));
     });
-    let Some(field) = field else { return };
+    let Some(field) = field else { return column };
     let has_keys = |ui: &egui::Ui| ui.memory(|memory| memory.has_focus(field.id));
     if ui.data_mut(|data| data.remove_temp::<bool>(egui::Id::unique("web address focus"))).is_some() {
         field.request_focus();
@@ -1641,6 +1642,7 @@ fn web_address(ui: &mut egui::Ui, object: sp_model::Uuid, url: &mut String, addr
         let live = t("inspector.web.live", "The page shows, live, while the slide is on screen.");
         line_of_words(ui, live, crate::studio::TEXT_DIM);
     }
+    column
 }
 
 /// How a picture sits in its box: a row with the three ways.
@@ -1662,14 +1664,15 @@ fn ndi_source(
     view: &mut crate::ndi_in::NdiView,
     installed: bool,
     download: &mut crate::ndi_download::NdiDownload,
-) {
+    also: &[&str],
+) -> f32 {
     let captions = [
         t("inspector.row.source", "Source"),
         t("inspector.row.fits", "Fits"),
         t("inspector.ndi.quality", "Quality"),
         t("inspector.ndi.sound", "Sound"),
     ];
-    let column = caption_column(ui, &captions);
+    let column = caption_column(ui, &[&captions[..], also].concat());
     let room = control_room(column);
     let stopped = !source.is_empty() && view.stopped.contains(source);
     let runtime = installed && !view.unavailable;
@@ -1739,12 +1742,7 @@ fn ndi_source(
         "inspector.ndi.sound.later.hint",
         "The setting is kept. SoftPresenter has no way yet to play a source\u{2019}s sound.",
     ));
-}
-
-/// True for the kinds whose box shows a picture from somewhere: a picture or video, a web page,
-/// an NDI source, AirPlay, a screen picture.
-fn shows_a_picture(kind: &ObjectKind) -> bool {
-    !matches!(kind, ObjectKind::Text { .. } | ObjectKind::Shape { .. })
+    column
 }
 
 /// Which of the fill's rows a tab has, for what is picked.
@@ -1808,34 +1806,8 @@ fn outline_row(ui: &mut egui::Ui, column: f32, object: &mut sp_model::Object) {
     });
 }
 
-/// A shadow's rows: Angle, Offset and Blur, and under them its Opacity and colour. `on` is whether
-/// there is a shadow: without one the rows stay, greyed, so no row under them moves.
-fn shadow_rows(ui: &mut egui::Ui, column: f32, on: bool, look: &mut sp_model::Shadow) {
-    let room = control_room(column);
-    let each = mini_width(room, 3);
-    row_tall(ui, column, t("inspector.shadow", "Shadow"), MINI, |ui| {
-        ui.add_enabled_ui(on, |ui| {
-            mini(ui, each, tk("inspector.shadow.angle", "Angle"), &mut look.angle, |d| {
-                d.range(0.0..=360.0).suffix("°")
-            });
-            mini(ui, each, tk("inspector.shadow.offset", "Offset"), &mut look.offset, |d| {
-                d.speed(0.5).range(0.0..=200.0)
-            });
-            mini(ui, each, tk("inspector.shadow.blur", "Blur"), &mut look.blur, |d| d.speed(0.5).range(0.0..=200.0));
-        });
-    });
-    row_tall(ui, column, "", MINI, |ui| {
-        ui.add_enabled_ui(on, |ui| {
-            let shown = (look.opacity * 100.0).round();
-            let mut percent = shown;
-            mini(ui, each, tk("inspector.shadow.opacity", "Opacity"), &mut percent, percent_box);
-            if percent != shown {
-                look.opacity = percent / 100.0;
-            }
-            colour_well(ui, each, KEY, &mut look.color, t("inspector.shadow.colour", "Shadow colour"));
-        });
-    });
-}
+/// How wide the line round a box is when Outline is switched on, in slide units.
+const BOX_OUTLINE: f32 = 4.0;
 
 /// The shadow a box or a shape starts with: 75 % black, falling down and to the right.
 const BOX_SHADOW: sp_model::Shadow =
@@ -1869,20 +1841,45 @@ fn flip_mark(painter: &egui::Painter, cell: Rect, across: bool, ink: Color32) {
     painter.add(egui::Shape::convex_polygon(vec![c + a, c + b, c + tip], ink, Stroke::NONE));
 }
 
-/// The object's own tab for everything but text: what makes it what it is.
+/// The captions of the rows for the colour behind a box that shows a picture.
+fn behind_captions(rows: FillRows) -> Vec<&'static str> {
+    let mut captions = vec![t("inspector.row.behind", "Behind")];
+    if rows.gradient {
+        captions.extend([t("inspector.row.gradient", "Gradient"), t("inspector.row.to", "To")]);
+    }
+    captions
+}
+
+/// The object's own tab for everything but text: what makes it what it is. For a shape that
+/// is which shape, its fill and its outline. A box that shows a picture (a picture, a video, a
+/// web page, an NDI source, AirPlay, a screen picture) ends with Behind: the colour of the box
+/// itself, which shows in the bars beside the picture and while it hasn't come.
 fn kind_tab(ui: &mut egui::Ui, state: &mut HomeState) {
     let stage = state.editing.as_ref().is_some_and(crate::stage_editor::is_stage) && state.theme_edit.is_none();
     let screens = if stage { state.screens.clone() } else { Vec::new() };
     let address = &mut state.inspector.address;
+    let gradient_rows_for = &mut state.inspector.gradient_rows_for;
     let (ndi_view, ndi_installed, ndi_download) = (&mut state.ndi, state.ndi_available, &mut state.ndi_download);
     let mirror_view = &state.mirror;
-    let Some(object) = state.editing.as_mut().and_then(|draft| draft.selected_object_mut()) else {
+    let Some(draft) = state.editing.as_mut() else { return nothing_selected(ui) };
+    // Gradient and To are there only for a box saved with a gradient (by an older version), so
+    // nothing saved is out of reach. Whether they show is settled when the boxes are picked,
+    // not as they are changed: a gradient set to None here leaves its rows where they are.
+    let picked = draft.selection();
+    if draft.slide.objects.iter().any(|object| picked.contains(&object.id) && object.gradient.is_some()) {
+        gradient_rows_for.clone_from(&picked);
+    }
+    let behind = FillRows { behind: true, gradient: *gradient_rows_for == picked };
+    let also = behind_captions(behind);
+    let Some(object) = draft.selected_object_mut() else {
         return nothing_selected(ui);
     };
     let object_id = object.id;
     // A screen picture: which screen it shows, its corners and its label.
     if matches!(object.kind, ObjectKind::Screen { .. }) {
-        return crate::stage_editor::screen_settings(ui, object, &screens);
+        crate::stage_editor::screen_settings(ui, object, &screens);
+        let column = caption_column(ui, &also);
+        return fill_rows(ui, column, object, behind);
     }
     if let ObjectKind::Shape { shape } = &mut object.kind {
         let captions = [
@@ -1908,11 +1905,13 @@ fn kind_tab(ui: &mut egui::Ui, state: &mut HomeState) {
         outline_row(ui, column, object);
         return;
     }
-    match &mut object.kind {
-        ObjectKind::Text { .. } | ObjectKind::Shape { .. } | ObjectKind::Screen { .. } => {}
+    let mut video = false;
+    let column = match &mut object.kind {
+        ObjectKind::Text { .. } | ObjectKind::Shape { .. } | ObjectKind::Screen { .. } => return,
         // A picture: how it sits in its place.
         ObjectKind::Image { file, fit } => {
-            let captions = [t("inspector.row.file", "File"), t("inspector.row.fits", "Fits")];
+            let captions =
+                [&[t("inspector.row.file", "File"), t("inspector.row.fits", "Fits")][..], &also[..]].concat();
             let column = caption_column(ui, &captions);
             // The file by its name alone, cut short where it is long and whole under the pointer.
             let name = std::path::Path::new(file.as_str()).file_name().map(|name| name.to_string_lossy().into_owned());
@@ -1925,30 +1924,37 @@ fn kind_tab(ui: &mut egui::Ui, state: &mut HomeState) {
                 });
             });
             fits_row(ui, column, "picture fit", fit);
-            if is_video_file(file) {
-                let plays = t("inspector.video.plays", "It plays from the start while the slide is on screen.");
-                line_of_words(ui, plays, crate::studio::TEXT_DIM);
-            }
+            video = is_video_file(file);
+            column
         }
         // A web page: its address. The page is laid out at the box's size.
-        ObjectKind::Web { url } => web_address(ui, object_id, url, address),
+        ObjectKind::Web { url } => web_address(ui, object_id, url, address, &also),
         // An NDI source: which one, and how its picture is received and shown.
         ObjectKind::Ndi { source, scaling, quality, sound } => {
-            ndi_source(ui, object_id, (source, scaling, quality, sound), ndi_view, ndi_installed, ndi_download);
+            let ndi = (source, scaling, quality, sound);
+            ndi_source(ui, object_id, ndi, ndi_view, ndi_installed, ndi_download, &also)
         }
         // AirPlay: who is showing a screen, and how its picture sits in the box.
         ObjectKind::Mirror { scaling } => {
             let ink = if mirror_view.on { crate::studio::TEXT_DIM } else { crate::studio::CARE };
             line_of_words(ui, &crate::mirror::line(mirror_view), ink);
-            let column = caption_column(ui, &[t("inspector.row.fits", "Fits")]);
+            let column = caption_column(ui, &[&[t("inspector.row.fits", "Fits")][..], &also[..]].concat());
             fits_row(ui, column, "mirror fits", scaling);
+            column
         }
+    };
+    fill_rows(ui, column, object, behind);
+    if video {
+        let plays = t("inspector.video.plays", "It plays from the start while the slide is on screen.");
+        line_of_words(ui, plays, crate::studio::TEXT_DIM);
     }
 }
 
-/// The Box tab, the same for every kind of object: where it sits and how big it is, lining it
-/// up, turning it, how solid it is, the colour in it and the line round it (a shape's are on
-/// its own tab), its shadow and mirroring, its place in the layers, its name, and Delete.
+/// The Box tab, the same seven rows for every kind of object: Place, Align, Rotate with the two
+/// flips beside it, Opacity with its number, Effects (Outline and Shadow, each a switch with
+/// the key to its look; a shape's outline is on its own tab), Order and Object. The colour in a
+/// box is not here: a text box's is the Text tab's Behind, a shape's its own tab's Fill, and
+/// one that shows a picture has Behind on its own tab.
 fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let stage = state.editing.as_ref().is_some_and(crate::stage_editor::is_stage) && state.theme_edit.is_none();
     let for_theme = state.theme_edit.is_some() || stage;
@@ -1956,27 +1962,18 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let history = (state.can_undo(false), state.can_undo(true));
     let menu_asked = &mut state.menu_asked;
     let lock_shape = &mut state.inspector.lock_shape;
-    let gradient_rows_for = &mut state.inspector.gradient_rows_for;
+    let panel = &mut state.inspector.panel;
     let rename_started = &mut state.rename_started;
     let Some(draft) = state.editing.as_mut() else { return };
     let picked = draft.selection();
     // With several picked: how many, and what they are.
     let mut kinds: Vec<String> = Vec::new();
-    // A row shows only where it applies to everything picked: a shape's colour and outline are
-    // on its own tab, so with a shape among them the Box tab has neither.
-    let of_picked = |ask: &dyn Fn(&sp_model::Object) -> bool| {
-        draft.slide.objects.iter().filter(|object| picked.contains(&object.id)).any(ask)
-    };
-    let any_shape = of_picked(&|object| matches!(object.kind, ObjectKind::Shape { .. }));
-    // Whether the gradient's rows show is settled when the boxes are picked, not as they are
-    // changed: a gradient set to None here leaves its rows where they are.
-    if of_picked(&|object| object.gradient.is_some()) {
-        gradient_rows_for.clone_from(&picked);
-    }
-    let fill = FillRows {
-        behind: !of_picked(&|object| !shows_a_picture(&object.kind)),
-        gradient: !of_picked(&|object| shows_a_picture(&object.kind)) || *gradient_rows_for == picked,
-    };
+    // A shape's outline is on its own tab, so with a shape among them Effects has Shadow alone.
+    let any_shape = draft
+        .slide
+        .objects
+        .iter()
+        .any(|object| picked.contains(&object.id) && matches!(object.kind, ObjectKind::Shape { .. }));
     for object in draft.slide.objects.iter().filter(|object| picked.contains(&object.id)) {
         let kind = kind_words(&object.kind).to_owned();
         if !kinds.contains(&kind) {
@@ -1989,22 +1986,16 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     };
     let captions = [
         t("inspector.row.place", "Place"),
-        t("inspector.row.arrange", "Arrange"),
+        t("inspector.row.align", "Align"),
         t("inspector.row.rotate", "Rotate"),
         t("inspector.shape.opacity", "Opacity"),
-        t("inspector.shape.fill", "Fill"),
-        t("inspector.row.behind", "Behind"),
-        t("inspector.row.gradient", "Gradient"),
-        t("inspector.row.to", "To"),
-        t("inspector.row.outline", "Outline"),
         t("inspector.row.effects", "Effects"),
-        t("inspector.shadow", "Shadow"),
         t("inspector.row.order", "Order"),
         t("inspector.row.object", "Object"),
     ];
     let column = caption_column(ui, &captions);
     let room = control_room(column);
-    let [place, arrange, rotate, opacity, _, _, _, _, _, effects, _, order, named] = captions;
+    let [place, arrange, rotate, opacity, effects, order, named] = captions;
     if picked.len() > 1 {
         let count = crate::i18n::tn("inspector.several", picked.len() as u64, "{n} object", "{n} objects", &[]);
         scope_line(ui, true, &count, &kinds.join(", "));
@@ -2124,24 +2115,55 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         }
     });
 
-    // A shape's colour and outline are what it is: they are on its own tab.
-    if !any_shape {
-        fill_rows(ui, column, object, fill);
-        outline_row(ui, column, object);
-    }
-
-    row(ui, column, effects, |ui| {
-        let shadow = word_key(ui, t("inspector.shadow", "Shadow"), object.shadow.is_some(), true)
-            .on_hover_text(t("inspector.shape.shadow.hint", "Put a soft shadow under the box or shape"));
-        if shadow.clicked() {
-            object.shadow = object.shadow.is_none().then_some(BOX_SHADOW);
+    // Effects: Outline and Shadow, each a switch with the key to its look beside it.
+    let (outlined, shadowed) = (object.stroke.is_some(), object.shadow.is_some());
+    let effects = row(ui, column, effects, |ui| {
+        if !any_shape {
+            let outline = (t("inspector.row.outline", "Outline"), outlined);
+            let hint = t("inspector.outline.more", "Outline: width and colour");
+            if switch_with_more(ui, panel, Panel::BoxOutline, outline, hint) {
+                object.stroke = (!outlined).then_some(sp_model::StrokeLook { width: BOX_OUTLINE, color: Rgba::WHITE });
+            }
+        }
+        let shadow = (t("inspector.shadow", "Shadow"), shadowed);
+        let hint = t("inspector.shadow.more", "Shadow: angle, offset, blur, opacity and colour");
+        if switch_with_more(ui, panel, Panel::BoxShadow, shadow, hint) {
+            object.shadow = (!shadowed).then_some(BOX_SHADOW);
         }
     });
-    let mut look = object.shadow.unwrap_or(BOX_SHADOW);
-    shadow_rows(ui, column, object.shadow.is_some(), &mut look);
-    if object.shadow.is_some() {
-        object.shadow = Some(look);
-    }
+    let title = t("inspector.row.outline", "Outline");
+    panel_over(ui, panel, (Panel::BoxOutline, false), effects, title, |ui| {
+        let captions = [t("inspector.stroke.width", "Width"), t("inspector.row.colour", "Colour")];
+        let column = caption_column(ui, &captions);
+        let room = panel_room(column);
+        let mut line = object.stroke.unwrap_or(sp_model::StrokeLook { width: 0.0, color: Rgba::WHITE });
+        let before = line;
+        row(ui, column, captions[0], |ui| {
+            number(ui, &mut line.width, NUMBER, |d| d.speed(0.2).range(0.0..=100.0).max_decimals(1))
+                .on_hover_text(t("inspector.shape.stroke.hint", "Draw a line round the box or shape"));
+        });
+        let colours = Swatches { salt: "box outline", room, count: 8, none_too: false, mixed: None };
+        swatches_row(ui, column, captions[1], &colours, |ui, look| swatches(ui, look, &mut line.color));
+        if line != before {
+            // A colour chosen while there is no line draws one, as wide as the switch makes it.
+            if before.width == 0.0 && line.width == 0.0 {
+                line.width = BOX_OUTLINE;
+            }
+            object.stroke = (line.width > 0.0).then_some(line);
+        }
+    });
+    let title = t("inspector.shadow", "Shadow");
+    panel_over(ui, panel, (Panel::BoxShadow, false), effects, title, |ui| {
+        // Without a shadow its rows are there, greyed: a box keeps no look for one it hasn't got.
+        let on = object.shadow.is_some();
+        let mut look = object.shadow.unwrap_or(BOX_SHADOW);
+        shadow_panel(ui, "box shadow", on, &mut look);
+        if on {
+            object.shadow = Some(look);
+        } else {
+            panel_note(ui, t("inspector.box_shadow.off", "Shadow is off. Switch it on to set its look."));
+        }
+    });
 
     let mut restack: Option<bool> = None;
     row(ui, column, order, |ui| {
@@ -3269,7 +3291,7 @@ mod tests {
             (crate::i18n::Language::Ukrainian, "75\u{a0}%", "40\u{a0}%"),
         ] {
             crate::i18n::with_language(language, || {
-                // The Box tab: the object's opacity beside its slider, its shadow's in a box.
+                // The Box tab: the object's opacity beside its slider, its shadow's in its panel.
                 let mut state = editing_text(InspectorTab::Box, false, false);
                 if let Some(object) = state.editing.as_mut().and_then(|draft| draft.selected_object_mut()) {
                     object.opacity = 0.75;
@@ -3277,6 +3299,7 @@ mod tests {
                         sp_model::Shadow { color: Rgba::BLACK, opacity: 0.4, angle: 315.0, offset: 5.0, blur: 5.0 };
                     object.shadow = Some(look);
                 }
+                let mut state = with_panel(state, Panel::BoxShadow);
                 let words = words_drawn(&mut state, &theme);
                 assert!(words.iter().any(|w| w == solid), "{language:?}: {solid} in {words:?}");
                 assert!(words.iter().any(|w| w == shadow), "{language:?}: {shadow} in {words:?}");
@@ -3469,9 +3492,12 @@ mod tests {
                 for (what, mut state, rows) in [
                     // Colour and Behind, each ending in its ramp.
                     ("text", editing_text(InspectorTab::Own, false, false), vec![10, 11]),
+                    // The Box tab has no colours on its rows.
+                    ("text box", editing_text(InspectorTab::Box, false, false), vec![]),
                     // Fill, To and Outline.
-                    ("text box", editing_text(InspectorTab::Box, false, false), vec![10, 9, 6]),
                     ("shape", editing_shape(InspectorTab::Own, false), vec![10, 9, 6]),
+                    // Behind.
+                    ("picture", editing_picture("cross.png", None), vec![10]),
                 ] {
                     let found = swatches_drawn(&mut state, &theme);
                     let mut lines: Vec<(i32, Vec<Rect>)> = Vec::new();
@@ -3809,8 +3835,7 @@ mod tests {
     /// A slide being edited with a picture object for `file` added and picked, on its own tab or
     /// (with a gradient to give it, or `Some(None)` for none) on the Box tab.
     fn editing_picture(file: &str, gradient: Option<Option<sp_model::Gradient>>) -> HomeState {
-        let tab = if gradient.is_some() { InspectorTab::Box } else { InspectorTab::Own };
-        let mut state = editing_text(tab, false, false);
+        let mut state = editing_text(InspectorTab::Own, false, false);
         if let Some(draft) = state.editing.as_mut() {
             let mut object = sp_model::Object::shape(sp_model::Shape::Rectangle);
             object.kind = ObjectKind::Image { file: file.to_owned(), fit: sp_model::ImageFit::Fit };
@@ -3858,9 +3883,19 @@ mod tests {
             let saved = sp_model::Gradient { kind: sp_model::GradientKind::Linear, ..Default::default() };
             let words = words_drawn(&mut editing_picture("cross.png", Some(Some(saved))), &theme);
             assert!(has(&words, "BEHIND") && has(&words, "GRADIENT") && has(&words, "TO"), "{words:?}");
-            // A text box is as before.
-            let words = words_drawn(&mut editing_text(InspectorTab::Box, false, false), &theme);
-            assert!(has(&words, "FILL") && has(&words, "GRADIENT") && !has(&words, "BEHIND"), "{words:?}");
+            // Its Box tab has no row for the colour, nor has a text box's: a text box's is the
+            // Text tab's Behind.
+            for mut state in
+                [editing_picture("cross.png", Some(Some(saved))), editing_text(InspectorTab::Own, false, false)]
+            {
+                state.inspector.tab = InspectorTab::Box;
+                let words = words_drawn(&mut state, &theme);
+                for gone in ["FILL", "BEHIND", "GRADIENT", "TO", "OUTLINE"] {
+                    assert!(!has(&words, gone), "{gone} in {words:?}");
+                }
+            }
+            let words = words_drawn(&mut editing_text(InspectorTab::Own, false, false), &theme);
+            assert!(has(&words, "BEHIND") && !has(&words, "FILL"), "{words:?}");
         });
     }
 
@@ -3956,7 +3991,6 @@ mod tests {
         for language in LANGUAGES {
             crate::i18n::with_language(language, || {
                 let mut state = editing_picture("cross.png", Some(Some(saved)));
-                state.inspector.tab = InspectorTab::Box;
                 let with = words_placed(&mut state, &theme);
                 // Gradient set to None, as its menu does, with the box still picked.
                 if let Some(object) = state.editing.as_mut().and_then(|draft| draft.selected_object_mut()) {
@@ -3973,7 +4007,6 @@ mod tests {
                 assert_eq!(captions(&with), captions(&without), "{language:?}");
                 // Picked again later, a box with no gradient has no rows for one.
                 let mut fresh = editing_picture("cross.png", Some(None));
-                fresh.inspector.tab = InspectorTab::Box;
                 let words = words_placed(&mut fresh, &theme);
                 assert!(!words.iter().any(|(words, ..)| *words == gradient), "{language:?}: {words:?}");
             });
@@ -4112,6 +4145,129 @@ mod tests {
         });
     }
 
+    /// The captions of the rows the inspector draws for `state`, top to bottom.
+    fn captions_drawn(state: &mut HomeState, theme: &Theme) -> Vec<String> {
+        let caption = |words: &str| words.chars().any(char::is_alphabetic) && words == words.to_uppercase();
+        let mut rows: Vec<(i32, String)> = words_placed(state, theme)
+            .into_iter()
+            .filter(|(words, across, _)| *across == 0 && caption(words))
+            .map(|(words, _, down)| (down, words))
+            .collect();
+        rows.sort();
+        rows.into_iter().map(|(_, words)| words).collect()
+    }
+
+    #[test]
+    fn the_box_tab_has_the_same_seven_rows_for_every_kind() {
+        let theme = Theme::builtin();
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let seven = ["PLACE", "ALIGN", "ROTATE", "OPACITY", "EFFECTS", "ORDER", "OBJECT"];
+            let boxed = |mut state: HomeState| {
+                state.inspector.tab = InspectorTab::Box;
+                state
+            };
+            for (what, mut state, outline) in [
+                ("text", boxed(editing_text(InspectorTab::Own, false, false)), true),
+                ("picture", boxed(editing_picture("cross.png", None)), true),
+                ("video", boxed(editing_picture("clip.mp4", None)), true),
+                // A shape's outline is on its own tab: Effects has Shadow alone.
+                ("shape", boxed(editing_shape(InspectorTab::Own, false)), false),
+                ("a shape and a text box", boxed(editing_shape(InspectorTab::Own, true)), false),
+            ] {
+                let rows = captions_drawn(&mut state, &theme);
+                let rows: Vec<&str> = rows.iter().map(String::as_str).filter(|row| !row.contains("OBJECTS")).collect();
+                assert_eq!(rows, seven, "{what}");
+                let words = words_drawn(&mut state, &theme);
+                assert!(words.iter().any(|said| said == "Shadow"), "{what}: {words:?}");
+                assert_eq!(words.iter().any(|said| said == "Outline"), outline, "{what}: {words:?}");
+            }
+        });
+        // Opening Outline's or Shadow's panel moves none of them, in any language.
+        for language in LANGUAGES {
+            crate::i18n::with_language(language, || {
+                let closed = words_placed(&mut editing_text(InspectorTab::Box, false, false), &theme);
+                for panel in [Panel::BoxOutline, Panel::BoxShadow] {
+                    let mut state = with_panel(editing_text(InspectorTab::Box, false, false), panel);
+                    let open = words_placed(&mut state, &theme);
+                    for placed in &closed {
+                        assert!(open.contains(placed), "{language:?} {panel:?}: {placed:?} moved");
+                    }
+                    assert!(open.len() > closed.len(), "{language:?} {panel:?}: the panel has rows of its own");
+                    for key in keys_drawn(&mut state, &theme) {
+                        assert!(key.max.x <= PANEL_WIDTH + 0.5, "{language:?} {panel:?}: {key:?} is past the column");
+                    }
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn the_box_tabs_outline_switches_a_line_on_at_four_points_and_off() {
+        let theme = Theme::builtin();
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let (ctx, mut time) = (crate::studio::tests::styled(), 0.0);
+            let mut state = editing_text(InspectorTab::Box, false, false);
+            let stroke = |state: &HomeState| {
+                state.editing.as_ref().and_then(|draft| draft.selected_object()).and_then(|object| object.stroke)
+            };
+            assert_eq!(stroke(&state), None);
+            click_in(&ctx, &mut time, &mut state, &theme, "Outline");
+            assert_eq!(stroke(&state), Some(sp_model::StrokeLook { width: 4.0, color: Rgba::WHITE }));
+            click_in(&ctx, &mut time, &mut state, &theme, "Outline");
+            assert_eq!(stroke(&state), None, "Outline again takes the line away");
+            // The dots beside it open its panel: Width and Colour.
+            let keys = row_keys(&mut state, &theme, "EFFECTS");
+            click_point(&ctx, &mut time, &mut state, &theme, keys[1].center());
+            assert_eq!(state.inspector.panel, Some(Panel::BoxOutline));
+            let words = words_drawn(&mut state, &theme);
+            assert!(words.iter().any(|said| said == "WIDTH") && words.iter().any(|said| said == "COLOUR"), "{words:?}");
+        });
+    }
+
+    #[test]
+    fn a_fill_saved_with_any_kind_of_box_is_kept_and_has_a_row_on_its_own_tab() {
+        let theme = Theme::builtin();
+        let fill = Rgba { r: 20, g: 40, b: 60, a: 200 };
+        let gradient = sp_model::Gradient {
+            kind: sp_model::GradientKind::Linear,
+            to: Rgba { r: 1, g: 2, b: 3, a: 255 },
+            angle: 30.0,
+        };
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            for (what, state, rows) in [
+                ("text", editing_text(InspectorTab::Own, false, false), vec!["BEHIND"]),
+                ("shape", editing_shape(InspectorTab::Own, false), vec!["FILL", "GRADIENT", "TO"]),
+                ("picture", editing_picture("cross.png", None), vec!["BEHIND", "GRADIENT", "TO"]),
+                ("video", editing_picture("clip.mp4", None), vec!["BEHIND", "GRADIENT", "TO"]),
+            ] {
+                // As a file written by an earlier version has it: the fill and its gradient on
+                // the object, read back from the song's own form.
+                let mut state = state;
+                let draft = state.editing.as_mut().expect("editing");
+                if let Some(object) = draft.selected_object_mut() {
+                    object.fill = Some(fill);
+                    object.gradient = Some(gradient);
+                }
+                let written = serde_json::to_string(&draft.slide).expect("written");
+                draft.slide = serde_json::from_str(&written).expect("read");
+                let before = draft.selected_object().cloned().expect("picked");
+                assert_eq!((before.fill, before.gradient), (Some(fill), Some(gradient)), "{what}");
+                // Every tab drawn: nothing is changed by drawing, and its own tab has the rows.
+                for tab in [InspectorTab::Own, InspectorTab::Box, InspectorTab::Animation] {
+                    state.inspector.tab = tab;
+                    let captions = captions_drawn(&mut state, &theme);
+                    if tab == InspectorTab::Own {
+                        for row in &rows {
+                            assert!(captions.iter().any(|caption| caption == row), "{what}: {row} in {captions:?}");
+                        }
+                    }
+                    let after = state.editing.as_ref().and_then(|draft| draft.selected_object().cloned());
+                    assert_eq!(after.as_ref(), Some(&before), "{what} {tab:?}: drawing changes nothing");
+                }
+            }
+        });
+    }
+
     #[test]
     fn no_control_reaches_past_the_inspectors_right_edge() {
         let theme = Theme::builtin();
@@ -4151,6 +4307,7 @@ mod tests {
                     &mut view,
                     installed,
                     download,
+                    &[],
                 );
             };
             // With NDI here there is no such key.

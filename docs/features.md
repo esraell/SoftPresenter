@@ -1673,11 +1673,18 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   colour's gradient (Kind, Angle, To), upward.
 - **The inspector follows what is picked.** Its first tab is the object's own, named for what
   it is (Text, Shape, Picture, Web Page, NDI Source, AirPlay, Screen); then Box, the same
-  for every kind (place, size, lining up, rotation, opacity, fill, outline, shadow, flip, order,
-  Rename, Duplicate, Delete); then Animation, on slides and props. Box and Animation stay open when another
+  seven rows for every kind: Place, Align (six keys that line it up with the slide, and with
+  three or more picked two that spread them out evenly), Rotate with the two flips beside the
+  angle, Opacity with its percentage, Effects (Outline and Shadow, each a switch with dots
+  beside it that open its look in a small panel over the rows: Outline's width and colour,
+  switched on at 4 points; Shadow's throw, opacity and colour; a shape has Shadow alone here,
+  its outline being on its own tab), Order, and Object (Rename, Duplicate, Delete); then
+  Animation, on slides and props. The colour in a box is set in one place: a text box's on the
+  Text tab's Behind, a shape's on its Shape tab's Fill, and a box that shows a picture on its
+  own tab's Behind. Box and Animation stay open when another
   object is picked. Every row has its name in small capitals at the left; colours are a row of
   swatches with a well for any other colour at its end; and a row that belongs to a switch
-  (Shadow, Outline, a gradient, a build) stays in place, greyed, while the switch is off, so
+  (a shape's gradient, a build) stays in place, greyed, while the switch is off, so
   nothing moves when a key is clicked. Copy style and Paste style are at the foot of the Text
   tab, with Back to theme and Clear word styles under the dots beside them. A shape's tab has a menu to change which shape it is. In a template, a
   text box's tab has Holds: which of a slide's words it takes (the main language, the
@@ -1686,9 +1693,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   from: the slide and the slides after it in its group become that group, as with Group in the
   slide's own menu, and Undo takes it back), then the slide's own Label, Template and Go to
   Next. A picture's or a video's tab names its
-  file. On the Box tab of a box that shows a picture (a picture, video, web page, NDI source,
-  AirPlay or screen), the colour is called Behind: it shows in the bars beside the picture and
-  while it hasn't arrived. With several objects picked, a row is there only if it applies to
+  file. The own tab of a box that shows a picture (a picture, video, web page, NDI source,
+  AirPlay or screen) ends with Behind, the colour of the box itself: it shows in the bars beside
+  the picture and while it hasn't arrived (Gradient and To are there too for a box saved with
+  a gradient). With several objects picked, a row is there only if it applies to
   them all, and a change goes to them all.
 - The keys over the Edit view's lists (Add, Duplicate, Delete, ↑, ↓) show their names where the
   three fit the column at the usual size. In a language whose words are too long for that, all

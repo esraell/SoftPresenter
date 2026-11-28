@@ -104,9 +104,6 @@
   "inspector.shape.stroke.hint": "Обвести рамку чи фігуру лінією",
   "inspector.stroke.width": "Товщина",
   "inspector.shadow": "Тінь",
-  "inspector.shape.shadow.hint": "Додати мʼяку тінь під рамкою чи фігурою",
-  "inspector.shadow.opacity": "Непрозорість",
-  "inspector.shadow.colour": "Колір тіні",
   "inspector.shadow.angle": "Кут",
   "inspector.shadow.offset": "Зсув",
   "inspector.shadow.blur": "Розмиття",
@@ -197,7 +194,6 @@
   "inspector.row.to": "Другий колір",
   "inspector.row.outline": "Контур",
   "inspector.row.place": "Положення",
-  "inspector.row.arrange": "Розташувати",
   "inspector.row.rotate": "Поворот",
   "inspector.row.effects": "Ефекти",
   "inspector.row.order": "Порядок",
@@ -299,5 +295,6 @@
   "inspector.spacing.title": "Поля та інтервали",
   "inspector.outline.off": "Контур вимкнено. Його колір збережеться до ввімкнення.",
   "inspector.shadow.off": "Тінь вимкнено. Її вигляд збережеться до ввімкнення.",
-  "inspector.panel.close": "Закрити"
+  "inspector.panel.close": "Закрити",
+  "inspector.box_shadow.off": "Тінь вимкнено. Увімкніть її, щоб налаштувати вигляд."
 }

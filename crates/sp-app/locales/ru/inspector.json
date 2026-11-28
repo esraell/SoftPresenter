@@ -104,9 +104,6 @@
   "inspector.shape.stroke.hint": "Провести линию вокруг блока или фигуры",
   "inspector.stroke.width": "Толщина",
   "inspector.shadow": "Тень",
-  "inspector.shape.shadow.hint": "Добавить мягкую тень под блоком или фигурой",
-  "inspector.shadow.opacity": "Непрозрачность",
-  "inspector.shadow.colour": "Цвет тени",
   "inspector.shadow.angle": "Угол",
   "inspector.shadow.offset": "Смещение",
   "inspector.shadow.blur": "Размытие",
@@ -197,7 +194,6 @@
   "inspector.row.to": "Второй цвет",
   "inspector.row.outline": "Контур",
   "inspector.row.place": "Положение",
-  "inspector.row.arrange": "Расположить",
   "inspector.row.rotate": "Поворот",
   "inspector.row.effects": "Эффекты",
   "inspector.row.order": "Порядок",
@@ -299,5 +295,6 @@
   "inspector.spacing.title": "Поля и интервалы",
   "inspector.outline.off": "Контур выключен. Его цвет сохранится до включения.",
   "inspector.shadow.off": "Тень выключена. Её вид сохранится до включения.",
-  "inspector.panel.close": "Закрыть"
+  "inspector.panel.close": "Закрыть",
+  "inspector.box_shadow.off": "Тень выключена. Включите её, чтобы настроить вид."
 }
