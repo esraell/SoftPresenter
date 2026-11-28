@@ -351,8 +351,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut HomeState, editor: Editor, bar: &Bar)
     }
     for (kind, rect) in kinds(editor).into_iter().zip(bar.keys.iter().copied()) {
         let key = flat_key(ui, rect, kind, bar.form);
-        // A key that is only its picture says its name; one with its name says what it does.
-        let key = key.hint(if bar.form == Form::Pictures { kind.name() } else { kind.hint() });
+        // A key that is only its picture always says its name, and what it does in its place
+        // while Quick Help is on; one with its name says what it does, with Quick Help on.
+        let key =
+            if bar.form == Form::Pictures { key.name_or_hint(kind.name(), kind.hint()) } else { key.hint(kind.hint()) };
         key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, kind.name()));
         match kind {
             Kind::Shape => {

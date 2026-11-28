@@ -38,6 +38,22 @@ struct FootKey {
     held: bool,
 }
 
+/// What a key of the window's foot does, for Quick Help.
+fn foot_hint(asks: Asked, stage: &Stage) -> &'static str {
+    match asks {
+        Asked::Cancel if matches!(stage, Stage::Failed { .. }) => t("quickhelp.sheet.close", "Close this window."),
+        Asked::Cancel if matches!(stage, Stage::Installing) => {
+            t("quickhelp.ndi.stop_waiting", "Stop waiting for NDI\u{2019}s installer, and close this window.")
+        }
+        Asked::Cancel => t("quickhelp.ndi.cancel", "Stop, and delete what was downloaded."),
+        Asked::Begin if matches!(stage, Stage::Failed { .. }) => t("quickhelp.ndi.again", "Try the download again."),
+        Asked::Begin => t("quickhelp.ndi.download", "Download NDI from NDI\u{2019}s own server."),
+        Asked::Accept => t("quickhelp.ndi.accept", "Accept NDI\u{2019}s licence and install it."),
+        Asked::Install => t("quickhelp.ndi.install", "Install the NDI that was downloaded."),
+        Asked::Finish => t("quickhelp.sheet.close", "Close this window."),
+    }
+}
+
 /// What a key of the window asks for, done once the drawing is over.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Asked {
@@ -183,7 +199,7 @@ pub fn window(ctx: &egui::Context, download: &mut NdiDownload, place: Place) {
     area.show(ctx, |ui| {
         ui.set_clip_rect(screen);
         // The window under it takes the pointer, so nothing there is clicked.
-        ui.allocate_rect(screen, Sense::click());
+        ui.allocate_rect(screen, Sense::click()).no_hint();
         let painter = ui.painter().clone();
         crate::studio::paint_sheet(&painter, screen, sheet);
         let title = if download.update {
@@ -226,8 +242,12 @@ pub fn window(ctx: &egui::Context, download: &mut NdiDownload, place: Place) {
             let look = if key.main { Flat::Main } else { Flat::Plain };
             let id = ui.scope_id().with(("install ndi key", index));
             let pressed = flat_button(ui, at, id, key.words, font, look, !key.held);
-            // Greyed, never live and refusing: the reason is under the pointer.
-            let pressed = if key.held { pressed.hint(super::row::on_screen_words()) } else { pressed };
+            // Greyed, never live and refusing: the reason is under the pointer, Quick Help or not.
+            let pressed = if key.held {
+                pressed.greyed(super::row::on_screen_words())
+            } else {
+                pressed.hint(foot_hint(key.asks, &download.stage))
+            };
             if pressed.clicked() && !key.held {
                 asked = Some(key.asks);
             }
@@ -643,6 +663,41 @@ mod tests {
 
     fn has(words: &[String], wanted: &str) -> bool {
         words.iter().any(|said| said.contains(wanted))
+    }
+
+    /// With something on screen (Windows, where NDI's installer resets the network), the greyed
+    /// Download says why under the pointer, Quick Help on or off.
+    #[test]
+    fn a_greyed_download_says_why_with_quick_help_off() {
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            let mut download = fresh("held");
+            download.as_installer = Some(true);
+            download.set_on_screen(true);
+            assert!(download.held());
+            let ctx = egui::Context::default();
+            ctx.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
+            let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1100.0, 700.0));
+            let sheet = Rect::from_center_size(screen.center(), SIZE);
+            // The Download key: the rightmost of the foot, 30 high at its bottom.
+            let key = pos2(sheet.max.x - SIDE - 12.0, sheet.max.y - SIDE - 15.0);
+            let mut words = Vec::new();
+            for n in 0..4 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(screen),
+                    time: Some(f64::from(n) * 0.5),
+                    events: vec![egui::Event::PointerMoved(key)],
+                    ..Default::default()
+                };
+                let mut output = ctx.run_ui(raw, |ui| window(ui.ctx(), &mut download, Place::Settings));
+                output.textures_delta.clear();
+                words.clear();
+                for clipped in &output.shapes {
+                    collect(&clipped.shape, &mut words);
+                }
+            }
+            assert!(!crate::quick_help::is_on(&ctx), "Quick Help is off");
+            assert!(has(&words, super::super::row::on_screen_words()), "{words:?}");
+        });
     }
 
     #[test]

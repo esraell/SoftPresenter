@@ -118,6 +118,10 @@ fn cases() -> Vec<(String, Vec<Silent>)> {
     case("Edit, Stage", home(&show, &mut state));
     let mut state = HomeState { props_editor_open: true, ..HomeState::default() };
     case("Edit, Props", home(&show, &mut state));
+    // The Install NDI window, at its first step.
+    let mut state = HomeState::default();
+    state.ndi_download.open(crate::ndi_download::Place::Home);
+    case("The Install NDI window", home(&show, &mut state));
     // The list of every key.
     let mut state = HomeState { key_sheet: true, ..HomeState::default() };
     case("The list of keys", home(&show, &mut state));

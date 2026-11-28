@@ -56,6 +56,9 @@ pub trait Hint: Sized {
     /// What the control does, under the whole of its name while `whole` gives it (the name is
     /// drawn cut short): the name shows always, and what it does too while Quick Help is on.
     fn full_name_and_hint(self, what: impl Into<WidgetText>, whole: Option<&str>) -> Self;
+    /// A key drawn as a picture alone: its `name` (the label it doesn't have) shows always;
+    /// while Quick Help is on, what it does shows in its place (the name, when it says nothing).
+    fn name_or_hint(self, name: &str, what: &str) -> Self;
     /// More about something shown (a readout, a row's state, where an item came from): not a
     /// control's hint, nor a reason or a name. It follows Quick Help, as hints do.
     fn status(self, more: impl Into<WidgetText>) -> Self;
@@ -91,6 +94,9 @@ impl Hint for Response {
 
     fn greyed(self, why: impl Into<WidgetText>) -> Self {
         let why = why.into();
+        if why.text().is_empty() {
+            return self;
+        }
         said(&self, why.text());
         self.on_hover_text(why)
     }
@@ -104,8 +110,19 @@ impl Hint for Response {
 
     fn full_name(self, name: impl Into<WidgetText>) -> Self {
         let name = name.into();
+        if name.text().is_empty() {
+            return self;
+        }
         said(&self, name.text());
         self.on_hover_text(name)
+    }
+
+    fn name_or_hint(self, name: &str, what: &str) -> Self {
+        // A screen reader is told what it does, on or off, when there is a sentence.
+        if !what.is_empty() {
+            describe(&self, what);
+        }
+        if what.is_empty() || !is_on(&self.ctx) { self.full_name(name.to_owned()) } else { self.hint(what.to_owned()) }
     }
 
     fn full_name_and_hint(self, what: impl Into<WidgetText>, whole: Option<&str>) -> Self {
@@ -129,6 +146,9 @@ impl Hint for Response {
 
     fn always(self, what: impl Into<WidgetText>) -> Self {
         let what = what.into();
+        if what.text().is_empty() {
+            return self;
+        }
         said(&self, what.text());
         self.on_hover_text(what)
     }
@@ -309,6 +329,10 @@ pub mod tests {
         assert!(!shown(false, &|r| r.hint_or_greyed("Words", None), true));
         assert!(shown(true, &|r| r.full_name_and_hint("", Some("Words")), true), "a whole name with no hint");
         assert!(shown(false, &|r| r.full_name_and_hint("Other", Some("Words")), true), "off: the name alone");
+        assert!(shown(false, &|r| r.name_or_hint("Words", "Other"), true), "a picture key's name, off");
+        assert!(shown(true, &|r| r.name_or_hint("Other", "Words"), true), "on: what it does in its place");
+        assert!(!shown(true, &|r| r.name_or_hint("Words", "Other"), true), "and not its name as well");
+        assert!(shown(true, &|r| r.name_or_hint("Words", ""), true), "on, with nothing to say: its name");
     }
 
     #[test]
@@ -466,6 +490,56 @@ pub mod tests {
         };
         assert!(hint(true), "on, a row of the list says what it does");
         assert!(!hint(false), "off, it doesn't");
+    }
+
+    #[test]
+    fn a_greyed_undo_in_the_inspector_says_why_with_quick_help_off() {
+        use crate::home::{HomeState, Preview};
+        let show = sp_engine::Show::new(vec![std::sync::Arc::new(sp_model::parse_song_text("Song", "Words\n"))]);
+        let ctx = egui::Context::default();
+        crate::studio::apply_style(&ctx);
+        ctx.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let mut editing = crate::editor::EditDraft::of(&show, sp_engine::SlideRef { presentation: 0, slide: 0 });
+        if let Some(draft) = editing.as_mut() {
+            draft.select_only(draft.slide.objects.first().map(|object| object.id));
+        }
+        let mut state = HomeState { editing, ..HomeState::default() };
+        state.inspector.tab = crate::inspector::InspectorTab::Box;
+        assert!(!state.quick_help);
+        let mut time = 0.0;
+        let mut frame = |state: &mut HomeState, events: Vec<egui::Event>| {
+            time += 0.5;
+            let raw = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1440.0, 900.0))),
+                time: Some(time),
+                events,
+                ..egui::RawInput::default()
+            };
+            let output = ctx.run_ui(raw, |ui| {
+                crate::home::home_ui(
+                    ui,
+                    &show,
+                    state,
+                    &sp_model::Theme::builtin(),
+                    &mut |_| None,
+                    Preview::default(),
+                    None,
+                );
+            });
+            let found = texts(&output);
+            output.drop_without_applying_deltas();
+            found
+        };
+        frame(&mut state, vec![]);
+        let undo = crate::i18n::t("inspector.undo", "Undo");
+        let drawn = frame(&mut state, vec![]);
+        let at = drawn.iter().filter(|(text, at)| text == undo && at.min.x > 1000.0).map(|(_, at)| at.center()).next();
+        let at = at.expect("the inspector's Undo");
+        frame(&mut state, vec![egui::Event::PointerMoved(at)]);
+        frame(&mut state, vec![]);
+        let said = frame(&mut state, vec![]);
+        let why = crate::home::nothing_to(false);
+        assert!(said.iter().any(|(text, _)| text == why), "{why:?} under the pointer: {said:?}");
     }
 
     /// The hovers egui shows by itself, which skip Quick Help: none is called outside this file.

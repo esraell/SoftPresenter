@@ -1739,7 +1739,7 @@ pub fn list_keys(ui: &mut egui::Ui, salt: &str, can: [bool; 5], hints: [&str; 5]
                 response.greyed(tf("edit.list.greyed", "{name}: {why}", &[("name", name), ("why", why[at])]))
             }
             (true, true) => response.hint(hints[at]),
-            (true, false) => response.full_name_and_hint(hints[at], Some(name)),
+            (true, false) => response.name_or_hint(name, hints[at]),
         };
         if response.clicked() {
             pressed = Some(key);

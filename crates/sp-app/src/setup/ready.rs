@@ -279,15 +279,16 @@ pub(super) fn reports_line(standing: &crate::reports::Standing) -> Line {
 fn tips_words(softprojector: bool) -> String {
     let keys = if softprojector {
         t(
-            "setup.ready.tips_keys_hide",
-            "Double-click a slide to put it on screen, Space for the next, Esc to hide the words.",
+            "setup.ready.tips_hide",
+            "Double-click a slide to put it on screen, Space for the next, Esc to hide the words. Later, in Settings: Phone remote, to run the slides from a phone.",
         )
     } else {
-        t("setup.ready.tips_keys", "Click a slide to put it on screen, Space for the next, Esc to clear.")
+        t(
+            "setup.ready.tips",
+            "Click a slide to put it on screen, Space for the next, Esc to clear. Later, in Settings: Phone remote, to run the slides from a phone.",
+        )
     };
-    let quick_help =
-        t("setup.done.quick_help", "Click ? at the top right for Quick Help: point at anything to see what it does.");
-    format!("{keys} {quick_help}")
+    format!("{keys} {}", t("setup.ready.quick_help", "Click ? at the top right for Quick Help."))
 }
 
 /// The Keys line: the key layout as it will be once the setup is finished, and the end of a

@@ -483,7 +483,7 @@ fn row_tall(ui: &mut egui::Ui, column: f32, caption: &str, tall: f32, add: impl 
         let cut = words.elided;
         ui.painter().galley(at, words, crate::studio::TEXT_DIM);
         if cut {
-            over.hint(caption);
+            over.full_name(caption);
         }
         ui.add_space(CAPTION_GAP - BETWEEN);
         add(ui);
@@ -540,7 +540,8 @@ fn square_key(
         painter.rect_filled(lower, egui::CornerRadius { nw: 0, ne: 0, sw: 9, se: 9 }, BLUE);
     }
     draw(painter, rect, INK);
-    response.hint(hint)
+    // A key that is only a picture: its name always shows (the label it doesn't have).
+    response.full_name(hint)
 }
 
 /// A [`square_key`] with a letter or two on it.
@@ -1494,7 +1495,7 @@ fn slide_panel(ui: &mut egui::Ui, state: &mut HomeState) {
             let cut = words.elided;
             ui.painter().galley(pos2(place.min.x, place.center().y - words.size().y / 2.0), words, INK);
             if cut {
-                over.hint(said);
+                over.full_name(said);
             }
             let key = word_key(ui, change, false, true).hint(t(
                 "inspector.slide.group.hint",
@@ -2359,16 +2360,18 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         if object_keys_named(ui, room) {
             for (at, (words, hint, _)) in keys.into_iter().enumerate() {
                 let can = at != 0 || one;
-                pressed[at] = word_key(ui, words, false, can).hint(if can { hint } else { several }).clicked();
+                pressed[at] = word_key(ui, words, false, can).hint_or_greyed(hint, (!can).then_some(several)).clicked();
             }
         } else {
-            for (at, (words, _, icon)) in keys.into_iter().enumerate() {
+            for (at, (words, hint, icon)) in keys.into_iter().enumerate() {
                 let can = at != 0 || one;
                 ui.add_enabled_ui(can, |ui| {
-                    let key = square_key(ui, KEY_WIDE, (false, false), words, |painter, cell, ink| {
+                    let key = square_key(ui, KEY_WIDE, (false, false), "", |painter, cell, ink| {
                         let glyph = Rect::from_center_size(cell.center(), vec2(14.0, 14.0));
                         crate::icons::paint(painter, icon, glyph, ink);
                     });
+                    // Its name always; what it does in its place while Quick Help is on.
+                    let key = key.name_or_hint(words, hint);
                     key.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, can, words));
                     pressed[at] = key.reason(several).clicked();
                 });
@@ -2392,8 +2395,10 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
             (t("inspector.redo", "Redo"), true, crate::keys::hint(t("inspector.redo.hint", "Redo it"), "Z", true)),
         ] {
             let can = if redo { history.1 } else { history.0 };
-            let why = if can { hint } else { crate::home::nothing_to(redo).to_owned() };
-            if word_key(ui, words, false, can).hint(why).clicked() {
+            if word_key(ui, words, false, can)
+                .hint_or_greyed(hint, (!can).then(|| crate::home::nothing_to(redo)))
+                .clicked()
+            {
                 use crate::menubar::Action;
                 *menu_asked = Some(if redo { Action::Redo } else { Action::Undo });
             }
@@ -2704,12 +2709,10 @@ fn text_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
             inspector.copied_style = Some(style.clone());
         }
         let can_paste = inspector.copied_style.is_some();
-        let hint = if can_paste {
-            t("inspector.text.paste_style.hint", "Give this text the look that was copied")
-        } else {
-            crate::home::copy_a_style()
-        };
-        if word_key(ui, t("inspector.text.paste_style", "Paste style"), false, can_paste).hint(hint).clicked()
+        let hint = t("inspector.text.paste_style.hint", "Give this text the look that was copied");
+        if word_key(ui, t("inspector.text.paste_style", "Paste style"), false, can_paste)
+            .hint_or_greyed(hint, (!can_paste).then(crate::home::copy_a_style))
+            .clicked()
             && let Some(copied) = &inspector.copied_style
         {
             *style = copied.clone();
