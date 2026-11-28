@@ -43,7 +43,7 @@ impl crate::App {
     /// passage to look up.
     pub(crate) fn ctl_bible_more(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
-        let words = &args[2..];
+        let words = args.get(2..).unwrap_or_default();
         let result = match word.as_str() {
             "text" => self.bible_text(&words.join(" ")),
             "search" => self.bible_search(&words.join(" ")),
@@ -395,7 +395,7 @@ impl crate::App {
         let usage = "theme templates THEME | theme main THEME | theme duplicate THEME [as NAME] | theme rename THEME to NAME | \
                      theme delete THEME --yes | theme box THEME TEMPLATE BOX key=value… | theme template THEME TEMPLATE for=songs|bible|both|none";
         let word = args.get(1).map(|w| w.to_lowercase()).unwrap_or_default();
-        let words = &args[2..];
+        let words = args.get(2..).unwrap_or_default();
         let names: Vec<String> = self.themes.iter().map(|t| t.name.clone()).collect();
         let theme_at = |typed: &str| find("theme", &names, typed);
         match word.as_str() {
@@ -603,8 +603,8 @@ impl crate::App {
     pub(crate) fn ctl_song_arrangement(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
         let result = match word.as_str() {
-            "arrangements" => self.song_arrangements(&args[2..].join(" ")),
-            "arrangement" => self.song_arrangement(&args[2..]),
+            "arrangements" => self.song_arrangements(&args.get(2..).unwrap_or_default().join(" ")),
+            "arrangement" => self.song_arrangement(args.get(2..).unwrap_or_default()),
             _ => return None,
         };
         Some(result)

@@ -178,7 +178,7 @@ impl crate::App {
     /// `timer new|set|delete …`; `None` for another word.
     pub(crate) fn ctl_timer_make(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
-        let words = &args[2..];
+        let words = args.get(2..).unwrap_or_default();
         let result = match word.as_str() {
             // `timer new NAME countdown 5:00 | to 10:30 | up [to M:SS]`
             "new" => {
@@ -299,7 +299,7 @@ impl crate::App {
     /// `message new|set|delete …` and `message show --text WORDS`; `None` for another word.
     pub(crate) fn ctl_message_make(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
-        let words = &args[2..];
+        let words = args.get(2..).unwrap_or_default();
         let result = match word.as_str() {
             "new" => match words {
                 [name, text @ ..] => self.message_new(name, &text.join(" ")),
@@ -400,7 +400,7 @@ impl crate::App {
     /// `prop new NAME [PICTURE]`, `prop delete NAME`; `None` for another word.
     pub(crate) fn ctl_prop_make(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
-        let words = &args[2..];
+        let words = args.get(2..).unwrap_or_default();
         let result = match word.as_str() {
             "new" => self.prop_new(words),
             // At once, as in the window: `sp undo` puts it back (an old --yes is let by).
@@ -465,7 +465,7 @@ impl crate::App {
     /// `macro new|add|step|move|startup|remove|delete …`; `None` for another word.
     pub(crate) fn ctl_macro_make(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
-        let words = &args[2..];
+        let words = args.get(2..).unwrap_or_default();
         let result = match word.as_str() {
             "new" => {
                 let name = words.join(" ");
@@ -685,7 +685,7 @@ impl crate::App {
     /// `audio add|next|previous|shuffle|through|crossfade|playlist …`; `None` for another word.
     pub(crate) fn ctl_audio_make(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
-        let words = &args[2..];
+        let words = args.get(2..).unwrap_or_default();
         let result = match word.as_str() {
             "add" => self.audio_add(words),
             "next" => self.audio_step(true),
@@ -881,7 +881,7 @@ impl crate::App {
     /// `media-playlist new|add|remove|follow|delete …`; `None` for another word.
     pub(crate) fn ctl_media_playlist_make(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
-        let words = &args[2..];
+        let words = args.get(2..).unwrap_or_default();
         let result = match word.as_str() {
             "new" => {
                 let name = words.join(" ");

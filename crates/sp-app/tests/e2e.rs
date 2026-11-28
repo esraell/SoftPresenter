@@ -3188,6 +3188,67 @@ fn remote_control_sends_a_change_at_once_and_one_that_happens_by_itself_with_it(
     copy.quit().assert_clean(&run);
 }
 
+/// Every command the copy's own `help` names, sent with a word missing: each command word
+/// alone, and each of its words that takes more after it, alone (`theme`, `theme box`, `slide
+/// text`…); a word of the list that is no command is sent too. Each gets a reply, done or
+/// refused with its usage, and the copy goes on: a bare `theme`, from `sp` or a phone, once
+/// took the words after a second word there wasn't and stopped the window's thread
+/// mid-service.
+#[test]
+fn every_command_with_a_word_missing_gets_a_reply_and_never_stops_the_app() {
+    let Some(run) = Run::new("every_command_with_a_word_missing_gets_a_reply_and_never_stops_the_app") else { return };
+    let mut copy = run.start(&[]);
+    let help = copy.ok(&["help"]).text;
+    let a_word = |word: &str| {
+        let mut letters = word.chars();
+        letters.next().is_some_and(|c| c.is_ascii_lowercase()) && letters.all(|c| c.is_ascii_lowercase() || c == '-')
+    };
+    // A line of the list is two spaces, then the commands (alternatives between " | "), then,
+    // after a gap of two spaces or more, what they do.
+    let mut commands: Vec<Vec<String>> = Vec::new();
+    let listed = help.lines().filter_map(|line| line.strip_prefix("  "));
+    for line in listed.filter(|line| line.starts_with(|c: char| c.is_ascii_lowercase())) {
+        let shapes = line.split("  ").next().unwrap_or_default();
+        for shape in shapes.split(" | ") {
+            let words: Vec<&str> = shape.split_whitespace().collect();
+            let Some(first) = words.first().filter(|word| a_word(word)) else { continue };
+            for command in [vec![first.to_string()]].into_iter().chain(
+                words
+                    .get(1)
+                    .filter(|word| a_word(word) && words.len() > 2)
+                    .map(|second| vec![first.to_string(), second.to_string()]),
+            ) {
+                if !commands.contains(&command) {
+                    commands.push(command);
+                }
+            }
+        }
+    }
+    assert!(commands.len() > 150, "help named only {} commands to try: {help}", commands.len());
+    let mut before = String::new();
+    for command in &commands {
+        // Through `ctl`, so each goes to the app as the phone's and `sp`'s commands do, a word
+        // that is no command among them (the app says so).
+        let words: Vec<&str> = std::iter::once("ctl").chain(command.iter().map(String::as_str)).collect();
+        let reply = copy.sp(&words);
+        assert!(
+            reply.ok || !reply.text.trim().is_empty(),
+            "sp {} was refused with no words{}",
+            reply.words,
+            run.context()
+        );
+        // A copy that stops may still be going as the next command is sent.
+        if let Ok(Some(status)) = copy.child.try_wait() {
+            copy.exit = Some(status);
+            panic!("sp {} or sp {before} stopped the copy ({status}){}", reply.words, run.context());
+        }
+        before = reply.words;
+    }
+    say(&format!("{}: {} commands tried with a word missing", run.name, commands.len()));
+    copy.ok(&["status"]);
+    copy.quit().assert_clean(&run);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Check for Updates, against a stand-in for GitHub on this computer
 

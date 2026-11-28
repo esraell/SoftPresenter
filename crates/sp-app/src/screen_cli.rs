@@ -616,7 +616,7 @@ impl crate::App {
         }
         let mut said = Vec::new();
         let mut changes: Vec<Change> = Vec::new();
-        for setting in &args[2..] {
+        for setting in args.get(2..).unwrap_or_default() {
             let (key, value) = setting.split_once('=').ok_or_else(|| format!("{setting} isn't key=value. {usage}"))?;
             match key.to_lowercase().as_str() {
                 "transition" | "media_transition" => {

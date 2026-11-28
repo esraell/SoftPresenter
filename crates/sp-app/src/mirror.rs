@@ -1165,7 +1165,7 @@ impl crate::App {
                 None
             }
             "name" => {
-                let name = clean_name(&args[2..].join(" "));
+                let name = clean_name(&args.get(2..).unwrap_or_default().join(" "));
                 if name.is_empty() {
                     return Err("mirror name NAME".to_owned());
                 }

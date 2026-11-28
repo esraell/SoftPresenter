@@ -235,7 +235,7 @@ impl crate::App {
     /// `playlist new|rename|delete|remove|move|header …`; `None` for a word that isn't one of them.
     pub(crate) fn ctl_playlist_change(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
-        let words = &args[2..];
+        let words = args.get(2..).unwrap_or_default();
         let result = match word.as_str() {
             "new" => self.playlist_new(&words.join(" ")),
             "go" => self.playlist_go(words),
@@ -499,7 +499,7 @@ impl crate::App {
     /// `library new|rename|delete|add|remove …`; `None` for a word that isn't one of them.
     pub(crate) fn ctl_library_change(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
-        let words = &args[2..];
+        let words = args.get(2..).unwrap_or_default();
         let result = match word.as_str() {
             "new" => self.library_new(&words.join(" ")),
             "rename" => match split_at_word(words, "to") {
@@ -620,7 +620,7 @@ impl crate::App {
     /// `song rename|duplicate|theme|transition|info …`; `None` for a word that isn't one of them.
     pub(crate) fn ctl_song_change(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
-        let words = &args[2..];
+        let words = args.get(2..).unwrap_or_default();
         let result = match word.as_str() {
             "rename" => match split_at_word(words, "to") {
                 (song, Some(title)) => self.song_rename(&song.join(" "), &title),
@@ -771,7 +771,7 @@ impl crate::App {
     /// template|media …`; `None` for a word that isn't one of them.
     pub(crate) fn ctl_slide_change(&mut self, args: &[String]) -> Option<Result<Reply, String>> {
         let word = args.get(1)?.to_lowercase();
-        let words = &args[2..];
+        let words = args.get(2..).unwrap_or_default();
         let result = match word.as_str() {
             "add" => self.slide_add(words),
             "delete" => self.slide_edit(words, |song, index, _| {

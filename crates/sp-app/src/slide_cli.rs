@@ -56,10 +56,10 @@ impl crate::App {
             return result;
         }
         match args.get(1).map(|w| w.to_lowercase()).as_deref() {
-            Some("text") => self.ctl_slide_text(&args[2..]),
-            Some("style") => self.ctl_slide_style(&args[2..]),
-            Some("frame") => self.ctl_slide_frame(&args[2..]),
-            Some(_) => self.ctl_slide_show(&args[1..]),
+            Some("text") => self.ctl_slide_text(args.get(2..).unwrap_or_default()),
+            Some("style") => self.ctl_slide_style(args.get(2..).unwrap_or_default()),
+            Some("frame") => self.ctl_slide_frame(args.get(2..).unwrap_or_default()),
+            Some(_) => self.ctl_slide_show(args.get(1..).unwrap_or_default()),
             None => Err(SLIDE_USAGE.to_owned()),
         }
     }

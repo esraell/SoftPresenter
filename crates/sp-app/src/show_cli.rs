@@ -147,7 +147,7 @@ impl crate::App {
     /// `group NAME|LETTER [in SONG]`: the first slide of a group on screen, in the song on
     /// screen (or the one shown, or the one named), as the group's letter key does.
     pub(crate) fn ctl_group(&mut self, args: &[String]) -> Result<Reply, String> {
-        let words = &args[1..];
+        let words = args.get(1..).unwrap_or_default();
         let (name, song) = match words.iter().rposition(|w| w.eq_ignore_ascii_case("in")) {
             Some(at) if at + 1 < words.len() => (words[..at].join(" "), Some(words[at + 1..].join(" "))),
             _ => (words.join(" "), None),
@@ -330,7 +330,7 @@ impl crate::App {
         let word = args.get(1)?.to_lowercase();
         let result = match word.as_str() {
             "message" => {
-                let text = args[2..].join(" ");
+                let text = args.get(2..).unwrap_or_default().join(" ");
                 if text.trim().is_empty() {
                     Err("stage message TEXT | stage message clear".to_owned())
                 } else if text.trim().eq_ignore_ascii_case("clear") {
@@ -347,11 +347,11 @@ impl crate::App {
                     Ok(Reply::done(format!("On the stage screens: \u{201c}{}\u{201d}", text.trim())))
                 }
             }
-            "layout" => self.stage_layout(&args[2..]),
+            "layout" => self.stage_layout(args.get(2..).unwrap_or_default()),
             "layouts" => self.stage_layouts(),
-            "objects" => self.stage_objects(&args[2..]),
-            "picture" => self.stage_picture(&args[2..]),
-            "frame" => self.stage_frame(&args[2..]),
+            "objects" => self.stage_objects(args.get(2..).unwrap_or_default()),
+            "picture" => self.stage_picture(args.get(2..).unwrap_or_default()),
+            "frame" => self.stage_frame(args.get(2..).unwrap_or_default()),
             _ => return None,
         };
         Some(result)

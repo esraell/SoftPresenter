@@ -1561,7 +1561,7 @@ impl crate::App {
                 // Next and Previous as the keys do them: on the open item, on into the next
                 // song or passage, or staying put with a word why. `--aim ITEM` acts on that
                 // item of the playlist in front as if it were the open one (a remote page's).
-                let (words, aim) = aim_words(&args[1..])?;
+                let (words, aim) = aim_words(args.get(1..).unwrap_or_default())?;
                 let stepping = matches!(word.as_str(), "next" | "previous" | "prev" | "back");
                 if !words.is_empty() || (aim.is_some() && !stepping) {
                     return Err(format!("{word}{}", if stepping { " [--aim ITEM [--rev REV]]" } else { "" }));
@@ -1590,7 +1590,7 @@ impl crate::App {
                     None => Reply::done(self.live_words()),
                 })
             })(),
-            "go" => match aim_words(&args[1..]) {
+            "go" => match aim_words(args.get(1..).unwrap_or_default()) {
                 Ok((words, Some(aim))) => self.aimed_item(&aim).and_then(|item| self.go_aimed(item, &words)),
                 Ok((_, None)) => self.ctl_go(args),
                 Err(usage) => Err(usage),
@@ -2614,7 +2614,7 @@ impl crate::App {
 
     fn ctl_library(&mut self, args: &[String]) -> Result<Reply, String> {
         if args.get(1).is_some_and(|word| word.eq_ignore_ascii_case("tidy")) {
-            return self.ctl_library_tidy(&args[2..]);
+            return self.ctl_library_tidy(args.get(2..).unwrap_or_default());
         }
         if let Some(result) = self.ctl_library_change(args) {
             return result;
@@ -2700,7 +2700,7 @@ impl crate::App {
             }
             Some("add") => {
                 // `playlist add SONG [to PLAYLIST]`, or the playlist in front.
-                let words = &args[2..];
+                let words = args.get(2..).unwrap_or_default();
                 let (song_words, list_words) = match words.iter().rposition(|w| w.eq_ignore_ascii_case("to")) {
                     Some(at) => (words[..at].join(" "), Some(words[at + 1..].join(" "))),
                     None => (words.join(" "), None),
@@ -2987,7 +2987,7 @@ impl crate::App {
             }
             // `voxlive look N|NAME [setting=value …]`: a screen's look, or settings of it saved
             // to VoxLive (checked against VoxLive's own description of each setting first).
-            Some("look") => self.voxlive_look(&args[2..]),
+            Some("look") => self.voxlive_look(args.get(2..).unwrap_or_default()),
             Some("refresh") => {
                 if !self.voxlive.has_key() {
                     return Err("VoxLive isn't connected.".to_owned());
@@ -3067,7 +3067,7 @@ impl crate::App {
         match args.get(1).map(|w| w.to_lowercase()).as_deref() {
             Some("next") => return self.media_step(true),
             Some("previous" | "prev" | "back") => return self.media_step(false),
-            Some("set") => return self.media_set(&args[2..]),
+            Some("set") => return self.media_set(args.get(2..).unwrap_or_default()),
             _ => {}
         }
         match args.get(1).map(|w| w.to_lowercase()).as_deref() {
@@ -3078,7 +3078,7 @@ impl crate::App {
             }
             Some("add") => {
                 self.only_at_the_computer(crate::remote::policy::AtComputer::AddMedia)?;
-                let files: Vec<PathBuf> = args[2..].iter().map(PathBuf::from).collect();
+                let files: Vec<PathBuf> = args.get(2..).unwrap_or_default().iter().map(PathBuf::from).collect();
                 if files.is_empty() {
                     return Err("Add which files?".to_owned());
                 }
@@ -3150,7 +3150,8 @@ impl crate::App {
             }
             Some("delete") => {
                 let yes = args.iter().any(|w| w == "--yes");
-                let words: Vec<String> = args[2..].iter().filter(|w| *w != "--yes").cloned().collect();
+                let words: Vec<String> =
+                    args.get(2..).unwrap_or_default().iter().filter(|w| *w != "--yes").cloned().collect();
                 let at = find("media item", &self.media_names(), &words.join(" "))?;
                 let name = self.show.media()[at].name.clone();
                 if !yes {
@@ -3491,7 +3492,8 @@ impl crate::App {
             None => (args.to_vec(), None),
         };
         let args = args.as_slice();
-        let reference: String = args[1..].iter().filter(|w| *w != "--show").cloned().collect::<Vec<_>>().join(" ");
+        let reference: String =
+            args.get(1..).unwrap_or_default().iter().filter(|w| *w != "--show").cloned().collect::<Vec<_>>().join(" ");
         if reference.trim().is_empty() {
             return Err("Which passage? For example: bible John 3:16-18".to_owned());
         }
@@ -3579,7 +3581,7 @@ impl crate::App {
             Some("new") => {
                 // `song new TITLE --words TEXT`: the words given as song text, in one word (an
                 // AI assistant's, a script's), every other word the title.
-                let mut words = args[2..].to_vec();
+                let mut words = args.get(2..).unwrap_or_default().to_vec();
                 let given = match words.iter().position(|w| w == "--words") {
                     Some(at) => {
                         let text = words.get(at + 1).cloned().ok_or("song new TITLE --words TEXT")?;
@@ -3633,7 +3635,7 @@ impl crate::App {
             }
             Some("delete") => {
                 let yes = args.iter().any(|w| w == "--yes");
-                let words: Vec<String> = args[2..].iter().filter(|w| *w != "--yes").cloned().collect();
+                let words: Vec<String> = args.get(2..).unwrap_or_default().iter().filter(|w| *w != "--yes").cloned().collect();
                 let at = self.find_song(&words.join(" "))?;
                 let title = self.show.presentations().get(at).map(|s| s.title.clone()).unwrap_or_default();
                 if !yes {
@@ -3645,8 +3647,8 @@ impl crate::App {
                 self.handle_song_request();
                 Ok(Reply::done(format!("Deleted {title}.")))
             }
-            Some("text") => self.ctl_song_text(&args[2..]),
-            Some("reload") => self.ctl_song_reload(&args[2..]),
+            Some("text") => self.ctl_song_text(args.get(2..).unwrap_or_default()),
+            Some("reload") => self.ctl_song_reload(args.get(2..).unwrap_or_default()),
             Some("keep") => {
                 let at = self.find_song_as_is(&rest(args, 2))?;
                 let waiting = self.held_songs.contains(&at)
@@ -3661,7 +3663,7 @@ impl crate::App {
                 crate::applog::event("outside", &format!("kept SoftPresenter's version of {title} (sp song keep)"));
                 Ok(Reply::done(format!("Saved SoftPresenter's version of {title} over its file.")))
             }
-            Some("export") => self.ctl_song_export(&args[2..]),
+            Some("export") => self.ctl_song_export(args.get(2..).unwrap_or_default()),
             Some("import") => {
                 self.only_at_the_computer(crate::remote::policy::AtComputer::ImportSongs)?;
                 // Song packs: what to do with songs the library has already (skip, unless told).
@@ -3674,7 +3676,7 @@ impl crate::App {
                 };
                 // `--as slides` or `--as pictures`: how presentation files come in (otherwise as
                 // each kind was last brought in).
-                let mut words: Vec<String> = args[2..].to_vec();
+                let mut words: Vec<String> = args.get(2..).unwrap_or_default().to_vec();
                 let mut deck_as = None;
                 if let Some(at) = words.iter().position(|w| w == "--as") {
                     let how = words.get(at + 1).and_then(|w| crate::deck::ImportAs::from_name(w));
