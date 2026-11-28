@@ -809,10 +809,10 @@ impl NdiDownload {
         let shared = self.shared.clone();
         let work = move || {
             let removed = if way().installer() {
-                match sp_ndi::locate().and_then(|runtime| windows::uninstaller_for(&runtime)) {
-                    Some(uninstaller) => {
-                        windows::open_and_wait(&uninstaller, &[], &shared.cancel).map_err(|problem| problem.to_string())
-                    }
+                let protected = windows::program_files();
+                match sp_ndi::locate().and_then(|runtime| windows::uninstaller_for(&runtime, &protected)) {
+                    Some(uninstaller) => windows::open_and_wait(&uninstaller, &[], &shared.cancel, None)
+                        .map_err(|problem| problem.to_string()),
                     None => Err("NDI's uninstaller isn't where NDI's installer puts it".to_owned()),
                 }
             } else {
@@ -830,7 +830,8 @@ impl NdiDownload {
     /// on Windows the NDI that NDI's runtime installer put there (never NDI Tools).
     pub fn removable(&mut self) -> bool {
         if way().installer() {
-            return sp_ndi::locate().is_some_and(|runtime| windows::uninstaller_for(&runtime).is_some());
+            return sp_ndi::locate()
+                .is_some_and(|runtime| windows::uninstaller_for(&runtime, &windows::program_files()).is_some());
         }
         self.installed().is_some() || self.waiting().is_some()
     }
@@ -1054,10 +1055,7 @@ fn fetch_and_read(address: &str, way: Way, stand_in: bool, folder: &Path, shared
                 Taken::Package(mac::read(&tools, &download, &scratch, std::env::consts::ARCH, &shared.cancel)?)
             }
             Way::Installer => {
-                let powershell = std::env::var_os("SystemRoot")
-                    .map(|windows| PathBuf::from(windows).join("System32/WindowsPowerShell/v1.0/powershell.exe"))
-                    .unwrap_or_else(|| PathBuf::from("powershell.exe"));
-                windows::check_signature(&powershell, &download)?;
+                windows::check_signature(&windows::powershell(), &download)?;
                 Taken::Installer
             }
         };
@@ -1207,7 +1205,10 @@ fn install(
         _ => {}
     }
     let unpacked = match &ready.taken {
-        Taken::Installer => return windows::open_and_wait(&ready.download, &[], cancel).map(|()| (None, false)),
+        // Checked again right before it runs, and held against any change until it has started.
+        Taken::Installer => {
+            return windows::check_and_open(&windows::powershell(), &ready.download, cancel).map(|()| (None, false));
+        }
         Taken::Sdk(contents) => sdk::install(&ready.download, contents, std::env::consts::ARCH, &next, cancel),
         Taken::Package(contents) => mac::install(contents, &next),
     };
