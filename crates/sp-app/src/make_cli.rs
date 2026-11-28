@@ -937,7 +937,7 @@ impl crate::App {
         let names: Vec<String> = self.show.media().iter().map(|m| m.name.clone()).collect();
         let mut picked = Vec::new();
         for typed in items {
-            let index = find("media item", &names, typed)?;
+            let index = crate::control::find_media(self.show.media(), typed)?;
             picked.push((self.show.media()[index].path.clone(), names[index].clone()));
         }
         let state = &mut self.running.as_mut().ok_or("The app isn't ready.")?.home_state;

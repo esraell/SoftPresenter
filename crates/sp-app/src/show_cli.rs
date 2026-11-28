@@ -288,8 +288,10 @@ impl crate::App {
         if settings.is_empty() || name.is_empty() {
             return Err(usage.to_owned());
         }
-        let names: Vec<String> = self.show.media().iter().map(|m| m.name.clone()).collect();
-        let at = find("media item", &names, &name.iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" "))?;
+        let at = crate::control::find_media(
+            self.show.media(),
+            &name.iter().map(|w| w.as_str()).collect::<Vec<_>>().join(" "),
+        )?;
         let item = self.show.media()[at].clone();
         let (mut fit, mut looping) = (item.fit, item.looping);
         let video = crate::media::is_video(&item.path);

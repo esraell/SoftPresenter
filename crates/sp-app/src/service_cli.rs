@@ -382,8 +382,7 @@ impl crate::App {
         }
         let (item, what) = match kind {
             "media" => {
-                let names: Vec<String> = self.show.media().iter().map(|media| media.name.clone()).collect();
-                let media = &self.show.media()[find("media item", &names, text)?];
+                let media = &self.show.media()[crate::control::find_media(self.show.media(), text)?];
                 let what = if crate::media::is_video(&media.path) { "video" } else { "picture" };
                 (Item::Media { id: media.id, name: media.name.clone() }, what)
             }
@@ -461,8 +460,7 @@ impl crate::App {
         };
         let item = match with.trim().strip_prefix("media ") {
             Some(media) => {
-                let names: Vec<String> = self.show.media().iter().map(|media| media.name.clone()).collect();
-                let media = &self.show.media()[find("media item", &names, media)?];
+                let media = &self.show.media()[crate::control::find_media(self.show.media(), media)?];
                 Item::Media { id: media.id, name: media.name.clone() }
             }
             None => {
@@ -1046,7 +1044,7 @@ impl crate::App {
             None
         } else {
             let names: Vec<String> = self.show.media().iter().map(|m| m.name.clone()).collect();
-            let at = find("media item", &names, &wanted)?;
+            let at = crate::control::find_media(self.show.media(), &wanted)?;
             Some((self.show.media()[at].id, names[at].clone()))
         };
         self.slide_edit(&[song.clone(), number.clone()], move |song, index, _| {

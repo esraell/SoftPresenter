@@ -87,6 +87,13 @@ pub fn put_main_theme(theme: Option<&Theme>, live: &mut Map<String, Value>) {
     }
 }
 
+/// The `bin` part: the media bin's items and the media playlists. `by_id` says that `media show`,
+/// `media delete`, `media move` and the other commands that name a bin item take its `id` (a
+/// page should send that, not the number, which changes when the bin is put in another order).
+fn bin_part(items: Vec<Value>, playlists: Vec<Value>) -> Value {
+    json!({"items": items, "playlists": playlists, "by_id": true})
+}
+
 /// Whether the seldom-changing parts go with this publish: when they are due, for a page just
 /// connected (`force`), and when the app's language changed since the last publish, so every part
 /// with a label goes in the same change as the `app` part.
@@ -403,6 +410,14 @@ impl crate::App {
         })
     }
 
+    /// The media bin was put in another order, or an item left it: the `bin` part goes out with
+    /// the next publish, not when the seldom-changing parts are next due, so a page's numbers
+    /// and order are not a second behind what a tap would act on.
+    pub(crate) fn remote_bin_changed(&mut self) {
+        self.remote.published_slow = None;
+        self.remote.published = None;
+    }
+
     /// The media bin, each item with its poster's address, and the media playlists.
     fn remote_bin(&mut self) -> Value {
         let items: Vec<(Uuid, String, sp_model::ImageFit, bool, bool)> = self
@@ -425,7 +440,7 @@ impl crate::App {
             .as_ref()
             .map(|r| r.home_state.media_playlists.iter().map(|p| json!({"id": p.id, "name": p.name})).collect())
             .unwrap_or_default();
-        json!({"items": entries, "playlists": playlists})
+        bin_part(entries, playlists)
     }
 
     /// What plays on the media layer: the video (when it would have been at its start, or where it
@@ -750,6 +765,12 @@ mod tests {
         assert!(slow_now(false, later, now, true));
         assert!(!slow_now(false, later, now, false));
         assert!(slow_now(false, now, now, false) && slow_now(true, later, now, false));
+        // After the bin changed, when the slow parts last went out is forgotten
+        // (`remote_bin_changed`): they are due at once, whenever that was.
+        let forgotten: Option<Instant> = None;
+        assert!(slow_now(false, forgotten.map_or(now, |at| at + SLOW_EVERY), now, false));
+        // The bin part tells a page it may name items by their ids.
+        assert_eq!(bin_part(Vec::new(), Vec::new())["by_id"], true);
         // Back in English, the labels go again, together.
         assert!(hub.publish(parts(Language::English)));
         let back: Value =

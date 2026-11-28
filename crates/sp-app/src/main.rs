@@ -6346,6 +6346,7 @@ impl App {
             state.media_lengths.remove(&id);
             running.thumbs.forget(id, &mut running.egui_renderer);
         }
+        self.remote_bin_changed();
         changed
     }
 
@@ -6368,6 +6369,7 @@ impl App {
             running.home_state.media_moved(&order);
             running.home_window.request_redraw();
         }
+        self.remote_bin_changed();
         self.save_media_list();
     }
 

@@ -3197,7 +3197,14 @@ mod remote {
 fn remote_control_signs_in_takes_a_snapshot_runs_a_command_and_signs_out() {
     const PASSWORD: &str = "a password for this test";
     let Some(run) = Run::new("remote_control_signs_in_takes_a_snapshot_runs_a_command_and_signs_out") else { return };
+    let pictures: Vec<_> = ["Blue.png", "Green.png", "Red.png"].iter().map(|name| run.file(name)).collect();
+    for (file, colour) in pictures.iter().zip([[30, 90, 200], [40, 160, 60], [200, 40, 40]]) {
+        write_png(file, colour);
+    }
     let copy = run.start(&[]);
+    let mut add = vec!["media".to_owned(), "add".to_owned()];
+    add.extend(pictures.iter().map(|file| file.to_string_lossy().into_owned()));
+    copy.ok(&add.iter().map(String::as_str).collect::<Vec<_>>());
     copy.refused(&["remote", "on"], "password");
     let set = run.sp_with_input(&["remote", "password"], Some(PASSWORD));
     assert!(set.ok, "{}", set.text);
@@ -3275,6 +3282,61 @@ fn remote_control_signs_in_takes_a_snapshot_runs_a_command_and_signs_out() {
     let refused = page.receive_type(&mut socket, "reply");
     assert_eq!(refused["reply"]["ok"], false, "{refused}");
     assert_eq!(copy.ok(&["remote"]).data["on"], true);
+
+    // The media bin: the page is told it may name items by their ids, and does, so a tap acts on
+    // the picture it showed whatever the bin's order has become meanwhile.
+    let bin = &snapshot["parts"]["bin"];
+    assert_eq!(bin["by_id"], true, "{bin}");
+    let id_of = |name: &str| {
+        let items = bin["items"].as_array().expect("the bin's items");
+        let item = items.iter().find(|item| item["name"] == name).unwrap_or_else(|| panic!("{name} in {bin}"));
+        item["id"].as_str().expect("an id").to_owned()
+    };
+    let (green, red) = (id_of("Green.png"), id_of("Red.png"));
+    // The bin is put in another order behind the page's back: Red, which the page has as
+    // number 3, is first now.
+    copy.ok(&["media", "move", "red", "to", "1"]);
+    // Sends a command and gives its reply, with the `bin` part of any change that came by then.
+    let ask = |socket: &mut _, id: u64, args: &[&str]| {
+        page.send(socket, serde_json::json!({"type": "command", "id": id, "args": args}));
+        let mut bin = None;
+        for _ in 0..200 {
+            let message = page.receive(socket).unwrap_or_else(|code| panic!("closed ({code:?}) before the reply"));
+            match message["type"].as_str() {
+                Some("reply") if message["id"] == id => return (message, bin),
+                Some("change") if message["parts"].get("bin").is_some() => bin = Some(message["parts"]["bin"].clone()),
+                _ => {}
+            }
+        }
+        panic!("no reply to {args:?}");
+    };
+    let (shown, _) = ask(&mut socket, 9, &["media", "show", &green]);
+    assert_eq!(shown["reply"]["ok"], true, "{shown}");
+    assert_eq!(copy.status()["media"], "Green.png", "the picture named by its id, not the one at its old number");
+    // A move from the page, by id: the bin part with the new order comes to the page.
+    let (moved, mut bin_after) = ask(&mut socket, 10, &["media", "move", &green, "to", "1"]);
+    assert_eq!(moved["reply"]["ok"], true, "{moved}");
+    for _ in 0..200 {
+        if bin_after.is_some() {
+            break;
+        }
+        let message = page.receive(&mut socket).unwrap_or_else(|code| panic!("closed ({code:?}) before the bin came"));
+        if message["type"] == "change" && message["parts"].get("bin").is_some() {
+            bin_after = Some(message["parts"]["bin"].clone());
+        }
+    }
+    let bin_after = bin_after.expect("the bin part came after the move");
+    let names: Vec<&str> =
+        bin_after["items"].as_array().into_iter().flatten().filter_map(|item| item["name"].as_str()).collect();
+    assert_eq!(names, ["Green.png", "Red.png", "Blue.png"], "{bin_after}");
+    assert_eq!(copy.status()["media"], "Green.png", "and what is on screen stayed on screen");
+    // Deleting by id takes that picture out, wherever it is.
+    let (deleted, _) = ask(&mut socket, 11, &["media", "delete", &red, "--yes"]);
+    assert_eq!(deleted["reply"]["ok"], true, "{deleted}");
+    assert_eq!(copy.ok(&["media"]).data, serde_json::json!(["Green.png", "Blue.png"]));
+    // An id of something gone is refused, never taken for a number.
+    let (gone, _) = ask(&mut socket, 12, &["media", "show", &red]);
+    assert_eq!(gone["reply"]["ok"], false, "{gone}");
 
     // Signing out forgets the device, closes its pages, and clears the cookie.
     let out = page.http("POST", "/api/logout", &[("Origin", &origin), ("Cookie", &with_cookie)], "");

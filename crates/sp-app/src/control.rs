@@ -1413,6 +1413,20 @@ fn job_reply(job: u64, kept: Option<&Option<Result<String, String>>>, run: &str)
     }
 }
 
+/// The media bin item a command names: by its id (what the remote page sends, since the item's
+/// number changes whenever the bin is put in another order, and the page's list can be a moment
+/// behind), else by its number or name as [`find`] takes them.
+pub(crate) fn find_media(bin: &[sp_model::MediaItem], typed: &str) -> Result<usize, String> {
+    if let Ok(id) = sp_model::Uuid::parse_str(typed.trim()) {
+        return bin
+            .iter()
+            .position(|item| item.id == id)
+            .ok_or_else(|| "That picture or video is no longer in the media bin.".to_owned());
+    }
+    let names: Vec<String> = bin.iter().map(|item| item.name.clone()).collect();
+    find("media item", &names, typed)
+}
+
 /// A thing found by what was typed: its place in the list.
 pub(crate) fn find(kind: &str, names: &[String], typed: &str) -> Result<usize, String> {
     let wanted = typed.trim().to_lowercase();
@@ -3081,7 +3095,7 @@ impl crate::App {
         }
         match args.get(1).map(|w| w.to_lowercase()).as_deref() {
             Some("show") => {
-                let at = find("media item", &self.media_names(), &rest(args, 2))?;
+                let at = crate::control::find_media(self.show.media(), &rest(args, 2))?;
                 self.apply(vec![Command::ShowMedia(at)]);
                 Ok(Reply::done(format!("Showing {}.", self.show.media()[at].name)))
             }
@@ -3164,7 +3178,7 @@ impl crate::App {
                 let names = self.media_names();
                 let (item, slot) = match &args[2..] {
                     [item @ .., to, place] if to.eq_ignore_ascii_case("to") && !item.is_empty() => {
-                        let at = find("media item", &names, &item.join(" "))?;
+                        let at = crate::control::find_media(self.show.media(), &item.join(" "))?;
                         let place: usize = place.parse().map_err(|_| USAGE.to_owned())?;
                         if !(1..=names.len()).contains(&place) {
                             return Err(format!("The media bin has {} items; there is no place {place}.", names.len()));
@@ -3173,7 +3187,7 @@ impl crate::App {
                         (at, if place - 1 > at { place } else { place - 1 })
                     }
                     [item @ .., way] if !item.is_empty() => {
-                        let at = find("media item", &names, &item.join(" "))?;
+                        let at = crate::control::find_media(self.show.media(), &item.join(" "))?;
                         let right = match way.to_lowercase().as_str() {
                             "left" => false,
                             "right" => true,
@@ -3202,7 +3216,7 @@ impl crate::App {
                 let yes = args.iter().any(|w| w == "--yes");
                 let words: Vec<String> =
                     args.get(2..).unwrap_or_default().iter().filter(|w| *w != "--yes").cloned().collect();
-                let at = find("media item", &self.media_names(), &words.join(" "))?;
+                let at = crate::control::find_media(self.show.media(), &words.join(" "))?;
                 let name = self.show.media()[at].name.clone();
                 if !yes {
                     return Err(format!("Deleting {name} from the media bin can't be undone. Add --yes to do it."));
@@ -3368,7 +3382,7 @@ impl crate::App {
         }
         let (what, name) = match args.get(1).map(|w| w.to_lowercase()).as_deref() {
             Some("media") if args.len() > 2 => {
-                let at = find("media item", &self.media_names(), &rest(args, 2))?;
+                let at = crate::control::find_media(self.show.media(), &rest(args, 2))?;
                 let item = &self.show.media()[at];
                 (Announce::Media(item.id), item.name.clone())
             }
@@ -4083,6 +4097,27 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_media_item_is_named_by_its_id_its_number_or_its_name() {
+        let bin: Vec<sp_model::MediaItem> = ["Blue.png", "Green.png", "Red.png"]
+            .iter()
+            .map(|name| sp_model::MediaItem::new((*name).into(), (*name).into()))
+            .collect();
+        // By id, wherever it is in the bin: the number a page saw a moment ago may be another
+        // picture's by now.
+        assert_eq!(find_media(&bin, &bin[2].id.to_string()), Ok(2));
+        let moved = vec![bin[2].clone(), bin[0].clone(), bin[1].clone()];
+        assert_eq!(find_media(&moved, &bin[2].id.to_string()), Ok(0));
+        assert_eq!(find_media(&moved, &format!(" {} ", bin[1].id)), Ok(2));
+        // An id of something no longer there is refused, never taken for a number or a name.
+        let gone = sp_model::Uuid::new_v4().to_string();
+        assert_eq!(find_media(&bin, &gone), Err("That picture or video is no longer in the media bin.".to_owned()));
+        // By number and by name, as before.
+        assert_eq!(find_media(&bin, "2"), Ok(1));
+        assert_eq!(find_media(&bin, "red"), Ok(2));
+        assert!(find_media(&bin, "purple").is_err());
+    }
 
     fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| (*s).to_owned()).collect()

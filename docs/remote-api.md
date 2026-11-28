@@ -412,7 +412,14 @@ untouched first playlist). A playlist's items come on demand: `["playlist", "NAM
 `["slides", "item", "3"]` (each slide with `id` and `thumb`).
 
 **`bin`** — the media bin: `{"items": [{"number", "id", "name", "kind": "picture|video", "fit",
-"loop", "poster": "/thumb/<id>/usual/<look>.jpg"}], "playlists": [{"id", "name"}]}`.
+"loop", "poster": "/thumb/<id>/usual/<look>.jpg"}], "playlists": [{"id", "name"}], "by_id": true}`.
+`by_id` says that the commands which name a bin item (`media show`, `media delete`, `media move`,
+`media set` and the others) take the item's `id` in place of its number or name. A page should
+send the `id` when `by_id` is there: an item's `number` changes whenever the bin is put in
+another order, and a page's list can be a moment behind, so a number could name another picture
+by the time it arrives. An app without `by_id` (an older one) takes only the number or the name.
+An id of an item no longer in the bin is refused. The part is sent at once when the bin's order
+changes or an item leaves it.
 
 **`media`** — what plays on the media layer:
 
