@@ -6,7 +6,7 @@ Website: [softpresenter.com](https://softpresenter.com)
 
 [![Licence: GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue)](LICENSE)
 [![Checks](https://github.com/esraell/SoftPresenter/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/esraell/SoftPresenter/actions/workflows/ci.yml)
-![macOS; Windows and Linux in testing](https://img.shields.io/badge/platform-macOS%3B%20Windows%20and%20Linux%20in%20testing-lightgrey)
+![macOS, Windows and Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
 ![The Service view: the Sunday Morning playlist open on Showers of Blessing, its slides in English with the Russian under each, the verse on screen over a background picture, two timers and the media bin](docs/images/home.png)
 
@@ -138,8 +138,9 @@ under Settings › About › What's new. In short:
 ## Get started
 
 Pre-releases for the Mac, Windows and Linux are on the
-[releases page](https://github.com/esraell/SoftPresenter/releases); Windows and Linux are still
-in testing. The Mac one runs on any Mac with macOS 11 (Big Sur) or later, Apple silicon or
+[releases page](https://github.com/esraell/SoftPresenter/releases). Churches run their Sunday
+services with the Mac and Windows versions; the Linux one is newer, with less use so far. The
+Mac one runs on any Mac with macOS 11 (Big Sur) or later, Apple silicon or
 Intel. On Linux, install the package, as below. To build SoftPresenter from source on a Mac, you
 need:
 
@@ -313,8 +314,8 @@ from a church's existing software, and fixing a slide's words from the Service v
 come the whole app in a browser (Remote Control's API is in place; its fuller page is still
 being designed) with a phone remote. Planned with
 [TimelyChurch](https://timelychurch.com): setlists planned there for a service arriving in
-SoftPresenter by themselves. Windows and Linux are in testing; releasing them is the other big
-step.
+SoftPresenter by themselves. Windows already runs Sunday services beside the Mac, and Linux is
+newer; a first release that isn't a pre-release, on all three, is the other big step.
 
 The full plan, about 170 features with their size and how much each matters on a Sunday, is in
 [docs/roadmap.md](docs/roadmap.md). Nothing in it is promised by a date.
