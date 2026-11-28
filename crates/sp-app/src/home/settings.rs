@@ -284,6 +284,8 @@ pub fn settings_ui(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     crate::whats_new::window(ui.ctx(), &mut state.whats_new);
     // The Install NDI window, from NDI's card.
     crate::ndi_download::window::window(ui.ctx(), &mut state.ndi_download, crate::ndi_download::Place::Settings);
+    // The Request an Integration window, from the last card of Integrations.
+    crate::integration_request::window(ui.ctx(), &mut state.integration_request);
 }
 
 /// The list: "Settings", the groups and their rows, and Set up SoftPresenter under them.
@@ -454,6 +456,7 @@ fn pane_contents(ui: &mut egui::Ui, state: &mut HomeState, show: &Show, pane: Pa
                 songbooks,
                 &mut state.timelychurch,
                 ndi,
+                &mut state.integration_request,
             ) {
                 state.preferences_pane = Pane::Screens;
             }
@@ -1541,7 +1544,8 @@ mod tests {
         let mut state = HomeState { preferences_pane: Pane::Integrations, ..HomeState::default() };
         state.timelychurch.offered = false;
         let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
-        for name in ["VoxLive", "Canva Sync", "TimelyChurch", "More to come", "COMING SOON"] {
+        for name in ["VoxLive", "Canva Sync", "TimelyChurch", "Don\u{2019}t see what your church uses?", "COMING SOON"]
+        {
             assert!(crate::studio::tests::place_of(&drawn, name).is_some(), "{name}");
         }
         drawn.drop_without_applying_deltas();
@@ -1553,6 +1557,12 @@ mod tests {
         // The page has the way back.
         assert!(click_last(&ctx, &mut state, &show, "Integrations"));
         assert!(!state.canva.open);
+        // The last card asks for requests, and opens the window for one over Settings.
+        assert!(click(&ctx, &mut state, &show, "Request an Integration\u{2026}"));
+        assert!(state.integration_request.shown);
+        let drawn = crate::studio::tests::drawn(&ctx, vec![], |ui| settings_ui(ui, &mut state, &show));
+        assert!(crate::studio::tests::place_of(&drawn, "What should it do in SoftPresenter?").is_some());
+        drawn.drop_without_applying_deltas();
     }
 
     /// Every piece of words a frame drew, with the rectangle it took.

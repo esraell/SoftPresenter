@@ -104,6 +104,14 @@ pub struct Cue {
     pub under: Option<Rect>,
 }
 
+impl Cue {
+    /// A refusal said now, for [`draw_cue`]; noted in the log, as [`Notices::refuse`] notes one.
+    pub fn new(text: &str) -> Cue {
+        crate::applog::event("refused", text);
+        Cue { text: text.to_owned(), since: None, under: None }
+    }
+}
+
 /// How the status button looks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Look {
@@ -876,20 +884,30 @@ pub fn paint_cue(ctx: &egui::Context, notices: &mut Notices) {
         notices.clicked = Some((Rect::from_center_size(at, vec2(1.0, 18.0)), now));
     }
     let readout = notices.readout.take();
-    let Some(cue) = notices.cue.as_mut() else { return };
-    let since = *cue.since.get_or_insert(now);
-    let under = *cue.under.get_or_insert_with(|| {
-        let recent = notices.clicked.filter(|(_, at)| now - at <= CLICK_NEAR).map(|(rect, _)| rect);
+    let clicked = notices.clicked;
+    draw_cue(ctx, &mut notices.cue, || {
+        let recent = clicked.filter(|(_, at)| now - at <= CLICK_NEAR).map(|(rect, _)| rect);
         recent.or(readout).unwrap_or_else(|| {
             let screen = ctx.content_rect();
             Rect::from_center_size(pos2(screen.center().x, crate::studio::TOP_BAR), vec2(0.0, 0.0))
         })
     });
+}
+
+/// A refusal's cue for a window of its own (a sheet in the Settings window, where the main
+/// window's [`paint_cue`] doesn't draw): `Cue::new` it when the refusal comes, and draw it here
+/// every frame, under what `under` gives the first time it is drawn.
+pub fn draw_cue(ctx: &egui::Context, cue: &mut Option<Cue>, under: impl FnOnce() -> Rect) {
+    let now = ctx.input(|input| input.time);
+    let Some(shown_cue) = cue.as_mut() else { return };
+    let since = *shown_cue.since.get_or_insert(now);
+    let under = *shown_cue.under.get_or_insert_with(under);
     let age = now - since;
     if age >= CUE_FOR {
-        notices.cue = None;
+        *cue = None;
         return;
     }
+    let Some(cue) = cue.as_ref() else { return };
     let shown = (age / CUE_FADE).min((CUE_FOR - age) / CUE_FADE).clamp(0.0, 1.0) as f32;
     if shown < 1.0 {
         ctx.request_repaint();

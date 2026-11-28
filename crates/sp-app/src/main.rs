@@ -43,6 +43,7 @@ mod i18n;
 mod icons;
 mod images;
 mod inspector;
+mod integration_request;
 mod integrations;
 mod interface_size;
 mod keep_awake;
@@ -11198,6 +11199,14 @@ impl App {
                         if let Some(demo) = name.strip_prefix("ndi-") {
                             state.ndi_available = state.ndi_download.demo(demo, ndi_download::Place::Settings);
                         }
+                    }
+                    // Integrations with the Request an Integration window open over it, empty
+                    // (integration-request) or with made-up words in a state: -filled,
+                    // -sending, -sent, -failed or -refused (`IntegrationRequest::demo`).
+                    name if name == "integration-request" || name.starts_with("integration-request-") => {
+                        state.preferences_pane = home::Pane::Integrations;
+                        let demo = name.strip_prefix("integration-request").unwrap_or("").trim_start_matches('-');
+                        state.integration_request.demo(demo);
                     }
                     // The songbooks' page, where the song catalog is offered.
                     "songbooks" => {

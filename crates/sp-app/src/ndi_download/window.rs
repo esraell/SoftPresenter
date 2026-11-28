@@ -520,19 +520,7 @@ fn licence_link(ui: &mut egui::Ui) {
 /// where to do it.
 fn done_step(ui: &mut egui::Ui, version: Option<&str>, waits: bool) {
     ui.spacing_mut().item_spacing.y = 6.0;
-    let (tick, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
-    let ground = Color32::from_rgb(
-        (f32::from(READY.r()) * 0.18 + f32::from(PANEL.r()) * 0.82) as u8,
-        (f32::from(READY.g()) * 0.18 + f32::from(PANEL.g()) * 0.82) as u8,
-        (f32::from(READY.b()) * 0.18 + f32::from(PANEL.b()) * 0.82) as u8,
-    );
-    ui.painter().circle_filled(tick.center(), 20.0, ground);
-    crate::icons::paint(
-        ui.painter(),
-        crate::icons::Icon::Check,
-        Rect::from_center_size(tick.center(), vec2(18.0, 18.0)),
-        READY,
-    );
+    done_tick(ui);
     ui.add_space(6.0);
     lead(ui, &installed_line(version), TEXT);
     sub(
@@ -565,6 +553,24 @@ fn done_step(ui: &mut egui::Ui, version: Option<&str>, waits: bool) {
         ui.painter().galley(pos2(place.min.x + 12.0, place.min.y + 10.0), name, TEXT);
         ui.painter().galley(pos2(place.min.x + 12.0, place.min.y + 10.0 + name_height + 2.0), how, TEXT_DIM);
     }
+}
+
+/// A sheet's mark of something done: a green tick in a round of green on the sheet, 40 across
+/// (the Install NDI window's last step, Request an Integration once it is sent).
+pub(crate) fn done_tick(ui: &mut egui::Ui) {
+    let (tick, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+    let ground = Color32::from_rgb(
+        (f32::from(READY.r()) * 0.18 + f32::from(PANEL.r()) * 0.82) as u8,
+        (f32::from(READY.g()) * 0.18 + f32::from(PANEL.g()) * 0.82) as u8,
+        (f32::from(READY.b()) * 0.18 + f32::from(PANEL.b()) * 0.82) as u8,
+    );
+    ui.painter().circle_filled(tick.center(), 20.0, ground);
+    crate::icons::paint(
+        ui.painter(),
+        crate::icons::Icon::Check,
+        Rect::from_center_size(tick.center(), vec2(18.0, 18.0)),
+        READY,
+    );
 }
 
 #[cfg(test)]

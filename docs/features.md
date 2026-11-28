@@ -2574,8 +2574,9 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **Integrations** (Settings): the services SoftPresenter works with, each the same card, two
   across where there is room: its logo (VoxLive's and TimelyChurch's, the owner's own; Canva's
   icon for Canva Sync; Worship Leader App's initials), its name and one line, then a light with
-  how it stands in the fixed-width face and one key (Connect, Open, or Soon), and a dashed card
-  saying more will come. Worship Leader App's card shows only where the song catalog is offered,
+  how it stands in the fixed-width face and one key (Connect, Open, or Soon), and a last, dashed
+  card asking which other app or device the church uses, with **Request an Integration…**
+  (below). Worship Leader App's card shows only where the song catalog is offered,
   as before; TimelyChurch's is greyed as Coming soon, taking no clicks, unless it is offered. A card opens
   that service's page in place, every one the same way and in the cards and rows of the rest of
   Settings: the way back to Integrations, its logo, name and how it stands with what it brings,
@@ -2622,6 +2623,20 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   `SOFTPRESENTER_DATA`) is the one exception, for trying the app only: it keeps its own in
   files in its own data folder that only its user may read (mode 600 on a Mac and on Linux),
   and never reads, changes or asks for anything in the owner's store.
+- **Request an Integration** (the last card of Settings › Integrations, "Don't see what your
+  church uses?"): a window, the same size in every state, asks which app, service or device the
+  church uses and what it should do in SoftPresenter (both needed: Send with either empty is
+  refused, said under Send) and, if wanted, how the church uses it. No name or email is asked
+  for, and nobody writes back: a request that is built shows in What's new. The line under the
+  fields says what is sent, and it is all that is sent: what was typed, the version and the
+  system (macOS, Windows or Linux). Send makes one HTTPS request to the project's own
+  server (`reports.softpresenter.com`, the anonymous reports' server, with no redirects), on a
+  thread of its own; the window says Sending…, then "Sent. Thank you." with what happens next,
+  or in amber why it couldn't be sent (no internet connection, or the server didn't answer)
+  with Try Again. What is typed stays until it is sent, however the window is left (Cancel, ✕,
+  Esc, a failure); once sent, the window opens empty. **Open an Issue on GitHub ↗** opens
+  GitHub's idea form in the browser with nothing typed in it, and the window stays. A test copy
+  sends nothing and says so. What the server keeps is in [PRIVACY.md](../PRIVACY.md).
 - **Canva Sync** (Settings › Integrations): keeps the announcements video fresh from the
   church's Canva presentation. It connects with an integration of the church's own, made in
   Canva's developer portal (an open-source app can't carry a secret of its own): the client ID

@@ -6,7 +6,8 @@
 //! presentation or the connection, then the account; every hint is a line on the page. Worship Leader App's free songbooks (where the song catalog is
 //! offered, `songbooks`), VoxLive, Canva Sync, TimelyChurch (where it is offered,
 //! `timelychurch`) and NDI (installing it, its updates and removing it, `ndi_download`); a
-//! service not offered yet is greyed as coming soon.
+//! service not offered yet is greyed as coming soon. The last card asks which other app or
+//! device a church uses, and opens the Request an Integration window (`integration_request`).
 
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 
@@ -49,8 +50,8 @@ pub struct Ndi<'a> {
 
 /// The pane: the list of services, or the page of the one open, or a screen's look.
 /// `songbooks` is given only where the song catalog is offered; TimelyChurch's card is greyed
-/// as coming soon unless it is offered (`timelychurch.offered`). True when NDI's page asked for
-/// Settings › Screens.
+/// as coming soon unless it is offered (`timelychurch.offered`). The list's last card opens the
+/// window of `ask`. True when NDI's page asked for Settings › Screens.
 pub fn pane(
     ui: &mut egui::Ui,
     view: &mut View,
@@ -58,6 +59,7 @@ pub fn pane(
     mut songbooks: Option<&mut crate::songbooks::View>,
     timelychurch: &mut crate::timelychurch::View,
     ndi: Ndi<'_>,
+    ask: &mut crate::integration_request::IntegrationRequest,
 ) -> bool {
     let songbooks_open = songbooks.as_ref().is_some_and(|songbooks| songbooks.open);
     if *ndi.open {
@@ -77,7 +79,7 @@ pub fn pane(
     } else if let (true, Some(songbooks)) = (songbooks_open, songbooks.as_deref_mut()) {
         songbooks_page(ui, songbooks);
     } else {
-        list(ui, view, canva, songbooks, timelychurch, ndi);
+        list(ui, view, canva, songbooks, timelychurch, ndi, ask);
     }
     false
 }
@@ -160,7 +162,8 @@ struct Service<'a> {
 }
 
 /// The list: a line saying what it is, then a card for each service, the same for all of them,
-/// and a card saying more will come. A card opens that service's page.
+/// and a last card that asks for another. A card opens that service's page; the last opens the
+/// Request an Integration window.
 fn list(
     ui: &mut egui::Ui,
     view: &mut View,
@@ -168,6 +171,7 @@ fn list(
     songbooks: Option<&mut crate::songbooks::View>,
     timelychurch: &mut crate::timelychurch::View,
     mut ndi: Ndi<'_>,
+    ask: &mut crate::integration_request::IntegrationRequest,
 ) {
     let about = t("integrations.list.about", "Other services SoftPresenter works with. Every one opens the same way.");
     let width = ui.available_width();
@@ -243,7 +247,10 @@ fn list(
     const BETWEEN: f32 = 12.0;
     let across = (((width + BETWEEN) / (240.0 + BETWEEN)).floor() as usize).clamp(1, 2);
     let each = (width - BETWEEN * (across - 1) as f32) / across as f32;
-    let tallest = shown.iter().map(|(_, service)| card_height(ui, service, each)).fold(176.0, f32::max);
+    let tallest = shown
+        .iter()
+        .map(|(_, service)| card_height(ui, service, each))
+        .fold(request_card_height(ui, each).max(176.0), f32::max);
     let count = shown.len() + 1;
     let rows = count.div_ceil(across);
     let (grid, _) = ui.allocate_exact_size(vec2(width, rows as f32 * (tallest + BETWEEN) - BETWEEN), Sense::hover());
@@ -258,7 +265,9 @@ fn list(
     let index = shown.len();
     let corner =
         grid.min + vec2((index % across) as f32 * (each + BETWEEN), (index / across) as f32 * (tallest + BETWEEN));
-    more_to_come(ui, Rect::from_min_size(corner, vec2(each, tallest)));
+    if request_card(ui, Rect::from_min_size(corner, vec2(each, tallest))) {
+        ask.open();
+    }
     match opened {
         Some(0) => {
             if let Some(songbooks) = songbooks {
@@ -337,28 +346,63 @@ fn service_card(ui: &mut egui::Ui, rect: Rect, service: &Service, index: usize) 
     response.on_hover_text(hint).clicked()
 }
 
-/// The card after the services: a dashed outline, with the cards' corners, saying a new service
-/// is a new card here.
-fn more_to_come(ui: &egui::Ui, rect: Rect) {
+/// The last card's question and its line, each line of them centred, laid out for a card
+/// `width` wide (drawn from the card's middle).
+fn request_card_parts(ui: &egui::Ui, width: f32) -> [std::sync::Arc<egui::Galley>; 2] {
+    let room = width - 48.0;
+    let centred = |text: &str, font: FontId, ink: Color32| {
+        let mut job = egui::text::LayoutJob::simple(text.to_owned(), font, ink, room);
+        job.halign = egui::Align::Center;
+        ui.painter().layout_job(job)
+    };
+    [
+        centred(t("integrations.ask.card", "Don\u{2019}t see what your church uses?"), semibold(13.0), TEXT_DIM),
+        centred(
+            t("integrations.ask.card.about", "Tell us which app or device, and what it should do."),
+            FontId::proportional(13.0),
+            TEXT_FAINT,
+        ),
+    ]
+}
+
+/// The last card's key.
+fn request_key() -> &'static str {
+    t("integrations.ask.key", "Request an Integration\u{2026}")
+}
+
+/// How tall the last card must be for its words and key to fit, at `width`.
+fn request_card_height(ui: &egui::Ui, width: f32) -> f32 {
+    let [title, line] = request_card_parts(ui, width);
+    16.0 + title.size().y + 8.0 + line.size().y + 16.0 + 30.0 + 16.0
+}
+
+/// The card after the services, in `rect`: a dashed outline with the cards' corners, brighter
+/// under the pointer, and in its middle "Don't see what your church uses?", a line, and the key
+/// Request an Integration…. The whole card is the key. True when clicked.
+fn request_card(ui: &mut egui::Ui, rect: Rect) -> bool {
+    let response = ui.interact(rect, ui.scope_id().with("request an integration card"), Sense::click());
+    let hovered = response.hovered();
     let painter = ui.painter();
     let mut outline = parts::rounded_outline(rect.shrink(0.5), crate::studio::RADIUS_CARD);
     outline.extend(outline.first().copied());
-    painter.extend(egui::Shape::dashed_line(&outline, Stroke::new(1.0, crate::studio::BUTTON_HOVER), 4.0, 3.0));
-    let title =
-        parts::words(ui, t("integrations.more", "More to come"), semibold(13.0), TEXT_DIM, 0.0, rect.width() - 32.0);
-    let line = parts::words(
-        ui,
-        t("integrations.more.about", "A new service is a new card here"),
-        FontId::proportional(13.0),
-        TEXT_FAINT,
-        0.0,
-        rect.width() - 32.0,
-    );
-    let height = title.size().y + 4.0 + line.size().y;
+    let edge = if hovered { TEXT_FAINT } else { crate::studio::BUTTON_HOVER };
+    painter.extend(egui::Shape::dashed_line(&outline, Stroke::new(1.0, edge), 4.0, 3.0));
+    let [title, line] = request_card_parts(ui, rect.width());
+    let key_words = request_key();
+    let key_width = crate::studio::widest(ui, &[key_words], &FontId::proportional(12.5)) + 26.0;
+    let height = title.size().y + 8.0 + line.size().y + 16.0 + 30.0;
     let top = rect.center().y - height / 2.0;
-    let title_height = title.size().y;
-    painter.galley(pos2(rect.center().x - title.size().x / 2.0, top), title, TEXT_DIM);
-    painter.galley(pos2(rect.center().x - line.size().x / 2.0, top + title_height + 4.0), line, TEXT_FAINT);
+    let (title_height, line_height) = (title.size().y, line.size().y);
+    painter.galley(pos2(rect.center().x, top), title, TEXT_DIM);
+    painter.galley(pos2(rect.center().x, top + title_height + 8.0), line, TEXT_FAINT);
+    let key = Rect::from_min_size(
+        pos2(rect.center().x - key_width / 2.0, top + title_height + 8.0 + line_height + 16.0),
+        vec2(key_width, 30.0),
+    );
+    // The key is part of the card, which takes the click.
+    crate::studio::paint_flat(painter, key, 9.0, crate::studio::Flat::Plain, hovered);
+    painter.text(key.center(), Align2::CENTER_CENTER, key_words, FontId::proportional(12.5), TEXT);
+    response.clicked()
 }
 
 /// The head of a service's page, the same for every service: the way back to the list, then its
@@ -1662,7 +1706,8 @@ mod tests {
             let mut download =
                 crate::ndi_download::NdiDownload::in_folder(std::env::temp_dir().join("softpresenter-no-ndi"));
             let ndi = Ndi { download: &mut download, found: false, open: &mut false };
-            pane(ui, &mut voxlive, &mut canva, songbooks.as_deref_mut(), timelychurch, ndi);
+            let mut ask = crate::integration_request::IntegrationRequest::default();
+            pane(ui, &mut voxlive, &mut canva, songbooks.as_deref_mut(), timelychurch, ndi, &mut ask);
         });
         drawn.textures_delta.clear();
         let mut words = Vec::new();
@@ -1752,7 +1797,8 @@ mod tests {
                     let mut download =
                         crate::ndi_download::NdiDownload::in_folder(std::env::temp_dir().join("softpresenter-no-ndi"));
                     let ndi = Ndi { download: &mut download, found: false, open: &mut false };
-                    pane(ui, voxlive, canva, None, timelychurch, ndi);
+                    let mut ask = crate::integration_request::IntegrationRequest::default();
+                    pane(ui, voxlive, canva, None, timelychurch, ndi, &mut ask);
                 });
             });
             words.clear();

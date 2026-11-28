@@ -45,8 +45,9 @@ use crate::log_scrub::Scrubber;
 pub use facts::{Facts, GpuFacts};
 
 /// Where the reports of a public build go: the SoftPresenter project's own server. Not a
-/// secret: the route takes a report from anyone, and checks it strictly.
-const SERVER: &str = "https://reports.softpresenter.com";
+/// secret: the route takes a report from anyone, and checks it strictly. Integration requests
+/// go there too (`integration_request`).
+pub(crate) const SERVER: &str = "https://reports.softpresenter.com";
 const ROUTE: &str = "/v1/public/report";
 
 /// How much waits on disk for the network to come back, at the most; the oldest go.

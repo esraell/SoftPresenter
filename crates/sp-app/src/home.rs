@@ -684,6 +684,9 @@ pub struct HomeState {
     pub ndi_download: crate::ndi_download::NdiDownload,
     /// True while NDI's page is open in Settings › Integrations.
     pub ndi_card_open: bool,
+    /// Request an Integration (the last card of Settings › Integrations): its window, what is
+    /// typed in it, and the request on its way.
+    pub integration_request: crate::integration_request::IntegrationRequest,
     /// The DeckLink devices found, and how the driver stands (no devices without it).
     pub decklink: sp_decklink::Found,
     /// The Edit view's right-hand panel.
@@ -2157,6 +2160,7 @@ impl Default for HomeState {
             ndi: crate::ndi_in::NdiView::default(),
             ndi_download: crate::ndi_download::NdiDownload::default(),
             ndi_card_open: false,
+            integration_request: crate::integration_request::IntegrationRequest::default(),
             decklink: sp_decklink::Found { driver: sp_decklink::Driver::Looking, devices: Vec::new() },
             inspector: crate::inspector::InspectorState::default(),
             theme_edit: None,
