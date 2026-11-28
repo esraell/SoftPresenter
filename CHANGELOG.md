@@ -21,6 +21,15 @@ Settings and playlists that couldn't be saved are tried again.
 - **NDI is checked before it is used.** The NDI that SoftPresenter keeps in its own folder is checked each time before it is used. On a Mac, macOS must find NDI's own signature on it. On Linux, where NDI's file isn't signed, it must still be the file SoftPresenter installed, by a fingerprint noted beside it; that catches a file that was replaced or damaged, not someone who can change both. A file that fails is not used: SoftPresenter uses the computer's own NDI if there is one, or says NDI isn't installed, and Install NDI puts it right.
 - **NDI on Windows waits for clear screens.** NDI's own installer resets a PC's network settings, so on Windows the keys that install or update NDI are greyed while anything is on screen, and say so. An update that finishes downloading after something came on screen waits for you to press Install; it never opens NDI's installer by itself.
 - **Part names in your language.** A slide's Group menu, and Insert Group in Edit Words, now offer a song's parts in the language SoftPresenter is set to: in Russian Куплет 1, Припев, Мост…, in Ukrainian Куплет 1, Приспів, Міст…, in Spanish Estrofa 1, Coro, Puente…; each gets the jump key and colour of its English name (Куплет 2 jumps with S, as Verse 2 does), and a new song with no words starts with Куплет 1 in Russian. The Label menu's labels follow the language too. Songs you already have keep their part names and labels as written, and the menu ticks the part a slide is in whatever language it is named in.
+- **Add toolbar in the editor.** The Edit view's Add keys are now one floating bar over the slide, each with a picture and a name. Linked Text is among them. It takes the place of the row of word buttons, and of the Add menu over a stage layout; in a small window each key shows its picture alone and says its name under the pointer.
+- **List keys in other languages.** In the Edit view, where Add, Duplicate and Delete don't fit over a list, all five keys there now show pictures. Each says its name under the pointer. Before, their lettering was made smaller to fit, so they read as a different kind of key.
+- **Video tab.** A video on a slide now has its own Video tab in the Edit view, with its file's name, how it fits, and a line saying when it plays. A picture's tab names its file too.
+- **Several objects at once.** With several objects picked in the Edit view, a change on the right side now goes to all of them. That includes which shape they are, and how they come on and go off.
+- **Slide settings in the editor.** With nothing picked on a song's slide, the Edit view's right side now shows the slide's Label, Template and Go to Next. Before, these were only on the slide's right-click menu.
+- **Change a shape.** A shape's tab in the Edit view has a menu to make it another shape, keeping its place, size and colours.
+- **Rename and Duplicate keys.** The Box tab in the Edit view has Rename and Duplicate beside Delete.
+- **What a template's box holds.** In a theme's template, a text box's tab says which of a slide's words it holds, and lets you change that.
+- **Editor's right side.** The tabs now follow what is picked: the object's own tab (Text, Shape, Picture, Web Page and so on), then Box and Animation. Every row has its name at the left, colours are a row of swatches, and switching Shadow, Outline or a gradient off greys its row instead of taking it away, so nothing moves under the pointer. Copy style, Paste style and Back to theme are at the foot of the Text tab.
 
 ### Fixed
 
@@ -84,15 +93,6 @@ A What's new window, a search that stays after a drag, AirPlay by name, a tidier
 - **Empty boxes are shaded.** In the Edit view, a Web Page, NDI Source or AirPlay box with nothing to show dims what is behind it.
 - **Pictures go under the words.** A picture or video added in the Edit view goes just above the slide's background (pictures, videos or a full-slide fill), under the words.
 - **A thin white outline.** A picked box in the Edit view is outlined in thin white.
-- **Add toolbar in the editor.** The Edit view's Add keys are now one floating bar over the slide, each with a picture and a name. Linked Text is among them. It takes the place of the row of word buttons, and of the Add menu over a stage layout; in a small window each key shows its picture alone and says its name under the pointer.
-- **List keys in other languages.** In the Edit view, where Add, Duplicate and Delete don't fit over a list, all five keys there now show pictures. Each says its name under the pointer. Before, their lettering was made smaller to fit, so they read as a different kind of key.
-- **Video tab.** A video on a slide now has its own Video tab in the Edit view, with its file's name, how it fits, and a line saying when it plays. A picture's tab names its file too.
-- **Several objects at once.** With several objects picked in the Edit view, a change on the right side now goes to all of them. That includes which shape they are, and how they come on and go off.
-- **Slide settings in the editor.** With nothing picked on a song's slide, the Edit view's right side now shows the slide's Label, Template and Go to Next. Before, these were only on the slide's right-click menu.
-- **Change a shape.** A shape's tab in the Edit view has a menu to make it another shape, keeping its place, size and colours.
-- **Rename and Duplicate keys.** The Box tab in the Edit view has Rename and Duplicate beside Delete.
-- **What a template's box holds.** In a theme's template, a text box's tab says which of a slide's words it holds, and lets you change that.
-- **Editor's right side.** The tabs now follow what is picked: the object's own tab (Text, Shape, Picture, Web Page and so on), then Box and Animation. Every row has its name at the left, colours are a row of swatches, and switching Shadow, Outline or a gradient off greys its row instead of taking it away, so nothing moves under the pointer. Copy style, Paste style and Back to theme are at the foot of the Text tab.
 
 ### Fixed
 
