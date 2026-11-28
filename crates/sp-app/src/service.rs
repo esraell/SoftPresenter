@@ -935,7 +935,7 @@ pub struct Prefs {
     #[serde(default)]
     pub import_as: std::collections::BTreeMap<String, String>,
     /// How large the operator's windows draw everything: `auto` (larger in a big window, the
-    /// default), or a percentage: `100`, `125`, `150` or `175`.
+    /// default), or a percentage: `80`, `90`, `100`, `125`, `150` or `175`.
     #[serde(default)]
     pub interface_size: String,
 }

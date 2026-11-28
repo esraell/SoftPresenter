@@ -12165,20 +12165,41 @@ mod tests {
     /// size Automatic gives it, as the window's toolkit is given them (a Retina display): in the
     /// window's own points, left to right, with the factor and the pixels to the point it drew at.
     fn columns_in(show: &Show, window: egui::Vec2) -> (Vec<Rect>, f32, f32) {
-        use crate::interface_size::{InterfaceSize, home_zoom};
-        fn walk(shape: &egui::Shape, into: &mut Vec<Rect>) {
+        let (columns, zoom, pixels, _) =
+            home_at_size(show, window, crate::interface_size::InterfaceSize::Automatic, 2.0);
+        (columns, zoom, pixels)
+    }
+
+    /// Each piece of text a frame drew, in the layout's points: its words, where, and the room it
+    /// was clipped to.
+    type ClippedWords = Vec<(String, Rect, Rect)>;
+
+    /// As [`columns_in`], at the interface size `size` on a display of `native` pixels a point,
+    /// with each piece of text the frame drew.
+    fn home_at_size(
+        show: &Show,
+        window: egui::Vec2,
+        size: crate::interface_size::InterfaceSize,
+        native: f32,
+    ) -> (Vec<Rect>, f32, f32, ClippedWords) {
+        use crate::interface_size::home_zoom;
+        fn walk(shape: &egui::Shape, clip: Rect, into: &mut Vec<Rect>, texts: &mut ClippedWords) {
             match shape {
                 egui::Shape::Rect(rect) if rect.fill == crate::studio::PANEL => into.push(rect.rect),
-                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                egui::Shape::Text(text) => {
+                    texts.push((text.galley.text().to_owned(), text.visual_bounding_rect(), clip));
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, clip, into, texts)),
                 _ => {}
             }
         }
-        let zoom = home_zoom(InterfaceSize::Automatic, window);
+        let zoom = home_zoom(size, window);
         let ctx = egui::Context::default();
         crate::studio::apply_style(&ctx);
         ctx.options_mut(|options| options.zoom_factor = zoom);
-        let mut state = HomeState::default();
+        let mut state = HomeState { interface_size: size, ..HomeState::default() };
         let mut panels = Vec::new();
+        let mut texts = Vec::new();
         for frame in 0..3 {
             let mut raw = RawInput {
                 // As egui-winit gives it: the window's size over the factor.
@@ -12186,12 +12207,13 @@ mod tests {
                 time: Some(f64::from(frame) * 0.1),
                 ..RawInput::default()
             };
-            raw.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(2.0);
+            raw.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(native);
             let output = ctx.run_ui(raw, |ui| {
                 home_ui(ui, show, &mut state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
             });
             panels.clear();
-            output.shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut panels));
+            texts.clear();
+            output.shapes.iter().for_each(|clipped| walk(&clipped.shape, clipped.clip_rect, &mut panels, &mut texts));
             output.drop_without_applying_deltas();
         }
         // The columns run from under the top bar to the foot of the window.
@@ -12205,7 +12227,67 @@ mod tests {
             .collect();
         columns.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
         columns.dedup_by(|a, b| (a.min.x - b.min.x).abs() < 1.0);
-        (columns, zoom, ctx.pixels_per_point())
+        (columns, zoom, ctx.pixels_per_point(), texts)
+    }
+
+    /// The owner, full screen on the church's Mac mini: "i think its too zoomed". At 80% and 90%
+    /// a 1920 × 1080 window on a display of 1 pixel a point is laid out with more points than it
+    /// has pixels (2400 × 1350 at 80%), and nothing is drawn past its edges: the same three
+    /// columns, the side ones as many points wide as at 100% (so fewer of the window's pixels),
+    /// none over another, and every word inside the window.
+    #[test]
+    fn a_smaller_interface_size_draws_the_home_window_whole_with_more_room() {
+        use crate::interface_size::InterfaceSize;
+        let show = three_songs();
+        let window = egui::vec2(1920.0, 1080.0);
+        let (at_100, zoom, pixels, _) = home_at_size(&show, window, InterfaceSize::Percent(100), 1.0);
+        assert_eq!((zoom, pixels), (1.0, 1.0));
+        assert_eq!(at_100.len(), 3, "the three columns at 100%: {at_100:?}");
+        for (percent, factor) in [(80, 0.8f32), (90, 0.9f32)] {
+            let said = format!("{percent}%");
+            let (columns, zoom, pixels, texts) = home_at_size(&show, window, InterfaceSize::Percent(percent), 1.0);
+            // Drawn at what was chosen: not held back to 100%.
+            assert!((zoom - factor).abs() < 0.001 && (pixels - factor).abs() < 0.001, "{said}: {zoom} {pixels}");
+            let laid_out = window / zoom;
+            assert!(laid_out.x > window.x && laid_out.y > window.y, "{said}: more room, {laid_out:?}");
+            // The three columns, left to right, inside the window and none over another.
+            assert_eq!(columns.len(), 3, "{said}: {columns:?}");
+            for column in &columns {
+                assert!(column.min.x >= -0.5 && column.max.x <= window.x + 0.5, "{said}: {column:?}");
+                assert!(column.min.y >= -0.5 && column.max.y <= window.y + 0.5, "{said}: {column:?}");
+                assert!(column.width() > 0.0 && column.height() > window.y * 0.6, "{said}: {column:?}");
+            }
+            for pair in columns.windows(2) {
+                assert!(pair[0].max.x <= pair[1].min.x + 0.5, "{said}: {:?} runs over {:?}", pair[0], pair[1]);
+            }
+            // The side columns keep their width in points, so they take less of the window than
+            // at 100% (in its pixels, that much smaller), and the middle more.
+            for side in [0, 2] {
+                let points = columns[side].width() / zoom;
+                assert!((points - at_100[side].width()).abs() < 1.0, "{said}: column {side} is {points} points");
+                assert!(columns[side].width() < at_100[side].width() - 1.0, "{said}: column {side}");
+            }
+            assert!(columns[1].width() > at_100[1].width(), "{said}: the middle column");
+            // Every word drawn where it can be seen is inside the window, and inside the room it
+            // was clipped to across (a word cut off at a column's edge would be past it).
+            let screen = Rect::from_min_size(pos2(0.0, 0.0), laid_out);
+            let seen: Vec<&(String, Rect, Rect)> =
+                texts.iter().filter(|(words, rect, clip)| !words.trim().is_empty() && rect.intersects(*clip)).collect();
+            assert!(seen.len() > 10, "{said}: words drawn: {}", seen.len());
+            let mut past = Vec::new();
+            for (words, rect, clip) in seen {
+                let shown = rect.intersect(*clip);
+                let inside = shown.min.x >= screen.min.x - 0.5
+                    && shown.max.x <= screen.max.x + 0.5
+                    && shown.min.y >= screen.min.y - 0.5
+                    && shown.max.y <= screen.max.y + 0.5;
+                let across = rect.min.x >= clip.min.x - 1.0 && rect.max.x <= clip.max.x + 1.0;
+                if !inside || !across {
+                    past.push(format!("\u{201c}{words}\u{201d} at {rect:?}, clipped to {clip:?}"));
+                }
+            }
+            assert!(past.is_empty(), "{said}, the window {screen:?}:\n{}", past.join("\n"));
+        }
     }
 
     #[test]

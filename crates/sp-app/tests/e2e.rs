@@ -2191,6 +2191,42 @@ fn sp_switches_a_screens_voxlive_captions() {
     copy.quit().assert_clean(&run);
 }
 
+/// `sp settings set interface_size=80|90` chooses the smaller interface sizes as Settings ›
+/// Slides › In your window does: said by `sp settings` as chosen, kept in the settings file by
+/// its percentage and between runs; a size it doesn't offer is refused with the ones it does.
+/// (The factor each choice draws at, and the window drawn at it, are `interface_size`'s and
+/// `home`'s tests.)
+#[test]
+fn sp_settings_sets_a_smaller_interface_size() {
+    let Some(run) = Run::new("sp_settings_sets_a_smaller_interface_size") else { return };
+    let copy = run.start(&[]);
+    let settings = copy.ok(&["settings"]);
+    assert!(settings.text.contains("interface size: automatic"), "Automatic until asked for: {}", settings.text);
+    let said = copy.ok(&["settings", "set", "interface_size=80"]);
+    assert!(said.text.contains("interface size 80%"), "{}", said.text);
+    let settings = copy.ok(&["settings"]);
+    assert!(settings.text.contains("interface size: 80%"), "{}", settings.text);
+    assert_eq!(settings.data["interface_size"], "80", "{}", settings.data);
+    copy.refused(&["settings", "set", "interface_size=70"], "interface_size is auto, 80, 90, 100, 125, 150 or 175");
+    assert_eq!(copy.ok(&["settings"]).data["interface_size"], "80", "a refusal changes nothing");
+    copy.quit().assert_clean(&run);
+    let file = std::fs::read_to_string(run.data.join("preferences.json")).expect("the preferences file");
+    let saved: serde_json::Value = serde_json::from_str(&file).expect("JSON");
+    assert_eq!(saved["interface_size"], "80", "{saved}");
+    // Kept between runs, and 90% (typed with its sign) too.
+    let copy = run.start(&[]);
+    let settings = copy.ok(&["settings"]);
+    assert_eq!(settings.data["interface_size"], "80", "kept between runs: {}", settings.data);
+    assert!(settings.text.contains("interface size: 80%"), "{}", settings.text);
+    copy.ok(&["settings", "set", "interface_size=90%"]);
+    let settings = copy.ok(&["settings"]);
+    assert!(settings.text.contains("interface size: 90%"), "{}", settings.text);
+    assert_eq!(settings.data["interface_size"], "90", "{}", settings.data);
+    copy.ok(&["settings", "set", "interface_size=auto"]);
+    assert_eq!(copy.ok(&["settings"]).data["interface_size"], "auto");
+    copy.quit().assert_clean(&run);
+}
+
 /// A setting changed by `sp` is kept when the copy quits straight after, its window hardly
 /// drawn (as with the window covered or minimised): the small choices are saved as the window
 /// is drawn, which a quiet copy's, behind everything, seldom is; quitting saves them too.

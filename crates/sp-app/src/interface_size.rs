@@ -2,7 +2,9 @@
 //! Interface size). Automatic, the usual, draws a window bigger than the size the layout was
 //! drawn for (1440 × 900 points) larger in proportion, up to 125%, so a big screen shows the same
 //! layout, bigger, instead of the same narrow side columns round a huge middle; a fixed 100% to 175%
-//! draws everything that much larger, as far as the window has room.
+//! draws everything that much larger, as far as the window has room, and 80% or 90% that much
+//! smaller (the owner, full screen on the church's Mac mini: "i think its too zoomed"), which
+//! always has room: the layout then has more points than it has at 100%.
 //!
 //! The toolkit's own zoom does it: every window is laid out in points as before, at more pixels
 //! to the point, and the words are drawn afresh at that size, never stretched. The pictures of
@@ -15,7 +17,8 @@ use egui::{Vec2, vec2};
 
 /// The window the layout was drawn for, in points: the design's 1440 × 900.
 pub const BASE: Vec2 = vec2(1440.0, 900.0);
-/// The home window's least size, in points: no factor lays it out smaller than this.
+/// The home window's least size, in points: no factor lays it out smaller than this (a factor
+/// under 1 lays it out larger than the window itself).
 pub const HOME_LEAST: Vec2 = vec2(1100.0, 700.0);
 /// The most Automatic goes to. The owner, on the 5K iMac full screen at 160%: "the scaling is a
 /// bit too much, there needs to be a limit on how much the ui should scale, i think we move it
@@ -35,14 +38,17 @@ pub enum InterfaceSize {
     /// Larger in proportion in a window bigger than the base size.
     #[default]
     Automatic,
-    /// Always this many percent (100, 125, 150 or 175), as far as the window has room.
+    /// Always this many percent (80, 90, 100, 125, 150 or 175), as far as the window has room
+    /// (80% and 90% always have it).
     Percent(u16),
 }
 
 impl InterfaceSize {
     /// Every choice, in the order the setting offers them.
-    pub const ALL: [InterfaceSize; 5] = [
+    pub const ALL: [InterfaceSize; 7] = [
         InterfaceSize::Automatic,
+        InterfaceSize::Percent(80),
+        InterfaceSize::Percent(90),
         InterfaceSize::Percent(100),
         InterfaceSize::Percent(125),
         InterfaceSize::Percent(150),
@@ -96,25 +102,30 @@ pub fn automatic(window: Vec2) -> f32 {
 }
 
 /// The factor the home window draws at, for its size in points (the window's own, not the
-/// toolkit's, which shrinks as the factor grows).
+/// toolkit's, which shrinks as the factor grows). A size over 100% goes only as far as the
+/// window has room; 80% and 90% are always what was chosen, whatever the window's size, since
+/// a smaller factor only gives the layout more room.
 pub fn home_zoom(size: InterfaceSize, window: Vec2) -> f32 {
     let wanted = match size {
         InterfaceSize::Automatic => automatic(window),
         InterfaceSize::Percent(percent) => f32::from(percent) / 100.0,
     };
-    wanted.min(room(window, HOME_LEAST)).max(1.0)
+    // `room` is never under 1: it only holds back a factor over 1.
+    wanted.min(room(window, HOME_LEAST)).max(wanted.min(1.0))
 }
 
 /// The factor a window of its own (Settings, Screens) draws at: the home window's, so every
-/// window looks the same, as far as it has room for its least size.
+/// window looks the same, as far as it has room for its least size (the home window's 80% or
+/// 90% always has it).
 pub fn panel_zoom(home: f32, window: Vec2, least: Vec2) -> f32 {
-    home.min(room(window, least)).max(1.0)
+    home.min(room(window, least)).max(home.min(1.0))
 }
 
 /// How much larger than their usual size the window's pictures of slides are drawn (thumbnails
 /// and the previews), for its pixels to the point (the display's scale times the factor). Their
 /// usual sizes were chosen for a Retina display at 100%, so they grow only past that, in
-/// quarters, up to twice: a display with fewer pixels never draws them larger than today.
+/// quarters, up to twice: a display with fewer pixels never draws them larger than today, and a
+/// factor under 1 never smaller (more of their pixels than the window shows, so still sharp).
 pub fn picture_scale(pixels_per_point: f32) -> f32 {
     ((pixels_per_point / 2.0 * 4.0).round() / 4.0).clamp(1.0, 2.0)
 }
@@ -250,16 +261,48 @@ mod tests {
     }
 
     #[test]
+    fn a_smaller_size_is_what_was_chosen_in_every_window_and_its_layout_has_more_room() {
+        // A 1080p display full screen (and under a menu bar), a big screen, the least window, and
+        // one smaller than that (a small display): 80% and 90% always, never held back to 100%
+        // and never rounded to a step.
+        for (percent, factor) in [(80, 0.8), (90, 0.9)] {
+            for (w, h) in [(1920.0, 1080.0), (1920.0, 1055.0), (2560.0, 1440.0), (1100.0, 700.0), (800.0, 600.0)] {
+                let window = vec2(w, h);
+                let zoom = home_zoom(InterfaceSize::Percent(percent), window);
+                assert!(close(zoom, factor), "{percent}% in {w} × {h}: {zoom}");
+                // The layout gets more points than the window has: at 80% a 1920 × 1080 window
+                // is laid out 2400 × 1350.
+                let laid_out = window / zoom;
+                assert!(laid_out.x > w && laid_out.y > h, "{percent}%: {laid_out:?}");
+            }
+        }
+        let at_80 = vec2(1920.0, 1080.0) / home_zoom(InterfaceSize::Percent(80), vec2(1920.0, 1080.0));
+        assert!((at_80.x - 2400.0).abs() < 0.5 && (at_80.y - 1350.0).abs() < 0.5, "{at_80:?}");
+        // Settings and Screens follow it, at any size of their own, smaller than their least too.
+        let least = vec2(820.0, 560.0);
+        for window in [vec2(1040.0, 720.0), vec2(820.0, 560.0), vec2(700.0, 500.0), vec2(2400.0, 1600.0)] {
+            assert!(close(panel_zoom(0.8, window, least), 0.8), "{window:?}");
+            assert!(close(panel_zoom(0.9, window, least), 0.9), "{window:?}");
+        }
+    }
+
+    #[test]
     fn no_factor_lays_a_window_out_smaller_than_its_least_size() {
         for size in InterfaceSize::ALL {
             for w in (900..=4000).step_by(37) {
                 for h in (600..=2400).step_by(29) {
                     let window = vec2(w as f32, h as f32);
                     let zoom = home_zoom(size, window);
-                    assert!((1.0..=1.751).contains(&zoom), "{size:?} {window:?}: {zoom}");
+                    assert!((0.799..=1.751).contains(&zoom), "{size:?} {window:?}: {zoom}");
+                    let laid_out = window / zoom;
                     if zoom > 1.0 {
-                        let laid_out = window / zoom;
                         assert!(laid_out.x >= HOME_LEAST.x - 0.1 && laid_out.y >= HOME_LEAST.y - 0.1);
+                    } else {
+                        // At 100% or less, never less room than the window itself.
+                        assert!(laid_out.x >= window.x - 0.1 && laid_out.y >= window.y - 0.1, "{size:?} {window:?}");
+                    }
+                    if size == InterfaceSize::Automatic {
+                        assert!(zoom >= 1.0, "Automatic never goes under 100%: {window:?} {zoom}");
                     }
                     if size == InterfaceSize::Automatic && zoom > 1.0 {
                         let laid_out = window / zoom;
@@ -286,7 +329,20 @@ mod tests {
         }
         assert_eq!(InterfaceSize::Automatic.code(), "auto");
         assert_eq!(InterfaceSize::Percent(150).code(), "150");
-        for odd in ["", "auto", "90", "200", "1.5", "large"] {
+        assert_eq!(InterfaceSize::Percent(80).code(), "80");
+        assert_eq!(InterfaceSize::from_code("80"), InterfaceSize::Percent(80));
+        assert_eq!(InterfaceSize::from_code("90"), InterfaceSize::Percent(90));
+        // The order the setting offers them: Automatic, then smallest to largest.
+        let percents: Vec<u16> = InterfaceSize::ALL
+            .iter()
+            .filter_map(|size| match size {
+                InterfaceSize::Percent(n) => Some(*n),
+                InterfaceSize::Automatic => None,
+            })
+            .collect();
+        assert_eq!(InterfaceSize::ALL[0], InterfaceSize::Automatic);
+        assert_eq!(percents, [80, 90, 100, 125, 150, 175]);
+        for odd in ["", "auto", "70", "85", "95", "200", "0.8", "1.5", "large"] {
             assert_eq!(InterfaceSize::from_code(odd), InterfaceSize::Automatic, "{odd:?}");
         }
     }
@@ -300,6 +356,13 @@ mod tests {
         assert!(close(picture_scale(3.2), 1.5), "a Retina display at 160%");
         assert!(close(picture_scale(3.5), 1.75));
         assert!(close(picture_scale(6.0), 2.0));
+        // 80% and 90%, on a display of 1 pixel a point and on a Retina one: the usual size,
+        // never smaller, so the window shows fewer of their pixels than they have.
+        for pixels in [0.8, 0.9, 1.6, 1.8] {
+            assert!(close(picture_scale(pixels), 1.0), "{pixels}");
+            assert_eq!(scaled((640, 360), picture_scale(pixels)), (640, 360));
+            assert_eq!(scaled((480, 270), picture_scale(pixels)), (480, 270));
+        }
         assert_eq!(scaled((640, 360), 1.0), (640, 360));
         assert_eq!(scaled((640, 360), 1.5), (960, 540));
         assert_eq!(scaled((480, 270), 1.25), (600, 338));

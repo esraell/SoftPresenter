@@ -543,8 +543,8 @@ fn slides_page(ui: &mut egui::Ui, state: &mut HomeState, show: &Show) {
     );
 }
 
-/// The Interface size row: Automatic, 100%, 125%, 150% or 175%, and what the windows are drawn
-/// at now (which a fixed size the main window has no room for is not). The switch goes under
+/// The Interface size row: Automatic, 80%, 90%, 100%, 125%, 150% or 175%, and what the windows
+/// are drawn at now (which a fixed size the main window has no room for is not). The switch goes under
 /// the words when the page is too narrow for both.
 fn interface_size_row(ui: &mut egui::Ui, state: &mut HomeState, look: &crate::studio::SwitchLook) {
     use crate::interface_size::InterfaceSize;
@@ -1685,6 +1685,51 @@ mod tests {
                             "{language:?}, {pane:?}: \u{201c}{words}\u{201d} ends at {}",
                             rect.max.x
                         );
+                    }
+                }
+            });
+        }
+    }
+
+    /// Interface size offers seven sizes, Automatic then 80% to 175%, left to right on one row,
+    /// each inside the page at Settings' least width and at the width it opens at, in every
+    /// language.
+    #[test]
+    fn interface_size_offers_seven_sizes_inside_the_page_in_every_language() {
+        use crate::i18n::Language;
+        use crate::interface_size::InterfaceSize;
+        for language in Language::ALL {
+            crate::i18n::with_language(language, || {
+                let labels: Vec<String> = InterfaceSize::ALL
+                    .iter()
+                    .map(|size| match size {
+                        InterfaceSize::Automatic => t("settings.size.automatic", "Automatic").to_owned(),
+                        InterfaceSize::Percent(n) => crate::i18n::percent(u64::from(*n)),
+                    })
+                    .collect();
+                assert_eq!(labels.len(), 7);
+                for width in [820.0, 1040.0] {
+                    let said = format!("{language:?} at {width}");
+                    let right = width - GAP - 28.0;
+                    let drawn = settings_at(width, Pane::Slides);
+                    // The switch is the page's last card's last row: the last of each label drawn.
+                    let places: Vec<Rect> = labels
+                        .iter()
+                        .map(|label| {
+                            drawn
+                                .iter()
+                                .rfind(|(words, _)| words == label)
+                                .map(|(_, rect)| *rect)
+                                .unwrap_or_else(|| panic!("{said}: {label} isn't drawn"))
+                        })
+                        .collect();
+                    for (label, rect) in labels.iter().zip(&places) {
+                        assert!(rect.max.x <= right + 0.5, "{said}: \u{201c}{label}\u{201d} ends at {}", rect.max.x);
+                    }
+                    for pair in places.windows(2) {
+                        assert!(pair[0].max.x <= pair[1].min.x, "{said}: out of order or over each other: {places:?}");
+                        let (a, b) = (pair[0], pair[1]);
+                        assert!(a.min.y < b.max.y && b.min.y < a.max.y, "{said}: one row: {places:?}");
                     }
                 }
             });

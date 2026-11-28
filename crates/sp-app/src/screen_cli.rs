@@ -628,7 +628,7 @@ impl crate::App {
     pub(crate) fn ctl_settings(&mut self, args: &[String]) -> Result<Reply, String> {
         let usage = "settings | settings set transition=KIND[:SECONDS] media_transition=… copyright=never|first|last|every \
                      ccli_licence=NUMBER continuous=on|off end_mark=on|off view=grid|words|table columns=1-12 \
-                     language=auto|en|es|ru|uk interface_size=auto|100|125|150|175";
+                     language=auto|en|es|ru|uk interface_size=auto|80|90|100|125|150|175";
         let state = &self.running.as_ref().ok_or("The app isn't ready.")?.home_state;
         if args.get(1).is_none() {
             let prefs = state.prefs();
@@ -755,13 +755,7 @@ impl crate::App {
                 // As Settings › Slides › In your window: how large the windows draw everything.
                 "interface_size" | "size" => {
                     use crate::interface_size::InterfaceSize;
-                    let typed = value.trim().trim_end_matches('%').to_lowercase();
-                    let size = InterfaceSize::ALL
-                        .into_iter()
-                        .find(|size| {
-                            size.code() == typed || (typed == "automatic" && *size == InterfaceSize::Automatic)
-                        })
-                        .ok_or_else(|| format!("interface_size is auto, 100, 125, 150 or 175, not {value}."))?;
+                    let size = interface_size_typed(value)?;
                     said.push(match size {
                         InterfaceSize::Automatic => "interface size automatic".to_owned(),
                         InterfaceSize::Percent(n) => format!("interface size {n}%"),
@@ -788,6 +782,17 @@ impl crate::App {
         self.with_state(|state| state.reflow = Some((at, text)));
         Ok(Reply::done(format!("Editing the words of {}.", song.title)))
     }
+}
+
+/// The Interface size `sp settings set interface_size=` was given: `auto` (or `automatic`), or
+/// one of the percentages, with or without its `%`.
+fn interface_size_typed(value: &str) -> Result<crate::interface_size::InterfaceSize, String> {
+    use crate::interface_size::InterfaceSize;
+    let typed = value.trim().trim_end_matches('%').to_lowercase();
+    InterfaceSize::ALL
+        .into_iter()
+        .find(|size| size.code() == typed || (typed == "automatic" && *size == InterfaceSize::Automatic))
+        .ok_or_else(|| format!("interface_size is auto, 80, 90, 100, 125, 150 or 175, not {value}."))
 }
 
 /// The Interface size setting as `sp settings` says it, with what the home window draws at now:
@@ -868,6 +873,35 @@ mod tests {
         ] {
             assert_eq!(short(line), None, "{line}");
         }
+    }
+
+    #[test]
+    fn sp_takes_every_interface_size_and_says_a_smaller_one_as_chosen() {
+        use crate::interface_size::InterfaceSize;
+        // Every choice the setting offers, by the code the settings file keeps it by, with a
+        // `%` too: the usage and the refusal name them all.
+        for size in InterfaceSize::ALL {
+            assert_eq!(interface_size_typed(&size.code()), Ok(size));
+            assert_eq!(InterfaceSize::from_code(&size.code()), size, "kept in the settings file as it was typed");
+            if let InterfaceSize::Percent(n) = size {
+                assert_eq!(interface_size_typed(&format!("{n}%")), Ok(size));
+                let refused = interface_size_typed("70").unwrap_err();
+                assert!(refused.contains(&format!(" {n}")), "{refused}");
+            }
+        }
+        assert_eq!(interface_size_typed("80"), Ok(InterfaceSize::Percent(80)));
+        assert_eq!(interface_size_typed(" 90% "), Ok(InterfaceSize::Percent(90)));
+        assert_eq!(interface_size_typed("Automatic"), Ok(InterfaceSize::Automatic));
+        for odd in ["70", "85", "0.8", "small", ""] {
+            assert!(interface_size_typed(odd).is_err(), "{odd:?}");
+        }
+        // Said as chosen: a smaller size always has room, so there is no "now" to add.
+        assert_eq!(interface_size_words(InterfaceSize::Percent(80), 0.8), "interface size: 80%");
+        assert_eq!(interface_size_words(InterfaceSize::Percent(90), 0.9), "interface size: 90%");
+        assert_eq!(
+            interface_size_words(InterfaceSize::Percent(150), 1.1),
+            "interface size: 150% (110% now, as large as the window has room for)"
+        );
     }
 
     #[test]

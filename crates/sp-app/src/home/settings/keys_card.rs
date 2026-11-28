@@ -1143,8 +1143,10 @@ mod tests {
 
     #[test]
     fn the_key_layout_caption_fits_its_column_in_every_language() {
-        // At every interface size: letters are set on whole pixels, so their widths differ a little.
-        for (language, scale) in Language::ALL.into_iter().flat_map(|l| [1.0, 1.25, 1.5, 1.75, 2.0].map(|s| (l, s))) {
+        // At every interface size: letters are set on whole pixels, so their widths differ a little
+        // (80% and 90% on a display of 1 pixel a point and on a Retina one too).
+        let scales = [0.8, 0.9, 1.0, 1.25, 1.5, 1.6, 1.75, 1.8, 2.0];
+        for (language, scale) in Language::ALL.into_iter().flat_map(|l| scales.map(|s| (l, s))) {
             crate::i18n::with_language(language, || {
                 let ctx = crate::studio::tests::styled();
                 ctx.set_pixels_per_point(scale);

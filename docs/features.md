@@ -2585,7 +2585,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   huge middle;
   at 1440 × 900 or smaller nothing changes. Or a fixed **100%**, **125%**, **150%** or **175%**,
   never more than keeps the window's layout at its least size (1100 × 700 points): the row says
-  what it draws at now ("Now 110%, as large as the main window has room for"). It is the
+  what it draws at now ("Now 110%, as large as the main window has room for"). Or a smaller
+  **80%** or **90%**, for a window where everything looks too big (full screen on a 1080p
+  display, say): always what was chosen, whatever the window's size, since the layout then has
+  more room (a 1920 × 1080 window at 80% is laid out 2400 × 1350 points); the slides' thumbnails
+  and the previews keep their usual size, so the window shows fewer of their pixels than they
+  have and they stay sharp. It is the
   toolkit's own zoom: the words are drawn afresh at the new size, never stretched, and the
   slides' thumbnails and both previews are drawn larger with it (up to twice their usual size,
   only on a display that has the pixels for it), so they stay sharp. Settings and the Screens
