@@ -553,4 +553,30 @@ mod tests {
         assert!(refused.is_err());
         let _ = std::fs::remove_dir_all(&folder);
     }
+
+    /// With macOS's own codesign and an NDI library already on the Mac (only read):
+    /// `SOFTPRESENTER_NDI_MAC_LIBRARY=/usr/local/lib/libndi.dylib cargo test -p sp-app
+    /// ndis_real_library -- --ignored --nocapture`.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "needs an NDI library on this Mac"]
+    fn ndis_real_library_passes_the_check_made_before_each_load_and_another_does_not() {
+        let library = PathBuf::from(std::env::var_os("SOFTPRESENTER_NDI_MAC_LIBRARY").expect("the library's path"));
+        let codesign = Tools::system().codesign;
+        assert_eq!(signed_by_ndi(&codesign, &library), Ok(()));
+        // This test program is nobody's library: signed by no team at all.
+        let other = signed_by_ndi(&codesign, &std::env::current_exe().unwrap());
+        println!("another program: {other:?}");
+        assert!(other.is_err());
+        // NDI's library with one byte changed no longer has a whole signature.
+        let changed = std::env::temp_dir().join(format!("softpresenter-ndi-changed-{}.dylib", std::process::id()));
+        let mut bytes = std::fs::read(&library).unwrap();
+        let middle = bytes.len() / 2;
+        bytes[middle] ^= 0xff;
+        std::fs::write(&changed, bytes).unwrap();
+        let refused = signed_by_ndi(&codesign, &changed);
+        println!("a changed library: {refused:?}");
+        let _ = std::fs::remove_file(&changed);
+        assert!(refused.is_err());
+    }
 }

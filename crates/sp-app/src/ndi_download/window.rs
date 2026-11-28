@@ -64,10 +64,10 @@ fn step_at(stage: &Stage, steps: usize) -> isize {
 }
 
 /// The steps' names: three where the app installs NDI itself, two where NDI's installer does.
-fn step_names() -> Vec<&'static str> {
+fn step_names(installer: bool) -> Vec<&'static str> {
     let download = t("integrations.ndi.step.download", "Download");
     let install = t("integrations.ndi.step.install", "Install");
-    if way().installer() {
+    if installer {
         vec![download, install]
     } else {
         vec![download, t("integrations.ndi.step.licence", "Licence"), install]
@@ -75,7 +75,7 @@ fn step_names() -> Vec<&'static str> {
 }
 
 /// The keys of a step's foot, left to right.
-fn foot_keys(stage: &Stage, held: bool) -> Vec<FootKey> {
+fn foot_keys(stage: &Stage, held: bool, installer: bool) -> Vec<FootKey> {
     let cancel =
         FootKey { words: t("integrations.ndi.key.cancel", "Cancel"), main: false, asks: Asked::Cancel, held: false };
     match stage {
@@ -95,7 +95,7 @@ fn foot_keys(stage: &Stage, held: bool) -> Vec<FootKey> {
                 },
             ]
         }
-        Stage::Installing if way().installer() => {
+        Stage::Installing if installer => {
             vec![FootKey {
                 words: t("integrations.ndi.key.stop", "Stop Waiting"),
                 main: false,
@@ -120,9 +120,9 @@ fn foot_keys(stage: &Stage, held: bool) -> Vec<FootKey> {
 }
 
 /// The window's first step: what NDI is, in four facts.
-fn facts() -> [String; 4] {
+fn facts(installer: bool) -> [String; 4] {
     let size = crate::i18n::count(way().megabytes());
-    let (licence, how) = if way().installer() {
+    let (licence, how) = if installer {
         (
             t(
                 "integrations.ndi.fact.licence.installer",
@@ -163,7 +163,7 @@ pub fn window(ctx: &egui::Context, download: &mut NdiDownload, place: Place) {
     }
     let screen = ctx.content_rect();
     let sheet = Rect::from_center_size(screen.center(), SIZE);
-    let keys = foot_keys(&download.stage, download.held());
+    let keys = foot_keys(&download.stage, download.held(), download.installer());
     let mut asked = None;
     let mut hide = ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape));
     if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Enter)) {
@@ -203,7 +203,7 @@ pub fn window(ctx: &egui::Context, download: &mut NdiDownload, place: Place) {
             pos2(sheet.min.x + SIDE, sheet.min.y + HEAD),
             pos2(sheet.max.x - SIDE, sheet.max.y - SIDE),
         );
-        steps_line(ui, inner, &download.stage);
+        steps_line(ui, inner, &download.stage, download.installer());
         let body = Rect::from_min_size(pos2(inner.min.x, inner.min.y + STEPS + 16.0), vec2(inner.width(), BODY - 16.0));
         let mut inside =
             ui.new_child(egui::UiBuilder::new().max_rect(body).layout(egui::Layout::top_down(egui::Align::Min)));
@@ -246,9 +246,9 @@ pub fn window(ctx: &egui::Context, download: &mut NdiDownload, place: Place) {
 
 /// The step line: each step's number in a circle (a tick once it is done) and its name, the
 /// one under way in ink, with a line under them all.
-fn steps_line(ui: &egui::Ui, inner: Rect, stage: &Stage) {
+fn steps_line(ui: &egui::Ui, inner: Rect, stage: &Stage, installer: bool) {
     let painter = ui.painter();
-    let names = step_names();
+    let names = step_names(installer);
     let at = step_at(stage, names.len());
     let middle = inner.min.y + 2.0 + 10.0;
     let mut x = inner.min.x;
@@ -324,7 +324,7 @@ fn step_body(ui: &mut egui::Ui, body: Rect, download: &mut NdiDownload) {
             );
             ui.add_space(4.0);
             ui.spacing_mut().item_spacing.y = 9.0;
-            for fact in facts() {
+            for fact in facts(download.installer()) {
                 let room = ui.available_width() - 18.0;
                 let words = ui.painter().layout(fact, FontId::proportional(13.5), TEXT_DIM, room);
                 let (place, _) = ui.allocate_exact_size(vec2(ui.available_width(), words.size().y), Sense::hover());
@@ -401,7 +401,7 @@ fn step_body(ui: &mut egui::Ui, body: Rect, download: &mut NdiDownload) {
                 }
             }
         }
-        Stage::Installing if way().installer() => {
+        Stage::Installing if download.installer() => {
             lead(ui, t("integrations.ndi.installer", "NDI\u{2019}s installer is open. Follow its steps."), TEXT);
             sub(
                 ui,
@@ -757,7 +757,7 @@ mod tests {
             // Its parts fit in it, the keys' row included.
             const { assert!(HEAD + STEPS + BODY + 30.0 + SIDE <= SIZE.y) };
             // A step with no key keeps the keys' row: the body is as tall at every step.
-            assert!(foot_keys(&Stage::Installing, false).len() <= 1);
+            assert!(foot_keys(&Stage::Installing, false, false).len() <= 1);
         });
     }
 
@@ -769,14 +769,14 @@ mod tests {
             download.set_on_screen(true);
             let words = drawn(&mut download, &[]);
             assert!(has(&words, "Install it when nothing is on screen."), "{words:?}");
-            assert!(foot_keys(&download.stage, download.held()).iter().any(|key| key.main && key.held));
+            assert!(foot_keys(&download.stage, download.held(), true).iter().any(|key| key.main && key.held));
             // Enter, Download's key, does nothing while it is greyed.
             drawn(&mut download, &[Key::Enter]);
             assert!(matches!(download.stage, Stage::About), "nothing is downloaded");
             // The screens clear: Download works.
             download.set_on_screen(false);
             assert!(!has(&drawn(&mut download, &[]), "Install it when nothing is on screen."));
-            assert!(foot_keys(&download.stage, download.held()).iter().all(|key| !key.held));
+            assert!(foot_keys(&download.stage, download.held(), true).iter().all(|key| !key.held));
         });
     }
 }
