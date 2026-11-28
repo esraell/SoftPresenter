@@ -3809,7 +3809,7 @@ mod tests {
         let (slot, passage) = state.bible.pending.take().expect("the passage was looked up");
         assert!(asked.contains(&Command::Select(slot)), "{asked:?}");
         // As the app does next: the passage goes into its place; the verse clicked is picked.
-        show.replace_presentation(slot, Arc::new(passage));
+        crate::place_passage(&mut show, slot, passage);
         frame_applied(&ctx, &mut show, &mut state, Vec::new(), 0.55);
         let verse = SlideRef { presentation: slot, slide: 1 };
         assert_eq!(state.pick(&show), Some(verse), "John 3:17 picked");
@@ -4007,7 +4007,7 @@ mod tests {
         assert_eq!(state.services.chosen, Some(1), "and the passage is the open item");
         assert!(!state.bible_open, "the Service view stays");
         // As the app does next: the passage goes into its place and its slide on screen.
-        show.replace_presentation(slot, Arc::new(looked_up));
+        crate::place_passage(&mut show, slot, looked_up);
         show.apply(Command::GoTo(SlideRef { presentation: slot, slide: 1 }));
         let made = decks(&show, &mut state, &mut Vec::new());
         let Some(Deck::Slides(passage)) = made.get(1) else { panic!("the passage is slides") };

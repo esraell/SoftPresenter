@@ -730,7 +730,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   or a pick gone with another view), Space, Page Down and any key set to Next put the passage's
   first verse, the one looked up, on screen, never a verse at the place the slide cleared had in
   another passage; Page Up and any key set to Previous do nothing, as going back puts no new
-  words on screen. In the Bible view, Enter with nothing picked does nothing. However slowly the window draws (an Intel Mac's
+  words on screen. The same chapter made again (a verse longer at either end, other options or
+  translations, the same passage opened again) keeps the verse cleared, outlined, so Space goes
+  on from it. A passage looked up never moves a song's place: a song on its second chorus goes
+  on to the verse after it. In the Bible view, Enter with nothing picked does nothing. However slowly the window draws (an Intel Mac's
   takes some 60 ms a frame while a song's slide pictures are made), keys act in the order they
   were pressed, each on what the keys before it left: Return in the find box and a quick Enter
   after it put the slide picked on screen, ↓ and a quick Enter in the playlist start the item ↓

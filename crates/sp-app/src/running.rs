@@ -234,11 +234,17 @@ impl NextUp {
 
 /// What Next would put on screen, from what it decides (`decided`: [`step`]'s answer, or the
 /// app's on the Bible page and in the editors, with Continuous going on), the playlist's items
-/// and their titles, and, when Next only steps the show, the slide the show would put on
-/// (`slide`, asked only then).
-pub fn next_up(decided: &Do, stops: &[Stop], titles: &[String], slide: impl FnOnce() -> NextUp) -> NextUp {
+/// and their titles, and, when Next only steps the show or goes to one slide (a Bible passage's
+/// verse looked up), that slide (`slide`, asked only then, with the slide gone to).
+pub fn next_up(
+    decided: &Do,
+    stops: &[Stop],
+    titles: &[String],
+    slide: impl FnOnce(Option<SlideRef>) -> NextUp,
+) -> NextUp {
     match decided {
-        Do::Show(Command::Next) => slide(),
+        Do::Show(Command::Next) => slide(None),
+        Do::Show(Command::GoTo(at)) => slide(Some(*at)),
         Do::Start { item, .. } => NextUp::Item {
             title: titles.get(*item).cloned().unwrap_or_default(),
             slides: stops.get(*item).is_some_and(|stop| stop.steps_into()),
@@ -594,7 +600,7 @@ mod tests {
     /// What the line under the preview says, as `App::next_up` makes it: from what `step`
     /// decides, with `slide` standing in for the show's own next slide.
     fn line(s: &Situation) -> NextUp {
-        let slide = || NextUp::Slide { name: Some("Verse 2".to_owned()), number: 2 };
+        let slide = |_| NextUp::Slide { name: Some("Verse 2".to_owned()), number: 2 };
         next_up(&step(s, true), s.stops, s.titles, slide)
     }
 
@@ -661,10 +667,27 @@ mod tests {
         // has no slide to put on, and the line says nothing.
         let playlist = service();
         let s = situation(&playlist, Here::Item(2), Some(2), false, false);
-        assert_eq!(next_up(&step(&s, true), s.stops, s.titles, || NextUp::Nothing), NextUp::Nothing);
+        assert_eq!(next_up(&step(&s, true), s.stops, s.titles, |_| NextUp::Nothing), NextUp::Nothing);
         // On the Bible page and in the editors the app decides a plain step: the show's slide.
         let slide = NextUp::Slide { name: None, number: 4 };
-        assert_eq!(next_up(&Do::Show(Command::Next), &[], &[], || slide.clone()), slide);
+        assert_eq!(
+            next_up(&Do::Show(Command::Next), &[], &[], |aimed| {
+                assert_eq!(aimed, None);
+                slide.clone()
+            }),
+            slide
+        );
+        // On the Bible page with a passage just looked up and nothing on screen, Next goes to its
+        // verse: the line is asked for that slide.
+        let verse = SlideRef { presentation: 2, slide: 27 };
+        let named = NextUp::Slide { name: Some("Romans 8:28".to_owned()), number: 28 };
+        assert_eq!(
+            next_up(&Do::Show(Command::GoTo(verse)), &[], &[], |aimed| {
+                assert_eq!(aimed, Some(verse));
+                named.clone()
+            }),
+            named
+        );
     }
 
     #[test]

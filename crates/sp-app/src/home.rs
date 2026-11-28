@@ -2416,7 +2416,12 @@ impl HomeState {
             return None;
         }
         let slot = self.bible.slots.map(|slots| slots[self.bible.showing])?;
-        let passage = show.presentations().get(slot).filter(|passage| passage.slide_count() > 0)?;
+        // Only once the place holds the passage the page shows (not while one just made waits
+        // to go in), as `cleared_verse` asks.
+        let passage = show
+            .presentations()
+            .get(slot)
+            .filter(|passage| passage.slide_count() > 0 && passage.title == self.bible.held[self.bible.showing].deck)?;
         let slide = match self.cleared_verse(show) {
             Some(at) => crate::running::pick_beside(&passage.order(), at.slide, forward)?,
             None => Some(self.bible.passage_slides().start).filter(|first| *first < passage.slide_count())?,

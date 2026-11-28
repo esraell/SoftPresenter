@@ -1643,12 +1643,25 @@ fn home_key_command(
 
 /// Puts a Bible passage just made into its place among the show's presentations (one of the Bible
 /// view's two, never the one on screen). The slide last on screen there, kept so Next goes on from
-/// it after a clear (the show's cursor), was a verse of the passage before; the new passage's
-/// slides are all made anew, so `replace_presentation_following`, which keeps the cursor only on
-/// the same slide, lets go of it. Otherwise it would stay at the same place in the new passage, on
-/// a verse never shown, and Space or a clicker would go on from there.
+/// it after a clear (the show's cursor), may be a verse of what the place held before:
+/// - the same chapter made again (the same title and as many slides: a verse longer at either end,
+///   other options or translations, the same passage opened again) keeps it where it was, by its
+///   place, so Next goes on from the verse cleared and its grey outline stays;
+/// - another passage's slides are all made anew, so `replace_presentation_following`, which keeps
+///   the cursor only on the same slide, lets go of it. Otherwise it would stay at the same place
+///   in the new passage, on a verse never shown, and Space or a clicker would go on from there.
+///
+/// Either way a cursor in another presentation (a song on its second chorus) keeps its place.
 fn place_passage(show: &mut Show, slot: usize, passage: sp_model::Presentation) {
-    show.replace_presentation_following(slot, Arc::new(passage));
+    let same_chapter = show
+        .presentations()
+        .get(slot)
+        .is_some_and(|was| was.title == passage.title && was.slide_count() == passage.slide_count());
+    if same_chapter {
+        show.replace_presentation(slot, Arc::new(passage));
+    } else {
+        show.replace_presentation_following(slot, Arc::new(passage));
+    }
 }
 
 /// What a key does to a slide picked (`running::pick_key`) while it is set to `action`, as the
@@ -1662,8 +1675,9 @@ fn place_passage(show: &mut Show, slot: usize, passage: sp_model::Presentation) 
 /// themselves, set to Next or Previous, only move the pick, forward for Next and back for
 /// Previous, whether a verse is picked or not, and never put anything on (the owner's rule,
 /// 2026-11-28); Enter puts the verse picked on. Space, Page Down and Page Up, which clickers send,
-/// and any other key doing Next or Previous, still go on from the verse last on screen, as Next
-/// and Previous do.
+/// and any other key doing Next or Previous, are left to Next and Previous
+/// (`HomeState::bible_step`): on from the verse cleared, or, with none, the passage's first verse
+/// for Next and nothing for Previous.
 fn pick_key_for(
     key: &Pressed,
     action: KeyAction,
@@ -5278,11 +5292,13 @@ impl App {
             running::Do::Start { .. } => self.playlist_stops(),
             _ => (Vec::new(), Vec::new()),
         };
-        running::next_up(&decided, &stops, &titles, || {
-            let Some(at) = self.show.next_on_screen() else { return running::NextUp::Nothing };
+        running::next_up(&decided, &stops, &titles, |aimed| {
+            // The slide Next goes to: the one it was aimed at (a Bible passage's verse looked up),
+            // else the one the show would step to.
+            let Some(at) = aimed.or_else(|| self.show.next_on_screen()) else { return running::NextUp::Nothing };
             let Some(song) = self.show.presentations().get(at.presentation) else { return running::NextUp::Nothing };
             // Nothing shown yet: the song chosen starts.
-            if self.show.cursor().is_none_or(|cursor| cursor.presentation != at.presentation) {
+            if aimed.is_none() && self.show.cursor().is_none_or(|cursor| cursor.presentation != at.presentation) {
                 return running::NextUp::Item { title: song.title.clone(), slides: true };
             }
             // Named as the readout over it names the slide on screen: by its group.
@@ -18086,6 +18102,96 @@ mod tests {
                 keyboard.draw();
                 assert_eq!((keyboard.live(), picked_at(&keyboard)), (None, Some((slot, 27))), "{how} {key:?}");
             }
+        }
+    }
+
+    #[test]
+    fn the_same_chapter_made_again_after_a_clear_keeps_the_verse_cleared() {
+        // John 3:16 shown and cleared, then the same chapter made again: a verse longer (›), or
+        // the same passage opened again. The verse cleared stays (outlined grey), and Space goes
+        // on to John 3:17 rather than putting John 3:16 on again.
+        for how in ["longer", "again"] {
+            let mut keyboard = verse_shown_then_cleared(key_table::KeyStyle::SoftPresenter);
+            let slot = bible_place(&keyboard).unwrap();
+            if how == "longer" {
+                keyboard.state.bible.step(true, None);
+            } else {
+                keyboard.state.bible.open_kept("John 3:16".to_owned(), None, None);
+            }
+            keyboard.draw();
+            assert_eq!(bible_place(&keyboard), Some(slot), "{how}: the same place");
+            assert_eq!(keyboard.show.cursor(), Some(sp_engine::SlideRef { presentation: slot, slide: 15 }), "{how}");
+            assert_eq!(
+                keyboard.state.cleared_verse(&keyboard.show),
+                Some(sp_engine::SlideRef { presentation: slot, slide: 15 }),
+                "{how}: still the verse cleared"
+            );
+            keyboard.press(Key::Named(NamedKey::Space));
+            keyboard.draw();
+            assert_eq!(live_name(&keyboard).as_deref(), Some("От Иоанна 3:17"), "{how}: Space went on");
+        }
+    }
+
+    #[test]
+    fn a_passage_looked_up_keeps_a_songs_place_on_its_second_chorus() {
+        // Verse 1, Chorus, Verse 2, Chorus, Verse 3 on its second chorus, and a passage made
+        // meanwhile (it goes into its place through `place_passage`): typed with Return in the
+        // Bible view with the song on screen, or with the song cleared; or quietly, for a pick, as a
+        // click set to a double-click does on a playlist's passage in the Service view with the
+        // song on screen. Next goes on to Verse 3, never back to Verse 2.
+        for how in ["typed", "typed, cleared", "quiet"] {
+            let bible_open = how != "quiet";
+            let mut keyboard = Keyboard::new(home::HomeState { bible_open, ..home::HomeState::default() });
+            let mut song = parse_song_text("Hymn", "[Verse 1]\nA\n\n[Chorus]\nC\n\n[Verse 2]\nD\n\n[Verse 3]\nE\n");
+            let ids: Vec<Uuid> = song.groups.iter().map(|group| group.id).collect();
+            let mut arrangement = song.new_arrangement(|n| format!("Arrangement {n}"));
+            arrangement.groups = vec![ids[0], ids[1], ids[2], ids[1], ids[3]];
+            song.arrangement = Some(arrangement.id);
+            song.arrangements.push(arrangement);
+            let mut all = keyboard.show.presentations().to_vec();
+            all[0] = Arc::new(song);
+            keyboard.show = Show::new(all);
+            keyboard.show.apply(Command::GoToStep { presentation: 0, step: 3 });
+            if how == "typed, cleared" {
+                keyboard.act(KeyAction::ClearSlide);
+            }
+            keyboard.draw();
+            assert_eq!(keyboard.show.position(), Some((3, 5)), "the second chorus");
+            if how == "quiet" {
+                // As `SlideDeck::pick_passage_slide` does: looked up into the place neither on
+                // screen nor holding the cursor, and its verse picked; the app puts it in its
+                // place after the frame.
+                let saved = crate::service::SavedPassage {
+                    lookup: "John 3:16-18".to_owned(),
+                    ..keyboard.state.bible.settings()
+                };
+                let kept = keyboard.show.live().or(keyboard.show.cursor()).map(|at| at.presentation);
+                keyboard.state.bible.open_saved(&saved, kept, home::SlidesOf::Passage);
+                let slot = keyboard.state.bible.pending.as_ref().map(|(slot, _)| *slot).expect("looked up");
+                let verse = sp_engine::SlideRef { presentation: slot, slide: 1 };
+                keyboard.state.set_pick(&keyboard.show, verse, false);
+                keyboard.draw();
+            } else {
+                keyboard.state.bible.lookup = "John 3:16".to_owned();
+                keyboard.state.bible.focus_lookup = true;
+                keyboard.draw();
+                keyboard.press(Key::Named(NamedKey::Enter));
+                keyboard.draw();
+            }
+            let slot = bible_place(&keyboard).unwrap();
+            // The passage's own slides (John 3:16-18), or its chapter's (John 3:16 typed).
+            let count = if how == "quiet" { 3 } else { 36 };
+            assert_eq!(keyboard.show.presentations()[slot].slide_count(), count, "{how}: it went into its place");
+            assert_eq!(keyboard.show.position(), Some((3, 5)), "{how}: still the second chorus");
+            assert_eq!(keyboard.show.upcoming(), Some(sp_engine::SlideRef { presentation: 0, slide: 3 }), "{how}");
+            if how == "typed, cleared" {
+                // In the Service view, Space goes on with the song.
+                keyboard.state.view_request = Some(0);
+                keyboard.draw();
+            }
+            keyboard.press(Key::Named(NamedKey::Space));
+            keyboard.draw();
+            assert_eq!(keyboard.live(), Some((0, 3)), "{how}: Verse 3");
         }
     }
 
