@@ -5,6 +5,10 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.9.0-dev.29 — 27 November 2026 (development build)
+
 Keys you can set yourself (with a layout like SoftProjector's), a mark for the end of a song, safer saving, a display that stays awake while the screens are on, videos that open without holding up the window, a calmer Remote Control, and Delete that takes the box you just added.
 
 ### New
