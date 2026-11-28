@@ -2307,9 +2307,14 @@ fn a_windows_log_off_saves_and_stops_the_app_as_its_own_quit_does() {
     // copy started.
     let log_off = run.file("log off now");
     // Each file takes a while to write, as on a slow disk, so the writer still has some to write
-    // when Windows asks whether the session may end.
-    let copy = run
-        .start(&[("SOFTPRESENTER_END_SESSION_WHEN", &log_off.to_string_lossy()), ("SOFTPRESENTER_SLOW_WRITES", "300")]);
+    // when Windows asks whether the session may end: the last change below is handed to it a
+    // second after it at the latest (or when Windows asks), and takes 2 s to write, while
+    // Windows asks within a quarter of a second of the file that sends the log-off, written as
+    // soon as `sp` answers. At 300 ms a slow computer's `sp` answered after the writer was done.
+    let copy = run.start(&[
+        ("SOFTPRESENTER_END_SESSION_WHEN", &log_off.to_string_lossy()),
+        ("SOFTPRESENTER_SLOW_WRITES", "2000"),
+    ]);
     copy.ok(&["song", "import", &file.to_string_lossy()]);
     copy.ok(&["go", "Hill Road"]);
     // Changed a moment before Windows ends the session.
@@ -3161,14 +3166,31 @@ fn remote_control_sends_a_change_at_once_and_one_that_happens_by_itself_with_it(
     // Keeping the display awake changes `status` by itself soon after the start: settled first,
     // so the token below waits for the message alone.
     copy.keep_awake_settled();
-    // A command, which comes to the app as an event: its change is sent at once, not on the
-    // backstop's time (a second).
+    // A command comes to the app as an event, and its change goes to the page on that same pass
+    // of the loop, at most `PUBLISH_EVERY` (50 ms) after the publish before: at once. Without
+    // that, the page would hear of it only at the backstop, `SLOW_EVERY` and 50 ms after the
+    // last publish of the seldom-changing parts: anywhere in the 1.05 s after the command.
+    // (`remote/state.rs`.) Each change is timed from `sp`'s answer, as a slow computer takes a
+    // while just to start `sp`, and must come within half of `SLOW_EVERY`, three times over: a
+    // page told only at the backstop would pass all three about one time in nine.
+    const SLOW_EVERY: Duration = Duration::from_secs(1);
+    copy.ok(&["message", "new", "Notice", "Welcome"]);
     copy.ok(&["message", "new", "Parking", "Car with lights on"]);
     copy.ok(&["message", "set", "Parking", "leaves=1"]);
+    let mut heard = Vec::new();
+    for (words, on) in [(&["message", "show", "Notice"][..], true), (&["message", "hide"][..], false)] {
+        copy.ok(words);
+        heard.push(message_layer(&mut socket, on, Instant::now()));
+    }
     let shown = Instant::now();
     copy.ok(&["message", "show", "Parking"]);
-    let on = message_layer(&mut socket, true, shown);
-    assert!(on < Duration::from_millis(400), "the message reached the page after {on:?}");
+    heard.push(message_layer(&mut socket, true, Instant::now()));
+    say(&format!("{name}: the page heard each change {heard:?} after sp's answer"));
+    assert!(
+        heard.iter().all(|after| *after < SLOW_EVERY / 2),
+        "a change reached the page later than at once: {heard:?} after sp's answers{}",
+        run.context()
+    );
     // The message leaves by itself after a second, on a pass of the loop that no event asked
     // for. `status --wait` is answered on that same pass, so the page must be told within a
     // moment of it: not on a window's next drawing or the backstop's time.
