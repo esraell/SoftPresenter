@@ -264,6 +264,7 @@
   "notices.media_playlist.empty": "В этом медиасписке нечего воспроизводить.",
   "notices.media_playlist.none_played": "Ни одно видео из «{playlist}» не воспроизвелось, поэтому список перестал повторяться.",
   "notices.voxlive.saved": "Сохранено в VoxLive.",
+  "notices.voxlive.screen_deleted": "Экран VoxLive {name} удалён в VoxLive, поэтому его субтитры убраны с экранов.",
   "notices.added_to_playlist": "{item}: добавлено в список {list}.",
   "notices.bible.reading": "Чтение: {name}…",
   "notices.bible.unreadable": "SoftPresenter не смог прочитать {name}.",

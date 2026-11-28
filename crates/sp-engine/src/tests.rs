@@ -611,6 +611,20 @@ fn a_replaced_presentation_keeps_the_live_slide_by_its_id() {
     assert_eq!(s.live(), None);
 }
 
+#[test]
+fn a_replaced_presentation_keeps_its_last_slide_live_when_one_before_it_goes() {
+    let mut s = show();
+    s.apply(Command::GoTo(SlideRef { presentation: 0, slide: 2 }));
+    s.apply(Command::HideWords);
+    let before = s.presentations()[0].clone();
+    // A goes: C, the last slide, is now the second, and stays live, its words still hidden, and
+    // the place Next goes on from.
+    assert!(s.replace_presentation_following(0, Arc::new(before.without_slide(0).unwrap())).slides);
+    assert_eq!((s.live(), s.cursor()), (at(0, 1), at(0, 1)));
+    assert_eq!(s.live_slide().unwrap().1.objects[0].as_text(), Some("C"));
+    assert!(s.words_hidden(), "the words stay hidden");
+}
+
 /// Verse 1, Chorus, Verse 2 (one slide each), arranged Verse 1, Chorus, Verse 2, Chorus.
 fn arranged() -> Show {
     let mut song = parse_song_text("Song", "[Verse 1]\nA\n\n[Chorus]\nC\n\n[Verse 2]\nD\n");

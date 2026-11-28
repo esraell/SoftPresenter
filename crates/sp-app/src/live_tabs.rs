@@ -2878,8 +2878,9 @@ fn voxlive_tab(ui: &mut egui::Ui, show: &sp_engine::Show, state: &mut HomeState)
             let width = ui.available_width();
             let text_wide = width - button_wide - CARD_GAP;
             let name = fitted(ui, &group.name, name_font(), TEXT, text_wide, 2);
-            // Under the name, the screen's language and what it shows, as VoxLive says them.
-            let about = state.voxlive.screens.iter().find(|screen| screen.name == group.name).map(|screen| {
+            // Under the name, the screen's language and what it shows, as VoxLive says them
+            // (the screen found by its own id, which the slide's is made from).
+            let about = crate::voxlive::screen_of(&state.voxlive.screens, group).map(|screen| {
                 let shows = match screen.mode.as_str() {
                     "captions" => t("tools.voxlive.captions", "Captions"),
                     "reference" => t("tools.voxlive.reference", "Bible passage"),

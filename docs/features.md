@@ -2653,6 +2653,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
 - **The VoxLive item**: once VoxLive is connected and has screens, the church's VoxLive screens
   are slides, one a screen, named after it; the item follows VoxLive's list as screens are
   made, renamed or deleted there, and is never edited, saved, deleted or put in a song pack.
+  Each of its slides is its VoxLive screen's own (by the screen's id), so when VoxLive's list
+  changes, the captions on screen, the slide lined up for Next and the slides picked in the window
+  stay on the same VoxLive screens wherever the list now has them: on screen they stay on, the same
+  page with nothing reloaded. Only the VoxLive screen on screen deleted in VoxLive takes its
+  captions off (as a clear goes), and the notices say so, naming it; its live display isn't kept
+  running then.
   It is not a row among the libraries: Add to playlist (or `sp playlist add VoxLive`) puts it in
   the playlist in front, and `sp select VoxLive` shows it by itself (the window has no other way
   to show it by itself). Clicking one of its slides puts that screen's live captions on the

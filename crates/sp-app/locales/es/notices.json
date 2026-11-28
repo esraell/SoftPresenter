@@ -264,6 +264,7 @@
   "notices.media_playlist.empty": "Esa lista multimedia no tiene nada que reproducir.",
   "notices.media_playlist.none_played": "Ninguno de los vídeos de “{playlist}” se ha podido reproducir, así que la lista ha dejado de repetirse.",
   "notices.voxlive.saved": "Guardado en VoxLive.",
+  "notices.voxlive.screen_deleted": "La pantalla de VoxLive {name} se eliminó en VoxLive, así que sus subtítulos se quitaron de las pantallas.",
   "notices.added_to_playlist": "Se añadió {item} a la lista {list}.",
   "notices.bible.reading": "Leyendo {name}…",
   "notices.bible.unreadable": "SoftPresenter no pudo leer {name}.",

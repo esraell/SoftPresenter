@@ -262,6 +262,12 @@ pub fn item(screens: &[Screen]) -> sp_model::Presentation {
     }
 }
 
+/// The VoxLive screen one of the item's slides shows, by the slide's group (its id is made from
+/// the screen's), among `screens`.
+pub fn screen_of<'a>(screens: &'a [Screen], group: &sp_model::Group) -> Option<&'a Screen> {
+    screens.iter().find(|screen| stable_id("group", &screen.id) == group.id)
+}
+
 /// A key's first characters, to show which key it is.
 fn hint_of(key: &str) -> String {
     format!("{}…", key.chars().take(12).collect::<String>())

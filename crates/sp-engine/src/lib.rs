@@ -385,21 +385,25 @@ impl Show {
         };
         let (live_at, cursor_at) = (live_id.map(place_of), cursor_id.map(place_of));
         let was = self.cursor_occurrence(index);
+        let words_hidden = self.words_hidden;
         let changes = self.replace_presentation(index, presentation);
-        if let (Some(found), Some(live)) = (live_at, self.live.as_mut().filter(|live| live.presentation == index)) {
-            match found {
-                Some(slide) => live.slide = slide,
-                None => {
-                    self.live = None;
-                    self.words_hidden = false;
-                }
+        // Each found again by its id, wherever it now is. (`replace_presentation` goes by place
+        // alone, and takes off one past the new end: the last slide when one before it went.)
+        match live_at {
+            Some(Some(slide)) => {
+                self.live = Some(SlideRef { presentation: index, slide });
+                self.words_hidden = words_hidden;
             }
+            Some(None) => {
+                self.live = None;
+                self.words_hidden = false;
+            }
+            None => {}
         }
-        if let (Some(found), Some(cursor)) = (cursor_at, self.cursor.as_mut().filter(|c| c.presentation == index)) {
-            match found {
-                Some(slide) => cursor.slide = slide,
-                None => self.cursor = None,
-            }
+        match cursor_at {
+            Some(Some(slide)) => self.cursor = Some(SlideRef { presentation: index, slide }),
+            Some(None) => self.cursor = None,
+            None => {}
         }
         self.step = self.cursor.filter(|c| c.presentation == index).and_then(|cursor| self.nth_place(cursor, was));
         changes

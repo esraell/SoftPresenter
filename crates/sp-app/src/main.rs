@@ -963,6 +963,59 @@ fn web_costs(url: &str) -> bool {
     voxlive && !lower.contains("demo=1") && !lower.contains("preview=1")
 }
 
+/// The places in the window that name slides by where they are (picked out, and the one
+/// selected), taken out while a presentation changes under them and given back after.
+#[derive(Default)]
+struct WindowPlaces {
+    picked: Vec<sp_engine::SlideRef>,
+    selected: Option<sp_engine::SlideRef>,
+}
+
+impl WindowPlaces {
+    fn take(state: &mut home::HomeState) -> WindowPlaces {
+        WindowPlaces { picked: std::mem::take(&mut state.picked_slides), selected: state.selected_slide.take() }
+    }
+
+    fn give_back(self, state: &mut home::HomeState) {
+        state.picked_slides = self.picked;
+        state.selected_slide = self.selected;
+    }
+}
+
+/// Puts the VoxLive item made from VoxLive's list as it is now (`item`) in its place (`slot`),
+/// keeping what is on screen, the slide Next would show and the slides picked or selected in the
+/// window (`places`) on the same VoxLive screens wherever the list now has them: each slide's id
+/// is made from its screen's, so a screen made, renamed, deleted or moved in VoxLive leaves the
+/// others where they are. The captions on screen stay on, the same page with nothing reloaded,
+/// unless VoxLive deleted that screen: then they are taken off, and its name is given back (for
+/// the notice). A place on a deleted screen is let go.
+fn follow_voxlive_item(
+    show: &mut Show,
+    slot: usize,
+    item: Arc<sp_model::Presentation>,
+    places: &mut WindowPlaces,
+) -> Option<String> {
+    let old = show.presentations().get(slot).cloned()?;
+    let new_of_old: Vec<Option<usize>> =
+        old.slides().map(|(_, slide)| item.slides().position(|(_, now)| now.id == slide.id)).collect();
+    let follows = |place: sp_engine::SlideRef| {
+        if place.presentation != slot {
+            return Some(place);
+        }
+        let slide = new_of_old.get(place.slide).copied().flatten()?;
+        Some(sp_engine::SlideRef { presentation: slot, slide })
+    };
+    let gone = show
+        .live()
+        .filter(|at| at.presentation == slot && follows(*at).is_none())
+        .and_then(|at| old.slide(at.slide))
+        .map(|(group, _)| group.name.clone());
+    show.replace_presentation_following(slot, item);
+    places.picked = places.picked.iter().filter_map(|place| follows(*place)).collect();
+    places.selected = places.selected.and_then(follows);
+    gone
+}
+
 /// True when a slide has a web page box (shown) whose page is a VoxLive screen's live display:
 /// VoxLive's captions, live.
 fn shows_voxlive_display(slide: &Slide) -> bool {
@@ -3986,6 +4039,7 @@ impl App {
         // so going back to it (a verse, then the captions again) is at once: it is running for
         // the service anyway.
         let now = Instant::now();
+        let listed = &self.voxlive.screens;
         for web in &mut self.web_pages {
             // One that costs and has just left the screens starts its while.
             if web.live
@@ -3993,6 +4047,11 @@ impl App {
                 && !wanted.iter().any(|(key, .., live)| *live && *key == web.key)
             {
                 web.warm_until = Some(now + WEB_WARM_FOR);
+            }
+            // Each is its own VoxLive screen's (by its address): one VoxLive no longer lists
+            // (deleted there, or VoxLive disconnected here) isn't kept for it.
+            if web.warm_until.is_some() && !listed.iter().any(|screen| screen.url == web.page.address()) {
+                web.warm_until = None;
             }
             if web.warm_until.is_some_and(|until| until > now) && !wanted.iter().any(|(key, ..)| *key == web.key) {
                 let (width, height) = web.page.size();
@@ -4399,9 +4458,28 @@ impl App {
         if !up_to_date {
             let item = Arc::new(voxlive::item(&self.voxlive.screens));
             if in_place.is_some_and(|have| **have != *item) {
-                self.show.replace_presentation(self.voxlive_slot, item);
+                // What is on screen, the slide Next would show and the slides picked in the
+                // window stay on the same VoxLive screens wherever the list now has them; the
+                // captions on screen go only if VoxLive deleted that screen.
+                let mut places = WindowPlaces::default();
                 if let Some(running) = self.running.as_mut() {
+                    places = WindowPlaces::take(&mut running.home_state);
+                }
+                let gone = follow_voxlive_item(&mut self.show, self.voxlive_slot, item, &mut places);
+                if let Some(running) = self.running.as_mut() {
+                    places.give_back(&mut running.home_state);
                     running.thumbs.forget(voxlive::ITEM_ID, &mut running.egui_renderer);
+                    if let Some(name) = gone {
+                        applog::event(
+                            "voxlive",
+                            "the screen on screen was deleted in VoxLive; its captions were taken off",
+                        );
+                        running.home_state.notices.trouble(i18n::tf(
+                            "notices.voxlive.screen_deleted",
+                            "The VoxLive screen {name} was deleted in VoxLive, so its captions were taken off the screens.",
+                            &[("name", &i18n::quoted(&name))],
+                        ));
+                    }
                 }
                 self.refresh_output();
             }
@@ -14798,6 +14876,123 @@ mod tests {
             url: "https://voxlive.app/listen/grace/screen/abc2345".to_owned(),
             ..Default::default()
         }])
+    }
+
+    /// A VoxLive screen as VoxLive lists it (made up: its address is never opened here).
+    fn listed(id: &str, name: &str) -> super::voxlive::Screen {
+        super::voxlive::Screen {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            language: "es".to_owned(),
+            mode: "captions".to_owned(),
+            url: format!("https://voxlive.app/listen/grace/screen/{id}"),
+            ..Default::default()
+        }
+    }
+
+    /// A song, then the VoxLive item made from `screens` (the item's place is 1), with that
+    /// screen's captions on screen.
+    fn captions_of(screens: &[super::voxlive::Screen], on: usize) -> sp_engine::Show {
+        let song = sp_model::parse_song_text("Psalm", "The first verse\n\nThe second verse\n");
+        let item = super::voxlive::item(screens);
+        let mut show = sp_engine::Show::new(vec![std::sync::Arc::new(song), std::sync::Arc::new(item)]);
+        show.apply(sp_engine::Command::GoTo(sp_engine::SlideRef { presentation: 1, slide: on }));
+        show
+    }
+
+    /// VoxLive's list changed to `screens`: what the app does with it (`App::tick_voxlive`).
+    fn list_now(
+        show: &mut sp_engine::Show,
+        screens: &[super::voxlive::Screen],
+        places: &mut super::WindowPlaces,
+    ) -> Option<String> {
+        super::follow_voxlive_item(show, 1, std::sync::Arc::new(super::voxlive::item(screens)), places)
+    }
+
+    /// The VoxLive screen whose captions are on screen, by its address.
+    fn on_screen(show: &sp_engine::Show) -> Option<String> {
+        let (_, slide) = show.live_slide()?;
+        slide.objects.iter().find_map(|object| match &object.kind {
+            sp_model::ObjectKind::Web { url } => url.rsplit('/').next().map(str::to_owned),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn captions_on_screen_stay_on_when_voxlive_deletes_a_screen_before_them() {
+        let (one, two) = (listed("one0001", "English"), listed("two0002", "Spanish"));
+        let mut show = captions_of(&[one.clone(), two.clone()], 1);
+        let before = show.live_slide().map(|(_, slide)| slide.clone());
+        let mut places = super::WindowPlaces::default();
+        assert_eq!(list_now(&mut show, std::slice::from_ref(&two), &mut places), None, "nothing taken off");
+        assert_eq!(show.live(), Some(sp_engine::SlideRef { presentation: 1, slide: 0 }), "it moved up the list");
+        assert_eq!(on_screen(&show).as_deref(), Some("two0002"), "the same screen's captions");
+        // The very slide: the screens see no new slide, so nothing fades and nothing reloads.
+        assert_eq!(show.live_slide().map(|(_, slide)| slide.clone()), before);
+    }
+
+    #[test]
+    fn captions_on_screen_are_taken_off_when_voxlive_deletes_their_screen_and_its_name_is_said() {
+        let (one, two) = (listed("one0001", "English"), listed("two0002", "Spanish"));
+        let mut show = captions_of(&[one.clone(), two.clone()], 0);
+        let mut places = super::WindowPlaces::default();
+        let gone = list_now(&mut show, std::slice::from_ref(&two), &mut places);
+        assert_eq!(gone.as_deref(), Some("English \u{b7} ES"), "named for the notice");
+        assert_eq!(show.live(), None, "taken off, never put on another screen's captions");
+        // As a clear goes: by the transition chosen for all.
+        let usual = sp_model::Transition::of(sp_model::TransitionKind::Dissolve);
+        assert_eq!(super::slide_transition(&show, usual), usual);
+    }
+
+    #[test]
+    fn captions_on_screen_follow_their_screen_renamed_added_before_or_moved() {
+        let (one, two, three) =
+            (listed("one0001", "English"), listed("two0002", "Spanish"), listed("new0003", "French"));
+        let mut places = super::WindowPlaces::default();
+        // Renamed: the same place, the same page.
+        let mut show = captions_of(&[one.clone(), two.clone()], 1);
+        let renamed = super::voxlive::Screen { name: "Spanish (main)".to_owned(), ..two.clone() };
+        assert_eq!(list_now(&mut show, &[one.clone(), renamed], &mut places), None);
+        assert_eq!(show.live(), Some(sp_engine::SlideRef { presentation: 1, slide: 1 }));
+        assert_eq!(on_screen(&show).as_deref(), Some("two0002"));
+        // A screen made in front of it: it moves down the list, still on.
+        let mut show = captions_of(&[one.clone(), two.clone()], 1);
+        assert_eq!(list_now(&mut show, &[three.clone(), one.clone(), two.clone()], &mut places), None);
+        assert_eq!(show.live(), Some(sp_engine::SlideRef { presentation: 1, slide: 2 }));
+        assert_eq!(on_screen(&show).as_deref(), Some("two0002"));
+        // The list in another order.
+        let mut show = captions_of(&[one.clone(), two.clone()], 0);
+        assert_eq!(list_now(&mut show, &[two.clone(), one.clone()], &mut places), None);
+        assert_eq!(show.live(), Some(sp_engine::SlideRef { presentation: 1, slide: 1 }));
+        assert_eq!(on_screen(&show).as_deref(), Some("one0001"));
+    }
+
+    #[test]
+    fn the_slides_picked_selected_and_lined_up_in_the_voxlive_item_follow_their_screens() {
+        let (one, two, three) =
+            (listed("one0001", "English"), listed("two0002", "Spanish"), listed("thr0003", "French"));
+        let at = |slide| sp_engine::SlideRef { presentation: 1, slide };
+        let song = sp_engine::SlideRef { presentation: 0, slide: 1 };
+        // The second screen's captions on screen, and lined up for Next (the cursor).
+        let mut show = captions_of(&[one.clone(), two.clone(), three.clone()], 1);
+        let mut places = super::WindowPlaces { picked: vec![at(1), at(2), song], selected: Some(at(2)) };
+        list_now(&mut show, &[three.clone(), two.clone()], &mut places);
+        assert_eq!(places.picked, [at(1), at(0), song], "each with its screen; the deleted one's let go");
+        assert_eq!(places.selected, Some(at(0)));
+        assert_eq!((show.live(), show.cursor()), (Some(at(1)), Some(at(1))), "on screen and lined up, followed");
+        let mut places = super::WindowPlaces { picked: Vec::new(), selected: Some(at(1)) };
+        list_now(&mut show, std::slice::from_ref(&three), &mut places);
+        assert_eq!(places.selected, None, "its screen deleted");
+        // The VoxLive tab's cards find their screen by its own id, whatever its name.
+        let item = super::voxlive::item(&[three.clone(), two.clone()]);
+        let screens = [two.clone(), three.clone()];
+        let names: Vec<&str> = item
+            .groups
+            .iter()
+            .filter_map(|group| super::voxlive::screen_of(&screens, group))
+            .map(|screen| screen.name.as_str())
+            .collect();
+        assert_eq!(names, ["French", "Spanish"]);
     }
 
     #[test]
