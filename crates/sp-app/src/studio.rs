@@ -6553,6 +6553,10 @@ pub fn media_strip(
             };
             let reorders = shown.as_ref().is_none_or(crate::media::Playlist::arranged_by_hand);
             state.picked_media.retain(|at| order.contains(at));
+            // A mouse's wheel turns only up and down, and the window has no scroll bars: the row
+            // scrolls only along, so the wheel scrolls it along (the toolkit's own switch for an
+            // area that scrolls one way), and every picture can be reached without a trackpad.
+            ui.style_mut().always_scroll_the_only_direction = true;
             let scroll = egui::scroll_area::ScrollSource::MOUSE_WHEEL | egui::scroll_area::ScrollSource::SCROLL_BAR;
             egui::ScrollArea::horizontal().id_salt("media row").scroll_source(scroll).auto_shrink([false, false]).show(
                 ui,

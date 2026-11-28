@@ -12488,10 +12488,78 @@ mod tests {
     }
 
     #[test]
-    fn a_tile_held_at_the_strips_end_scrolls_all_media_as_it_does_a_media_playlist() {
-        // More pictures than the strip has room for.
+    fn a_mouse_wheel_over_the_strip_scrolls_through_sixty_pictures_to_the_last() {
         let mut show = show(3);
-        for n in 0..14 {
+        for n in 0..60 {
+            let name = format!("{n}.png");
+            show.add_media(sp_model::MediaItem::new(name.clone(), name.into()));
+        }
+        let ctx = egui::Context::default();
+        let mut state = HomeState::default();
+        let mut clock = 0.0;
+        let mut run = |state: &mut HomeState, events: Vec<Event>| {
+            clock += 0.05;
+            let raw = RawInput { focused: true, time: Some(clock), events, ..input(None) };
+            let output = ctx.run_ui(raw, |ui| {
+                home_ui(ui, &show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+            });
+            output.drop_without_applying_deltas();
+        };
+        run(&mut state, Vec::new());
+        run(&mut state, Vec::new());
+        assert_eq!(state.media_tiles.len(), 60);
+        let window = Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0));
+        let (first, last) = (state.media_tiles[0], state.media_tiles[59]);
+        assert!(!window.contains(last.center()), "the last picture starts out of sight");
+        // A wheel that only turns up and down, with the pointer over the strip.
+        let over = first.center();
+        let wheel = |down: f32| Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -down),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+        };
+        run(&mut state, vec![Event::PointerMoved(over)]);
+        // Turned down, the row moves on towards its end, until the last picture is in sight.
+        let mut turns = 0;
+        while !window.contains(state.media_tiles[59].center()) && turns < 400 {
+            run(&mut state, vec![wheel(120.0)]);
+            for _ in 0..4 {
+                run(&mut state, Vec::new());
+            }
+            turns += 1;
+        }
+        let shown_last = state.media_tiles[59];
+        assert!(window.contains(shown_last.center()), "the last picture is reached by the wheel: {shown_last:?}");
+        assert!(state.media_tiles[0].max.x < first.min.x, "and the first has gone off the start");
+        // Turned back up, the row comes back to its start.
+        for _ in 0..400 {
+            run(&mut state, vec![wheel(-120.0)]);
+            for _ in 0..4 {
+                run(&mut state, Vec::new());
+            }
+            if (state.media_tiles[0].min.x - first.min.x).abs() < 0.5 {
+                break;
+            }
+        }
+        assert!((state.media_tiles[0].min.x - first.min.x).abs() < 0.5, "back at the start");
+        // Nothing was shown, picked or moved by scrolling.
+        assert!(state.media_request.is_none() && state.picked_media.is_empty());
+        // Away from the strip the wheel leaves the row alone (it scrolls what is under it).
+        let before = state.media_tiles[0].min.x;
+        run(&mut state, vec![Event::PointerMoved(pos2(640.0, 200.0)), wheel(120.0)]);
+        for _ in 0..4 {
+            run(&mut state, Vec::new());
+        }
+        assert_eq!(state.media_tiles[0].min.x, before);
+    }
+
+    #[test]
+    fn a_tile_held_at_the_strips_end_scrolls_all_media_as_it_does_a_media_playlist() {
+        // Many more pictures than the strip has room for.
+        let mut show = show(3);
+        for n in 0..60 {
             let name = format!("{n}.png");
             show.add_media(sp_model::MediaItem::new(name.clone(), name.into()));
         }

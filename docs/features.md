@@ -640,7 +640,7 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   while it is also picked out). A tile drags to a new place in the strip, in All Media as in a
   media playlist put together by hand: the tile goes faint, an ink line shows the side of the
   tile it will land beside, no tile moves until it is let go, and what is on screen stays on
-  screen with its ring, and the strip scrolls while a tile is held near either end; the ⋯
+  screen with its ring, and the strip scrolls while a tile is held near either end (and at any time by a trackpad or a mouse's wheel, turned up or down, since the row scrolls only along); the ⋯
   menu's Move Left and Move Right move it one place (greyed at either end, and in a media
   playlist that follows a folder, where they say under the pointer "This playlist follows a
   folder; its order is the folder's."), and `sp media move` does the same. All Media's order is the bin's own, kept for the next start, and the one `sp media` and
