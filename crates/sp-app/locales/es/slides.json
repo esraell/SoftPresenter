@@ -154,9 +154,5 @@
   "slides.menu.paste_style.none": "Primero copia un estilo",
   "slides.media.show.short": "Clic para mostrar",
   "slides.media.gone.short": "Ya no está",
-  "slides.playlist.playing.short": "En bucle",
-  "slides.label.blank": "Diapositiva en blanco",
-  "slides.label.instrumental": "Instrumental",
-  "slides.label.repeat": "Repetir",
-  "slides.label.spoken": "Hablado"
+  "slides.playlist.playing.short": "En bucle"
 }

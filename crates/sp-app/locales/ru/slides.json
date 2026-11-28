@@ -156,9 +156,5 @@
   "slides.menu.paste_style.none": "Сначала скопируйте стиль",
   "slides.media.show.short": "Показать",
   "slides.media.gone.short": "Убрано",
-  "slides.playlist.playing.short": "По кругу",
-  "slides.label.blank": "Пустой слайд",
-  "slides.label.instrumental": "Инструментал",
-  "slides.label.repeat": "Повтор",
-  "slides.label.spoken": "Речь"
+  "slides.playlist.playing.short": "По кругу"
 }
