@@ -248,6 +248,8 @@
   "settings.updates.why.not_signed": "no está firmada por SoftPresenter",
   "settings.updates.why.damaged": "la descarga estaba dañada",
   "settings.updates.advice.blocked": "Prueba con otra red, o consíguela en la página de descarga: softpresenter.com.",
+  "settings.updates.advice.network": "Prueba con otra red.",
+  "settings.updates.this_is": "Esta es la versión {version}.",
   "settings.updates.advice.page": "O consíguela en la página de descarga: softpresenter.com.",
   "settings.updates.advice.refused": "No se cambió nada.",
   "settings.updates.advice.retries": "SoftPresenter lo intenta de nuevo por sí mismo.",

@@ -236,6 +236,8 @@
   "settings.updates.why.not_signed": "вона не підписана SoftPresenter",
   "settings.updates.why.damaged": "завантажений файл пошкоджено",
   "settings.updates.advice.blocked": "Спробуйте іншу мережу або завантажте її зі сторінки завантаження: softpresenter.com.",
+  "settings.updates.advice.network": "Спробуйте іншу мережу.",
+  "settings.updates.this_is": "Це версія {version}.",
   "settings.updates.advice.page": "Або завантажте її зі сторінки завантаження: softpresenter.com.",
   "settings.updates.advice.refused": "Нічого не змінено.",
   "settings.updates.advice.retries": "SoftPresenter сам спробує ще раз.",

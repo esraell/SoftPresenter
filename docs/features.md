@@ -3036,7 +3036,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   under it, while anything is); or why it couldn't ("0.9.1 couldn't be downloaded: there is no
   internet connection.", the blocked network as above, "0.9.1 was refused: it isn't signed by
   SoftPresenter." over "Nothing was changed."), with Try Again. The keys that bring a newer
-  version in, Update and Restart and Open the Download Page, are amber. A download goes on with
+  version in, Update and Restart and Open the Download Page, are amber, and while the row's key
+  does something else than check (those two, and Cancel) a quiet Check Now sits under it, so
+  checking again is always in reach. An updater that only answers checks and reports nothing
+  is shown as it answered ("Downloading 0.9.1…" with no bar, or ready), with Check Now to ask
+  it again; a build whose updater fetches its own versions is never sent to the public download
+  page. A download goes on with
   Settings closed, and a notice says "Version 0.9.1 is ready." once; the gear carries no mark.
 - The version a build shows (the Mac's About panel, Settings › About, the log's first line, a new
   issue's text, `sp update`, the MCP server's name) is a development build's full one,

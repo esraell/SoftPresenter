@@ -523,6 +523,10 @@ pub struct View {
     /// The bar's part filled, 0 to 1, while a version comes down.
     pub bar: Option<f32>,
     pub under_key: &'static str,
+    /// The key does something else than check (it opens the download page, cancels, or puts a
+    /// version in), so a quiet Check Now sits in the line under it: checking again is never
+    /// out of reach. Not while that line says why the key is greyed.
+    pub check_under: bool,
 }
 
 fn check_key() -> &'static str {
@@ -549,9 +553,11 @@ fn key(words: &'static str, act: Act) -> Option<Key> {
     Some(Key { words, act, enabled: true, amber: false })
 }
 
-/// The line under a failure: what else to do about it.
-fn advice(why: &Trouble, retries: bool) -> String {
+/// The line under a failure: what else to do about it. A build whose own updater fetches its
+/// versions (`fetches`) is never sent to the public download page, which hasn't got them.
+fn advice(why: &Trouble, retries: bool, fetches: bool) -> String {
     match why {
+        Trouble::Blocked if fetches => t("settings.updates.advice.network", "Try another network.").to_owned(),
         Trouble::Blocked => t(
             "settings.updates.advice.blocked",
             "Try another network, or get it from the download page: softpresenter.com.",
@@ -564,6 +570,7 @@ fn advice(why: &Trouble, retries: bool) -> String {
             t("settings.updates.advice.retries", "SoftPresenter tries again by itself.").to_owned()
         }
         Trouble::NoNetwork => String::new(),
+        _ if fetches => String::new(),
         _ => t("settings.updates.advice.page", "Or get it from the download page: softpresenter.com.").to_owned(),
     }
 }
@@ -614,17 +621,19 @@ fn fetch_view(fetch: &Fetch, build: Build) -> View {
                     amber: false,
                 }),
                 bar: Some(fetch.percent().unwrap_or(0) as f32 / 100.0),
+                check_under: build.keys,
                 ..View::default()
             }
         }
-        // With no key of the updater's to put it in now, it goes in at quit, and the row says
-        // only that.
+        // With no key of the updater's to put it in now, it goes in at quit; the row says only
+        // that, and its key checks again.
         Fetch::Ready { version } if !build.keys => View {
             sentence: tf(
                 "settings.updates.ready_at_quit",
                 "{version} is ready. It goes in when you quit.",
                 &[("version", version)],
             ),
+            key: key(check_key(), Act::Check),
             ..View::default()
         },
         Fetch::Ready { version } => View {
@@ -635,6 +644,7 @@ fn fetch_view(fetch: &Fetch, build: Build) -> View {
             ),
             key: Some(Key { words: install_key(), act: Act::Install, enabled: !build.waits, amber: true }),
             under_key: if build.waits { t("settings.updates.waits", "Something is on screen") } else { "" },
+            check_under: !build.waits,
             ..View::default()
         },
         Fetch::Failed { version, why, retries } => View {
@@ -651,7 +661,7 @@ fn fetch_view(fetch: &Fetch, build: Build) -> View {
                     &[("version", version), ("why", &why.why(false))],
                 )
             },
-            under: advice(why, *retries),
+            under: advice(why, *retries, true),
             key: key(again_key(), Act::Check),
             ..View::default()
         },
@@ -700,8 +710,8 @@ pub fn view(status: &Status, form: &crate::clock::TimeForm, build: Build) -> Vie
             ..View::default()
         };
     }
-    if let Some(fetch) = status.fetching() {
-        return fetch_view(&fetch, build);
+    if let Some(fetch) = &status.fetch {
+        return fetch_view(fetch, build);
     }
     let failed = |why: String, advice: String| View {
         sentence: tf("settings.updates.failed", "Couldn\u{2019}t check: {why}.", &[("why", &why)]),
@@ -712,7 +722,7 @@ pub fn view(status: &Status, form: &crate::clock::TimeForm, build: Build) -> Vie
     match &status.last {
         None => View {
             sentence: if build.fetches {
-                String::new()
+                tf("settings.updates.this_is", "This is version {version}.", &[("version", VERSION)])
             } else {
                 t("settings.updates.asked_only", "Updates are checked only when you ask.").to_owned()
             },
@@ -734,12 +744,21 @@ pub fn view(status: &Status, form: &crate::clock::TimeForm, build: Build) -> Vie
             sentence: tf("settings.updates.out", "SoftPresenter {version} is out.", &[("version", version)]),
             under: t("settings.updates.cant", "This copy can\u{2019}t update itself yet.").to_owned(),
             key: Some(Key { words: open_key(), act: Act::Open(page.clone()), enabled: true, amber: true }),
+            check_under: true,
             ..View::default()
         },
-        // (An updater's answers are shown as what it is fetching, above.)
-        Some((Found::DevFetching { .. } | Found::DevReady { .. }, _)) => View::default(),
+        // An updater that answered a check and has reported nothing since (it may never report):
+        // what it said then, with no bar, since how far it is isn't known, and Check Now to ask
+        // it again, which is what moves this on.
+        Some((Found::DevFetching { version }, _)) => View {
+            sentence: tf("settings.updates.downloading.none", "Downloading {version}\u{2026}", &[("version", version)]),
+            under: t("settings.updates.downloading.under", "Nothing changes until it is ready.").to_owned(),
+            key: key(check_key(), Act::Check),
+            ..View::default()
+        },
+        Some((Found::DevReady { version }, _)) => fetch_view(&Fetch::Ready { version: version.clone() }, build),
         Some((Found::Failed(why), _)) => failed(why.clone(), String::new()),
-        Some((Found::Unreached(why), _)) => failed(why.why(true), advice(why, false)),
+        Some((Found::Unreached(why), _)) => failed(why.why(true), advice(why, false, build.fetches)),
     }
 }
 
@@ -759,21 +778,6 @@ pub struct Status {
     pub last: Option<(Found, i64)>,
     /// Where an updater that fetches a newer version has got to with it ([`report`]).
     pub fetch: Option<Fetch>,
-}
-
-impl Status {
-    /// What an updater is fetching: what it last reported, else what its answer to the last
-    /// check says (coming down, how far not yet said; or ready).
-    pub fn fetching(&self) -> Option<Fetch> {
-        match (&self.fetch, &self.last) {
-            (Some(fetch), _) => Some(fetch.clone()),
-            (None, Some((Found::DevFetching { version }, _))) => {
-                Some(Fetch::Downloading { version: version.clone(), done: 0, total: 0 })
-            }
-            (None, Some((Found::DevReady { version }, _))) => Some(Fetch::Ready { version: version.clone() }),
-            _ => None,
-        }
-    }
 }
 
 /// What an updater that fetches versions sets for the key that puts a ready one in: what the
@@ -872,7 +876,9 @@ impl Checks {
             let view = fetch_view(&Fetch::Cancelled { version: String::new() }, Build::default());
             return Some((format!("{} {}", view.sentence, view.under), false));
         }
-        let fetch = self.lock().fetching()?;
+        // Only what an updater reported: its bare answer to a check is said as the check's
+        // answer, and an updater that reports nothing says its own things itself.
+        let fetch = self.lock().fetch.clone()?;
         let (once, notice) = match &fetch {
             Fetch::Ready { version } => (
                 format!("ready {version}"),
@@ -1063,12 +1069,13 @@ const ROOM: f32 = 12.0;
 /// to fetch. With the version in hand, or this one's, in their sentences.
 fn reachable(now: &Status, build: Build) -> Vec<Status> {
     let version = now
-        .fetching()
+        .fetch
+        .as_ref()
         .map(|fetch| match fetch {
             Fetch::Downloading { version, .. }
             | Fetch::Ready { version }
             | Fetch::Failed { version, .. }
-            | Fetch::Cancelled { version } => version,
+            | Fetch::Cancelled { version } => version.clone(),
         })
         .or_else(|| now.last.as_ref().and_then(|(found, _)| found.newer().map(str::to_owned)))
         .unwrap_or_else(|| VERSION.to_owned());
@@ -1085,6 +1092,7 @@ fn reachable(now: &Status, build: Build) -> Vec<Status> {
         all.push(fetch(Fetch::Downloading { version: version.clone(), done: 999_000_000, total: 999_000_000 }));
         all.push(fetch(Fetch::Ready { version: version.clone() }));
         all.push(fetch(Fetch::Cancelled { version: version.clone() }));
+        all.push(found(Found::DevFetching { version: version.clone() }));
         for why in [Trouble::NoNetwork, Trouble::Blocked, Trouble::NotSigned, Trouble::Timeout] {
             all.push(fetch(Fetch::Failed { version: version.clone(), why, retries: true }));
         }
@@ -1161,6 +1169,16 @@ fn draw_row(ui: &mut egui::Ui, state: &mut crate::home::HomeState, now: &Status,
     } else {
         state.updates_bar = None;
     }
+    let mut check_again = false;
+    if shown.check_under && shown.under_key.is_empty() {
+        let under =
+            Rect::from_min_size(pos2(key_place.min.x, key_place.max.y + UNDER_KEY_GAP), vec2(key_wide, UNDER_KEY_LINE));
+        check_again = parts::key(ui, under, ui.scope_id().with("updates check again"), check_key(), true).clicked();
+    }
+    if check_again {
+        state.menu_asked = Some(crate::menubar::Action::CheckForUpdates);
+    }
+    let painter = ui.painter();
     if !shown.under_key.is_empty() {
         let at = pos2(key_place.center().x, key_place.max.y + UNDER_KEY_GAP + UNDER_KEY_LINE / 2.0);
         painter.text(at, Align2::CENTER_CENTER, shown.under_key, FontId::proportional(11.5), TEXT_FAINT);
@@ -1218,9 +1236,10 @@ impl crate::App {
                 *kept = Some(if found.trouble() { Err(reply.clone()) } else { Ok(reply.clone()) });
             }
         }
-        // A version an updater is fetching is said once it is ready, not here.
-        let fetching = matches!(found, Found::DevFetching { .. } | Found::DevReady { .. });
-        if let Some(running) = self.running.as_mut().filter(|_| !fetching) {
+        // The answer goes in the notices, as every check's does; but not an updater's answer
+        // about a version it reports on ([`report`]), which is said once when it is ready.
+        let reported = status().fetch.is_some() && matches!(found, Found::DevFetching { .. } | Found::DevReady { .. });
+        if let Some(running) = self.running.as_mut().filter(|_| !reported) {
             if found.trouble() {
                 running.home_state.notices.trouble(found.notice());
             } else {
@@ -1512,6 +1531,7 @@ mod tests {
     /// it, its key and the line under the key.
     fn states() -> Vec<(Status, Build, [&'static str; 4])> {
         let newest: &'static str = Box::leak(format!("SoftPresenter {VERSION} is the newest.").into_boxed_str());
+        let this_is: &'static str = Box::leak(format!("This is version {VERSION}.").into_boxed_str());
         let page = format!("{PAGES}tag/v0.9.1");
         let downloading = Fetch::Downloading { version: "0.9.1".to_owned(), done: 22_680_000, total: 54_000_000 };
         let ready = Fetch::Ready { version: "0.9.1".to_owned() };
@@ -1556,7 +1576,7 @@ mod tests {
                 ],
             ),
             // A build whose updater fetches the version itself.
-            (Status::default(), FETCHES, ["", "Not checked yet", "Check Now", ""]),
+            (Status::default(), FETCHES, [this_is, "Not checked yet", "Check Now", ""]),
             (
                 fetching(downloading),
                 FETCHES,
@@ -1565,7 +1585,7 @@ mod tests {
             (
                 found(Found::DevFetching { version: "0.9.1".to_owned() }),
                 FETCHES,
-                ["Downloading 0.9.1\u{2026}", "Nothing changes until it is ready.", "Cancel", ""],
+                ["Downloading 0.9.1\u{2026}", "Nothing changes until it is ready.", "Check Now", ""],
             ),
             (
                 fetching(ready.clone()),
@@ -1612,7 +1632,7 @@ mod tests {
                 FETCHES,
                 [
                     "0.9.1 couldn\u{2019}t be downloaded: this network checks secure connections and blocked it.",
-                    "Try another network, or get it from the download page: softpresenter.com.",
+                    "Try another network.",
                     "Try Again",
                     "",
                 ],
@@ -1620,12 +1640,7 @@ mod tests {
             (
                 failed(Trouble::Other("the disk is full".to_owned()), false),
                 FETCHES,
-                [
-                    "0.9.1 couldn\u{2019}t be downloaded: the disk is full.",
-                    "Or get it from the download page: softpresenter.com.",
-                    "Try Again",
-                    "",
-                ],
+                ["0.9.1 couldn\u{2019}t be downloaded: the disk is full.", "", "Try Again", ""],
             ),
             (
                 failed(Trouble::NotSigned, false),
@@ -1655,7 +1670,7 @@ mod tests {
             assert_eq!(shown.key.as_ref().map_or("", |key| key.words), key, "{status:?}");
             assert_eq!(shown.under_key, under_key, "{status:?}");
             // A bar only while a version comes down.
-            assert_eq!(shown.bar.is_some(), sentence.starts_with("Downloading"), "{status:?}");
+            assert_eq!(shown.bar.is_some(), matches!(status.fetch, Some(Fetch::Downloading { .. })), "{status:?}");
         }
         // Checking greys the key; something on screen greys Update and Restart.
         let key = |status: &Status, build| view(status, &form, build).key.expect("a key");
@@ -1684,8 +1699,94 @@ mod tests {
         // An updater that hasn't said what its keys do gets none: no key that does nothing.
         let unset = Build { keys: false, ..FETCHES };
         let waiting = view(&ready, &form, unset);
-        assert_eq!((waiting.sentence.as_str(), waiting.key), ("0.9.1 is ready. It goes in when you quit.", None));
+        assert_eq!(waiting.sentence, "0.9.1 is ready. It goes in when you quit.");
+        assert_eq!(waiting.key.map(|key| (key.words, key.act)), Some(("Check Now", Act::Check)));
         assert_eq!(view(&downloading, &form, unset).key, None);
+    }
+
+    #[test]
+    fn an_updater_that_only_answers_checks_is_shown_as_it_answered_and_can_be_asked_again() {
+        let form = crate::clock::TimeForm::default();
+        // It sets a hook and nothing else, and never reports: no keys of its own.
+        let hook_only = Build { fetches: true, waits: false, keys: false, cancelling: false };
+        // Before any check the row says something.
+        let never = view(&Status::default(), &form, hook_only);
+        assert_eq!(never.sentence, format!("This is version {VERSION}."));
+        // It answered "downloading": the row says so with no bar (how far isn't known, and
+        // nothing would ever move one), and Check Now asks it again, which is what moves it on.
+        let coming = view(&found(Found::DevFetching { version: "0.9.1".to_owned() }), &form, hook_only);
+        assert_eq!(coming.sentence, "Downloading 0.9.1\u{2026}");
+        assert_eq!(coming.bar, None);
+        assert_eq!(coming.key.map(|key| (key.words, key.act, key.enabled)), Some(("Check Now", Act::Check, true)));
+        // Asked again, it answered "ready": it goes in at quit, and the key still checks.
+        let ready = view(&found(Found::DevReady { version: "0.9.1".to_owned() }), &form, hook_only);
+        assert_eq!(ready.sentence, "0.9.1 is ready. It goes in when you quit.");
+        assert_eq!(ready.key.map(|key| key.act), Some(Act::Check));
+        // Its own notices are its own: nothing is said for it here, so nothing is said twice.
+        let checks = Checks::new();
+        checks.finish(Found::DevReady { version: "0.9.1".to_owned() }, 1);
+        assert_eq!(checks.take_notice(), None);
+        // Once it reports, the report is what is said, once.
+        checks.report(Some(Fetch::Ready { version: "0.9.1".to_owned() }));
+        assert_eq!(checks.take_notice(), Some(("Version 0.9.1 is ready.".to_owned(), false)));
+        assert_eq!(checks.take_notice(), None);
+    }
+
+    #[test]
+    fn checking_again_is_always_in_reach() {
+        let form = crate::clock::TimeForm::default();
+        // Every state has a key that checks, or a quiet Check Now under its key; only while the
+        // line under the key says why the key is greyed (something is on screen) is there
+        // neither, and while a check is running.
+        for (status, build, _) in states() {
+            let shown = view(&status, &form, build);
+            let checks = shown.key.as_ref().is_some_and(|key| key.act == Act::Check);
+            assert!(checks || shown.check_under || !shown.under_key.is_empty(), "no way to check again: {status:?}");
+            assert!(!(checks && shown.check_under), "two keys that check: {status:?}");
+        }
+        // A newer version found: its key opens the page, and Check Now is under it.
+        let newer = found(Found::Newer { version: "0.9.1".to_owned(), page: format!("{PAGES}tag/v0.9.1") });
+        assert!(view(&newer, &form, PUBLIC).check_under);
+        // Drawn in the row, and a click on it checks.
+        use crate::studio::tests::{drawn, place_of};
+        let ctx = crate::studio::tests::styled();
+        let mut state = crate::home::HomeState::default();
+        let output = drawn(&ctx, vec![], |ui| {
+            draw_row(ui, &mut state, &newer, PUBLIC);
+        });
+        let at = place_of(&output, "Check Now").expect("Check Now is under the key");
+        let key = state.updates_key.expect("the key");
+        assert!(at.y > key.max.y && key.x_range().contains(at.x), "{at:?} under {key:?}");
+        output.drop_without_applying_deltas();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for events in [vec![egui::Event::PointerMoved(at)], vec![press(true)], vec![press(false)]] {
+            drawn(&ctx, events, |ui| {
+                draw_row(ui, &mut state, &newer, PUBLIC);
+            })
+            .drop_without_applying_deltas();
+        }
+        assert_eq!(state.menu_asked.take(), Some(crate::menubar::Action::CheckForUpdates));
+    }
+
+    #[test]
+    fn a_build_that_fetches_its_own_versions_is_never_sent_to_the_public_download_page() {
+        let form = crate::clock::TimeForm::default();
+        let page = "softpresenter.com";
+        for why in [Trouble::Blocked, Trouble::Timeout, Trouble::Insecure, Trouble::Unreached, Trouble::NoNetwork] {
+            // Its downloads, and its checks.
+            for status in [failed(why.clone(), false), found(Found::Unreached(why.clone()))] {
+                let shown = view(&status, &form, FETCHES);
+                assert!(!shown.under.contains(page), "{status:?}: {}", shown.under);
+            }
+        }
+        assert_eq!(view(&failed(Trouble::Blocked, false), &form, FETCHES).under, "Try another network.");
+        // A build from the public source is: that page is where its versions are.
+        assert!(view(&found(Found::Unreached(Trouble::Blocked)), &form, PUBLIC).under.contains(page));
     }
 
     #[test]
@@ -1714,7 +1815,8 @@ mod tests {
                 let row = row.expect("drawn");
                 // The bar runs along the foot of the words, in the row, left of the key.
                 let key_place = state.updates_key.expect("the key's place");
-                assert_eq!(state.updates_bar.is_some(), sentence.starts_with("Downloading"), "{status:?}");
+                let coming = matches!(status.fetch, Some(Fetch::Downloading { .. }));
+                assert_eq!(state.updates_bar.is_some(), coming, "{status:?}");
                 if let Some(bar) = state.updates_bar {
                     assert!(row.contains_rect(bar) && bar.max.x < key_place.min.x, "{bar:?} in {row:?}");
                     assert_eq!(bar.height(), 4.0);
@@ -1878,11 +1980,6 @@ mod tests {
         // Try Again lets the failure go, so the row says Checking… and then what comes.
         assert!(checks.begin());
         assert_eq!(checks.status().fetch, None);
-        // An updater's answer to a check that it has one ready is said the same way, once.
-        checks.finish(Found::DevReady { version: "0.9.3".to_owned() }, 1);
-        assert_eq!(checks.take_notice(), Some(("Version 0.9.3 is ready.".to_owned(), false)));
-        checks.report(Some(Fetch::Ready { version: "0.9.3".to_owned() }));
-        assert_eq!(checks.take_notice(), None);
     }
 
     /// A request to `address` with the app's own client settings: the error it ends in.
