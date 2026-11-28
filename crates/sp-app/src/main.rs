@@ -6342,9 +6342,7 @@ impl App {
         }
         if let Some(running) = self.running.as_mut() {
             let state = &mut running.home_state;
-            state.picked_media =
-                state.picked_media.iter().filter_map(|at| media::place_after_removal(*at, index)).collect();
-            state.media_anchor = state.media_anchor.and_then(|at| media::place_after_removal(at, index));
+            state.media_removed(index);
             state.media_lengths.remove(&id);
             running.thumbs.forget(id, &mut running.egui_renderer);
         }

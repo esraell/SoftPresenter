@@ -474,6 +474,9 @@ pub struct HomeState {
     /// Where each tile of the media strip was drawn last, in the strip's order (for tests, and to
     /// aim a testing aid's drag).
     pub media_tiles: Vec<Rect>,
+    /// The media bin's places changed since the last frame, so a tile being carried by the
+    /// pointer ([`MediaDrag`], which holds a place) is let go at the next one.
+    pub media_carry_stale: bool,
     /// Where the list under the find box was drawn last, its foot line included (for tests).
     pub find_list: Option<Rect>,
     /// The find box's Bible results, and the Bible view's Search's verses as they are typed,
@@ -2100,6 +2103,7 @@ impl Default for HomeState {
             live_menu: None,
 
             media_tiles: Vec::new(),
+            media_carry_stale: false,
             updates_key: None,
             updates_bar: None,
             media_playlists: Vec::new(),
@@ -2532,9 +2536,29 @@ impl HomeState {
     /// pictures stay picked out, and a Delete question open meanwhile still asks about them.
     pub fn media_moved(&mut self, order: &[usize]) {
         let now = |at: &usize| crate::media::place_after_move(*at, order);
-        self.picked_media = self.picked_media.iter().filter_map(now).collect();
-        self.media_anchor = self.media_anchor.as_ref().and_then(now);
-        self.confirm_delete_media = self.confirm_delete_media.iter().filter_map(now).collect();
+        self.media_places_changed(now);
+    }
+
+    /// An item was taken out of the media bin, from wherever (its menu, Delete, `sp`, the
+    /// phone, a folder followed): as [`HomeState::media_moved`], and the item itself is no
+    /// longer picked out or asked about.
+    pub fn media_removed(&mut self, index: usize) {
+        self.media_places_changed(|at: &usize| crate::media::place_after_removal(*at, index));
+    }
+
+    /// The bin's places changed: `now` says where the item at a place is now, if it is still
+    /// there. What is picked out and what Delete asks about follow. A drag under way in the
+    /// strip is let go, and a tile being carried to a slide is dropped from the pointer at the
+    /// next frame: both hold a place from before, and where the pointer lets go is no longer
+    /// what was aimed at.
+    fn media_places_changed(&mut self, now: impl Fn(&usize) -> Option<usize>) {
+        self.picked_media = self.picked_media.iter().filter_map(&now).collect();
+        self.media_anchor = self.media_anchor.as_ref().and_then(&now);
+        self.confirm_delete_media = self.confirm_delete_media.iter().filter_map(&now).collect();
+        if self.sweep.is_some_and(|sweep| sweep.list == Picking::Media) {
+            self.sweep = None;
+        }
+        self.media_carry_stale = true;
     }
 
     /// Whether an Escape pressed in the Edit view has something there to do, which it does
@@ -2717,6 +2741,11 @@ pub fn home_ui(
     // ending), no panel is left open behind it to take the Service view's Escape.
     if state.editing.is_none() {
         state.inspector.panel = None;
+    }
+    // A tile carried from the media strip holds its place in the bin: once the bin's places
+    // have changed under it, it is let go rather than dropped as another picture.
+    if std::mem::take(&mut state.media_carry_stale) && egui::DragAndDrop::has_payload_of_type::<MediaDrag>(ui.ctx()) {
+        egui::DragAndDrop::clear_payload(ui.ctx());
     }
     let commands = home_view(ui, show, state, theme, thumb, preview, canvas);
     // A key's ask that no field took (it went before it drew) is let go of, never carried out
@@ -12304,6 +12333,108 @@ mod tests {
         assert_eq!(state.picked_media, vec![1, 0]);
         assert_eq!(state.media_anchor, Some(0));
         assert_eq!(state.confirm_delete_media, vec![0], "Delete still asks about the picture it asked about");
+    }
+
+    #[test]
+    fn a_picture_taken_out_from_elsewhere_leaves_delete_asking_about_the_others_only() {
+        // Delete is asking about the first and the third; the first is taken out meanwhile
+        // (from `sp`, the phone, or a folder followed).
+        let mut state = HomeState {
+            picked_media: vec![0, 2],
+            media_anchor: Some(0),
+            confirm_delete_media: vec![0, 2],
+            ..HomeState::default()
+        };
+        state.media_removed(0);
+        assert_eq!(state.confirm_delete_media, vec![1], "the third, where it is now, and not the one gone");
+        assert_eq!((state.picked_media.clone(), state.media_anchor), (vec![1], None));
+        // Return then deletes that one picture.
+        let (ctx, mut show) = (egui::Context::default(), show_with_three_media());
+        show.remove_media(0);
+        frame_with(&ctx, &show, &mut state, Some(Key::Enter));
+        assert_eq!(state.media_request, Some(MediaRequest::Delete(vec![1])));
+    }
+
+    #[test]
+    fn a_drag_in_the_strip_is_let_go_when_the_bin_changes_under_it() {
+        let show = show_with_three_media();
+        let sweep = Sweep { list: Picking::Media, from: Some(2), start: pos2(0.0, 0.0), keeps: false, carried: true };
+        for change in [0, 1] {
+            let ctx = egui::Context::default();
+            let mut state = HomeState { sweep: Some(sweep), ..HomeState::default() };
+            frame_with(&ctx, &show, &mut state, None);
+            // The third tile is being carried to a slide, by its place.
+            egui::DragAndDrop::set_payload(&ctx, MediaDrag(2));
+            match change {
+                0 => state.media_moved(&crate::media::moved_order(3, &[2], 0)),
+                _ => state.media_removed(0),
+            }
+            assert!(state.sweep.is_none(), "the drag is let go");
+            frame_with(&ctx, &show, &mut state, None);
+            assert!(!egui::DragAndDrop::has_payload_of_type::<MediaDrag>(&ctx), "nothing is carried any more");
+            assert!(state.media_request.is_none() && !state.media_playlists_changed, "and nothing was moved by it");
+        }
+        // A drag in another list is left alone.
+        let mut state = HomeState { sweep: Some(Sweep { list: Picking::Songs, ..sweep }), ..HomeState::default() };
+        state.media_removed(0);
+        assert!(state.sweep.is_some());
+    }
+
+    #[test]
+    fn a_tiles_menu_goes_with_its_picture_and_closes_when_the_picture_leaves_the_bin() {
+        // The same three pictures (the same items), in whatever order asked for.
+        let items: Vec<sp_model::MediaItem> = ["a.png", "b.png", "c.png"]
+            .iter()
+            .map(|name| sp_model::MediaItem::new((*name).into(), (*name).into()))
+            .collect();
+        let bin = |places: &[usize]| {
+            let mut show = show(3);
+            for place in places {
+                show.add_media(items[*place].clone());
+            }
+            show
+        };
+        let show = bin(&[0, 1, 2]);
+        let ctx = egui::Context::default();
+        let mut state = HomeState::default();
+        let mut clock = 0.0;
+        let mut run = |show: &Show, state: &mut HomeState, events: Vec<Event>| {
+            clock += 0.05;
+            let raw = RawInput { focused: true, time: Some(clock), events, ..input(None) };
+            ctx.run_ui(raw, |ui| {
+                home_ui(ui, show, state, &Theme::builtin(), &mut |_| None, Preview::default(), None);
+            })
+        };
+        let menu_open = |output: &egui::FullOutput| crate::studio::tests::place_of(output, "Move Left").is_some();
+        run(&show, &mut state, Vec::new()).drop_without_applying_deltas();
+        // A right-click on the first picture opens its menu.
+        let at = state.media_tiles[0].center();
+        let press = |pressed| Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        for events in [vec![Event::PointerMoved(at)], vec![press(true)], vec![press(false)]] {
+            run(&show, &mut state, events).drop_without_applying_deltas();
+        }
+        let output = run(&show, &mut state, Vec::new());
+        assert!(menu_open(&output), "the menu is open");
+        output.drop_without_applying_deltas();
+        // The bin put in another order from elsewhere: the menu is still its picture's.
+        let moved = bin(&[2, 1, 0]);
+        let output = run(&moved, &mut state, Vec::new());
+        assert!(menu_open(&output), "it stays with the picture, now the last");
+        output.drop_without_applying_deltas();
+        // The picture taken out of the bin from elsewhere: its menu goes with it, rather than
+        // becoming the menu of the picture that took its place.
+        let without = bin(&[1, 2]);
+        for _ in 0..2 {
+            run(&without, &mut state, Vec::new()).drop_without_applying_deltas();
+        }
+        let output = run(&without, &mut state, Vec::new());
+        assert!(!menu_open(&output), "no menu is left open on another picture");
+        output.drop_without_applying_deltas();
     }
 
     #[test]

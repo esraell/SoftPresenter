@@ -6566,8 +6566,12 @@ pub fn media_strip(
                         ui.spacing_mut().item_spacing.x = 10.0;
                         let several = state.picked_media.len() > 1;
                         for (index, item) in order.iter().map(|at| (*at, &show.media()[*at])) {
-                            let (rect, response) =
-                                ui.allocate_exact_size(image_size + vec2(0.0, 22.2), Sense::click_and_drag());
+                            // A tile, its ⋯ and the menus they open go by the item, not by its
+                            // place: a menu open while the bin is put in another order from
+                            // elsewhere (the phone, `sp`, a folder followed) stays with its
+                            // picture, and closes if the picture leaves the bin.
+                            let (_, rect) = ui.allocate_space(image_size + vec2(0.0, 22.2));
+                            let response = ui.interact(rect, media_tile_id(ui, item.id), Sense::click_and_drag());
                             placed.push((index, rect));
                             // Its number, after Shift-modifier-M: the number shows it.
                             let numbers = &state.numbers;
@@ -6654,7 +6658,7 @@ pub fn media_strip(
                                 egui::Vec2::splat(MORE_BUTTON),
                             );
                             ui.painter().rect_filled(place, 6.0, Color32::from_black_alpha(178));
-                            let more = more_button(ui, place, ui.scope_id().with(("media more", index)), near);
+                            let more = more_button(ui, place, ui.scope_id().with(("media more", item.id)), near);
                             egui::Popup::menu(&more).show(|ui| media_item_menu(ui, show, state, index, item));
                             response.on_hover_text(item.name.as_str()).context_menu(|ui| {
                                 media_item_menu(ui, show, state, index, item);
@@ -6685,6 +6689,12 @@ pub fn media_strip(
         }
     });
 }
+/// What a media strip tile's clicks, drags and right-click menu go by: the item itself, wherever
+/// it is in the bin.
+pub(crate) fn media_tile_id(ui: &egui::Ui, item: sp_model::Uuid) -> egui::Id {
+    ui.scope_id().with(("media tile", item))
+}
+
 /// A rounded-looking dashed outline: short dashes along each side of `rect`.
 fn dashed_rect(painter: &egui::Painter, rect: Rect, stroke: Stroke) {
     let (dash, gap) = (7.0, 5.0);
