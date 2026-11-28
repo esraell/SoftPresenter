@@ -421,7 +421,13 @@ impl Show {
             Some(None) => self.cursor = None,
             None => {}
         }
-        self.step = self.cursor.filter(|c| c.presentation == index).and_then(|cursor| self.nth_place(cursor, was));
+        // The cursor's place in the play order, worked out again only when the cursor was in
+        // this presentation: one in another (a song on its second chorus while a Bible passage is
+        // put in its place) keeps its place, or Next would go back to the slide after the first
+        // chorus.
+        if cursor_id.is_some() || self.cursor.is_some_and(|c| c.presentation == index) {
+            self.step = self.cursor.filter(|c| c.presentation == index).and_then(|cursor| self.nth_place(cursor, was));
+        }
         changes
     }
 

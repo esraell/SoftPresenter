@@ -707,6 +707,38 @@ fn a_deleted_group_or_an_undo_keeps_the_place_in_the_arrangement() {
 }
 
 #[test]
+fn another_presentation_put_in_its_place_keeps_a_songs_place_in_its_arrangement() {
+    // Verse 1, Chorus, Verse 2, Chorus, Verse 3, on its second chorus, with a Bible passage, say,
+    // put in another place by its slides' ids (`replace_presentation_following`) or by place: Next
+    // goes on to Verse 3, never back to Verse 2 after the first chorus. On screen, and cleared.
+    let mut song = parse_song_text("Song", "[Verse 1]\nA\n\n[Chorus]\nC\n\n[Verse 2]\nD\n\n[Verse 3]\nE\n");
+    let ids: Vec<sp_model::Uuid> = song.groups.iter().map(|group| group.id).collect();
+    let mut arrangement = song.new_arrangement(|n| format!("Arrangement {n}"));
+    arrangement.groups = vec![ids[0], ids[1], ids[2], ids[1], ids[3]];
+    song.arrangement = Some(arrangement.id);
+    song.arrangements.push(arrangement);
+    let song = Arc::new(song);
+    for (cleared, following) in [(false, true), (true, true), (false, false), (true, false)] {
+        let mut s = Show::new(vec![song.clone(), Arc::new(parse_song_text("Bible", "X\n\nY\n"))]);
+        s.apply(Command::GoToStep { presentation: 0, step: 3 });
+        if cleared {
+            s.apply(Command::Clear(Layer::Slides));
+        }
+        assert_eq!((s.cursor(), s.position()), (at(0, 1), Some((3, 5))), "the second chorus");
+        let passage = Arc::new(parse_song_text("Bible", "Z\n\nW\n"));
+        if following {
+            s.replace_presentation_following(1, passage);
+        } else {
+            s.replace_presentation(1, passage);
+        }
+        assert_eq!(s.position(), Some((3, 5)), "cleared {cleared}, following {following}: still the second chorus");
+        assert_eq!(s.upcoming(), at(0, 3), "Verse 3 is next");
+        s.apply(Command::Next);
+        assert_eq!((s.live(), s.position()), (at(0, 3), Some((4, 5))), "cleared {cleared}, following {following}");
+    }
+}
+
+#[test]
 fn next_sets_a_slides_click_builds_going_before_moving_on() {
     let mut song = parse_song_text("Song", "A\n\nB\n");
     let click = sp_model::Build { on_click: true, ..sp_model::Build::of(sp_model::BuildEffect::Dissolve) };
