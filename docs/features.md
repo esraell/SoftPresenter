@@ -2359,8 +2359,8 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   - **Its look is the theme's.** Which mark (one of seven: `* * *`, `- - -`, `° ° °`,
     `• • •`, `● ● ●`, `▪ ▪ ▪`, `■ ■ ■`), its size (40% to 160% of the words' size in steps of 10,
     80% as it comes), its colour (the words' own, or one of eight) and its place (under the
-    last line, or the bottom of the screen: as low as the no-room limit allows, 3% above the
-    bottom or just over the copyright line). A theme that never chose a look draws three stars
+    last line, or the bottom of the screen: as low as it may go, 3% above the bottom or just
+    over the copyright line). A theme that never chose a look draws three stars
     as before, and its file says nothing of it. A song with a theme of its own ends with that
     theme's mark. The mark always takes the words' font, outline and shadow.
   - **One small window** sets it, with a small last slide at its left that shows the mark as
@@ -2398,16 +2398,35 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     its top half a line of theirs under the last line of the lowest words (the lower block,
     with two languages), centred on that box, and no more solid than those boxes are. It is a
     layer of its own, drawn by the painter after each screen's own theme has laid the words out
-    (`sp-render`'s `end_mark_place`), so the words keep their size and place with it on or
-    off. It comes to the screens with the slide (`Frame::end_mark`), so it goes on and off with
+    (`sp-render`'s `end_mark_place`), so on a slide with room for it the words keep their size
+    and place with it on or off. It comes to the screens with the slide (`Frame::end_mark`), so it goes on and off with
     the slide's own transition. On a slide with builds it comes once every build has played:
     after the last lines a click brings, never over words still coming in.
+  - **On a full last slide** the mark always has a place (the window says so: "On a full last
+    slide the mark moves down, as far as the screen allows. If there is still no room, the
+    words are made a little smaller for it, or the mark is."), found in this order:
+    1. It moves down: under the last line it may lie below the words' box, as far as the
+       lowest it may go (3% above the slide's bottom, or the copyright line's top where that
+       shows), the gap under the words closing from half a line to a quarter line.
+    2. The words make room (`end_mark_shorter_box`): the lowest words are fitted to a box
+       taken shorter at its bottom, by the least that gives the mark its room at its own size.
+       Words with room to spare in their box only move up in it; words that fill it come out
+       a little smaller, as the theme already makes them to fit (eight lines filling a box
+       over most of the slide came out 4% smaller in a test, 8% over a copyright line). They
+       never spill out of their box for it.
+    3. Where the words can't give room (a theme that keeps their size in a box they fill,
+       words at their least size, a box that grows round its words), the mark is drawn
+       smaller, in the room there is, down to 40% of the words' size.
+    4. With less room than that it is left out, and the log says so once for the slide
+       (`[screens] the end of a song's mark was left out…`).
+    The same holds for a mark at the bottom of the screen, which is drawn wherever it clears
+    the words (it used to be left out whenever the place under the last line had no room).
   - **Never.** On a song that loops; on what the app makes (a Bible passage, VoxLive's
     captions, a song of the song catalog); on what has no song's words (a deck of text boxes
     or pictures brought in from a presentation file); under words that scroll or sit in a
     turned box; while the words are hidden (it dissolves out and back with them); on stage
-    screens and thumbnails; and where it would reach into the lowest 3% of the slide, or past
-    the copyright line's top on the slides that show one.
+    screens and thumbnails. It never reaches into the lowest 3% of the slide, or past the
+    copyright line's top on the slides that show one, and never lies over the words.
   - **The copyright line's Last slide** is this same slide, so the line and the stars always
     land together; what has no song's words keeps its written last slide for the line.
 - **Interface size** (Settings › Slides › In your window, or `sp settings set interface_size=`):

@@ -1566,6 +1566,9 @@ struct Output {
     identify: Vec<(Uuid, Arc<Slide>, sp_model::Rgba)>,
     identify_since: Instant,
     identify_theme: Arc<Theme>,
+    /// The slide last drawn without the end of a song's mark for want of room, so the log says
+    /// it once.
+    end_mark_left_out: Option<Uuid>,
     /// The screens switched off that go on sending: drawn black (see `OutputMsg::Dark`).
     dark: Vec<Uuid>,
     /// The audience screens with a look of their own.
@@ -1735,6 +1738,7 @@ fn run(
         identify: Vec::new(),
         identify_since: Instant::now(),
         identify_theme: Arc::new(Theme::builtin()),
+        end_mark_left_out: None,
         dark: Vec::new(),
         stage: Vec::new(),
         stage_on: true,
@@ -2208,6 +2212,18 @@ fn run(
             }
         } else {
             output.draw(new_picture);
+            // A last slide drawn without the end of a song's mark, for want of room even at
+            // its smallest: said once for the slide.
+            if sp_render::take_end_mark_left_out() {
+                let slide = output.frame.slide.as_ref().map(|slide| slide.id);
+                if slide.is_some() && output.end_mark_left_out != slide {
+                    crate::applog::event(
+                        "screens",
+                        "the end of a song's mark was left out: no room under the words of the last slide, even at its smallest",
+                    );
+                }
+                output.end_mark_left_out = slide;
+            }
         }
         // A window whose X is to look different, and wasn't drawn just now, is shown again;
         // so is one that was passed over, now that its next picture has come.

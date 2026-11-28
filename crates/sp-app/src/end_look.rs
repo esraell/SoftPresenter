@@ -190,13 +190,13 @@ fn chip_marks(ui: &egui::Ui, mark: EndMark, ink: Color32) -> std::sync::Arc<egui
     ui.ctx().fonts_mut(|fonts| fonts.layout_job(job))
 }
 
-/// The sentence under the rows: the no-room rule while the mark is on, or that it is switched
+/// The sentence under the rows: what happens on a full last slide while the mark is on, or that it is switched
 /// off.
 fn sentence(on: bool) -> &'static str {
     if on {
         t(
             "settings.endlook.note",
-            "Where there is no room for the mark under the words, it isn\u{2019}t drawn. The words are never moved or made smaller for it.",
+            "On a full last slide the mark moves down, as far as the screen allows. If there is still no room, the words are made a little smaller for it, or the mark is.",
         )
     } else {
         t(
@@ -666,7 +666,7 @@ mod tests {
         click(&ctx, &mut state, "Under the last line");
         assert_eq!(state.theme_end_looks[0].place, EndPlace::Under);
         // The sentence says the rule, or that the mark is off.
-        let rule = "Where there is no room for the mark under the words, it isn\u{2019}t drawn. The words are never moved or made smaller for it.";
+        let rule = "On a full last slide the mark moves down, as far as the screen allows. If there is still no room, the words are made a little smaller for it, or the mark is.";
         let off = "The mark is switched off in Settings \u{203a} Slides. Its look is kept for when it is on.";
         let (words, _) = drawn(&ctx, &mut state, USUAL);
         assert!(words.iter().any(|(have, _)| have == rule) && !words.iter().any(|(have, _)| have == off));

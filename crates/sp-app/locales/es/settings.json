@@ -378,6 +378,6 @@
   "settings.endlook.place": "Lugar",
   "settings.endlook.place.under": "Bajo la última línea",
   "settings.endlook.place.bottom": "Abajo en la pantalla",
-  "settings.endlook.note": "Donde no hay sitio para la marca bajo la letra, no se dibuja. La letra nunca se mueve ni se hace más pequeña por ella.",
+  "settings.endlook.note": "En una última diapositiva llena, la marca baja hasta donde la pantalla lo permite. Si aun así no hay sitio, la letra se hace un poco más pequeña por ella, o se hace más pequeña la marca.",
   "settings.endlook.note.off": "La marca está desactivada en Ajustes › Diapositivas. Su aspecto se guarda para cuando esté activada."
 }

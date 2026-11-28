@@ -43,8 +43,9 @@ pub fn last_sung(song: &Presentation) -> Option<Last> {
 }
 
 /// How far down the slide the mark may reach, in slide units: 3% above the slide's bottom, or
-/// the copyright line's top while that shows (`copyright`). With no room above it, the painter
-/// leaves the mark out; the words are never moved or made smaller for it.
+/// the copyright line's top while that shows (`copyright`). On a slide too full for it above
+/// that, the painter makes the words a little smaller for it where their box lets it, or else
+/// the mark (`sp-render`'s `end_mark_place`).
 pub fn floor(copyright: bool) -> f32 {
     if copyright { crate::props::COPYRIGHT_TOP } else { sp_model::SLIDE_HEIGHT * (1.0 - FOOT) }
 }
