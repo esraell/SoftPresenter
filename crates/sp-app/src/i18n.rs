@@ -1104,6 +1104,12 @@ mod tests {
         "setup",
         "integrations",
         "mirror",
+        "tools",
+        "inspector",
+        "edit",
+        "editor",
+        "themes",
+        "menubar",
     ];
 
     /// What `language` lacks in the areas `done` lists, as "key (English)".

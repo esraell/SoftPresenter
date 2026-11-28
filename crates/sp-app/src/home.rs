@@ -7981,7 +7981,9 @@ fn version_line(ui: &mut egui::Ui, state: &mut HomeState) {
                 .iter()
                 .any(|have| have.name == usual.name && (have.songs, have.bible) == (usual.songs, usual.bible))
         })
-        .map(|(at, usual)| (at, format!("{} ({})", usual.name, used_for(usual.songs, usual.bible).to_lowercase())))
+        .map(|(at, usual)| {
+            (at, format!("{} ({})", usual.name, crate::i18n::in_a_list(used_for(usual.songs, usual.bible))))
+        })
         .collect();
     let words = tf(
         "themes.version.about",

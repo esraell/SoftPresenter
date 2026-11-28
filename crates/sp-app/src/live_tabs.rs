@@ -3183,7 +3183,7 @@ mod tests {
     #[test]
     fn loop_stands_beside_shuffle_clear_of_the_crossfade_and_switches_on_and_off() {
         use crate::i18n::{Language, with_language};
-        for language in [Language::English, Language::Spanish, Language::Russian, Language::Ukrainian] {
+        for language in Language::ALL {
             with_language(language, || {
                 let show = show();
                 let mut state = HomeState { live_tab: 5, ..HomeState::default() };
