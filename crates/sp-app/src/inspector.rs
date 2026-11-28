@@ -66,6 +66,10 @@ pub struct InspectorState {
     /// The text field in the panel that had the keyboard when it was last drawn, if one had: an
     /// Escape that takes the keyboard out of it is its alone (see `edit_view`).
     pub field_with_keys: Option<egui::Id>,
+    /// The boxes picked when the Gradient and To rows were last shown for a box that shows a
+    /// picture (one saved with a gradient by an older version): the rows stay while the same
+    /// boxes are picked, though Gradient is then set to None, so no row under them moves.
+    pub gradient_rows_for: Vec<sp_model::Uuid>,
 }
 
 /// A web page box's address field, as the Edit view's Delete and Undo need it.
@@ -1506,6 +1510,26 @@ fn shadow_rows(ui: &mut egui::Ui, column: f32, on: bool, look: &mut sp_model::Sh
 const BOX_SHADOW: sp_model::Shadow =
     sp_model::Shadow { color: Rgba::BLACK, opacity: 0.75, angle: 315.0, offset: 5.0, blur: 5.0 };
 
+/// The room between the six keys that line an object up, [`KEY_WIDE`] each, across `room`:
+/// [`BETWEEN`] where they fit so, and less where they don't.
+fn line_up_gap(room: f32) -> f32 {
+    ((room - 6.0 * KEY_WIDE) / 5.0).floor().clamp(1.0, BETWEEN)
+}
+
+/// Three bars with the same room between them: spread out left to right (`across`), or top to
+/// bottom.
+fn spread_mark(painter: &egui::Painter, cell: Rect, across: bool, ink: Color32) {
+    let c = cell.center();
+    for step in [-6.0, 0.0, 6.0] {
+        let bar = if across {
+            Rect::from_center_size(pos2(c.x + step, c.y), vec2(2.5, 12.0))
+        } else {
+            Rect::from_center_size(pos2(c.x, c.y + step), vec2(12.0, 2.5))
+        };
+        painter.rect_filled(bar, 1.0, ink);
+    }
+}
+
 /// A triangle standing on a line: mirror left to right (`across`), or top to bottom.
 fn flip_mark(painter: &egui::Painter, cell: Rect, across: bool, ink: Color32) {
     let c = cell.center();
@@ -1601,6 +1625,7 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     let history = (state.can_undo(false), state.can_undo(true));
     let menu_asked = &mut state.menu_asked;
     let lock_shape = &mut state.inspector.lock_shape;
+    let gradient_rows_for = &mut state.inspector.gradient_rows_for;
     let rename_started = &mut state.rename_started;
     let Some(draft) = state.editing.as_mut() else { return };
     let picked = draft.selection();
@@ -1612,9 +1637,14 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
         draft.slide.objects.iter().filter(|object| picked.contains(&object.id)).any(ask)
     };
     let any_shape = of_picked(&|object| matches!(object.kind, ObjectKind::Shape { .. }));
+    // Whether the gradient's rows show is settled when the boxes are picked, not as they are
+    // changed: a gradient set to None here leaves its rows where they are.
+    if of_picked(&|object| object.gradient.is_some()) {
+        gradient_rows_for.clone_from(&picked);
+    }
     let fill = FillRows {
         behind: !of_picked(&|object| !shows_a_picture(&object.kind)),
-        gradient: !of_picked(&|object| shows_a_picture(&object.kind)) || of_picked(&|object| object.gradient.is_some()),
+        gradient: !of_picked(&|object| shows_a_picture(&object.kind)) || *gradient_rows_for == picked,
     };
     for object in draft.slide.objects.iter().filter(|object| picked.contains(&object.id)) {
         let kind = kind_words(&object.kind).to_owned();
@@ -1683,10 +1713,9 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
     // them out evenly too, which is done once this object is let go of.
     let mut spread: Option<bool> = None;
     row(ui, column, arrange, |ui| {
-        // Always the eight keys, so none changes size when a third object is picked: the two
-        // that spread are greyed until there are three.
-        let spreads = picked.len() > 2;
-        let wide = key_width(room, 8);
+        // Six keys at the design's width in every language: where a long caption leaves them
+        // less room, they stand closer together, never narrower.
+        ui.spacing_mut().item_spacing.x = line_up_gap(room);
         let hints = [
             t("inspector.arrange.left", "Line up with the left of the slide"),
             t("inspector.arrange.centre", "Centre across the slide"),
@@ -1696,7 +1725,7 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
             t("inspector.arrange.bottom", "Line up with the bottom of the slide"),
         ];
         for (which, hint) in hints.into_iter().enumerate() {
-            let key = square_key(ui, wide, (false, false), hint, |p, cell, ink| align_mark(p, cell, which, ink));
+            let key = square_key(ui, KEY_WIDE, (false, false), hint, |p, cell, ink| align_mark(p, cell, which, ink));
             if key.clicked() {
                 match which {
                     0 => edited.x = 0.0,
@@ -1708,20 +1737,24 @@ fn box_tab(ui: &mut egui::Ui, state: &mut HomeState, theme: &Theme) {
                 }
             }
         }
-        ui.add_enabled_ui(spreads, |ui| {
+    });
+    // With three or more picked, the two keys that spread them out evenly, on a line of their
+    // own under the six.
+    if picked.len() > 2 {
+        row(ui, column, "", |ui| {
+            ui.spacing_mut().item_spacing.x = line_up_gap(room);
             for (across, hint) in [
                 (true, t("inspector.arrange.spread_across", "Spread them out evenly, left to right")),
                 (false, t("inspector.arrange.spread_down", "Spread them out evenly, top to bottom")),
             ] {
-                let mark = if across { 1 } else { 4 };
-                let key = square_key(ui, wide, (false, false), hint, |p, cell, ink| align_mark(p, cell, mark, ink));
-                let why = t("inspector.arrange.spread.why", "Pick three or more objects to spread them out");
-                if key.on_disabled_hover_text(why).clicked() {
+                let key =
+                    square_key(ui, KEY_WIDE, (false, false), hint, |p, cell, ink| spread_mark(p, cell, across, ink));
+                if key.clicked() {
                     spread = Some(across);
                 }
             }
         });
-    });
+    }
     if edited != frame {
         object.frame = Some(edited);
     }
@@ -3401,6 +3434,93 @@ mod tests {
             let words = words_drawn(&mut editing_shape(InspectorTab::Box, true), &theme);
             assert!(!words.iter().any(|said| said == "FILL" || said == "OUTLINE"), "{words:?}");
         });
+    }
+
+    /// Every control the inspector draws for `state` that takes a click, in a column as wide as
+    /// the window's.
+    fn keys_drawn(state: &mut HomeState, theme: &Theme) -> Vec<Rect> {
+        let ctx = crate::studio::tests::styled();
+        let mut keys = Vec::new();
+        for _ in 0..3 {
+            let raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(PANEL_WIDTH, 2400.0))),
+                ..RawInput::default()
+            };
+            ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().frame(Frame::NONE).show(ui, |ui| {
+                    inspector(ui, state, theme);
+                    keys.clear();
+                    ui.ctx().viewport(|viewport| {
+                        for (_, rects) in viewport.this_pass.widgets.layers() {
+                            keys.extend(rects.iter().filter(|widget| widget.sense.senses_click()).map(|w| w.rect));
+                        }
+                    });
+                });
+            })
+            .drop_without_applying_deltas();
+        }
+        keys
+    }
+
+    /// The six keys that line an object up, as the Box tab drew them: the one line that holds
+    /// six keys of the design's width.
+    fn line_up_keys(state: &mut HomeState, theme: &Theme) -> Vec<Rect> {
+        let keys = keys_drawn(state, theme);
+        let wide = |key: &&Rect| (key.width() - KEY_WIDE).abs() < 0.01 && (key.height() - KEY).abs() < 0.01;
+        let mut lines: Vec<f32> = keys.iter().filter(wide).map(|key| key.min.y).collect();
+        lines.sort_by(f32::total_cmp);
+        lines.dedup();
+        let six = lines.into_iter().find(|line| keys.iter().filter(wide).filter(|key| key.min.y == *line).count() == 6);
+        let line = six.expect("a line of six keys");
+        let mut row: Vec<Rect> = keys.iter().filter(wide).filter(|key| key.min.y == line).copied().collect();
+        row.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
+        row
+    }
+
+    #[test]
+    fn the_keys_that_line_an_object_up_are_the_designs_width_in_every_language() {
+        let theme = Theme::builtin();
+        for language in LANGUAGES {
+            crate::i18n::with_language(language, || {
+                let row = line_up_keys(&mut editing_text(InspectorTab::Box, false, false), &theme);
+                assert_eq!(row.len(), 6, "{language:?}");
+                // Inside the column, none over the next, and all as wide as the design has them.
+                assert!(row.last().is_some_and(|last| last.max.x <= PANEL_WIDTH + 0.1), "{language:?}: {row:?}");
+                for pair in row.windows(2) {
+                    assert!(pair[1].min.x >= pair[0].max.x + 1.0 - 0.01, "{language:?}: {pair:?}");
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn a_picture_boxs_gradient_set_to_none_moves_no_row() {
+        let theme = Theme::builtin();
+        let saved = sp_model::Gradient { kind: sp_model::GradientKind::Linear, ..Default::default() };
+        for language in LANGUAGES {
+            crate::i18n::with_language(language, || {
+                let mut state = editing_picture("cross.png", Some(Some(saved)));
+                state.inspector.tab = InspectorTab::Box;
+                let with = words_placed(&mut state, &theme);
+                // Gradient set to None, as its menu does, with the box still picked.
+                if let Some(object) = state.editing.as_mut().and_then(|draft| draft.selected_object_mut()) {
+                    object.gradient = None;
+                }
+                let without = words_placed(&mut state, &theme);
+                let gradient = t("inspector.row.gradient", "Gradient").to_uppercase();
+                assert!(without.iter().any(|(words, ..)| *words == gradient), "{language:?}: its row stays");
+                // Every caption is where it was (the menu itself now says another kind).
+                let captions = |all: &[(String, i32, i32)]| -> Vec<(String, i32, i32)> {
+                    all.iter().filter(|(words, ..)| *words == words.to_uppercase()).cloned().collect()
+                };
+                assert_eq!(captions(&with), captions(&without), "{language:?}");
+                // Picked again later, a box with no gradient has no rows for one.
+                let mut fresh = editing_picture("cross.png", Some(None));
+                fresh.inspector.tab = InspectorTab::Box;
+                let words = words_placed(&mut fresh, &theme);
+                assert!(!words.iter().any(|(words, ..)| *words == gradient), "{language:?}: {words:?}");
+            });
+        }
     }
 
     #[test]

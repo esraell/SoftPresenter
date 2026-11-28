@@ -277,10 +277,9 @@
   "inspector.duplicate.hint": "Сделать копию рядом",
   "inspector.row.holds": "Содержит",
   "inspector.row.go_next": "Переход дальше",
-  "inspector.arrange.spread.why": "Выберите три объекта или больше, чтобы распределить их",
   "inspector.rename.several": "Выберите один объект, чтобы переименовать его",
   "inspector.tab.video": "Видео",
   "inspector.kind.video": "видео",
   "inspector.row.file": "Файл",
-  "inspector.video.plays": "Играет с начала, пока слайд на экране."
+  "inspector.video.plays": "Воспроизводится с начала, пока слайд на экране."
 }

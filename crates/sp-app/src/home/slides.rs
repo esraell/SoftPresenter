@@ -1734,9 +1734,10 @@ fn draw_slides(
 }
 
 /// What a slide's strip names it: its group, and its label after a dot when it has one (the
-/// label alone in a group with no name).
+/// label alone in a group with no name). One of the app's own labels, which a song keeps in
+/// English, is said in the language set, as the Label menus say it.
 pub(super) fn strip_name(group: &sp_model::Group, slide: &Slide) -> String {
-    match slide.label.as_deref().filter(|label| !label.is_empty()) {
+    match slide.label.as_deref().filter(|label| !label.is_empty()).map(super::slide_label_words) {
         Some(label) if group.name.is_empty() => label.to_owned(),
         Some(label) => format!("{} \u{b7} {label}", group.name),
         None => group.name.clone(),
@@ -3240,6 +3241,28 @@ mod tests {
     use sp_model::parse_song_text;
 
     use super::*;
+
+    #[test]
+    fn a_slides_strip_says_the_apps_own_labels_in_the_language_set() {
+        let song = parse_song_text("S", "[Verse 1]\nWe lift our voices\n");
+        let (group, slide) = song.slide(0).expect("a slide");
+        let group = group.clone();
+        assert_eq!(group.name, "Verse 1");
+        let labelled = |label: &str| Slide { label: Some(label.to_owned()), ..slide.clone() };
+        for language in [crate::i18n::Language::Russian, crate::i18n::Language::Spanish] {
+            crate::i18n::with_language(language, || {
+                // One of the app's four labels, kept in English in the song's file.
+                let said = t("slides.label.blank", "Blank Slide");
+                assert_ne!(said, "Blank Slide", "{language:?} has its own words for it");
+                assert_eq!(strip_name(&group, &labelled("Blank Slide")), format!("Verse 1 \u{b7} {said}"));
+                // A label of the person's own is said as typed.
+                assert_eq!(strip_name(&group, &labelled("Bridge twice")), "Verse 1 \u{b7} Bridge twice");
+            });
+        }
+        crate::i18n::with_language(crate::i18n::Language::English, || {
+            assert_eq!(strip_name(&group, &labelled("Blank Slide")), "Verse 1 \u{b7} Blank Slide");
+        });
+    }
 
     /// One frame of the window with these events. Returns what it asked for.
     fn run(

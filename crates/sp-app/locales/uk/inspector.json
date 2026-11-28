@@ -277,10 +277,9 @@
   "inspector.duplicate.hint": "Зробити копію поруч",
   "inspector.row.holds": "Містить",
   "inspector.row.go_next": "Перейти далі",
-  "inspector.arrange.spread.why": "Виберіть три обʼєкти або більше, щоб розподілити їх",
   "inspector.rename.several": "Виберіть один обʼєкт, щоб перейменувати його",
   "inspector.tab.video": "Відео",
   "inspector.kind.video": "відео",
   "inspector.row.file": "Файл",
-  "inspector.video.plays": "Грає з початку, поки слайд на екрані."
+  "inspector.video.plays": "Відтворюється з початку, поки слайд на екрані."
 }
