@@ -1087,8 +1087,8 @@ const ROOM: f32 = 12.0;
 /// Every state the row can be in for this build, to size it by: a build from the public source
 /// checks, finds and fails; one whose updater fetches also downloads, has one ready and fails
 /// to fetch. With the version in hand, or this one's, in their sentences.
-fn reachable(now: &Status, build: Build) -> Vec<Status> {
-    let version = now
+fn reachable(now: &Status, build: Build, own: &str) -> Vec<Status> {
+    let in_hand = now
         .fetch
         .as_ref()
         .map(|fetch| match fetch {
@@ -1097,8 +1097,13 @@ fn reachable(now: &Status, build: Build) -> Vec<Status> {
             | Fetch::Failed { version, .. }
             | Fetch::Cancelled { version } => version.clone(),
         })
-        .or_else(|| now.last.as_ref().and_then(|(found, _)| found.newer().map(str::to_owned)))
-        .unwrap_or_else(|| VERSION.to_owned());
+        .or_else(|| now.last.as_ref().and_then(|(found, _)| found.newer().map(str::to_owned)));
+    // Sized for this build's own version in every state, and for the one in hand as well when
+    // there is one: with only the one in hand, a row whose sentences wrap for this version's
+    // length would change height the moment a shorter-named version turned up (a development
+    // build, "0.9.0-dev.30", finding "0.9.1").
+    let mut versions = vec![own.to_owned()];
+    versions.extend(in_hand.filter(|version| version != own));
     let found = |found: Found| Status { last: Some((found, 0)), ..Status::default() };
     let mut all = vec![
         Status::default(),
@@ -1107,17 +1112,19 @@ fn reachable(now: &Status, build: Build) -> Vec<Status> {
         found(Found::Unreached(Trouble::Blocked)),
         found(Found::Unreached(Trouble::Timeout)),
     ];
-    if build.fetches {
-        let fetch = |fetch: Fetch| Status { fetch: Some(fetch), ..Status::default() };
-        all.push(fetch(Fetch::Downloading { version: version.clone(), done: 999_000_000, total: 999_000_000 }));
-        all.push(fetch(Fetch::Ready { version: version.clone() }));
-        all.push(fetch(Fetch::Cancelled { version: version.clone() }));
-        all.push(found(Found::DevFetching { version: version.clone() }));
-        for why in [Trouble::NoNetwork, Trouble::Blocked, Trouble::NotSigned, Trouble::Timeout] {
-            all.push(fetch(Fetch::Failed { version: version.clone(), why, retries: true }));
+    for version in versions {
+        if build.fetches {
+            let fetch = |fetch: Fetch| Status { fetch: Some(fetch), ..Status::default() };
+            all.push(fetch(Fetch::Downloading { version: version.clone(), done: 999_000_000, total: 999_000_000 }));
+            all.push(fetch(Fetch::Ready { version: version.clone() }));
+            all.push(fetch(Fetch::Cancelled { version: version.clone() }));
+            all.push(found(Found::DevFetching { version: version.clone() }));
+            for why in [Trouble::NoNetwork, Trouble::Blocked, Trouble::NotSigned, Trouble::Timeout] {
+                all.push(fetch(Fetch::Failed { version: version.clone(), why, retries: true }));
+            }
+        } else {
+            all.push(found(Found::Newer { version, page: String::new() }));
         }
-    } else {
-        all.push(found(Found::Newer { version, page: String::new() }));
     }
     all
 }
@@ -1135,13 +1142,24 @@ pub fn row(ui: &mut egui::Ui, state: &mut crate::home::HomeState) {
 
 /// The row for where the checks stand (`now`) in a build like `build`; where it was drawn.
 fn draw_row(ui: &mut egui::Ui, state: &mut crate::home::HomeState, now: &Status, build: Build) -> egui::Rect {
+    draw_row_of(ui, state, now, build, VERSION)
+}
+
+/// As [`draw_row`], in a build whose own version is `own` (the row is sized for it).
+fn draw_row_of(
+    ui: &mut egui::Ui,
+    state: &mut crate::home::HomeState,
+    now: &Status,
+    build: Build,
+    own: &str,
+) -> egui::Rect {
     use crate::home::settings::parts;
     use crate::studio::{BUTTON, Flat, LINE, TEXT, TEXT_DIM, TEXT_FAINT, flat_button, semibold, widest};
     use egui::{Align2, FontId, Rect, Sense, Stroke, pos2, vec2};
     let form = state.clock.known().clone();
     let shown = view(now, &form, build);
     let all: Vec<View> =
-        reachable(now, build).iter().map(|status| view(status, &form, Build { waits: true, ..build })).collect();
+        reachable(now, build, own).iter().map(|status| view(status, &form, Build { waits: true, ..build })).collect();
     let key_font = FontId::proportional(12.5);
     let mut wordings: Vec<&str> = all.iter().filter_map(|view| view.key.as_ref().map(|key| key.words)).collect();
     wordings.extend(shown.key.as_ref().map(|key| key.words));
@@ -1899,6 +1917,40 @@ mod tests {
                     }
                 }
             });
+        }
+    }
+
+    #[test]
+    fn the_row_keeps_its_height_when_a_version_with_a_shorter_name_turns_up() {
+        use crate::studio::tests::drawn;
+        // A development build's own version is long ("0.9.0-dev.30"), and sentences that name a
+        // version wrap sooner for it than for a short one. The row is sized for its own version
+        // in every state, so it is as tall before a check as while "0.9.1" comes down. (A version
+        // found whose name is longer than this build's own can still make the row taller when it
+        // turns up: its name isn't known before.)
+        for own in ["0.9.0-dev.30", "0.9.0-development.300000", "0.9.0"] {
+            for width in [700.0, 560.0, 440.0] {
+                for build in [PUBLIC, FETCHES] {
+                    let heights: Vec<(f32, Status)> = states()
+                        .into_iter()
+                        .filter(|(_, of, _)| of.fetches == build.fetches)
+                        .map(|(status, of, _)| {
+                            let ctx = crate::studio::tests::styled();
+                            let mut state = crate::home::HomeState::default();
+                            let mut row = None;
+                            drawn(&ctx, vec![], |ui| {
+                                ui.set_width(width);
+                                row = Some(draw_row_of(ui, &mut state, &status, of, own));
+                            })
+                            .drop_without_applying_deltas();
+                            (row.expect("drawn").height(), status)
+                        })
+                        .collect();
+                    for (height, status) in &heights {
+                        assert_eq!(*height, heights[0].0, "as {own} at {width}: the row changes height in {status:?}");
+                    }
+                }
+            }
         }
     }
 
