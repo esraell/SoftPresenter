@@ -1432,8 +1432,10 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   next verse; with one slide for the whole passage (Options) the verse alone is the passage, so
   the slide shown is that verse and never its chapter on one slide. Hovering over a verse says
   so ("Click to pick. Double-click to put it on screen."; in the lists, also "Shift-click another
-  for a passage."). Two quick clicks on two different keys (a chapter, then a verse; a verse and
-  the one beside it) are two clicks, never a double-click. The
+  for a passage."). A double-click counts only when both its clicks are on the same verse: two
+  quick clicks on two different keys (a chapter, then a verse; a verse and the one beside it; a
+  key that moved under the pointer as the column scrolled) are two clicks, and put nothing on
+  screen. The
   passage showing is lit, however it was looked up. Chapters and verses are numbered as the page
   is read (see above), and what a click opens is kept named in that language.
 - Four Bibles ship with the app (King James, World English, Berean Standard, Russian Synodal)

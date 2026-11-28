@@ -39,7 +39,7 @@ Settings and playlists that couldn't be saved are tried again.
 - **One place for a box's colour.** The colour behind a text box is now set on the Text tab's Behind row only, and no longer on the Box tab as well. A picture, video, web page, NDI source, AirPlay or screen box has Behind on its own tab, and a shape keeps Fill on its Shape tab. Slides keep the colours they have.
 - **Updates row.** In Settings › About, Updates now says where things stand in a sentence with one key beside it: Check Now, an amber Open the Download Page for a newer version, or Try Again. The row keeps its size whatever it says, so nothing on the page moves.
 - **Blocked networks say so.** On a network that checks secure connections, such as some schools, offices and hotels, Check for Updates now says the network blocked it and to try another network. Before, it said there was no connection.
-- **Double-click a verse.** In the Bible view's keypad and lists, a double-click on a verse now puts that verse on screen, as picking it and pressing Enter does, and Space goes on to the next verse. One click still only picks a verse, and Shift-click still makes a passage. Before, a double-click opened the verse's whole chapter with the verse picked, and nothing went on screen until Enter.
+- **Double-click a verse.** In the Bible view's keypad and lists, a double-click on a verse now puts that verse on screen, as picking it and pressing Enter does; with one verse a slide, Space then goes on to the next verse. One click still only picks a verse, and Shift-click still makes a passage. Before, a double-click opened the verse's whole chapter with the verse picked, and nothing went on screen until Enter.
 
 ### Fixed
 

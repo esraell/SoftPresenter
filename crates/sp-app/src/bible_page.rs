@@ -46,8 +46,12 @@ pub enum Choice {
 /// with a slide a verse). A verse double-clicked is its whole chapter, with a slide a verse, so
 /// Space goes on to the next verse; with one slide for the whole passage (Options) it is that
 /// verse alone, as one click makes it, so the slide shown is the verse and never its chapter on
-/// one slide. Nothing goes on screen here: the caller picks the slide, and asks the app for
-/// Enter (`HomeState::enter_after`) when it is to go on.
+/// one slide. A double-click counts only as the second click on the same verse (the one a
+/// Shift-click would run from): egui counts two quick clicks at one place, and the keys may have
+/// moved under the pointer between them (the column still scrolling), so a double-click whose
+/// first click picked another verse, or none, only picks this one. Nothing goes on screen here:
+/// the caller picks the slide, and asks the app for Enter (`HomeState::enter_after`) when it is
+/// to go on.
 pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Option<(usize, bool)> {
     let lead = page.lead().and_then(|lead| page.shelf.get(lead).ok())?;
     let book = match choice {
@@ -55,7 +59,7 @@ pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Opti
         _ => page.list_book,
     };
     let bible = page.page_bible_for(book).unwrap_or_else(|| lead.clone());
-    let show_it = matches!(choice, Choice::Verse { double: true, .. });
+    let mut show_it = false;
     let mut double_clicked = None;
     let reference = match choice {
         Choice::Book(book) => {
@@ -72,6 +76,8 @@ pub fn choose(page: &mut BiblePage, choice: Choice, live: Option<usize>) -> Opti
         Choice::Verse { verse, shift, double } => {
             let (book, chapter) = (page.list_book, page.list_chapter);
             let place = |verse| VerseRef { book, chapter, verse };
+            let double = double && page.list_from == Some(verse);
+            show_it = double;
             if double && page.options.break_on_new_verse {
                 double_clicked = Some(sp_bible::convert(place(verse), bible.info.numbering, lead.info.numbering));
                 crate::bible::in_its_chapter(&bible, place(verse)).0
@@ -1319,6 +1325,35 @@ pub fn found_list(ui: &mut egui::Ui, show: &Show, state: &mut HomeState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_double_click_puts_a_verse_on_only_when_its_first_click_picked_that_verse() {
+        let mut page = BiblePage { slots: Some([2, 3]), ..BiblePage::default() };
+        page.list_book = sp_bible::BOOKS.iter().position(|book| book.code == "JOH").unwrap();
+        page.list_chapter = 3;
+        let double = |verse| Choice::Verse { verse, shift: false, double: true };
+        // The first click on verse 5, the second on verse 17 (the keys moved under the pointer
+        // between them): verse 17 is picked alone, as one click picks it, and nothing goes on.
+        page.list_from = Some(5);
+        assert_eq!(choose(&mut page, double(17), None), Some((16, false)));
+        assert_eq!(page.shown, "От Иоанна 3:17");
+        assert_eq!(page.list_from, Some(17), "it is where a Shift-click runs from now");
+        // Both clicks on verse 5: its chapter, and verse 5 to go on screen.
+        page.list_from = Some(5);
+        assert_eq!(choose(&mut page, double(5), None), Some((4, true)));
+        assert_eq!(page.shown, "От Иоанна 3:1-36");
+        // No verse clicked first (both clicks seen in one slow frame, or a Shift-click before
+        // it): picked, and nothing goes on.
+        page.list_from = None;
+        assert_eq!(choose(&mut page, double(5), None), Some((4, false)));
+        assert_eq!(page.shown, "От Иоанна 3:5");
+        // One slide for the whole passage: the same rule, the verse alone either way.
+        page.options.break_on_new_verse = false;
+        page.list_from = Some(5);
+        assert_eq!(choose(&mut page, double(9), None), Some((0, false)));
+        assert_eq!(choose(&mut page, double(9), None), Some((0, true)));
+        assert_eq!(page.shown, "От Иоанна 3:9");
+    }
 
     #[test]
     fn a_bible_slides_name_gives_its_verses_with_or_without_the_bibles_name() {

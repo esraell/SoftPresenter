@@ -10713,6 +10713,11 @@ mod tests {
             if let Some(computer) = computer {
                 state.bible.system_language = crate::system_language::SystemLanguage::answered(computer);
             }
+            // A double-click on a chapter loads it, as one click does: nothing goes on screen.
+            let commands = double_click_list_row(&ctx, &mut show, &mut state, ("chapter", 3u16), 0.3);
+            assert!(!goes_on_screen(&commands), "{commands:?}");
+            assert_eq!(state.bible.shown, "От Иоанна 3:1-36");
+            assert_eq!(show.live(), Some(SlideRef { presentation: 0, slide: 0 }), "the song stays on screen");
             let commands = double_click_list_row(&ctx, &mut show, &mut state, ("verse", 5u16), 1.0);
             // Its chapter is the passage, a slide a verse, and the verse is on screen: put on by
             // Enter, as picking it and pressing Enter does, not by the frame itself.
