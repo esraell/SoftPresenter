@@ -12004,7 +12004,12 @@ impl App {
             self.unsaved.push(at.presentation);
         }
         self.save_unsaved();
-        if changes.slides {
+        // Not for a group changed in the editor with Live Edit off: see the function.
+        let (editing, live_edit) = self
+            .running
+            .as_ref()
+            .map_or((false, false), |running| (running.home_state.editing.is_some(), running.home_state.live_edit));
+        if changes.slides && home::slide_request_redraws_screens(&request, editing, live_edit) {
             self.refresh_output();
         }
         if let Some(running) = self.running.as_mut() {

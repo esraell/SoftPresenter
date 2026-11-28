@@ -2502,7 +2502,7 @@ impl HomeState {
     /// Escape closes only the thing on top.
     pub fn escape_taken_above_find(&self, ctx: &egui::Context) -> bool {
         egui::Popup::is_any_open(ctx)
-            || self.inspector.panel.is_some()
+            || (self.inspector.panel.is_some() && self.editing.is_some())
             || self.key_sheet
             || crate::end_look::over_the_operators_window(self)
             || self.alert_open()
@@ -2687,6 +2687,12 @@ pub fn home_ui(
     preview: Preview,
     canvas: Option<TextureId>,
 ) -> Vec<Command> {
+    // A panel of the inspector belongs to the Edit view: however the editor was left (a tab of
+    // the toolbar, Go to the Slide on Screen, a command from the phone or `sp`, an import
+    // ending), no panel is left open behind it to take the Service view's Escape.
+    if state.editing.is_none() {
+        state.inspector.panel = None;
+    }
     let commands = home_view(ui, show, state, theme, thumb, preview, canvas);
     // A key's ask that no field took (it went before it drew) is let go of, never carried out
     // later.
@@ -5175,6 +5181,15 @@ pub enum SlideRequest {
     /// Put these slides, changed, in their places (one step for Undo): what a slide's menu
     /// changes for the slides picked with it (media, transition, label, hot key…).
     Edit(Vec<(usize, Slide)>),
+}
+
+/// Whether the screens are drawn again after a change to a song's slides asked for from a
+/// slide's menu or the editor, when the change touched the song on screen. A change of group
+/// made in the Edit view with Live Edit off is the one that isn't: a group changes nothing on
+/// the screens by itself, and drawing them again would put up the words changed in the editor
+/// that Live Edit off is keeping back.
+pub fn slide_request_redraws_screens(request: &SlideRequest, editing: bool, live_edit: bool) -> bool {
+    !(matches!(request, SlideRequest::Group(..)) && editing && !live_edit)
 }
 
 /// Where the slide at `place` of a song is once `deleted` (places in the song, in any order)
@@ -17837,6 +17852,49 @@ mod tests {
         assert_eq!(drawn.iter().any(|words| words == "F5"), crate::keys::f_keys());
         assert!(!drawn.iter().any(|words| words.contains(crate::keys::BUTTON_ONLY)), "the list of keys says that");
         assert!(drawn.iter().any(|words| words.contains("what Undo brings back goes at once")));
+    }
+
+    #[test]
+    fn a_panel_left_open_in_the_editor_does_not_take_escape_in_the_service_view() {
+        use crate::studio::tests::key;
+        let ctx = egui::Context::default();
+        // The editor with Lines open over the Text tab's rows.
+        let (show, mut state) = song_open(&[("Verse 1", 1)], 0);
+        if let Some(draft) = state.editing.as_mut() {
+            let first = draft.slide.objects.first().map(|object| object.id);
+            draft.select_only(first);
+            state.inspector.panel_for = (crate::inspector::InspectorTab::Own, draft.selection());
+        }
+        state.inspector.panel = Some(crate::inspector::Panel::Lines);
+        frame_events(&ctx, &show, &mut state, vec![], 0.0);
+        assert_eq!(state.inspector.panel, Some(crate::inspector::Panel::Lines), "open while the editor is");
+        assert!(state.escape_taken_above(&ctx), "there, Escape is the panel's");
+        // The editor is left without the inspector being drawn again (as Show in the toolbar,
+        // Go to the Slide on Screen, a command or an import ending leave it), and the playlist
+        // chooser is opened: Escape puts the chooser away.
+        state.editing = None;
+        assert!(!state.escape_taken_above(&ctx), "a panel with no editor takes no Escape");
+        state.playlist_open = true;
+        state.chooser_open = true;
+        frame_events(&ctx, &show, &mut state, vec![], 0.1);
+        assert_eq!(state.inspector.panel, None, "the panel went with the editor");
+        frame_events(&ctx, &show, &mut state, vec![key(Key::Escape)], 0.2);
+        assert!(!state.chooser_open, "Escape puts the chooser away");
+    }
+
+    #[test]
+    fn a_group_changed_in_the_editor_with_live_edit_off_leaves_the_screens_alone() {
+        let group = SlideRequest::Group(vec![1], "Bridge".to_owned());
+        // In the editor with Live Edit off: the screens keep what they show, so the words
+        // changed in the editor and not yet shown stay back.
+        assert!(!slide_request_redraws_screens(&group, true, false));
+        // With Live Edit on, and from a slide's menu in the Service view, as before.
+        assert!(slide_request_redraws_screens(&group, true, true));
+        assert!(slide_request_redraws_screens(&group, false, false));
+        // Every other change to a song's slides draws them again, as before.
+        for other in [SlideRequest::DeleteMany(vec![1]), SlideRequest::Edit(Vec::new())] {
+            assert!(slide_request_redraws_screens(&other, true, false), "{other:?}");
+        }
     }
 
     #[test]
