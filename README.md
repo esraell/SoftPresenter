@@ -72,7 +72,9 @@ under Settings › About › What's new. In short:
 - **Songs and slides.** Groups (Verse, Chorus, Bridge), arrangements, one-key jumps, playlists
   with headers, and a slide editor with text, shapes, pictures and video. Words can be styled
   inside one box (a bold reference, an italic line, one word in a colour). SoftPresenter Sans,
-  with Latin, Cyrillic and Greek, is built in, so slides look the same on every computer.
+  with Latin, Cyrillic and Greek, is built in, so slides look the same on every computer. A
+  song's last slide can end with a mark (`*  *  *`), under each language when a translation
+  shows, and part names follow the app's language.
 - **Presentations.** A `.pptx` comes in as slides you can edit, read straight from the file, or
   as pictures of its slides drawn by an app on the Mac that can open it; PDFs and folders of
   pictures come in as slides.
@@ -84,11 +86,15 @@ under Settings › About › What's new. In short:
   an NDI source or an AirPlay screen goes on a slide as a box that fills it, behind the words.
 - **Screens.** Any number of audience screens on displays, in windows, over NDI or out of a
   DeckLink card, each with its own look and theme; stage screens with layouts you design.
+  VoxLive captions can be left off any screen, such as the livestream.
 - **Remote Control.** Run the show from a computer or tablet on the church's network: switched
   on in Settings, the app serves a page over HTTPS behind a password
   ([docs/remote-api.md](docs/remote-api.md)).
 - **Quick Help.** The ? at the top right switches it on: then pointing at anything says what it
   does. Off, hover hints stay out of the way.
+- **Languages.** SoftPresenter itself speaks English, Spanish, Russian, Ukrainian and German.
+- **Ask for what's missing.** Settings › Integrations › Request an Integration sends what you
+  would like connected, with no account and nothing about you.
 
 ## A service from start to finish
 
@@ -258,6 +264,11 @@ status` instead of `sp status`.
 
 The letter for each group is shown on its first slide. On Windows and Linux, Ctrl takes the
 place of Cmd, and Alt of Option.
+
+Settings › Keys can change what each of these keys does, or switch to a layout like
+SoftProjector's. Its Show a slide with row chooses whether one click or a double-click puts a
+slide on screen: Like SoftProjector starts with a double-click, and one click still moves within
+the item already on screen.
 
 ### Song text files
 
