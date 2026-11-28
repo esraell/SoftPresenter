@@ -403,6 +403,17 @@ impl Copy<'_> {
         }
     }
 
+    /// Waits until keeping the display awake has given its first answer, with a screen on. It is
+    /// asked as the screens come on and looked at two seconds later (`keep_awake.rs`), and each
+    /// step changes `status` by itself, so a test that waits for one change with `status --wait
+    /// --since` takes its token after this: on a slow computer the look came while it waited.
+    fn keep_awake_settled(&self) -> Value {
+        self.wait_for("keeping the display awake's first answer", Duration::from_secs(15), |status| {
+            let how = status["display_kept_awake"]["how"].as_str().unwrap_or_default();
+            !how.is_empty() && how != "no screen is on" && !how.ends_with("asked a moment ago")
+        })
+    }
+
     /// Quits the copy as a person would (`menu Quit`), and waits for it to go.
     fn quit(self) -> Quitted {
         self.quit_within(QUIT_WITHIN)
@@ -3147,6 +3158,9 @@ fn remote_control_sends_a_change_at_once_and_one_that_happens_by_itself_with_it(
         }
         panic!("no change said a message was {}", if want { "on" } else { "off" });
     };
+    // Keeping the display awake changes `status` by itself soon after the start: settled first,
+    // so the token below waits for the message alone.
+    copy.keep_awake_settled();
     // A command, which comes to the app as an event: its change is sent at once, not on the
     // backstop's time (a second).
     copy.ok(&["message", "new", "Parking", "Car with lights on"]);
