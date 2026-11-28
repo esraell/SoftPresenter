@@ -711,12 +711,15 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   by the arrows. With something on screen, Space, → and ← go on with that (a song can be run to
   its end with the reading picked), and Enter takes the pick. A click on a slide takes over from the pick, and the pick goes once a slide of its
   passage or song goes on screen, or another song, passage or view is opened. In the Bible
-  view, after a verse was on screen and the slides were cleared (the verse outlined grey, nothing
-  picked), → and ← pick the verse after or before it, and ↓ and ↑ the verse below or above,
-  putting nothing on; Enter then puts the verse picked on screen. Space, Page Down and Page Up
-  (what a clicker sends), and any other key set to Next or Previous, still go on from the verse
-  cleared and put the next or previous one on screen, as they do in the Service view after a
-  song's slide is cleared. In the Bible view, Enter with nothing picked does nothing. However slowly the window draws (an Intel Mac's
+  view, with nothing on screen and nothing picked, the arrows never put anything on: after a
+  verse was on screen and the slides were cleared (the verse outlined grey), → and ← pick the
+  verse after or before it, and ↓ and ↑ the verse below or above; with no verse of the passage
+  cleared (a song's slide cleared, or the pick gone with another view), they pick the passage's
+  first verse. → and ← go by what they are set to in Settings › Keys: set to Previous, → picks
+  back. Enter then puts the verse picked on screen. Space, Page Down and Page Up (what a clicker
+  sends), and any other key set to Next or Previous, still go on from what was on screen last
+  and put the next or previous slide on, as they do in the Service view after a slide is
+  cleared. In the Bible view, Enter with nothing picked does nothing. However slowly the window draws (an Intel Mac's
   takes some 60 ms a frame while a song's slide pictures are made), keys act in the order they
   were pressed, each on what the keys before it left: Return in the find box and a quick Enter
   after it put the slide picked on screen, ↓ and a quick Enter in the playlist start the item ↓

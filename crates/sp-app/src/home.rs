@@ -2318,17 +2318,41 @@ impl HomeState {
         (in_view && there.is_some_and(|(_, slide)| slide.enabled) && !moved_on && show.live() != Some(at)).then_some(at)
     }
 
+    /// Whether the arrows only move the pick: the Bible view open (no editor) and nothing on
+    /// screen. Then → and ← (and ↓ and ↑) never put anything on screen, whatever was on last (the
+    /// owner's rule, 2026-11-28); Enter puts the verse they pick on. See `bible_arrow_pick`,
+    /// `bible_pick_keys` and `pick_key_press` in `main.rs`.
+    pub fn bible_arrows_pick(&self, show: &Show) -> bool {
+        self.bible_view_now() && self.edit_kind().is_none() && show.live().is_none()
+    }
+
     /// The verse of the Bible view's passage that was on screen until the slides were cleared,
-    /// outlined grey, while nothing is on screen and no verse is picked: where the arrows move a
-    /// pick from, putting nothing on (the owner's rule, 2026-11-28; see `bible_pick_keys` and
-    /// `pick_key_press` in `main.rs`).
+    /// outlined grey, while the arrows only move the pick (`bible_arrows_pick`) and nothing is
+    /// picked: where they move a pick from.
     pub fn cleared_verse(&self, show: &Show) -> Option<SlideRef> {
-        if !self.bible_view_now() || self.edit_kind().is_some() || show.live().is_some() || self.pick(show).is_some() {
+        if !self.bible_arrows_pick(show) || self.pick(show).is_some() {
             return None;
         }
         let slot = self.bible.slots.map(|slots| slots[self.bible.showing])?;
         let count = show.presentations().get(slot).map_or(0, |passage| passage.slide_count());
         show.cursor().filter(|at| at.presentation == slot && at.slide < count)
+    }
+
+    /// Where → or ← picks while the arrows only move the pick (`bible_arrows_pick`) and nothing
+    /// is picked, `forward` for one doing Next: the verse after or before the one cleared
+    /// (`cleared_verse`), else the passage's first verse (among its chapter's slides). `None` at
+    /// either end, or with no passage shown.
+    pub fn bible_arrow_pick(&self, show: &Show, forward: bool) -> Option<SlideRef> {
+        if !self.bible_arrows_pick(show) || self.pick(show).is_some() || self.bible.shown.is_empty() {
+            return None;
+        }
+        let slot = self.bible.slots.map(|slots| slots[self.bible.showing])?;
+        let passage = show.presentations().get(slot).filter(|passage| passage.slide_count() > 0)?;
+        let slide = match self.cleared_verse(show) {
+            Some(at) => crate::running::pick_beside(&passage.order(), at.slide, forward)?,
+            None => Some(self.bible.passage_slides().start).filter(|first| *first < passage.slide_count())?,
+        };
+        Some(SlideRef { presentation: slot, slide })
     }
 
     /// What the slide picked is, for the refusal's cue that says Enter puts it on screen.
