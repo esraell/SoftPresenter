@@ -165,6 +165,57 @@ fn bilingual_1920x1080() {
     assert_matches_golden("bilingual_1920x1080", &px, 1920, 1080);
 }
 
+/// How far down a slide the end of a song's mark may reach: 3% above its bottom.
+const MARK_FLOOR: f32 = 1080.0 * 0.97;
+
+/// A song's last slide of eight lines that fill a words' box over most of the slide, with the
+/// end of a song marked: the words come out a little smaller, and the three stars sit under
+/// them, below the box and above the lowest 3% of the slide.
+#[test]
+fn end_mark_on_a_full_last_slide() {
+    let mut theme = Theme::builtin();
+    for template in &mut theme.templates {
+        for look in &mut template.boxes {
+            if look.role == Role::primary() {
+                look.rect = sp_model::SlideRect { x: 80.0, y: 60.0, w: 1760.0, h: 940.0 };
+            }
+        }
+    }
+    let words = "Now the evening light is falling\nOver field and over hill\nEvery road is turning homeward\n\
+Every restless wind is still\nHere we stand and sing together\nOne more song before we part\n\
+Grace has brought us safe thus far\nGrace will keep us, hand and heart";
+    let full = slide(words, None);
+    let marked = Slide { end_mark: Some(MARK_FLOOR), ..full.clone() };
+    let (plain, px) = (render_with(Some(&full), &theme, 1920, 1080), render_with(Some(&marked), &theme, 1920, 1080));
+    // Nothing is lit in the lowest 3% of the slide, and with the mark there is something lit
+    // under where the unmarked words end, which there is not without it.
+    let lit_from = |pixels: &[u8], top: u32| {
+        (top..1080)
+            .flat_map(|y| (0..1920).map(move |x| (x, y)))
+            .filter(|(x, y)| pixel(pixels, 1920, *x, *y)[0] > 200)
+            .count()
+    };
+    assert_eq!(lit_from(&px, 1049), 0, "the mark stays above the lowest 3%");
+    let lowest_lit = |pixels: &[u8]| (0..1080).rev().find(|y| (0..1920).any(|x| pixel(pixels, 1920, x, *y)[0] > 200));
+    let (words_end, mark_ends) = (lowest_lit(&plain).expect("words"), lowest_lit(&px).expect("words and mark"));
+    assert!(mark_ends > words_end && mark_ends <= 1048, "the mark ends at {mark_ends}, the words alone at {words_end}");
+    assert_matches_golden("end_mark_on_a_full_last_slide", &px, 1920, 1080);
+}
+
+/// A last slide in two languages in the built-in theme, with the end of a song marked under
+/// the translation.
+#[test]
+fn end_mark_under_two_languages() {
+    let s = slide(
+        "Light rises over the quiet hills\nAnd the morning sings again",
+        Some("Свет встаёт над тихими холмами\nІ ранок знову співає"),
+    );
+    let marked = Slide { end_mark: Some(MARK_FLOOR), ..s.clone() };
+    let (plain, px) = (render(Some(&s), 1920, 1080), render(Some(&marked), 1920, 1080));
+    assert!(count_lit(&px) > count_lit(&plain), "the mark adds white to the slide");
+    assert_matches_golden("end_mark_under_two_languages", &px, 1920, 1080);
+}
+
 /// Russian and Ukrainian (with і, ї, є and ґ) in every style of the bundled typeface, one style
 /// to a line: regular, bold, italic, bold italic.
 #[test]
