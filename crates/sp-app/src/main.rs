@@ -18052,7 +18052,8 @@ mod tests {
     #[test]
     fn after_another_passage_is_looked_up_the_step_keys_show_it_not_a_verse_never_shown() {
         // Space and Page Down (a clicker's forward) put Romans 8:28 on, the verse asked for; before,
-        // the cleared John 3:16's place was kept, and Romans 8:17 (the slide after it) went on.
+        // the cleared John 3:16's place was kept, and Romans 8:17 (the slide after it) went on. Page
+        // Up (its back) does nothing: going back puts no new words on screen.
         for how in ["return", "lose pick", "pause"] {
             for key in [NamedKey::Space, NamedKey::PageDown] {
                 let mut keyboard = another_passage_looked_up_after_a_clear(how);
@@ -18066,6 +18067,15 @@ mod tests {
                     "{how} {key:?}: the verse looked up"
                 );
             }
+            // Page Up puts nothing on: with Romans 8:28 picked it moves the pick back, as ever;
+            // with nothing picked it does nothing at all.
+            let mut keyboard = another_passage_looked_up_after_a_clear(how);
+            let slot = bible_place(&keyboard).unwrap();
+            keyboard.press(Key::Named(NamedKey::PageUp));
+            keyboard.draw();
+            assert_eq!(keyboard.live(), None, "{how}: Page Up put nothing on");
+            let back = if how == "return" { Some((slot, 26)) } else { None };
+            assert_eq!(picked_at(&keyboard), back, "{how}");
         }
         // → picks Romans 8:28, the passage's first verse, and puts nothing on; so do ↓ and ↑.
         for how in ["lose pick", "pause"] {

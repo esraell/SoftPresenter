@@ -2386,9 +2386,10 @@ impl HomeState {
     /// page's own playlist): with a verse picked and nothing on screen, nothing, and it says to
     /// press Enter (`running::held_for_enter`); with nothing on screen, nothing picked and no verse
     /// of the passage shown cleared (a passage just looked up, or one whose pick went with another
-    /// view), the passage's first verse goes on, the one asked for, rather than whatever came after
-    /// the slide on screen last (the owner's rule, 2026-11-28); otherwise the show steps, on from
-    /// the slide on screen or the verse cleared.
+    /// view), Next puts the passage's first verse on, the one asked for, rather than whatever came
+    /// after the slide on screen last, and Previous does nothing: going back puts no new words on
+    /// screen (the owner's rules, 2026-11-28); otherwise the show steps, on from the slide on
+    /// screen or the verse cleared.
     pub fn bible_step(&self, show: &Show, forward: bool) -> crate::running::Do {
         let showing = show.live().is_some();
         if let Some(said) = crate::running::held_for_enter(self.picked_word(show), showing) {
@@ -2397,7 +2398,11 @@ impl HomeState {
         if self.cleared_verse(show).is_none()
             && let Some(first) = self.bible_arrow_pick(show, forward)
         {
-            return crate::running::Do::Show(Command::GoTo(first));
+            return if forward {
+                crate::running::Do::Show(Command::GoTo(first))
+            } else {
+                crate::running::Do::Stay(crate::running::End::Slide { last: false })
+            };
         }
         crate::running::Do::Show(if forward { Command::Next } else { Command::Previous })
     }
