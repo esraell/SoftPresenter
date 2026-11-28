@@ -202,18 +202,123 @@ Grace has brought us safe thus far\nGrace will keep us, hand and heart";
     assert_matches_golden("end_mark_on_a_full_last_slide", &px, 1920, 1080);
 }
 
-/// A last slide in two languages in the built-in theme, with the end of a song marked under
-/// the translation.
-#[test]
-fn end_mark_under_two_languages() {
-    let s = slide(
+/// The last slide in two languages the end mark's pictures show.
+fn two_languages() -> Slide {
+    slide(
         "Light rises over the quiet hills\nAnd the morning sings again",
+        Some("Свет встаёт над тихими холмами\nІ ранок знову співає"),
+    )
+}
+
+/// A theme's look for the end of a song's mark, under the last words only, or each language's.
+fn end_look(under: sp_model::EndUnder) -> sp_model::EndLook {
+    sp_model::EndLook { under, ..sp_model::EndLook::default() }
+}
+
+/// The built-in theme with its two languages' boxes where `main` and `translation` say, placed
+/// in their box as `valign` says.
+fn two_boxes(main: sp_model::SlideRect, translation: sp_model::SlideRect, valign: sp_model::VAlign) -> Theme {
+    let mut theme = Theme::builtin();
+    for template in &mut theme.templates {
+        for look in &mut template.boxes {
+            if look.role == Role::primary() {
+                look.rect = main;
+            } else if look.role == Role::translation() {
+                look.rect = translation;
+            } else {
+                continue;
+            }
+            look.valign = valign;
+        }
+    }
+    theme
+}
+
+/// Pixels of the built-in theme's translation colour, warm grey (#D2CEC6).
+fn stone(pixels: &[u8]) -> usize {
+    pixels.chunks(4).filter(|p| p[0].abs_diff(210) < 6 && p[1].abs_diff(206) < 6 && p[2].abs_diff(198) < 6).count()
+}
+
+/// A last slide in two languages in the built-in theme, whose look for the end of a song's
+/// mark says under the last words only: one mark, under the translation, in the look of the
+/// largest words. It is the picture of the mark as it was before there was a choice, drawn
+/// then (as `end_mark_under_two_languages`), unchanged.
+#[test]
+fn end_mark_under_the_last_words_only() {
+    let theme = Theme { end_look: end_look(sp_model::EndUnder::LastWords), ..Theme::builtin() };
+    let s = two_languages();
+    let marked = Slide { end_mark: Some(MARK_FLOOR), ..s.clone() };
+    let (plain, px) = (render_with(Some(&s), &theme, 1920, 1080), render_with(Some(&marked), &theme, 1920, 1080));
+    assert!(count_lit(&px) > count_lit(&plain), "the mark adds white to the slide");
+    assert_eq!(stone(&px), stone(&plain), "and nothing in the translation's colour");
+    assert_matches_golden("end_mark_under_the_last_words_only", &px, 1920, 1080);
+}
+
+/// The same slide in the built-in theme as it comes: a mark under each language's words, the
+/// main language's white one between the two, the translation's smaller, warm grey one under
+/// it.
+#[test]
+fn end_mark_under_each_language_stacked() {
+    let s = two_languages();
+    let marked = Slide { end_mark: Some(MARK_FLOOR), ..s.clone() };
+    let (plain, px) = (render(Some(&s), 1920, 1080), render(Some(&marked), 1920, 1080));
+    assert!(count_lit(&px) > count_lit(&plain), "the main language's mark adds white");
+    assert!(stone(&px) > stone(&plain) + 60, "the translation's adds its warm grey");
+    assert_matches_golden("end_mark_under_each_language_stacked", &px, 1920, 1080);
+}
+
+/// Four lines of the main language filling a box right over the translation's: they come out
+/// smaller (about a fifth) to make room for their mark between the two, and the translation
+/// stays as it is, with its own mark under it.
+#[test]
+fn end_mark_under_each_language_full_upper_box() {
+    let theme = two_boxes(
+        sp_model::SlideRect { x: 120.0, y: 170.0, w: 1680.0, h: 400.0 },
+        sp_model::SlideRect { x: 120.0, y: 575.0, w: 1680.0, h: 400.0 },
+        sp_model::VAlign::Top,
+    );
+    let s = slide(
+        "Light rises over the quiet hills\nAnd the morning sings again\nEvery field is bright with rain\nEvery road is new",
         Some("Свет встаёт над тихими холмами\nІ ранок знову співає"),
     );
     let marked = Slide { end_mark: Some(MARK_FLOOR), ..s.clone() };
-    let (plain, px) = (render(Some(&s), 1920, 1080), render(Some(&marked), 1920, 1080));
-    assert!(count_lit(&px) > count_lit(&plain), "the mark adds white to the slide");
-    assert_matches_golden("end_mark_under_two_languages", &px, 1920, 1080);
+    let (plain, px) = (render_with(Some(&s), &theme, 1920, 1080), render_with(Some(&marked), &theme, 1920, 1080));
+    let lit_below =
+        |pixels: &[u8], from: u32| (from..1080).any(|y| (0..1920).any(|x| pixel(pixels, 1920, x, y)[0] > 200));
+    assert!(!lit_below(&px, 1049), "the marks stay above the lowest 3%");
+    // The main language's mark touches neither its words nor the translation: dark rows above
+    // the translation's first, under the lowest white over it.
+    let white = |y: u32| (0..1920).any(|x| pixel(&px, 1920, x, y)[..3].iter().all(|c| *c > 240));
+    let warm = |y: u32| (0..1920).any(|x| stone(&pixel(&px, 1920, x, y)) == 1);
+    let translation_top = (0..1080).find(|y| warm(*y)).expect("the translation");
+    let mark_end = (0..translation_top).rev().find(|y| white(*y)).expect("the mark over it");
+    assert!(translation_top - mark_end > 4, "the mark ends at {mark_end}, the translation starts at {translation_top}");
+    assert!(!lit_below(&plain, 1049));
+    assert!(stone(&px) > stone(&plain) + 60, "the translation's mark");
+    assert_matches_golden("end_mark_under_each_language_full_upper_box", &px, 1920, 1080);
+}
+
+/// The main language at the left and the translation at the right, each with its mark under its
+/// own column.
+#[test]
+fn end_mark_under_each_language_side_by_side() {
+    let theme = two_boxes(
+        sp_model::SlideRect { x: 60.0, y: 140.0, w: 870.0, h: 760.0 },
+        sp_model::SlideRect { x: 990.0, y: 140.0, w: 870.0, h: 760.0 },
+        sp_model::VAlign::Middle,
+    );
+    let s = slide("Light rises over\nthe quiet hills", Some("Свет встаёт\nнад тихими холмами\nІ ранок знову\nспіває"));
+    let marked = Slide { end_mark: Some(MARK_FLOOR), ..s.clone() };
+    let (plain, px) = (render_with(Some(&s), &theme, 1920, 1080), render_with(Some(&marked), &theme, 1920, 1080));
+    let white_at_left = |pixels: &[u8]| {
+        (0..1080)
+            .flat_map(|y| (0..960).map(move |x| (x, y)))
+            .filter(|(x, y)| pixel(pixels, 1920, *x, *y)[0] > 240)
+            .count()
+    };
+    assert!(white_at_left(&px) > white_at_left(&plain), "the main language's mark, at the left");
+    assert!(stone(&px) > stone(&plain) + 60, "the translation's, at the right");
+    assert_matches_golden("end_mark_under_each_language_side_by_side", &px, 1920, 1080);
 }
 
 /// Russian and Ukrainian (with і, ї, є and ґ) in every style of the bundled typeface, one style

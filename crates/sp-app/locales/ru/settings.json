@@ -398,6 +398,12 @@
   "settings.endlook.place": "Место",
   "settings.endlook.place.under": "Под последней строкой",
   "settings.endlook.place.bottom": "Внизу экрана",
+  "settings.endlook.under": "Под",
+  "settings.endlook.under.each": "Каждым языком",
+  "settings.endlook.under.last": "Только нижними словами",
+  "settings.endlook.under.each.hint": "Когда на экране есть перевод, знак ставится под каждым языком, в цвет его слов.",
+  "settings.endlook.under.last.hint": "Когда на экране есть перевод, знак ставится только под словами, которые ниже всех на слайде.",
+  "settings.endlook.under.one": "Внизу экрана знак один",
   "settings.endlook.note": "На заполненном последнем слайде знак сдвигается вниз, насколько позволяет экран. Если места всё равно нет, слова делаются немного меньше ради него, или меньше становится сам знак.",
   "settings.endlook.note.off": "Знак выключен в разделе Настройки › Слайды. Его вид сохранится и вернётся, когда знак включат.",
   "settings.set_up.hint_five": "Пройти первую настройку ещё раз: языки, песни, Библии, экраны"

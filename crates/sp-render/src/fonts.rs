@@ -113,6 +113,10 @@ struct Fitted {
 pub(crate) struct WordsBox<'a> {
     /// The place of its object on the slide.
     pub at: usize,
+    /// Whether it holds the main language's words (and not the translation's): a mark goes
+    /// under each language's words, so two slides alike but for that may have their marks in
+    /// other places.
+    pub main: bool,
     pub text: &'a str,
     pub spans: &'a [sp_model::TextSpan],
     pub style: sp_model::BoxStyle,
@@ -123,6 +127,7 @@ pub(crate) struct WordsBox<'a> {
 /// A [`WordsBox`] kept.
 struct KeptBox {
     at: usize,
+    main: bool,
     text: String,
     spans: Vec<sp_model::TextSpan>,
     style: sp_model::BoxStyle,
@@ -133,6 +138,7 @@ struct KeptBox {
 impl KeptBox {
     fn is(&self, other: &WordsBox) -> bool {
         self.at == other.at
+            && self.main == other.main
             && self.rect == other.rect
             && self.paragraphs == other.paragraphs
             && self.text == other.text
@@ -141,15 +147,24 @@ impl KeptBox {
     }
 }
 
-/// How a slide's words make room for the end of a song's mark: for these boxes of words, a
-/// mark of this share of their size that may reach this far down, the box to take shorter and
-/// by how much (`None`: none). The same always comes to the same, on a screen of any size
-/// (words are laid out in the slide's own units), until the fonts change.
+/// How the end of a song's mark goes on a slide: for these boxes of words, a mark of this look
+/// that may reach this far down, its plan (`crate::scene::MarkPlan`: one mark or one under
+/// each language's words, the boxes taken shorter and by how much, and how far down each mark
+/// may reach). Everything the plan comes to follows from these: where one language's words are
+/// drawn, which the floor of the mark over them is worked out from, is found from their box, its
+/// look and place, and their own mark's look and floor. The same always comes to the same, on a
+/// screen of any size (words are laid out in the slide's own units), until the fonts change.
 struct MarkRoom {
     boxes: Vec<KeptBox>,
     floor: f32,
-    size: u16,
-    shorter: Option<(usize, f32)>,
+    /// The mark's look as far as where it goes depends on it: all of it but its colour.
+    look: sp_model::EndLook,
+    plan: crate::scene::MarkPlan,
+}
+
+/// A mark's look as far as where it goes depends on it: its colour moves nothing.
+fn placing(look: &sp_model::EndLook) -> sp_model::EndLook {
+    sp_model::EndLook { colour: None, ..*look }
 }
 
 /// How many slides' rooms for the mark are remembered: the last slides of the songs lately on
@@ -534,21 +549,27 @@ impl Fonts {
 }
 
 impl Fonts {
-    /// How these boxes of words were found to make room for the mark before
-    /// ([`MarkRoom`]): `None` when they never were.
-    pub(crate) fn mark_room(&mut self, boxes: &[WordsBox], floor: f32, size: u16) -> Option<Option<(usize, f32)>> {
+    /// How the marks were found to go with these boxes of words before ([`MarkRoom`]): `None`
+    /// when they never were.
+    pub(crate) fn mark_room(
+        &mut self,
+        boxes: &[WordsBox],
+        floor: f32,
+        look: &sp_model::EndLook,
+    ) -> Option<crate::scene::MarkPlan> {
         self.catch_up();
+        let look = placing(look);
         let at = self.mark_rooms.iter().rposition(|room| {
             room.floor == floor
-                && room.size == size
+                && room.look == look
                 && room.boxes.len() == boxes.len()
                 && room.boxes.iter().zip(boxes).all(|(kept, now)| kept.is(now))
         })?;
         // Used again: moved to the end, so the ones not used for longest are let go first.
         let found = self.mark_rooms.remove(at);
-        let shorter = found.shorter;
+        let plan = found.plan.clone();
         self.mark_rooms.push(found);
-        Some(shorter)
+        Some(plan)
     }
 
     /// How many slides' rooms for the mark are remembered now.
@@ -557,13 +578,13 @@ impl Fonts {
         self.mark_rooms.len()
     }
 
-    /// Remembers how these boxes of words make room for the mark.
+    /// Remembers how the marks go with these boxes of words.
     pub(crate) fn remember_mark_room(
         &mut self,
         boxes: &[WordsBox],
         floor: f32,
-        size: u16,
-        shorter: Option<(usize, f32)>,
+        look: &sp_model::EndLook,
+        plan: crate::scene::MarkPlan,
     ) {
         if self.mark_rooms.len() >= MOST_MARK_ROOMS {
             self.mark_rooms.remove(0);
@@ -572,6 +593,7 @@ impl Fonts {
             .iter()
             .map(|b| KeptBox {
                 at: b.at,
+                main: b.main,
                 text: b.text.to_owned(),
                 spans: b.spans.to_vec(),
                 style: b.style.clone(),
@@ -579,7 +601,7 @@ impl Fonts {
                 paragraphs: b.paragraphs,
             })
             .collect();
-        self.mark_rooms.push(MarkRoom { boxes, floor, size, shorter });
+        self.mark_rooms.push(MarkRoom { boxes, floor, look: placing(look), plan });
     }
 
     /// The names of the font families installed on this computer, sorted, with the default

@@ -410,6 +410,12 @@
   "settings.endlook.place": "Lugar",
   "settings.endlook.place.under": "Bajo la última línea",
   "settings.endlook.place.bottom": "Abajo en la pantalla",
+  "settings.endlook.under": "Debajo de",
+  "settings.endlook.under.each": "Cada idioma",
+  "settings.endlook.under.last": "Solo las últimas palabras",
+  "settings.endlook.under.each.hint": "Con una traducción en pantalla, cada idioma lleva la marca, en el color de su propia letra.",
+  "settings.endlook.under.last.hint": "Con una traducción en pantalla, solo la letra más baja de la diapositiva lleva la marca.",
+  "settings.endlook.under.one": "Abajo en la pantalla hay una sola marca",
   "settings.endlook.note": "En una última diapositiva llena, la marca baja hasta donde la pantalla lo permite. Si aun así no hay sitio, la letra se hace un poco más pequeña por ella, o se hace más pequeña la marca.",
   "settings.endlook.note.off": "La marca está desactivada en Ajustes › Diapositivas. Su aspecto se guarda para cuando esté activada.",
   "settings.set_up.hint_five": "Volver a hacer la configuración del primer inicio: idiomas, canciones, Biblias, pantallas"

@@ -62,8 +62,8 @@ pub use spans::{
 };
 pub use theme::{
     Align, BIBLE_TEMPLATE, BIBLE_THEME_ID, BUILTIN_TEMPLATES, BUILTIN_THEME, BoxStyle, Caps, DEFAULT_FONT_FAMILY,
-    EndLook, EndMark, EndPlace, Gradient, GradientKind, LINE_HEIGHT, LineFill, LineTransform, ListStyle, Scaling,
-    Scroll, Shadow, SlideRect, TextStyle, Theme, ThemeTemplate, ThemeVersion, VAlign, Version, all_versions,
+    EndLook, EndMark, EndPlace, EndUnder, Gradient, GradientKind, LINE_HEIGHT, LineFill, LineTransform, ListStyle,
+    Scaling, Scroll, Shadow, SlideRect, TextStyle, Theme, ThemeTemplate, ThemeVersion, VAlign, Version, all_versions,
     fonts_used, missing_fonts,
 };
 pub use tidy::{

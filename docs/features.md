@@ -2526,14 +2526,20 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
   under them, beside Mark the end of a song, On or Off.
   - **Its look is the theme's.** Which mark (one of seven: `* * *`, `- - -`, `° ° °`,
     `• • •`, `● ● ●`, `▪ ▪ ▪`, `■ ■ ■`), its size (40% to 160% of the words' size in steps of 10,
-    80% as it comes), its colour (the words' own, or one of eight) and its place (under the
+    80% as it comes), its colour (the words' own, or one of eight), its place (under the
     last line, or the bottom of the screen: as low as it may go, 3% above the bottom or just
-    over the copyright line). A theme that never chose a look draws three stars
-    as before, and its file says nothing of it. A song with a theme of its own ends with that
+    over the copyright line), and on a slide with a translation, **Under**: **Each language**
+    (as it comes) or **The last words only** (`EndLook::under`; a theme's file says it only
+    when it is the last words only, so a file from before reads as each language). A theme
+    that never chose a look draws three stars under each language's words, and its file says
+    nothing of it. A song with a theme of its own ends with that
     theme's mark. The mark always takes the words' font, outline and shadow.
   - **One small window** sets it, with a small last slide at its left that shows the mark as
-    it will be, and Mark, Size, Colour and Place at its right; a change applies at once and
-    Done closes it. It opens from Settings › Slides' **Change how it looks…** (the main
+    it will be, and Mark, Size, Colour, Place and Under at its right; a change applies at once
+    and Done closes it. Under is greyed while Place is Bottom of the screen (its hint: "At the
+    bottom of the screen there is one mark"); its choices' hints say what each does with a
+    translation on screen. The small slide still draws one mark, under its last line,
+    whichever is chosen. It opens from Settings › Slides' **Change how it looks…** (the main
     theme's) and from **Song end** › Change… among a theme's own rows in Edit › Themes (a song
     template open, nothing picked). Nothing in it moves as choices change. Each mark's chip
     shows three of it, in chips of one width; the window writes the marks in SoftPresenter
@@ -2563,8 +2569,30 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
     its next place in the order, as Next does.
   - **Where and how.** The mark takes the face, weight, colour, outline and shadow of the
     largest of the song's words on the slide, at 80% of the size those words were fitted to,
-    its top half a line of theirs under the last line of the lowest words (the lower block,
-    with two languages), centred on that box, and no more solid than those boxes are. It is a
+    its top half a line of theirs under the last line of the lowest words, centred on that
+    box, and no more solid than those boxes are. With two languages (the main language's box
+    and the translation's, each with words), under the last line and Under set to Each
+    language, there is a **mark under each language's words**, each in the look, colour and
+    size of the words it is under (a colour the theme chose goes to both), placed and fitted
+    as the one mark is with its own words alone (`each_language_marks`):
+    - the lowest words' mark first, against the slide's own floor, as one mark;
+    - words with the other language's under them (stacked) have their mark between the two,
+      against a floor a quarter of a line of their words over the other's first line as it is
+      drawn: their words move up or come out smaller for it, by as much as the mark and its
+      two gaps (1.3 lines of theirs) need (four lines filling a box right over the
+      translation's came out 22% smaller in a test; fewer lines in a box that tight, more),
+      never the other language's; then the mark is drawn smaller, down to
+      40%; then it is left out, and the log says so;
+    - words side by side each have their mark under them, against the slide's floor: the
+      other column is no floor to a mark that clears it across the slide;
+    - words with the other language's beside them and reaching lower, where the mark would
+      lie, get none (left out, and logged);
+    - each mark is checked where it will be drawn, at its size and width, against the other
+      language's lines, and one that would lie over them is left out.
+    The Last words only, and the bottom of the screen whichever Under says, keep one mark as
+    it always was: in the look of the largest words on the slide (the main language's in the
+    built-in theme, and wherever they are the larger), under the lowest. A slide in one
+    language is drawn exactly the same under either. It is a
     layer of its own, drawn by the painter after each screen's own theme has laid the words out
     (`sp-render`'s `end_mark_place`), so on a slide with room for it the words keep their size
     and place with it on or off. It comes to the screens with the slide (`Frame::end_mark`), so it goes on and off with
@@ -2587,10 +2615,12 @@ mouse wheel (with Shift for sideways) or the keys, and the whole width is the co
        smaller, in the room there is, down to 40% of the words' size.
     4. With less room than that it is left out, and the log says so once for the slide
        (`[screens] the end of a song's mark was left out…`).
-    How a slide's words make room is worked out once and remembered with the fonts
-    (`Fonts::mark_room`: by the words, their looks and places, the mark's size and how low it
-    may go; the same for a screen of any size), so a slide drawn again and again behind a
-    playing video only looks it up. Known and left as it is: on a slide with builds the mark
+    How a slide's marks go and its words make room is worked out once and remembered with the
+    fonts (`Fonts::mark_room`: by the words, their looks and places, the mark's look but its
+    colour (Under and Place among it) and how low it may go, which together decide where the
+    lower language's words are drawn and so the floor of the mark over them; the same for a
+    screen of any size), so a slide drawn again and again behind a playing video only looks it
+    up. Known and left as it is: on a slide with builds the mark
     comes once every build has played, and where the words then make room for it they take
     their new place and size at once, with no movement of their own.
     The same holds for a mark at the bottom of the screen, which is drawn wherever it clears

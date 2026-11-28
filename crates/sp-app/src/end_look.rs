@@ -3,8 +3,10 @@
 //! from two doors: Settings › Slides' "Change how it looks…", for the main theme, and the Theme
 //! Editor's "Song end" row, for the theme open there. It is drawn in the window its door is in.
 //!
-//! At its left is a small last slide with the mark as it will show; at its right four rows,
-//! each one line (Mark, Size, Colour, Place), and a sentence. A change applies at once, and
+//! At its left is a small last slide with the mark as it will show; at its right five rows,
+//! each one line (Mark, Size, Colour, Place, and Under: each language's words or the last words
+//! only, on a slide with a translation; greyed while the mark is at the bottom of the screen,
+//! where there is one), and a sentence. A change applies at once, and
 //! Done closes it; there is nothing to save. Nothing in it moves as choices change: every row
 //! keeps its place and height, the small slide's words stay put wherever the mark goes, and the
 //! sentence keeps the room of the longer of its two wordings.
@@ -13,7 +15,7 @@
 
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use sp_engine::Show;
-use sp_model::{EndLook, EndMark, EndPlace, Rgba, Uuid};
+use sp_model::{EndLook, EndMark, EndPlace, EndUnder, Rgba, Uuid};
 
 use crate::home::settings::parts;
 use crate::home::{HomeState, ThemeRequest};
@@ -130,16 +132,20 @@ pub fn give(
     Some(index)
 }
 
-/// Testing aid: `SOFTPRESENTER_END_LOOK=MARK,SIZE,PLACE,COLOUR` (as `•,120,bottom,ffc400`; any
-/// part may be left empty), in a copy with a data folder of its own, gives the main theme that
-/// look for the run, to picture a last slide and the window with it. It is read as a theme's
-/// file is, so what can't be read is the usual look's; nothing is saved unless the look is then
-/// changed in the window.
+/// Testing aid: `SOFTPRESENTER_END_LOOK=MARK,SIZE,PLACE,COLOUR,UNDER` (as
+/// `•,120,bottom,ffc400,last`; UNDER is `each` or `last`; any part may be left empty or left
+/// off), in a copy with a data folder of its own, gives the main theme that look for the run, to
+/// picture a last slide and the window with it. It is read as a theme's file is, so what can't
+/// be read is the usual look's; nothing is saved unless the look is then changed in the window.
 pub fn asked_for_the_run() -> Option<EndLook> {
     std::env::var_os("SOFTPRESENTER_DATA")?;
-    let asked = std::env::var("SOFTPRESENTER_END_LOOK").ok()?;
+    look_asked(&std::env::var("SOFTPRESENTER_END_LOOK").ok()?)
+}
+
+/// The look [`asked_for_the_run`] reads from `SOFTPRESENTER_END_LOOK`'s words.
+fn look_asked(asked: &str) -> Option<EndLook> {
     let mut parts = asked.split(',').map(str::trim);
-    let (mark, size, place, colour) = (parts.next(), parts.next(), parts.next(), parts.next());
+    let (mark, size, place, colour, under) = (parts.next(), parts.next(), parts.next(), parts.next(), parts.next());
     let mut saved = serde_json::Map::new();
     if let Some(mark) = mark {
         saved.insert("mark".to_owned(), mark.into());
@@ -153,6 +159,9 @@ pub fn asked_for_the_run() -> Option<EndLook> {
     if let Some(rgb) = colour.filter(|hex| hex.len() == 6).and_then(|hex| u32::from_str_radix(hex, 16).ok()) {
         let part = |shift: u32| (rgb >> shift) & 0xff;
         saved.insert("colour".to_owned(), serde_json::json!({ "r": part(16), "g": part(8), "b": part(0), "a": 255 }));
+    }
+    if let Some(under) = under {
+        saved.insert("under".to_owned(), under.into());
     }
     serde_json::from_value(serde_json::Value::Object(saved)).ok()
 }
@@ -278,6 +287,18 @@ fn chip(ui: &egui::Ui, rect: Rect, id: egui::Id, words: &str, font: FontId, chos
     response
 }
 
+/// A chip with words in its middle that can't be chosen now: greyed, its choice outlined in the
+/// plain line's grey, and answering only to a hover.
+fn greyed_chip(ui: &egui::Ui, rect: Rect, id: egui::Id, words: &str, font: FontId, chosen: bool) -> egui::Response {
+    let response = ui.interact(rect, id, Sense::hover());
+    ui.painter().rect_filled(rect, 8.0, BUTTON);
+    if chosen {
+        ui.painter().rect_stroke(rect, 8.0, Stroke::new(1.0, LINE), StrokeKind::Inside);
+    }
+    ui.painter().text(rect.center(), Align2::CENTER_CENTER, words, font, TEXT_FAINT);
+    response
+}
+
 /// A mark's chip: its three marks in its middle ([`chip_marks`]), in a chip of the one width
 /// every mark's has.
 fn mark_chip(ui: &egui::Ui, rect: Rect, id: egui::Id, mark: EndMark, chosen: bool) -> egui::Response {
@@ -333,7 +354,7 @@ pub fn window(ctx: &egui::Context, state: &mut HomeState, show: &Show, door: Doo
             .into_iter()
             .map(|on| parts::lines(ui, sentence(on), note_font.clone(), TEXT_FAINT, rows_wide, 18.0).size().y)
             .fold(18.0, f32::max);
-        let rows_tall = 4.0 * ROW + 3.0 * BETWEEN_ROWS + BETWEEN_ROWS + note_room;
+        let rows_tall = 5.0 * ROW + 4.0 * BETWEEN_ROWS + BETWEEN_ROWS + note_room;
         let body = if beside { slide_size.y.max(rows_tall) } else { slide_size.y + 16.0 + rows_tall };
         let height = 14.0 + 30.0 + 14.0 + body + 18.0 + 30.0 + 16.0;
         let sheet = Rect::from_center_size(screen.center(), vec2(width, height));
@@ -370,17 +391,18 @@ pub fn window(ctx: &egui::Context, state: &mut HomeState, show: &Show, door: Doo
         sample(ui, slide, show, &look, on);
         let rows = if beside { pos2(slide.max.x + BESIDE, top) } else { pos2(left, slide.max.y + 16.0) };
         let row_top = |n: usize| rows.y + n as f32 * (ROW + BETWEEN_ROWS);
-        let label = |n: usize, words: &str| {
+        let label_in = |n: usize, words: &str, ink: Color32| {
             paint_spaced(
                 ui,
                 pos2(rows.x, row_top(n) + ROW / 2.0),
                 Align2::LEFT_CENTER,
                 &words.to_uppercase(),
                 fixed_semibold(11.5),
-                TEXT_DIM,
+                ink,
                 0.575,
             );
         };
+        let label = |n: usize, words: &str| label_in(n, words, TEXT_DIM);
         let controls = rows.x + LABEL + AFTER_LABEL;
         let chip_top = |n: usize| row_top(n) + (ROW - CHIP) / 2.0;
         // Mark: the seven, each showing its three marks.
@@ -472,9 +494,43 @@ pub fn window(ctx: &egui::Context, state: &mut HomeState, show: &Show, door: Doo
                 chosen = Some(EndLook { place, ..look });
             }
         }
+        // Under: each language's words, or the last words only, on a slide with a translation.
+        // Greyed while the mark is at the bottom of the screen, where there is one mark.
+        let one_mark = look.place == EndPlace::Bottom;
+        label_in(4, t("settings.endlook.under", "Under"), if one_mark { TEXT_FAINT } else { TEXT_DIM });
+        let mut x = controls;
+        for (under, words, hint) in [
+            (
+                EndUnder::EachLanguage,
+                t("settings.endlook.under.each", "Each language"),
+                t(
+                    "settings.endlook.under.each.hint",
+                    "With a translation on screen, each language gets the mark, in its own words\u{2019} colour.",
+                ),
+            ),
+            (
+                EndUnder::LastWords,
+                t("settings.endlook.under.last", "The last words only"),
+                t(
+                    "settings.endlook.under.last.hint",
+                    "With a translation on screen, only the words lowest on the slide get the mark.",
+                ),
+            ),
+        ] {
+            let rect = Rect::from_min_size(pos2(x, chip_top(4)), vec2(chip_width(ui, words), CHIP));
+            x = rect.max.x + BETWEEN;
+            let id = ui.scope_id().with(("under", under == EndUnder::LastWords));
+            let font = FontId::proportional(13.0);
+            if one_mark {
+                greyed_chip(ui, rect, id, words, font, look.under == under)
+                    .on_hover_text(t("settings.endlook.under.one", "At the bottom of the screen there is one mark"));
+            } else if chip(ui, rect, id, words, font, look.under == under).on_hover_text(hint).clicked() {
+                chosen = Some(EndLook { under, ..look });
+            }
+        }
         // The sentence, in the room of the longer one.
         let note = parts::lines(ui, sentence(on), note_font, TEXT_FAINT, rows_wide, 18.0);
-        painter.galley(pos2(rows.x, row_top(3) + ROW + BETWEEN_ROWS), note, TEXT_FAINT);
+        painter.galley(pos2(rows.x, row_top(4) + ROW + BETWEEN_ROWS), note, TEXT_FAINT);
         // Done.
         let done_words = t("keys.done", "Done");
         let done_wide = widest(ui, &[done_words], &FontId::proportional(12.5)) + 30.0;
@@ -665,6 +721,22 @@ mod tests {
         assert_eq!(asked(&mut state).map(|look| look.place), Some(EndPlace::Bottom));
         click(&ctx, &mut state, "Under the last line");
         assert_eq!(state.theme_end_looks[0].place, EndPlace::Under);
+        // Under: each language's words, as it comes, or the last words only.
+        assert_eq!(state.theme_end_looks[0].under, EndUnder::EachLanguage);
+        let (words, _) = drawn(&ctx, &mut state, USUAL);
+        assert!(words.iter().any(|(have, _)| have == "UNDER"), "its row, captioned: {words:?}");
+        click(&ctx, &mut state, "The last words only");
+        assert_eq!(asked(&mut state).map(|look| look.under), Some(EndUnder::LastWords));
+        assert_eq!(state.theme_end_looks[0].under, EndUnder::LastWords);
+        click(&ctx, &mut state, "Each language");
+        assert_eq!(asked(&mut state).map(|look| look.under), Some(EndUnder::EachLanguage));
+        // At the bottom of the screen there is one mark: the row is greyed, and asks nothing.
+        click(&ctx, &mut state, "Bottom of the screen");
+        assert_eq!(asked(&mut state).map(|look| look.place), Some(EndPlace::Bottom));
+        click(&ctx, &mut state, "The last words only");
+        assert_eq!((asked(&mut state), state.theme_end_looks[0].under), (None, EndUnder::EachLanguage), "greyed");
+        click(&ctx, &mut state, "Under the last line");
+        assert_eq!(asked(&mut state).map(|look| look.place), Some(EndPlace::Under));
         // The sentence says the rule, or that the mark is off.
         let rule = "On a full last slide the mark moves down, as far as the screen allows. If there is still no room, the words are made a little smaller for it, or the mark is.";
         let off = "The mark is switched off in Settings \u{203a} Slides. Its look is kept for when it is on.";
@@ -687,7 +759,13 @@ mod tests {
         // makes it at the start (`HomeState::listing_themes`): no change to the themes has
         // listed them again yet.
         let yellow = COLOURS[4];
-        let saved = EndLook { mark: EndMark::Square, size: 120, colour: Some(yellow), place: EndPlace::Bottom };
+        let saved = EndLook {
+            mark: EndMark::Square,
+            size: 120,
+            colour: Some(yellow),
+            place: EndPlace::Bottom,
+            under: EndUnder::LastWords,
+        };
         let file = Theme { end_look: saved, ..Theme::builtin() }.to_json();
         let themes = [Theme::from_json(&file).expect("the theme's file is read")];
         let mut state = HomeState {
@@ -827,12 +905,15 @@ mod tests {
                         (EndLook { size: 160, ..usual }, true),
                         (EndLook { colour: Some(COLOURS[4]), ..usual }, true),
                         (EndLook { place: EndPlace::Bottom, ..usual }, true),
+                        (EndLook { under: EndUnder::LastWords, ..usual }, true),
+                        (EndLook { place: EndPlace::Bottom, under: EndUnder::LastWords, ..usual }, true),
                         (
                             EndLook {
                                 mark: EndMark::Square,
                                 size: 160,
                                 colour: Some(COLOURS[7]),
                                 place: EndPlace::Bottom,
+                                under: EndUnder::LastWords,
                             },
                             true,
                         ),
@@ -911,11 +992,75 @@ mod tests {
     }
 
     #[test]
+    fn end_look_every_row_and_its_choices_fit_the_window_in_every_language() {
+        // The fifth row, Under, and its two choices, in every language, inside the window at its
+        // narrowest, beside the others' rows; its hints and its greyed word are there to say.
+        for language in Language::ALL {
+            crate::i18n::with_language(language, || {
+                let ctx = crate::studio::tests::styled();
+                let mut state = opened();
+                let size = vec2(820.0, 700.0);
+                let (words, _) = drawn(&ctx, &mut state, size);
+                let place = |key: &'static str, english: &'static str| {
+                    let said = t(key, english);
+                    words.iter().rfind(|(have, _)| have == said).unwrap_or_else(|| panic!("{language:?}: {said}")).1
+                };
+                let each = place("settings.endlook.under.each", "Each language");
+                let last = place("settings.endlook.under.last", "The last words only");
+                let under = place("settings.endlook.place.under", "Under the last line");
+                assert!(each.max.x < last.min.x && (each.center().y - last.center().y).abs() < 0.5, "{language:?}");
+                assert!(each.min.y > under.max.y, "{language:?}: under the Place row");
+                assert!(last.max.x <= size.x - 16.0 + 0.5, "{language:?}: {last:?}");
+                for (key, english) in [
+                    (
+                        "settings.endlook.under.each.hint",
+                        "With a translation on screen, each language gets the mark, in its own words\u{2019} colour.",
+                    ),
+                    (
+                        "settings.endlook.under.last.hint",
+                        "With a translation on screen, only the words lowest on the slide get the mark.",
+                    ),
+                    ("settings.endlook.under.one", "At the bottom of the screen there is one mark"),
+                ] {
+                    assert!(!t(key, english).is_empty(), "{language:?}: {key}");
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn end_look_for_the_run_takes_under_as_its_fifth_part() {
+        // `each` or `last`, or left off: the usual, a mark under each language's words.
+        let yellow = Rgba::rgb(0xff, 0xc4, 0x00);
+        let full = EndLook {
+            mark: EndMark::Bullet,
+            size: 120,
+            colour: Some(yellow),
+            place: EndPlace::Bottom,
+            under: EndUnder::LastWords,
+        };
+        assert_eq!(look_asked("\u{2022},120,bottom,ffc400,last"), Some(full));
+        assert_eq!(
+            look_asked("\u{2022},120,bottom,ffc400,each"),
+            Some(EndLook { under: EndUnder::EachLanguage, ..full })
+        );
+        assert_eq!(look_asked("\u{2022},120,bottom,ffc400"), Some(EndLook { under: EndUnder::EachLanguage, ..full }));
+        assert_eq!(look_asked(",,,,last"), Some(EndLook { under: EndUnder::LastWords, ..EndLook::default() }));
+        assert_eq!(look_asked(",,,,sideways"), Some(EndLook::default()), "what can't be read is the usual");
+    }
+
+    #[test]
     fn end_look_given_to_a_theme_reaches_the_editors_copy_too() {
         let builtin = Theme::builtin();
         let evening = Theme { id: Uuid::from_u128(7), name: "Evening".to_owned(), ..builtin.clone() };
         let mut themes = vec![builtin.clone(), evening.clone()];
-        let dots = EndLook { mark: EndMark::Dot, size: 120, colour: Some(COLOURS[4]), place: EndPlace::Bottom };
+        let dots = EndLook {
+            mark: EndMark::Dot,
+            size: 120,
+            colour: Some(COLOURS[4]),
+            place: EndPlace::Bottom,
+            under: EndUnder::LastWords,
+        };
         // The theme open in the Theme Editor: its copy there takes the look as well.
         let mut edit = crate::home::ThemeEdit::of(1, evening.clone());
         assert_eq!(give(&mut themes, Some(&mut edit), evening.id, dots), Some(1));

@@ -568,22 +568,43 @@ pub enum EndPlace {
     Bottom,
 }
 
+/// Under which words the end of a song's mark goes, on a last slide with the song's words in
+/// two languages (the main language's box and the translation's), when it goes under the last
+/// line ([`EndPlace::Under`]). A slide in one language has one mark either way, and so does a
+/// mark at the bottom of the screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EndUnder {
+    /// A mark under each language's words, each in the look and size of the words it is under.
+    #[default]
+    EachLanguage,
+    /// One mark, under the lowest words: the mark as it was before there was a choice.
+    LastWords,
+}
+
 /// How the end of a song's mark looks, which is a theme's to say: which mark, its size beside
-/// the words', its colour (the words' own unless one is chosen) and its place. The mark always
-/// takes the words' face, outline and shadow. As it comes, it is the mark as it always was:
-/// three stars at 80% of the words' size, in their colour, under the last line.
+/// the words', its colour (the words' own unless one is chosen), its place, and on a slide in two
+/// languages whether each language's words get one. The mark always takes the words' face,
+/// outline and shadow. As it comes, it is the mark as it always was: three stars at 80% of the
+/// words' size, in their colour, under the last line; under each language's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EndLook {
     pub mark: EndMark,
-    /// A whole percentage of the largest words' size, from 40 to 160 in steps of 10.
+    /// A whole percentage of the size of the words it follows, from 40 to 160 in steps of 10.
     pub size: u16,
     pub colour: Option<Rgba>,
     pub place: EndPlace,
+    pub under: EndUnder,
 }
 
 impl Default for EndLook {
     fn default() -> EndLook {
-        EndLook { mark: EndMark::Star, size: EndLook::USUAL_SIZE, colour: None, place: EndPlace::Under }
+        EndLook {
+            mark: EndMark::Star,
+            size: EndLook::USUAL_SIZE,
+            colour: None,
+            place: EndPlace::Under,
+            under: EndUnder::EachLanguage,
+        }
     }
 }
 
@@ -605,9 +626,11 @@ impl EndLook {
     }
 
     /// The look as a theme's file has it, taking what can be read: a mark this copy doesn't
-    /// know, a size that is no number, a colour or a place that can't be read each fall back to
-    /// the usual one, and a size out of range or between steps goes to the nearest step. A
-    /// theme's file is read as one, so a look that failed to read would lose the whole theme.
+    /// know, a size that is no number, a colour, a place or an "under" that can't be read each
+    /// fall back to the usual one, and a size out of range or between steps goes to the nearest
+    /// step. A file from before there was an "under" says nothing of it, and has a mark under
+    /// each language's words. A theme's file is read as one, so a look that failed to read would
+    /// lose the whole theme.
     fn read(saved: &serde_json::Value) -> EndLook {
         let usual = EndLook::default();
         let mark = saved
@@ -628,7 +651,11 @@ impl EndLook {
             Some("bottom") => EndPlace::Bottom,
             _ => EndPlace::Under,
         };
-        EndLook { mark, size, colour, place }
+        let under = match saved.get("under").and_then(serde_json::Value::as_str) {
+            Some("last") => EndUnder::LastWords,
+            _ => EndUnder::EachLanguage,
+        };
+        EndLook { mark, size, colour, place, under }
     }
 }
 
@@ -641,12 +668,20 @@ impl Serialize for EndLook {
             #[serde(skip_serializing_if = "Option::is_none")]
             colour: Option<Rgba>,
             place: &'static str,
+            // Said only when it is not the usual (a mark under each language's words), so a
+            // file of a look chosen before there was a choice stays as it was.
+            #[serde(skip_serializing_if = "Option::is_none")]
+            under: Option<&'static str>,
         }
         let place = match self.place {
             EndPlace::Under => "under",
             EndPlace::Bottom => "bottom",
         };
-        Saved { mark: self.mark.glyph().to_string(), size: self.size, colour: self.colour, place }.serialize(to)
+        let under = match self.under {
+            EndUnder::EachLanguage => None,
+            EndUnder::LastWords => Some("last"),
+        };
+        Saved { mark: self.mark.glyph().to_string(), size: self.size, colour: self.colour, place, under }.serialize(to)
     }
 }
 
@@ -1505,7 +1540,13 @@ mod tests {
     fn the_end_marks_look_is_the_themes_and_as_it_comes_it_is_three_stars_at_80_percent() {
         // As it comes: the mark as it always was, and the theme's file says nothing of it.
         let theme = Theme::builtin();
-        let usual = EndLook { mark: EndMark::Star, size: 80, colour: None, place: EndPlace::Under };
+        let usual = EndLook {
+            mark: EndMark::Star,
+            size: 80,
+            colour: None,
+            place: EndPlace::Under,
+            under: EndUnder::EachLanguage,
+        };
         assert_eq!((theme.end_look, EndLook::default()), (usual, usual));
         assert_eq!(usual.mark.text(), "*\u{a0}\u{a0}\u{a0}\u{a0}*\u{a0}\u{a0}\u{a0}\u{a0}*");
         let saved = theme.to_json();
@@ -1514,7 +1555,8 @@ mod tests {
         assert_eq!(Theme::from_json(&saved).expect("read").end_look, usual);
         // A look chosen goes into the file and comes back.
         let yellow = Rgba::rgb(0xff, 0xc4, 0x00);
-        let chosen = EndLook { mark: EndMark::Bullet, size: 120, colour: Some(yellow), place: EndPlace::Bottom };
+        let chosen =
+            EndLook { mark: EndMark::Bullet, size: 120, colour: Some(yellow), place: EndPlace::Bottom, ..usual };
         let dotted = Theme { end_look: chosen, ..theme.clone() };
         let saved = dotted.to_json();
         assert!(saved.contains("end_look") && saved.contains("\u{2022}"), "{saved}");
@@ -1568,13 +1610,59 @@ mod tests {
         assert_eq!(odd.templates, theme.templates, "the theme itself is whole");
         // What can be read is kept beside what can't.
         let part = with(r#"{"mark": "-", "size": 300, "colour": 7, "place": "bottom"}"#);
-        assert_eq!(part.end_look, EndLook { mark: EndMark::Dash, size: 160, colour: None, place: EndPlace::Bottom });
+        assert_eq!(
+            part.end_look,
+            EndLook { mark: EndMark::Dash, size: 160, colour: None, place: EndPlace::Bottom, ..usual }
+        );
         assert_eq!(with(r#"{"size": 12}"#).end_look.size, 40);
         assert_eq!(with(r#"{"size": 104.9}"#).end_look.size, 100, "to the nearest step");
         // Not an object at all.
         for look in ["null", "7", "\"stars\"", "[]"] {
             assert_eq!(with(look).end_look, usual, "{look}");
         }
+        // An "under" this copy doesn't know is a mark under each language's words.
+        for under in [r#""first""#, "7", "null", r#"{"last": true}"#] {
+            let look = format!(r#"{{"mark": "-", "place": "under", "under": {under}}}"#);
+            assert_eq!(with(&look).end_look, EndLook { mark: EndMark::Dash, ..usual }, "{under}");
+        }
+        assert_eq!(with(r#"{"under": "last"}"#).end_look.under, EndUnder::LastWords);
+    }
+
+    #[test]
+    fn under_each_language_is_the_usual_and_only_the_last_words_is_saved() {
+        let theme = Theme::builtin();
+        let usual = EndLook::default();
+        assert_eq!(usual.under, EndUnder::EachLanguage, "a theme that never chose has a mark under each language");
+        // A look of its own with the usual "under": its file is as it was before there was a
+        // choice, word for word.
+        let yellow = Rgba::rgb(0xff, 0xc4, 0x00);
+        let chosen =
+            EndLook { mark: EndMark::Bullet, size: 120, colour: Some(yellow), place: EndPlace::Bottom, ..usual };
+        let saved = Theme { end_look: chosen, ..theme.clone() }.to_json();
+        assert!(!saved.contains("\"under\""), "{saved}");
+        let file: serde_json::Value = serde_json::from_str(&saved).expect("a theme's file");
+        let look = &file["theme"]["end_look"];
+        let mut fields: Vec<&str> = look.as_object().expect("an object").keys().map(String::as_str).collect();
+        fields.sort_unstable();
+        assert_eq!(fields, ["colour", "mark", "place", "size"], "{look}");
+        // The last words only goes into the file and comes back; the rest with it.
+        let one = EndLook { under: EndUnder::LastWords, ..usual };
+        assert!(!one.is_usual(), "a theme that chose one mark keeps its choice");
+        let saved = Theme { end_look: one, ..theme.clone() }.to_json();
+        let file: serde_json::Value = serde_json::from_str(&saved).expect("a theme's file");
+        assert_eq!(file["theme"]["end_look"]["under"], "last", "{saved}");
+        assert_eq!(Theme::from_json(&saved).expect("read").end_look, one);
+        let both = EndLook { under: EndUnder::LastWords, ..chosen };
+        assert_eq!(
+            Theme::from_json(&Theme { end_look: both, ..theme.clone() }.to_json()).expect("read").end_look,
+            both
+        );
+        // A file written before there was a choice reads as each language's.
+        let mut old: serde_json::Value = serde_json::from_str(&theme.to_json()).expect("a theme's file");
+        old["theme"]["end_look"] = serde_json::json!({"mark": "*", "size": 80, "place": "under"});
+        assert_eq!(Theme::from_json(&old.to_string()).expect("read").end_look, usual);
+        // Stepping the size keeps it.
+        assert_eq!(one.stepped(true), EndLook { size: 90, ..one });
     }
 
     #[test]
