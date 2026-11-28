@@ -5,6 +5,10 @@ Versions are numbered 0.x until version 1, and until then things may still chang
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.9.0-dev.30 — 28 November 2026 (development build)
+
 A new first-start setup, SoftPresenter in German, Quick Help on everything, slides shown with a click or a double-click, NDI installed from inside SoftPresenter, a redesigned Edit view, VoxLive captions kept off the screens you choose, song parts in your language, and SoftPresenter on older Intel Macs.
 
 ### New
